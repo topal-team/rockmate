@@ -65,7 +65,8 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
     #      sub_mod_str = "self.wpe"
     #      sub_fct     = "forward"
     # inputs_vars : B_vars on which the sub_fct is applied
-    print(f"Opening : {sub_mod_str}.{sub_fct}")
+    if show_debug_msg:
+        print(f"Opening : {sub_mod_str}.{sub_fct}")
     if sub_fct=="forward": # quick fix
         code,memory = sub_mod.code_with_constants
     else:
@@ -297,12 +298,12 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
 
     raise Exception("error 4 : should have stoped with the ast.Return")
 
-def main(nn_mod,ex_inputs,concise_name=True):
+def main(nn_mod,ex_inputs,concise_name=True,show_debug=False):
     # main_mod must be a instance of torch.nn.Module
     # ex_inputs must be a tuple
-    global concise
-    global fresh_var
+    global concise, fresh_var, show_debug_msg
     concise = concise_name
+    show_debug_msg = show_debug
     fresh_var = 0
     main_mod = trace_module(nn_mod, {'forward': ex_inputs}, check_trace=False)
     main_str = "self"

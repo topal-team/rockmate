@@ -1,8 +1,8 @@
 from read_trace_code import *
 
 class D_node(B_node):
-    def __init__(self):
-        super().__init__()
+    def __init__(self,target="",code=""):
+        super().__init__(target,code) # is_input is now useless
         self.used_by_nodes = []
 
 class D_graph():
@@ -11,11 +11,14 @@ class D_graph():
         self.nodes   = [] # D_node list -> topo sorted
         self.outputs = [] # str list
 
-def sort_nodes(g : B_graph): # in place -> change g.nodes
-    assert(len(g.outputs)==1)
+def sort_nodes(g : B_graph): # -> B_node list 
+    # use outputs' nodes, not B_graph.nodes
+    # by the way, I take the opportunity to change g.nodes
+    assert(len(g.outputs)==1) # tmp
     o_var = g.outputs[0]
     if not o_var.has_node:
         g.nodes = []
+        return []
     else:
         dict_done = {}
         nodes = []
@@ -27,28 +30,45 @@ def sort_nodes(g : B_graph): # in place -> change g.nodes
                 dict_done[n]=True
                 nodes.append(n)
             elif not dict_done[n]:
-                raise Exception("Cycle in the B_graph")
+                raise Exception("Cycle in the B_graph. How could this happened ??")
         visit(o_var.node)
         g.nodes = nodes
+        return nodes
 
 def print_all_nodes(g):
     for n in g.nodes:
         print(f"({n.target}) : {n.code}")
 
-def print_code(g : B_graph):
-    sort_nodes(g) # done in place
+def B_to_D(bg : B_graph) -> D_graph:
     inputs = []
-    body = []
-    for n in g.nodes:
+    d_nodes = []
+    b_nodes = sort_nodes(bg)
+    dict_nodes = {}
+    for n in b_nodes:
         if n.is_input:
             inputs.append(n.target)
         else:
-            body.append(n)
-    str_input = ','.join(inputs)
+            dn = D_node(n.target,n.code)
+            for sub_n in n.required_nodes:
+                if sub_n.target not in inputs:
+                    sub_dn = dict_nodes[sub_n]
+                    dn.required_nodes.append(sub_dn)
+                    sub_dn.used_by_nodes.append(dn)
+            dict_nodes[n] = dn
+            d_nodes.append(dn)
+    dg = D_graph()
+    dg.nodes = d_nodes
+    dg.inputs = inputs
+    dg.outputs = [v.val for v in bg.outputs]
+    return dg
+
+def print_code(g : D_graph):
+    str_input = ','.join(g.inputs)
+    str_output = ','.join(g.outputs)
     print(f"def main({str_input}):")
-    for n in body:
+    for n in g.nodes:
         print(f"\t{n.code}")
-    print(f"\treturn {g.outputs[0].val}")
+    print(f"\treturn {str_output}")
 
 def test_code(g : B_graph):
     sort_nodes(g) # done in place
