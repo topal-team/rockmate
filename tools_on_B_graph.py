@@ -70,6 +70,23 @@ def print_code(g : D_graph):
         print(f"\t{n.code}")
     print(f"\treturn {str_output}")
 
-def test_code(g : B_graph):
-    sort_nodes(g) # done in place
-    pass
+import torch
+from torch import tensor
+
+def test_code(g : D_graph,nn_mod,dict_inputs : dict):
+    self=nn_mod
+    for inp in g.inputs:
+        assert(inp in dict_inputs)
+        exec(f"{inp} = {dict_inputs[inp]}")
+    for n in g.nodes:
+        exec(n.code)
+    ret = []
+    for out in g.outputs:
+        exec(f"global btools_extract_result ; btools_extract_result = {out}")
+        ret.append(globals()["btools_extract_result"])
+    return ret
+    exec(f"global result ; result = {g.outputs[0]}")
+    return globals()["result"]
+    # return [globals()[out] for out in g.outputs]
+
+

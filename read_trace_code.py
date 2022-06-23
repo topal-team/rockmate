@@ -7,6 +7,7 @@
 # ------------------------------------
 
 import ast
+import torch
 from torch.jit import trace_module
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -65,8 +66,6 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
     #      sub_mod_str = "self.wpe"
     #      sub_fct     = "forward"
     # inputs_vars : B_vars on which the sub_fct is applied
-    if show_debug_msg:
-        print(f"Opening : {sub_mod_str}.{sub_fct}")
     if sub_fct=="forward": # quick fix
         code,memory = sub_mod.code_with_constants
     else:
@@ -165,7 +164,8 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             new_node   = B_node(target=new_tg_id)
             nodes.append(new_node)
             main_val   = main_var.get_value(calling_node=new_node)
-            new_node.code = f"{new_tg_id} = getattr({main_val},\"{i}\")"
+            # new_node.code = f"{new_tg_id} = getattr({main_val},\"{i}\")"
+            new_node.code = f"{new_tg_id} = {main_val}[{i}]"
             new_var    = B_var(new_tg_id,node=new_node)
             dict_vars[tg] = new_var
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -184,29 +184,33 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             parent_id  = args[0].id
             parent_var = dict_vars[parent_id]
             attr = args[1].value
+            #if attr.isdigit(): format_fct = lambda pv : f"{pv}[{attr}]"
+            #else: 
             format_fct = lambda pv : f"getattr({pv},\"{attr}\")"
             return aux_handle_attr(target,parent_var,format_fct,[attr]) # might create one node
 
         # == torchscript's functions == -> must be removed because some refer to TS global var
         elif l_name[0]=="ops":
             assert(len(args)==1)
-            handle_expr(args[0],target)
+            return handle_expr(args[0],target)
         elif l_name[0]=="int":
-            handle_expr(args[0],target)
+            return handle_expr(args[0],target)
         elif l_name[0]=="annotate":
             assert(len(args)==2)
-            handle_expr(args[1],target)
+            return handle_expr(args[1],target)
 
         else: # -> real function
             args_Bvar = [handle_expr(ar,target=None) for ar in args]
             # == sub module ==
             if l_name[0] in dict_vars:
                 sub_var = dict_vars[l_name[0]]
+                if show_debug_msg:
+                    print(f"In {sub_mod_str}.{sub_fct} try to sub open {sub_var.val}.{l_name[1]}")
                 assert(sub_var.is_attr_of_self)
                 assert(len(l_name)==2)
                 sub_sub_mod = sub_mod
                 for at in sub_var.path_from_self:
-                    sub_sub_mod = getattr(sub_mod,at)
+                    sub_sub_mod = getattr(sub_sub_mod,at)
                 sub_graph = open_sub_module(sub_sub_mod,sub_var.val,l_name[1],args_Bvar)
                 nodes.extend(sub_graph.nodes)
                 assert(len(sub_graph.outputs)==1) # else TODO
@@ -216,12 +220,45 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             else:
                 if target is None:
                     target = get_fresh_var()
-                fct_name = ".".join(l_name)
+                # == torch.size == quick fix -> TODO UTILISER LES FONCTIONS DE torch.Tensor.(size/view etc)
+                if l_name==["torch","size"]:
+                    new_node = B_node(target)
+                    nodes.append(new_node)
+                    if len(args_Bvar)==1 and expr.keywords==[]:
+                        dim_arg=""
+                    elif len(args_Bvar)==1:
+                        kw = expr.keywords[0]
+                        assert(kw.arg=="dim")
+                        dim_arg=handle_expr(kw.value).get_value(new_node)
+                    else:
+                        assert(len(args_Bvar)==2)
+                        dim_arg=args_Bvar[1].get_value(new_node)
+                    c = f"{target} = {args_Bvar[0].get_value(new_node)}.size({dim_arg})"
+                    new_node.code = c
+                    return B_var(target,node=new_node)
+
+                # == torch.nn.functional == quick.fix
+                if l_name[0]=="torch" and len(l_name)==2:
+                    try: exec(f"torch.{l_name[1]}")
+                    except:
+                        try: exec(f"torch.nn.functional.{l_name[1]}")
+                        except: raise Exception(f"torch.{l_name[1]} neither found in torch or torch.nn.functional")
+                        else: fct_name = f"torch.nn.functional.{l_name[1]}"
+                    else: fct_name = f"torch.{l_name[1]}"
+                else:
+                    fct_name = ".".join(l_name)
+
+                # == else ==
                 new_node = B_node(target=target)
                 nodes.append(new_node)
                 args_str = [v.get_value(calling_node=new_node) for v in args_Bvar]
-                keywords_str = [f"{kw.arg} = {(handle_expr(kw.value)).get_value(new_node)}" for kw in expr.keywords]
-                all_args = ",".join(args_str + keywords_str)
+                kwds_str = []
+                for kw in expr.keywords:
+                    if not ((kw.arg=="dtype" or kw.arg=="layout")
+                        and isinstance(kw.value,ast.Constant)
+                        and isinstance(kw.value.value,int)):
+                        kwds_str.append(f"{kw.arg} = {(handle_expr(kw.value)).get_value(new_node)}")
+                all_args = ",".join(args_str + kwds_str)
                 new_node.code = f"{target} = {fct_name}({all_args})"
                 return B_var(target,node = new_node)
 
@@ -235,8 +272,9 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
     # -> fct used in the main fct and to handle arguments given to a Call 
     # /!\ TorchScript's global constant vars must have been removed
     def handle_expr(expr,target : str = None) -> B_var :
-        if isinstance(expr,ast.Constant):
-            return B_var(str(expr.value)) # never creates any node
+        if isinstance(expr,ast.Constant): # never creates any node
+            if isinstance(expr.value,str): return B_var(f"\"{expr.value}\"")
+            else: return B_var(str(expr.value))
         elif isinstance(expr,ast.Name):
             assert(expr.id in dict_vars)
             return dict_vars[expr.id]
@@ -248,9 +286,17 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             return handle_attr(expr,target) # may creates one node
         elif isinstance(expr,ast.Call):
             return handle_call(expr,target) # may creates nodes for inputs + for output
-        elif isinstance(expr,ast.List):
-            raise Exception(f"Not done yet : used in {sub_mod_str}.{sub_fct}")
-            # TODO a = [b,f(c)]
+        elif isinstance(expr,ast.List): # tmp TODO to improve ++
+            if target is None:
+                target = get_fresh_var()
+            new_node = B_node(target=target)
+            nodes.append(new_node)
+            args_vars = [handle_expr(v) for v in expr.elts]
+            args_str  = [v.get_value(new_node) for v in args_vars]
+            join_s = ','.join(args_str)
+            c = f"{target} = [{join_s}]"
+            new_node.code = c
+            return B_var(target,node=new_node)
         elif isinstance(expr,ast.Tuple): # tmp TODO to improve ++
             if target is None:
                 target = get_fresh_var()
@@ -262,6 +308,12 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             c = f"{target} = ({join_s})"
             new_node.code = c
             return B_var(target,node=new_node)
+        elif isinstance(expr,ast.UnaryOp):
+            assert(isinstance(expr.op,ast.USub)) # quick fix
+            assert(isinstance(expr.operand,ast.Constant))
+            return B_var(f"-{expr.operand.value}")
+        else:
+            raise Exception(f"{type(expr)} unknown")
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
     # =========================
