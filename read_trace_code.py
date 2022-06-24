@@ -184,9 +184,8 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             parent_id  = args[0].id
             parent_var = dict_vars[parent_id]
             attr = args[1].value
-            #if attr.isdigit(): format_fct = lambda pv : f"{pv}[{attr}]"
-            #else: 
-            format_fct = lambda pv : f"getattr({pv},\"{attr}\")"
+            if attr.isdigit(): format_fct = lambda pv : f"{pv}[{attr}]"
+            else: format_fct = lambda pv : f"getattr({pv},\"{attr}\")"
             return aux_handle_attr(target,parent_var,format_fct,[attr]) # might create one node
 
         # == torchscript's functions == -> must be removed because some refer to TS global var
@@ -220,6 +219,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             else:
                 if target is None:
                     target = get_fresh_var()
+                """
                 # == torch.size == quick fix -> TODO UTILISER LES FONCTIONS DE torch.Tensor.(size/view etc)
                 if l_name==["torch","size"]:
                     new_node = B_node(target)
@@ -236,13 +236,18 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
                     c = f"{target} = {args_Bvar[0].get_value(new_node)}.size({dim_arg})"
                     new_node.code = c
                     return B_var(target,node=new_node)
+                """
 
                 # == torch.nn.functional == quick.fix
                 if l_name[0]=="torch" and len(l_name)==2:
                     try: exec(f"torch.{l_name[1]}")
                     except:
                         try: exec(f"torch.nn.functional.{l_name[1]}")
-                        except: raise Exception(f"torch.{l_name[1]} neither found in torch or torch.nn.functional")
+                        except:
+                            try: exec(f"torch.Tensor.{l_name[1]}")
+                            except:
+                                raise Exception(f"torch.{l_name[1]} neither found in torch, torch.Tensor or torch.nn.functional")
+                            else: fct_name = f"torch.Tensor.{l_name[1]}"
                         else: fct_name = f"torch.nn.functional.{l_name[1]}"
                     else: fct_name = f"torch.{l_name[1]}"
                 else:
