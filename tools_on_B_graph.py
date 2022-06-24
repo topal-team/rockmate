@@ -89,4 +89,13 @@ def test_code(g : D_graph,nn_mod,dict_inputs : dict):
     return globals()["result"]
     # return [globals()[out] for out in g.outputs]
 
+import graphviz
 
+def print_graph(g : D_graph):
+    dot = graphviz.Digraph('calc-graph',comment="The forward D_graph")
+    for n in g.nodes:
+        dot.node(n.target,n.code)
+    for n in g.nodes:
+        for sub_n in n.required_nodes:
+            dot.edge(sub_n.target,n.target)
+    dot.render(directory="dottest",view=True)
