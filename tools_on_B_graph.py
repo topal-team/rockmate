@@ -2,7 +2,7 @@ from read_trace_code import *
 
 class D_node(B_node):
     def __init__(self,target="",code=""):
-        super().__init__(target,code) # is_input is now useless
+        super().__init__(target,code)
         self.used_by_nodes = []
 
 class D_graph():
@@ -45,17 +45,16 @@ def B_to_D(bg : B_graph) -> D_graph:
     b_nodes = sort_nodes(bg)
     dict_nodes = {}
     for n in b_nodes:
+        dn = D_node(n.target,n.code)
         if n.is_input:
             inputs.append(n.target)
-        else:
-            dn = D_node(n.target,n.code)
-            for sub_n in n.required_nodes:
-                if sub_n.target not in inputs:
-                    sub_dn = dict_nodes[sub_n]
-                    dn.required_nodes.append(sub_dn)
-                    sub_dn.used_by_nodes.append(dn)
-            dict_nodes[n] = dn
-            d_nodes.append(dn)
+            dn.is_input = True
+        for sub_n in n.required_nodes:
+            sub_dn = dict_nodes[sub_n]
+            dn.required_nodes.append(sub_dn)
+            sub_dn.used_by_nodes.append(dn)
+        dict_nodes[n] = dn
+        d_nodes.append(dn)
     dg = D_graph()
     dg.nodes = d_nodes
     dg.inputs = inputs
@@ -67,7 +66,7 @@ def print_code(g : D_graph):
     str_output = ','.join(g.outputs)
     print(f"def main({str_input}):")
     for n in g.nodes:
-        print(f"\t{n.code}")
+        if not n.is_input: print(f"\t{n.code}")
     print(f"\treturn {str_output}")
 
 import torch
@@ -79,22 +78,27 @@ def test_code(g : D_graph,nn_mod,dict_inputs : dict):
         assert(inp in dict_inputs)
         exec(f"{inp} = {dict_inputs[inp]}")
     for n in g.nodes:
-        exec(n.code)
+        if not n.is_input: exec(n.code)
     ret = []
     for out in g.outputs:
         exec(f"global btools_extract_result ; btools_extract_result = {out}")
         ret.append(globals()["btools_extract_result"])
+    if len(ret)==1: return ret[0]
+    else: return tuple(ret)
     return ret
-    exec(f"global result ; result = {g.outputs[0]}")
-    return globals()["result"]
-    # return [globals()[out] for out in g.outputs]
 
 import graphviz
 
-def print_graph(g : D_graph):
-    dot = graphviz.Digraph('calc-graph',comment="The forward D_graph")
+def print_graph(g : D_graph,name=None):
+    if name is None:
+        name = "calc-graph"
+    dot = graphviz.Digraph(name,comment="D_graph = forward graph")
     for n in g.nodes:
-        dot.node(n.target,n.code)
+        if n.is_input:
+            dot.node(n.target,n.code,color="blue")
+        elif n.target in g.outputs:
+            dot.node(n.target,n.code,color="red")
+        else: dot.node(n.target,n.code)
     for n in g.nodes:
         for sub_n in n.required_nodes:
             dot.edge(sub_n.target,n.target)
