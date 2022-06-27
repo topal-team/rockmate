@@ -10,29 +10,49 @@ import ast
 import torch
 from torch.jit import trace_module
 
+list_rand_fct = ["torch.randn"]
+dict_rand = {}
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 class B_node():
-    def __init__(self,target="",code="",required=None,is_input=False):
+    def __init__(self,target="",code="",fct="",required=None,is_input=False):
         self.target = target
-        self.code = code
+        self.make_code(code)
+        self.fct = fct
         if required is None:
             self.required_nodes = []
         else:
             self.required_nodes = required
         self.is_input = is_input
+        self.is_rand = None # unknown for the moment
+        self.required_rand = []
+    def make_code(self,code):
+        self.code_without_target = code
+        self.code = f"{self.target} = {code}"
 
 class B_var():
     def __init__(self,val,node : B_node = None, is_attr_of_self = False, path_from_self = None):
         self.is_attr_of_self = is_attr_of_self
         self.path_from_self  = path_from_self
         self.val = val
-        if node is None:
-            self.has_node = False # e.g. has_node = False for const
-        else:
-            self.has_node = True
-            self.node = node
+        self.has_node = False # by default, e.g. has_node = False for const
+        self.is_rand = False # by default
+        if node is not None:
+            if node.required_nodes==[] and not node.is_input:
+                if node.fct in list_rand_fct:
+                    dict_rand[node.target] = node.code
+                    self.is_rand = True
+                else:
+                    self.val = node.code_without_target
+            else:
+                self.has_node = True
+                self.node = node
+
     def get_value(self,calling_node):
-        if self.has_node:
+        if self.is_rand:
+            calling_node.is_rand = True
+            calling_node.required_rand.append(self.val)
+        elif self.has_node:
             calling_node.required_nodes.append(self.node)
         return self.val
     def inherits(self,parent,l_attr): # for a getattr
@@ -45,6 +65,7 @@ class B_graph():
     def __init__(self):
         self.nodes   = [] # tmp -> should not be trusted
         self.outputs = [] # list of B_var
+        self.dict_rand = dict_rand
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
@@ -88,7 +109,8 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
         for i in range(1,nb_i):
             i_node = B_node(
                 target=inputs[i],
-                code=f"{inputs[i]} = INPUT",
+                code=f"INPUT",
+                fct="INPUT",
                 required=[],
                 is_input=True)
             nodes.append(i_node)
@@ -134,11 +156,10 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
                 new_id = get_fresh_var()
             else:
                 new_id = make_unique(target)
-            new_node = B_node(target=new_id)
+            new_node = B_node(target=new_id,fct="getattr")
             nodes.append(new_node)
             parent_val = parent_var.get_value(calling_node=new_node)
-            c = f"{new_id} = {format_fct(parent_val)}"
-            new_node.code = c
+            new_node.make_code(format_fct(parent_val))
             new_var = B_var(new_id,node=new_node)
         return new_var
 
@@ -163,11 +184,11 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
     def handle_targets(list_tg,main_var): # str list of len > 1
         for i,tg in enumerate(list_tg):
             new_tg_id  = make_unique(tg)
-            new_node   = B_node(target=new_tg_id)
+            new_node   = B_node(target=new_tg_id,fct="getattr")
             nodes.append(new_node)
             main_val   = main_var.get_value(calling_node=new_node)
             # new_node.code = f"{new_tg_id} = getattr({main_val},\"{i}\")"
-            new_node.code = f"{new_tg_id} = {main_val}[{i}]"
+            new_node.make_code(f"{main_val}[{i}]")
             new_var    = B_var(new_tg_id,node=new_node)
             dict_vars[tg] = new_var
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -238,7 +259,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
                     fct_name = ".".join(l_name)
 
                 # == else ==
-                new_node = B_node(target=target)
+                new_node = B_node(target=target,fct=fct_name)
                 nodes.append(new_node)
                 args_str = [v.get_value(calling_node=new_node) for v in args_Bvar]
                 kwds_str = []
@@ -249,9 +270,25 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
                         or (kw.arg=="layout" and kw.value.value is None)):
                         kwds_str.append(f"{kw.arg} = {(handle_expr(kw.value)).get_value(new_node)}")
                 all_args = ",".join(args_str + kwds_str)
-                new_node.code = f"{target} = {fct_name}({all_args})"
+                new_node.make_code(f"{fct_name}({all_args})")
                 return B_var(target,node = new_node)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~
+    # isinstance(expr, ast.List or ast.Tuple)
+    # constr = "list" or "tuple"
+    def aux_handle_tuple_or_list(expr,target,constr): # tmp TODO to improve ++
+        if target is None:
+            target = get_fresh_var()
+        new_node = B_node(target=target,fct="{constr} constructor")
+        nodes.append(new_node)
+        args_vars = [handle_expr(v) for v in expr.elts]
+        args_str  = [v.get_value(new_node) for v in args_vars]
+        join_s = ','.join(args_str)
+        if constr=="list": c = f"[{join_s}]"
+        else: c = f"({join_s})"
+        new_node.make_code(c)
+        return B_var(target,node=new_node)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -276,28 +313,10 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             return handle_attr(expr,target) # may creates one node
         elif isinstance(expr,ast.Call):
             return handle_call(expr,target) # may creates nodes for inputs + for output
-        elif isinstance(expr,ast.List): # tmp TODO to improve ++
-            if target is None:
-                target = get_fresh_var()
-            new_node = B_node(target=target)
-            nodes.append(new_node)
-            args_vars = [handle_expr(v) for v in expr.elts]
-            args_str  = [v.get_value(new_node) for v in args_vars]
-            join_s = ','.join(args_str)
-            c = f"{target} = [{join_s}]"
-            new_node.code = c
-            return B_var(target,node=new_node)
-        elif isinstance(expr,ast.Tuple): # tmp TODO to improve ++
-            if target is None:
-                target = get_fresh_var()
-            new_node = B_node(target=target)
-            nodes.append(new_node)
-            args_vars = [handle_expr(v) for v in expr.elts]
-            args_str  = [v.get_value(new_node) for v in args_vars]
-            join_s = ','.join(args_str)
-            c = f"{target} = ({join_s})"
-            new_node.code = c
-            return B_var(target,node=new_node)
+        elif isinstance(expr,ast.List):
+            return aux_handle_tuple_or_list(expr,target,"list")
+        elif isinstance(expr,ast.Tuple):
+            return aux_handle_tuple_or_list(expr,target,"tuple")
         elif isinstance(expr,ast.UnaryOp):
             assert(isinstance(expr.op,ast.USub)) # quick fix
             assert(isinstance(expr.operand,ast.Constant))
@@ -343,7 +362,8 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
 def main(nn_mod,ex_inputs,concise_name=True,show_debug=False):
     # main_mod must be a instance of torch.nn.Module
     # ex_inputs must be a tuple
-    global concise, fresh_var, show_debug_msg
+    global concise, fresh_var, show_debug_msg, dict_rand
+    dict_rand = {}
     concise = concise_name
     show_debug_msg = show_debug
     fresh_var = 0

@@ -10,6 +10,7 @@ class D_graph():
         self.inputs  = [] # str list
         self.nodes   = [] # D_node list -> topo sorted
         self.outputs = [] # str list
+        self.dict_rand = {}
 
 def sort_nodes(g : B_graph): # -> B_node list 
     # use outputs' nodes, not B_graph.nodes
@@ -37,7 +38,7 @@ def sort_nodes(g : B_graph): # -> B_node list
 
 def print_all_nodes(g):
     for n in g.nodes:
-        print(f"({n.target}) : {n.code}")
+        print(f"({n.target}) : [{n.fct}] : {n.code}")
 
 def B_to_D(bg : B_graph) -> D_graph:
     inputs = []
@@ -45,7 +46,7 @@ def B_to_D(bg : B_graph) -> D_graph:
     b_nodes = sort_nodes(bg)
     dict_nodes = {}
     for n in b_nodes:
-        dn = D_node(n.target,n.code)
+        dn = D_node(n.target,n.code_without_target)
         if n.is_input:
             inputs.append(n.target)
             dn.is_input = True
@@ -59,9 +60,11 @@ def B_to_D(bg : B_graph) -> D_graph:
     dg.nodes = d_nodes
     dg.inputs = inputs
     dg.outputs = [v.val for v in bg.outputs]
+    dg.dict_rand = bg.dict_rand
     return dg
 
 def print_code(g : D_graph):
+    print(g.dict_rand)
     str_input = ','.join(g.inputs)
     str_output = ','.join(g.outputs)
     print(f"def main({str_input}):")
@@ -77,26 +80,15 @@ def test_code(g : D_graph,nn_mod,dict_inputs : dict):
     loc_dict["self"] = nn_mod
     for inp in g.inputs:
         loc_dict[inp] = dict_inputs[inp]
+    for v in g.dict_rand:
+        exec(g.dict_rand[v], globals(), loc_dict)
     for n in g.nodes:
         if not n.is_input: exec(n.code, globals(), loc_dict)
     ret = []
     for out in g.outputs:
         ret.append(loc_dict[out])
-    """
-    self=nn_mod
-    for inp in g.inputs:
-        assert(inp in dict_inputs)
-        exec(f"{inp} = {dict_inputs[inp]}")
-    for n in g.nodes:
-        if not n.is_input: exec(n.code, locals=dict_inputs)
-    ret = []
-    for out in g.outputs:
-        exec(f"global btools_extract_result ; btools_extract_result = {out}")
-        ret.append(globals()["btools_extract_result"])
-    """
     if len(ret)==1: return ret[0]
     else: return tuple(ret)
-    return ret
 
 import graphviz
 
