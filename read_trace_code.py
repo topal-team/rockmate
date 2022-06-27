@@ -70,6 +70,8 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
         code,memory = sub_mod.code_with_constants
     else:
         code,memory = getattr(sub_mod,sub_fct).code_with_constants
+    if not isinstance(memory,dict):
+        memory = memory.const_mapping
     a = (ast.parse(code)).body[0]
 
     dict_vars = {}
@@ -219,26 +221,8 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             else:
                 if target is None:
                     target = get_fresh_var()
-                """
-                # == torch.size == quick fix -> TODO UTILISER LES FONCTIONS DE torch.Tensor.(size/view etc)
-                if l_name==["torch","size"]:
-                    new_node = B_node(target)
-                    nodes.append(new_node)
-                    if len(args_Bvar)==1 and expr.keywords==[]:
-                        dim_arg=""
-                    elif len(args_Bvar)==1:
-                        kw = expr.keywords[0]
-                        assert(kw.arg=="dim")
-                        dim_arg=handle_expr(kw.value).get_value(new_node)
-                    else:
-                        assert(len(args_Bvar)==2)
-                        dim_arg=args_Bvar[1].get_value(new_node)
-                    c = f"{target} = {args_Bvar[0].get_value(new_node)}.size({dim_arg})"
-                    new_node.code = c
-                    return B_var(target,node=new_node)
-                """
 
-                # == torch.nn.functional == quick.fix
+                # == torch.nn.functional / torch.Tensor == quick.fix
                 if l_name[0]=="torch" and len(l_name)==2:
                     try: exec(f"torch.{l_name[1]}")
                     except:
@@ -246,7 +230,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
                         except:
                             try: exec(f"torch.Tensor.{l_name[1]}")
                             except:
-                                raise Exception(f"torch.{l_name[1]} neither found in torch, torch.Tensor or torch.nn.functional")
+                                raise Exception(f"torch.{l_name[1]} neither found in torch, torch.Tensor and torch.nn.functional")
                             else: fct_name = f"torch.Tensor.{l_name[1]}"
                         else: fct_name = f"torch.nn.functional.{l_name[1]}"
                     else: fct_name = f"torch.{l_name[1]}"
@@ -259,9 +243,10 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
                 args_str = [v.get_value(calling_node=new_node) for v in args_Bvar]
                 kwds_str = []
                 for kw in expr.keywords:
-                    if not ((kw.arg=="dtype" or kw.arg=="layout")
+                    if not (((kw.arg=="dtype" or kw.arg=="layout")
                         and isinstance(kw.value,ast.Constant)
-                        and isinstance(kw.value.value,int)):
+                        and isinstance(kw.value.value,int))
+                        or (kw.arg=="layout" and kw.value.value is None)):
                         kwds_str.append(f"{kw.arg} = {(handle_expr(kw.value)).get_value(new_node)}")
                 all_args = ",".join(args_str + kwds_str)
                 new_node.code = f"{target} = {fct_name}({all_args})"
@@ -286,7 +271,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
         elif (  isinstance(expr,ast.Attribute) # -> special constants
             and isinstance(expr.value,ast.Name)
             and expr.value.id == 'CONSTANTS' ):
-            return B_var(str(memory.const_mapping[expr.attr]))
+            return B_var(str(memory[expr.attr]))
         elif isinstance(expr,ast.Attribute):
             return handle_attr(expr,target) # may creates one node
         elif isinstance(expr,ast.Call):

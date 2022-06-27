@@ -73,16 +73,27 @@ import torch
 from torch import tensor
 
 def test_code(g : D_graph,nn_mod,dict_inputs : dict):
+    loc_dict = {}
+    loc_dict["self"] = nn_mod
+    for inp in g.inputs:
+        loc_dict[inp] = dict_inputs[inp]
+    for n in g.nodes:
+        if not n.is_input: exec(n.code, globals(), loc_dict)
+    ret = []
+    for out in g.outputs:
+        ret.append(loc_dict[out])
+    """
     self=nn_mod
     for inp in g.inputs:
         assert(inp in dict_inputs)
         exec(f"{inp} = {dict_inputs[inp]}")
     for n in g.nodes:
-        if not n.is_input: exec(n.code)
+        if not n.is_input: exec(n.code, locals=dict_inputs)
     ret = []
     for out in g.outputs:
         exec(f"global btools_extract_result ; btools_extract_result = {out}")
         ret.append(globals()["btools_extract_result"])
+    """
     if len(ret)==1: return ret[0]
     else: return tuple(ret)
     return ret
