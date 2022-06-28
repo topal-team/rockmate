@@ -10,6 +10,7 @@ class D_graph():
         self.inputs  = [] # str list
         self.nodes   = [] # D_node list -> topo sorted
         self.outputs = [] # str list
+        self.dict_outputs = {} # dict
         self.dict_rand = {}
 
 def sort_nodes(g : B_graph): # -> B_node list 
@@ -59,7 +60,10 @@ def B_to_D(bg : B_graph) -> D_graph:
     dg = D_graph()
     dg.nodes = d_nodes
     dg.inputs = inputs
-    dg.outputs = [v.val for v in bg.outputs]
+    for v in bg.outputs:
+        if v.has_node:
+            dg.dict_outputs[v.val] = dict_nodes[v.node]
+        dg.outputs.append(v.val)
     dg.dict_rand = bg.dict_rand
     return dg
 
@@ -83,6 +87,9 @@ def test_code(g : D_graph,nn_mod,dict_inputs : dict):
     for v in g.dict_rand:
         exec(g.dict_rand[v], globals(), loc_dict)
     for n in g.nodes:
+        if n.is_rand:
+            for sub_t in n.required_rand:
+                exec(g.dict_rand[sub_t])
         if not n.is_input: exec(n.code, globals(), loc_dict)
     ret = []
     for out in g.outputs:
