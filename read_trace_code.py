@@ -280,7 +280,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
     def aux_handle_tuple_or_list(expr,target,constr): # tmp TODO to improve ++
         if target is None:
             target = get_fresh_var()
-        new_node = B_node(target=target,fct="{constr} constructor")
+        new_node = B_node(target=target,fct=f"{constr} constructor")
         nodes.append(new_node)
         args_vars = [handle_expr(v) for v in expr.elts]
         args_str  = [v.get_value(new_node) for v in args_vars]
