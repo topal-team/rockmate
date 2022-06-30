@@ -20,12 +20,12 @@ class B_node():
         self.make_code(code)
         self.fct = fct
         if required is None:
-            self.required_nodes = []
+            self.req = []
         else:
-            self.required_nodes = required
+            self.req = required
         self.is_input = is_input
         self.is_rand = None # unknown for the moment
-        self.required_rand = []
+        self.req_rand = []
     def make_code(self,code):
         self.code_without_target = code
         self.code = f"{self.target} = {code}"
@@ -38,7 +38,7 @@ class B_var():
         self.has_node = False # by default, e.g. has_node = False for const
         self.is_rand = False # by default
         if node is not None:
-            if node.required_nodes==[] and not node.is_input:
+            if node.req==[] and not node.is_input:
                 if node.fct in list_rand_fct:
                     dict_rand[node.target] = node.code
                     self.is_rand = True
@@ -51,9 +51,9 @@ class B_var():
     def get_value(self,calling_node):
         if self.is_rand:
             calling_node.is_rand = True
-            calling_node.required_rand.append(self.val)
+            calling_node.req_rand.append(self.val)
         elif self.has_node:
-            calling_node.required_nodes.append(self.node)
+            calling_node.req.append(self.node)
         return self.val
     def inherits(self,parent,l_attr): # for a getattr
         if parent.has_node:
@@ -157,6 +157,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             else:
                 new_id = make_unique(target)
             new_node = B_node(target=new_id,fct="getattr")
+            setattr(new_node,"number",l_attr[0])
             nodes.append(new_node)
             parent_val = parent_var.get_value(calling_node=new_node)
             new_node.make_code(format_fct(parent_val))

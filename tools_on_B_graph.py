@@ -27,7 +27,7 @@ def sort_nodes(g : B_graph): # -> B_node list
         def visit(n):
             if n not in dict_done:
                 dict_done[n]=False
-                for sub_n in n.required_nodes:
+                for sub_n in n.req:
                     visit(sub_n)
                 dict_done[n]=True
                 nodes.append(n)
@@ -51,9 +51,10 @@ def B_to_D(bg : B_graph) -> D_graph:
         if n.is_input:
             inputs.append(n.target)
             dn.is_input = True
-        for sub_n in n.required_nodes:
+        req = list(set(n.req))
+        for sub_n in req:
             sub_dn = dict_nodes[sub_n]
-            dn.required_nodes.append(sub_dn)
+            dn.req.append(sub_dn)
             sub_dn.used_by_nodes.append(dn)
         dict_nodes[n] = dn
         d_nodes.append(dn)
@@ -88,7 +89,7 @@ def test_code(g : D_graph,nn_mod,dict_inputs : dict):
         exec(g.dict_rand[v], globals(), loc_dict)
     for n in g.nodes:
         if n.is_rand:
-            for sub_t in n.required_rand:
+            for sub_t in n.req_rand:
                 exec(g.dict_rand[sub_t])
         if not n.is_input: exec(n.code, globals(), loc_dict)
     ret = []
@@ -110,6 +111,6 @@ def print_graph(g : D_graph,name=None):
             dot.node(n.target,n.code,color="red")
         else: dot.node(n.target,n.code)
     for n in g.nodes:
-        for sub_n in n.required_nodes:
+        for sub_n in n.req:
             dot.edge(sub_n.target,n.target)
     dot.render(directory="dottest",view=True)

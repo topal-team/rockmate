@@ -7,7 +7,7 @@ def test_code(g : D_graph,nn_mod,dict_inputs : dict):
         exec(g.dict_rand[v], globals(), loc_dict)
     for n in g.nodes:
         if n.is_rand:
-            for sub_t in n.required_rand:
+            for sub_t in n.req_rand:
                 exec(g.dict_rand[sub_t])
         if not n.is_input: exec(n.code, globals(), loc_dict)
     ret = []
@@ -16,6 +16,15 @@ def test_code(g : D_graph,nn_mod,dict_inputs : dict):
     if len(ret)==1: return ret[0]
     else: return tuple(ret)
 
+def flat(l):
+    ret = []
+    for sub in l:
+        if isinstance(sub,list):
+            flat_sub = flat(sub)
+            ret.extend(flat_sub)
+        else:
+            ret.append(sub)
+    return ret
 
 if torch.cuda.is_available():
     device = torch.device('cuda')
@@ -59,19 +68,28 @@ def get_info(x) -> Node_info:
         raise Exception(f"sorry only tuple list tensor or size : {tt}")
     return info
 
-def create_input(info):
-    tt = info.target_type
-    if tt==torch.Size:
-        return info.target_size
-    elif tt==torch.Tensor:
-        return torch.randn(info.target_size,
-                dtype=info.dtype,
-                requires_grad=info.requires_grad,
-                device=device)
-    elif tt==list or tt==tuple:
-        return tt([create_input(sub_i) for sub_i in info.sub_info])
-    else:
-        raise Exception(f"you should had the type {tt} here also")
+def generate_val(info,inputs_Kbw,dict_Kbw_loc):
+    # dict_Kbw_loc = dict_Kbw[sub_n.target]
+    def aux(path,info):
+        tt = info.target_type
+        if tt==torch.Size:
+            return info.target_size
+        elif tt==torch.Tensor:
+            random_x =  torch.randn(info.target_size,
+                    dtype=info.dtype,
+                    requires_grad=info.requires_grad,
+                    device=device)
+            inputs_Kbw[random_x] = dict_Kbw_loc[path]
+            return random_x
+        elif tt==list or tt==tuple:
+            ret = []
+            for i,sub_info in enumerate(info.sub_info):
+                ret.append(aux(f"{i}_{path}",sub_info))
+            return tt(ret)
+        else:
+            raise Exception(f"you should had the type {tt} here also")
+    aux("",info)
+
 
 def generate_bwd_code(n : D_node,info):
     tt = info.target_type
@@ -82,7 +100,7 @@ def generate_bwd_code(n : D_node,info):
         else:
             inputs_str = ','.join([
             return '{o}.backward({o}.grad, inputs={i})'.format(o=node.target,
-                    i='[%s]'%','.join([inp.target for inp in node.required_nodes]))
+                    i='[%s]'%','.join([inp.target for inp in node.req_nodes]))
 
 
 
@@ -90,6 +108,8 @@ def generate_bwd_code(n : D_node,info):
 def make_k_nodes(g : D_graph,nn_mod,dict_inputs : dict):
     # returns a list of K_nodes
     dict_info = {} # dict : D_node.target -> node_info
+    dict_Kbw = {} # dict : D_node.target -> K_node(bw) dict
+    dict_Kfw = {} # dict : D_node.target -> K_node(fw)
 
     # -- inputs --  
     for inp in g.inputs:
@@ -108,19 +128,52 @@ def make_k_nodes(g : D_graph,nn_mod,dict_inputs : dict):
             pass # info already known
         else:
             # -- generate random inputs --
+            inputs_Kbw = {}
             tmp_local = {"self" : nn_mod}
-            for sub_n in n.required_nodes:
+            for sub_n in n.req_nodes:
                 sub_info = dict_info[sub_n.target]
-                sub_x = create_input(sub_info)
+                sub_x = generate_val(info,inputs_Kbw,dict_Kbw[sub_n.target])
+                # -> added all sub_x's tensors in inputs_Kbw
                 tmp_local[sub_n.target] = sub_x
             if n.is_rand:
-                for sub_r in n.required_rand:
+                for sub_r in n.req_rand:
                     exec(g.dict_rand[sub_r],globals(),tmp_local)
             # -- info --
+            # INSPECT FORWARD
             exec(n.code , globals() , tmp_local)
             x = tmp_local[n.target]
             info = get_info(x)
             dict_info[n.target] = info
+
+            # -- build Kbw -- -> inputs_Kbw is very usefull
+            # ---------------------------
+            n_Kbw = {}
+            x_flatten = flat_with_path(x)
+            x_tensors = []
+            for (key,tens) in x_flatten: # e.g. key = "0_1" or ""
+                if not (isinstance(tens,torch.Size)):
+                    assert(isinstance(tens,torch.Tensor))
+                    if tens.requires_grad: x_tensors.append((key,tens))
+            for (key,tens) in x_tensors:
+                if tens in inputs_Kbw: # i.e. already exists 
+                    n_Kbw[key] = inputs_Kbw[tens]
+                else: # we need to create a new K_node(bw)
+
+
+            """
+            if n.fct=="list constructor":
+                bw_nodes = {}
+                for sub_n in n.req_nodes:
+                    for i,sub_t in enumerate(x):
+                        if tmp_local[sub_n.target] is sub_t:
+                            for key,bwn in enumerate(dict_Kbw(sub_n.target)):
+                                bw_nodes[f"{i}_{key}"] = bwn
+                dict_Kbw[n.target] = bw_nodes
+                # end
+            elif n.fct=="getattr":
+            """
+
+
 
 
 
