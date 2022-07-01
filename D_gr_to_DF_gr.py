@@ -1,4 +1,5 @@
 import torch
+from Btools import *
 try:
     from rotor.utils import *
 except:
@@ -27,7 +28,10 @@ class K_node():
         self.overhead = None
         self.time = None
         self.code = code
-        self.req = req # list of K_node
+        if req is None:
+            self.req = []
+        else:
+            self.req = req # list of K_node
 
 def get_info(x) -> Node_info:
     info = Node_info()
@@ -61,18 +65,21 @@ def detach_code(n): # TODO TO IMPROVE
 
 def generate_bwd_code(n : D_node,info,dict_info):
     tt = info.target_type
-    assert(tt==torch.Size)
+    assert(tt!=torch.Size)
     if n.is_input: input_str = None
     else:
         req = []
         for inp in n.req:
             if dict_info[inp.target].requires_grad:
                 req.append(inp.target)
-        inputs_str = "["+ ','.join(req) +"]"
+        if req==[]:
+            inputs_str='None'
+        else:
+            inputs_str = "["+ ','.join(req) +"]"
     code='_{o}.backward({o}.grad, inputs={i})'.format(o=n.target,i=inputs_str)
     targ = n.target
     bwd_code = f"if _{targ}.data.shape == torch.Size([0]):\n"
-    bwd_code += f"\t_{targ}.data = torch.randn_like({targ}.grad)\n"
+    bwd_code += f"\t_{targ}.data = torch.randn_like({targ}.grad,device=device)\n"
     bwd_code += f"\t{code}\n"
     bwd_code += f"\t_{targ}.data = torch.randn(0,device=device)\n"
     bwd_code += f"else:\n\t{code}\n"
@@ -100,12 +107,18 @@ def inspection(n,fwd_code,bwd_code,dict_info,g,our_global):
     tmp_local = generate_tmp_local(g,dict_info,n)
     ret = {}
 
-    def measure_time(fct):
-        duration = timer.measure_median(fct)
+    def measure_time(fct, inter_fct=None):
+        duration = timer.measure_median(fct,samples=1)
+        
         if duration < min_duration:
             number_repetitions = 1 + int(min_duration // duration)
-            duration = timer.measure_median(fct, iterations = number_repetitions)
-        return duration
+            #duration = timer.measure_median(fct, iterations = number_repetitions)
+            for _ in range(1,number_repetitions):
+                if inter_fct:
+                    inter_fct()
+                duration += timer.measure_median(fct,samples=1)
+        else: number_repetitions = 1
+        return duration/number_repetitions
 
     # === FORWARD ===
     # def of run fwd
@@ -113,7 +126,7 @@ def inspection(n,fwd_code,bwd_code,dict_info,g,our_global):
     # def of forget fwd
     if info.requires_grad:
         def fct_fgt_fwd():
-            tmp_local["_"+n.target].data := torch.randn(0,device=device)
+            tmp_local["_"+n.target].data = torch.randn(0,device=device)
             tmp_local[n.target].data = torch.randn(0,device=device)
     else:
         def fct_fgt_fwd():
@@ -126,35 +139,42 @@ def inspection(n,fwd_code,bwd_code,dict_info,g,our_global):
     _ , mem_fgt_fwd , _ = memUsage.measure(fct_fgt_fwd)
     ret["overhead_fwd"] = overhead_fwd
     ret["mem_run_fwd"] = mem_run_fwd
-    ret["mem_fgt_fwd"] = - mem_fgt_fwd
+    ret["mem_fgt_fwd"] = mem_fgt_fwd
     ret["time_run_fwd"] = time_run_fwd
     # ===============
 
     # === BACKWARD ===
     if info.requires_grad:
+        tmp_local[n.target].data = generate_val(info)
+        tmp_local[n.target].grad = generate_val(info)
+        tmp_local[n.target].data = torch.randn(0, device=device)
+        
         # def of run bwd
         fct_run_bwd = lambda : exec(bwd_code, our_global, tmp_local)
         # def of forget bwd
         def fct_fgt_bwd():
             for sub_n in n.req:
                 if dict_info[sub_n.target].requires_grad:
-                    tmp_local[sub_n.target].grad = torch.randn(0,device=device)
+                    tmp_local[sub_n.target].grad = None
 
         # measure
         _ , mem_run_bwd , peak_bwd = memUsage.measure(fct_run_bwd)
         overhead_bwd = peak_bwd - mem_run_bwd
         _ , mem_fgt_bwd , _ = memUsage.measure(fct_fgt_bwd)
-        time_run_bwd = measure_time(fct_run_bwd)
+        fct_run_fwd()
+        timer.measure_median(fct_run_fwd)
+        tmp_local[n.target].grad = generate_val(info)
+        time_run_bwd = measure_time(fct_run_bwd, fct_run_fwd)
         # overhead_bwd contains n.target.data now /!\
 
         ret["overhead_bwd"] = overhead_bwd
         ret["mem_run_bwd"] = mem_run_bwd
-        ret["mem_fgt_bwd"] = - mem_fgt_bwd
+        ret["mem_fgt_bwd"] = mem_fgt_bwd
         ret["time_run_bwd"] = time_run_bwd
     # ===============
     return ret
 
-def make_k_nodes(g : D_graph,nn_mod,dict_inputs : dict):
+def make_k_nodes(g : D_graph,nn_mod,dict_inputs : dict,show_debug=False):
     # returns a list of K_nodes
     dict_info = {} # dict : D_node.target -> node_info
     dict_Kbwd = {} # dict : D_node.target -> K_node(bwd)
@@ -168,9 +188,13 @@ def make_k_nodes(g : D_graph,nn_mod,dict_inputs : dict):
     # -- inputs --  
     for inp in g.inputs:
         dict_info[inp] = get_info(dict_inputs[inp])
-
+        dict_Kfwd[inp] = K_node(name="fwd_"+inp, code="input")
+        
+        dict_Kbwd[inp] = K_node(name="bwd_"+inp, code="input")
     # ------------
     def handle_node(n : D_node):
+        if show_debug:
+            print(n.target)
         if n.is_input:
             pass # info already known
         else:
@@ -178,11 +202,14 @@ def make_k_nodes(g : D_graph,nn_mod,dict_inputs : dict):
             tmp_local = generate_tmp_local(g,dict_info,n)
 
             # -- get info --
-            exec(n.code , our_global , tmp_local)
+            try:
+                exec(n.code , our_global , tmp_local)
+            except:
+                print('Fail to execute:', n.target, n.code)
             x = tmp_local[n.target]
+            if show_debug: print(x.requires_grad)
             info = get_info(x)
             dict_info[n.target] = info
-
             # -- build Kfwd --
             Kreq = [dict_Kfwd[sub_n.target] for sub_n in n.req]
             fwd_code = n.code
@@ -194,13 +221,13 @@ def make_k_nodes(g : D_graph,nn_mod,dict_inputs : dict):
             # -- build Kbwd --
             if info.requires_grad:
                 assert(info.target_type == torch.Tensor)
-                bwd_code = generate_bwd_code(n,info)
+                bwd_code = generate_bwd_code(n,info,dict_info)
                 Kbwd = K_node(name="bwd_"+n.target, code=bwd_code, req=Kreq)
                 dict_Kbwd[n.target] = Kbwd
                 for sub_n in n.req:
                     if sub_n.target in dict_Kbwd:
                         dict_Kbwd[sub_n.target].req.append(Kbwd)
-            else bwd_code=None
+            else: bwd_code=None
 
             # -- inspection --
             if info.target_type == torch.Size:
