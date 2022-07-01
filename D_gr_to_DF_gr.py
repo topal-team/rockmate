@@ -61,7 +61,7 @@ def generate_val(info):
 
 def detach_code(n): # TODO TO IMPROVE
     code = (n.code).replace(n.target,"_"+n.target)
-    return f"{code} ; {n.target} = _{n.target}.detach()"
+    return f"{code} ; {n.target} = _{n.target}.detach(); {n.target}.requires_grad_()"
 
 def generate_bwd_code(n : D_node,info,dict_info):
     tt = info.target_type
