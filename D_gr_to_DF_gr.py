@@ -222,7 +222,7 @@ def make_k_nodes(g : D_graph,nn_mod,dict_inputs : dict,show_debug=False):
             if info.requires_grad:
                 assert(info.target_type == torch.Tensor)
                 bwd_code = generate_bwd_code(n,info,dict_info)
-                Kbwd = K_node(name="bwd_"+n.target, code=bwd_code, req=Kreq)
+                Kbwd = K_node(name="bwd_"+n.target, code=bwd_code, req=list(Kreq))
                 dict_Kbwd[n.target] = Kbwd
                 for sub_n in n.req:
                     if sub_n.target in dict_Kbwd:

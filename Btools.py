@@ -102,7 +102,7 @@ import graphviz
 
 def print_graph(g : D_graph,name=None):
     if name is None:
-        name = "calc-graph"
+        name = "forward D-graph"
     dot = graphviz.Digraph(name,comment="D_graph = forward graph")
     for n in g.nodes:
         if n.is_input:
@@ -113,4 +113,4 @@ def print_graph(g : D_graph,name=None):
     for n in g.nodes:
         for sub_n in n.req:
             dot.edge(sub_n.target,n.target)
-    dot.render(directory="dottest",view=True)
+    dot.render(directory="graphviz_dir",view=True)

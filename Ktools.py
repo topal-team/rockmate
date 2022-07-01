@@ -1,4 +1,4 @@
-import D_gr_to_K_gr
+import D_gr_to_DF_gr
 import graphviz
 
 def print_K_nodes(dict_Kfwd,dict_Kbwd,name=None):
@@ -10,8 +10,8 @@ def print_K_nodes(dict_Kfwd,dict_Kbwd,name=None):
             dot.node(n.name,f"{n.name} = INPUT",color="green")
         else:
             dot.node(n.name,n.code,color=default_color)
-    fwd_nodes = dict_Kfwd.values()
-    bwd_nodes = dict_Kbwd.values()
+    fwd_nodes = list(dict_Kfwd.values())
+    bwd_nodes = list(dict_Kbwd.values())
     all_nodes = fwd_nodes + bwd_nodes
     for n in fwd_nodes:
         print_node(n,"blue")
