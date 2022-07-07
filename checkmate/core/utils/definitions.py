@@ -12,4 +12,5 @@ AdjList = Dict[Vertex, List[Vertex]]
 
 # environment variables
 ENV_VAR_FLAGS = ["DEBUG_SCHEDULER_RAM"]
+os.environ["DEBUG_SCHEDULER_RAM"] = 'true'
 active_env_var_flags = {key for key in ENV_VAR_FLAGS if key in os.environ and os.environ[key].lower() in ("true", "t", "1")}
