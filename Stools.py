@@ -172,6 +172,12 @@ def simplify_cheap(g : S_graph):
 
 
 
+
+def D_to_S(dg):
+    sg = D_to_S_init(dg)
+    simplify_cheap(sg)
+    return sg
+
 # ==========================
 
 
