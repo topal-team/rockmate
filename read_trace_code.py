@@ -16,6 +16,9 @@ list_rand_fct = ["torch.randn"]
 dict_rand = {}
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def ast_to_str(ast_code):
+    return ast.unparse(ast.fix_missing_locations(ast_code))
+
 class B_node():
     def __init__(self,target="",code=None,fct="",req=None,is_input=False):
         # "code" must be an AST, "fct" is a string
@@ -36,7 +39,7 @@ class B_node():
         else:
             self.ast_code = ast.Assign([ast.Name(self.target)],code)
     def get_code(self):
-        return ast.unparse(ast.fix_missing_locations(self.ast_code))
+        return ast_to_str(self.ast_code)
 
 class B_var():
     def __init__(self,val,node : B_node = None, is_attr_of_self = False, path_from_self = None):
@@ -260,7 +263,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
                 sub_sub_mod = sub_mod
                 for at in sub_var.path_from_self:
                     sub_sub_mod = getattr(sub_sub_mod,at)
-                sub_sub_str = ast.unparse(ast.fix_missing_locations(sub_var.val))
+                sub_sub_str = ast_to_str(sub_var.val)
                 sub_graph = open_sub_module(sub_sub_mod,sub_sub_str,l_name[1],args_Bvar)
                 return sub_graph.output # which is a B_var !
 

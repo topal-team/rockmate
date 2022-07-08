@@ -24,8 +24,7 @@ class S_node():
         else: mc = [self.main_code]
         return ast.Module(mc + self.body_code,[])
     def get_code(self):
-        all_code = self.full_code()
-        return ast.unparse(ast.fix_missing_locations(all_code))
+        return ast_to_str(self.full_code())
     def insert(self,sub_n,strong):
         # self is the main node ; sub_n is the node inserted
         # if strong: delete sub_n else: sub_node <- artefact
