@@ -165,7 +165,7 @@ def ast_replace(mc,target : str,sc): # mc : main_code , sc : sub_code
 def simplify_cheap(g : S_graph):
     # from root to leaves
     for n in g.nodes:
-        if n.main_fct in list_cheap_fct:
+        if n.main_target != g.output and n.main_fct in list_cheap_fct:
             for sub_n in n.used_by:
                 # -- unplug n --
                 sub_n.req.update(n.req)
