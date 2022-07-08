@@ -1,4 +1,4 @@
-from Btools import *
+from Dtools import *
 import ast
 
 list_cheap_fct = ["torch.add","torch.mul"]
@@ -10,21 +10,21 @@ list_cheap_fct.extend(["list constructor","tuple constructor"])
 # ==========================
 
 class S_node():
-    def __init__(self,code=None,fct="",target=None):
-        self.real_node = True # boolean, "size" nodes are artefacts
+    def __init__(self,code=None,fct="",target="No target"):
+        self.is_artefact = False
         self.main_code = code
         self.main_fct = fct
-        self.body_code = [] # list of ast.Assign or ast.Module
+        self.body_code = [] # list of ast.Assign
         self.main_target = target # str
         self.all_targets = [target]
         self.req = set()
         self.used_by = set()
-    def get_code(self):
+    def full_code(self):
         if self.main_code is None: mc = []
         else: mc = [self.main_code]
-        if isinstance(self.body_code,list): bc = self.body_code
-        else: bc = self.body_code.body
-        all_code = ast.Module(mc+bc,[])
+        return ast.Module(mc + self.body_code,[])
+    def get_code(self):
+        all_code = self.full_code()
         return ast.unparse(ast.fix_missing_locations(all_code))
     def insert(self,sub_n,strong):
         # self is the main node ; sub_n is the node inserted
@@ -51,7 +51,7 @@ class S_node():
             sub_n.req = set()
             # -> sub_n has been fully unpluged
         else:
-            sub_n.real_node = False
+            sub_n.is_artefact = True
             # -> artefact
         # -- insert sub_n code --
         assert(sub_n.main_code is not None)
@@ -69,7 +69,6 @@ class S_graph():
     def __init__(self,dg : D_graph = None):
         self.nodes = []
         self.init_node = None
-        self.init_code = None # list of ast.Assign or ast.Module
         if dg:
             self.output    = dg.output
             self.dict_info = dg.dict_info
@@ -78,12 +77,25 @@ class S_graph():
             self.output    = None
             self.dict_info = {}
             self.dict_rand = {}
+
     def clear(self): # remove unpluged nodes
         l = []
         for n in self.nodes:
             if n.req != set() or n.used_by != set():
                 l.append(n)
         self.nodes = l
+
+    def assert_ready(self):
+        # check if ready to be given to S_to_K
+        # -> main_targets are tensors, except if artefact -> sizes
+        for n in self.nodes:
+            if not (n.main_target in self.dict_info):
+                raise Exception(f"{n.main_target} not in dict_info ??")
+            info = self.dict_info[n.main_target]
+            if not (info.ttype in [torch.Tensor,torch.Size]):
+                raise Exception(f"After simplifications there should only be tensors or sizes, but {info.ttype} found for {n.main_target}.")
+            if info.ttype==torch.Size and not n.is_artefact:
+                raise Exception(f"After simplifications, all remaining \"size\" should be \"artefacts\", but {n.main_target} isn't an artefact")
 
 
 def D_to_S_init(dg : D_graph) -> S_graph:
@@ -103,7 +115,6 @@ def D_to_S_init(dg : D_graph) -> S_graph:
     for inp in dg.inputs:
         init_node.insert(dict_s_nodes[inp],strong=True)
     init_node.body_code = []
-    sg.init_code = init_node.body_code
     sg.init_node = init_node
     sg.clear()
     return sg
@@ -172,10 +183,10 @@ def simplify_cheap(g : S_graph):
 
 
 
-
 def D_to_S(dg):
     sg = D_to_S_init(dg)
     simplify_cheap(sg)
+    sg.assert_ready()
     return sg
 
 # ==========================
@@ -195,7 +206,7 @@ def print_graph(g : D_graph,name=None):
     for n in g.nodes:
         if n.main_target == g.output:
             dot.node(n.main_target,n.get_code(),color="red")
-        elif not n.real_node:
+        elif n.is_artefact:
             dot.node(n.main_target,n.get_code(),style="dashed")
         else: dot.node(n.main_target,n.get_code())
     for n in g.nodes:
