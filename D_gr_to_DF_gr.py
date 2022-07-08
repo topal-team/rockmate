@@ -61,7 +61,8 @@ def generate_val(info):
 
 def detach_code(n): # TODO TO IMPROVE
     code = (n.code).replace(n.target,"_"+n.target)
-    return f"{code} ; {n.target} = _{n.target}.detach(); {n.target}.requires_grad_()"
+    #return f"{code} ; {n.target} = _{n.target}.detach(); {n.target}.requires_grad_()"
+    return n.code
 
 def generate_bwd_code(n : D_node,info,dict_info):
     tt = info.target_type
@@ -76,12 +77,12 @@ def generate_bwd_code(n : D_node,info,dict_info):
             inputs_str='None'
         else:
             inputs_str = "["+ ','.join(req) +"]"
-    code='_{o}.backward({o}.grad, inputs={i})'.format(o=n.target,i=inputs_str)
+    code='{o}.backward({o}.grad, inputs={i})'.format(o=n.target,i=inputs_str)
     targ = n.target
-    bwd_code = f"if _{targ}.data.shape == torch.Size([0]):\n"
-    bwd_code += f"\t_{targ}.data = torch.randn_like({targ}.grad,device=device)\n"
+    bwd_code = f"if {targ}.data.shape == torch.Size([0]):\n"
+    bwd_code += f"\t{targ}.data = torch.randn_like({targ}.grad,device=device)\n"
     bwd_code += f"\t{code}\n"
-    bwd_code += f"\t_{targ}.data = torch.randn(0,device=device)\n"
+    bwd_code += f"\t{targ}.data = torch.randn(0,device=device)\n"
     bwd_code += f"else:\n\t{code}\n"
     return bwd_code
 
@@ -126,7 +127,7 @@ def inspection(n,fwd_code,bwd_code,dict_info,g,our_global):
     # def of forget fwd
     if info.requires_grad:
         def fct_fgt_fwd():
-            tmp_local["_"+n.target].data = torch.randn(0,device=device)
+            #tmp_local["_"+n.target].data = torch.randn(0,device=device)
             tmp_local[n.target].data = torch.randn(0,device=device)
     else:
         def fct_fgt_fwd():
