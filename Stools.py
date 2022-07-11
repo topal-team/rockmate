@@ -1,9 +1,39 @@
 from Dtools import *
 import ast
 
-list_cheap_fct = ["torch.add","torch.mul"]
+list_cheap_fct = ["torch.add","torch.sub","torch.mul","torch.div"]
+# TODO : complete this list
 list_cheap_fct.extend(["list constructor","tuple constructor"])
 # because I treat them in the same way
+list_view_fct = [
+    "torch.adjoint","torch.Tensor.adjoint",
+    "torch.as_strided","torch.Tensor.as_strided",
+    "torch.Tensor.detach",
+    "torch.diagonal","torch.Tensor.diagonal",
+    "torch.Tensor.expand","torch.Tensor.expand_as",
+    "torch.movedim","torch.Tensor.movedim",
+    "torch.narrow","torch.Tensor.narrow",
+    "torch.permute","torch.Tensor.permute",
+    "torch.select","torch.Tensor.select",
+    "torch.squeeze","torch.Tensor.squeeze",
+    "torch.transpose","torch.Tensor.transpose",
+    "torch.view_as_real",
+    "torch.Tensor.unflatten",
+    "torch.Tensor.unfold",
+    "torch.unsqueeze","torch.Tensor.unsqueeze",
+    "torch.Tensor.view","torch.Tensor.view_as",
+    "torch.unbind","torch.Tensor.unbind",
+    "torch.split","torch.Tensor.split",
+    "torch.hsplit","torch.Tensor.hsplit",
+    "torch.vsplit","torch.Tensor.vsplit",
+    "torch.tensor_split","torch.Tensor.tensor_split",
+    "torch.split_with_sizes","torch.Tensor.split_with_sizes",
+    "torch.swapaxes","torch.Tensor.swapaxes",
+    "torch.swapdims","torch.Tensor.swapdims",
+    "torch.chunk","torch.Tensor.chunk",
+    "torch.Tensor.values","torch.Tensor.indices",
+    ]
+# list imported from https://pytorch.org/docs/stable/tensor_view.html
 
 # ==========================
 # = Init move from D to S  =
@@ -30,19 +60,22 @@ class S_node():
         # if strong: delete sub_n else: sub_node <- artefact
         # in any case cut as many edges as possible
         # -- disconnect sub_n and self --
-        sub_n.req.discard(self)
-        self.used_by.discard(sub_n)
-        merged_req = self.req | sub_n.req
-        merged_used_by = self.used_by | sub_n.used_by
+
+        #sub_n.req.discard(self)
+        #self.used_by.discard(sub_n)
+        merged_req = (self.req | sub_n.req) - {self}
+        #merged_used_by = self.used_by | sub_n.used_by
         # -- disconnect sub_n with its children (if possible) --
-        if strong: # for "view"
+        if strong: # e.g. for "view"
             for sub_sub_n in sub_n.used_by:
                 sub_sub_n.req.discard(sub_n)
+            merged_used_by = (self.used_by | sub_n.used_by) - {sub_n}
             sub_n.used_by = set()
-        else: # for "size"
+        else: # e.g. for "size"
             for sub_sub_n in self.used_by:
                 sub_sub_n.req.discard(sub_n)
                 sub_n.used_by.discard(sub_sub_n)
+            merged_used_by = self.used_by
         # -- if sub_n is deleted, remove it from parents' used_by --
         if sub_n.used_by == set():
             for req_n in sub_n.req:
@@ -200,6 +233,44 @@ def simplify_cheap(g : S_graph):
             simplify_node(n)
     g.clear()
 
+# ==========================
+
+
+
+# ==========================
+# ==== Simplification 2 ====
+# === insert size nodes ====
+# ==========================
+
+# 1) merge the size nodes which have the same parent
+# 2) insert the size nodes in the body code of the
+#    parent, and keep them only if needed -> artefact
+
+def size_children(g,n):
+    # give the list of child nodes of n which are size
+    ret = []
+    for sub_n in n.used_by:
+        if g.dict_info[sub_n.main_target].ttype == torch.Size:
+            ret.append(sub_n)
+    return ret
+
+
+def simplify_size(g : S_graph):
+    # from leaves to root
+    nodes = list(g.nodes) ; nodes.reverse()
+    for n in nodes:
+        if n.main_target != g.output:
+            list_size = size_children(g,n)
+            if list_size != []:
+                print("yes")
+                # -- merge into one node --
+                size_n = list_size[0]
+                for other_n in list_size[1:]:
+                    size_n.insert(other_n,strong=True)
+                # -- insert their code --
+                n.insert(size_n,strong=False)
+    g.clear()
+
 
 # ==========================
 
@@ -212,6 +283,7 @@ def simplify_cheap(g : S_graph):
 def D_to_S(dg):
     sg = D_to_S_init(dg)
     simplify_cheap(sg)
+    simplify_size(sg)
     sg.assert_ready()
     return sg
 
