@@ -6,7 +6,7 @@ list_cheap_fct.extend(["list constructor","tuple constructor"])
 # because I treat them in the same way
 
 # ==========================
-# = Move from D to S graph =
+# = Init move from D to S  =
 # ==========================
 
 class S_node():
@@ -89,12 +89,19 @@ class S_graph():
         # -> main_targets are tensors, except if artefact -> sizes
         for n in self.nodes:
             if not (n.main_target in self.dict_info):
-                raise Exception(f"{n.main_target} not in dict_info ??")
+                raise Exception(
+                    f"{n.main_target} not in dict_info ??")
             info = self.dict_info[n.main_target]
             if not (info.ttype in [torch.Tensor,torch.Size]):
-                raise Exception(f"After simplifications there should only be tensors or sizes, but {info.ttype} found for {n.main_target}.")
+                raise Exception(
+                    f"After simplifications there should "\
+                    f"only be tensors or sizes, but {info.ttype} "\
+                    f"found for {n.main_target}.")
             if info.ttype==torch.Size and not n.is_artefact:
-                raise Exception(f"After simplifications, all remaining \"size\" should be \"artefacts\", but {n.main_target} isn't an artefact")
+                raise Exception(
+                    f"After simplifications, all remaining "\
+                    f"\"size\" should be \"artefacts\", but "\
+                    f"{n.main_target} isn't an artefact")
 
 
 def D_to_S_init(dg : D_graph) -> S_graph:
@@ -123,11 +130,11 @@ def D_to_S_init(dg : D_graph) -> S_graph:
 
 
 # ==========================
-# ==== simplifications =====
+# ==== Simplification 1 ====
+# === remove cheap nodes ===
 # ==========================
 
-# == Simplification 1 : remove cheap nodes ==
-def ast_replace(mc,target : str,sc): # mc : main_code , sc : sub_code
+def insert_ast_code(main_n,mc,target : str,sc): # mc : main_code , sc : sub_code
     assert(isinstance(mc,ast.Assign))
     assert(isinstance(sc,ast.Assign))
     if not isinstance(sc.targets[0],ast.Name):
@@ -148,6 +155,7 @@ def ast_replace(mc,target : str,sc): # mc : main_code , sc : sub_code
                 kwds.append(scv)
             else: kwds.append(s)
         ret = ast.Call(mcv.func,args,kwds)
+        main_n.main_code = ast.Assign(mc.targets,ret)
     elif (isinstance(mcv,ast.Tuple)
         or isinstance(mcv,ast.List)):
         l = []
@@ -156,31 +164,50 @@ def ast_replace(mc,target : str,sc): # mc : main_code , sc : sub_code
                 l.append(scv)
             else: l.append(s)
         ret = type(mcv)(l)
+        main_n.main_code = ast.Assign(mc.targets,ret)
+    elif isinstance(mcv,ast.Subscript):
+        assert(isinstance(scv,ast.List)
+            or isinstance(scv,ast.Tuple))
+        assert(len(mc.targets)==1)
+        # mcv = scv.elts[mcv.slice.value]
+        main_n.main_code = ast.Assign(mc.targets,scv.elts[mcv.slice.value])
+        simplify_node(main_n)
     else:
         print(ast.dump(mc,indent=4))
-        raise Exception(f"unknown type of code where we should insert things: {type(main_code.value)}")
-    return ast.Assign(mc.targets,ret)
+        raise Exception(
+            f"unknown type of code where we should "\
+            f"insert things: {type(mc.value)}")
 
+def simplify_node(n):
+    # aux fct, insert n.ast_code in children's code, and unplug it
+    for sub_n in n.used_by:
+        # -- unplug n --
+        sub_n.req.update(n.req)
+        sub_n.req.discard(n)
+        req = set(n.req)
+        for req_n in req:
+            req_n.used_by.add(sub_n)
+            req_n.used_by.discard(n)
+        # -- insert the code --
+        insert_ast_code(sub_n,sub_n.main_code,n.main_target,n.main_code)
+    n.req     = set()
+    n.used_by = set()
 
 def simplify_cheap(g : S_graph):
     # from root to leaves
     for n in g.nodes:
         if n.main_target != g.output and n.main_fct in list_cheap_fct:
-            for sub_n in n.used_by:
-                # -- unplug n --
-                sub_n.req.update(n.req)
-                sub_n.req.discard(n)
-                req = set(n.req)
-                for req_n in req:
-                    req_n.used_by.add(sub_n)
-                    req_n.used_by.discard(n)
-                # -- insert the code --
-                sub_n.main_code = ast_replace(sub_n.main_code,n.main_target,n.main_code)
-            n.req     = set()
-            n.used_by = set()
+            simplify_node(n)
     g.clear()
 
 
+# ==========================
+
+
+
+# ==========================
+# = Move from D to S graph =
+# ==========================
 
 def D_to_S(dg):
     sg = D_to_S_init(dg)

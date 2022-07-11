@@ -164,8 +164,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
     # -- handle attribute -- -> explicit "getattr" or using "." (e.g. self.wpe)
     def aux_make_ast(p_val,format_fct,l_attr): # -> AST
         if isinstance(p_val,ast.Name): # not always the case due to simplication
-            new_val_id = format_fct(p_val.id)
-            new_val = ast.Name(new_val_id)
+            new_val = format_fct(p_val)
         else:
             attr = '.'.join(l_attr)
             new_val = ast.Call(
@@ -197,7 +196,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
         assert(l_name[0] in dict_vars) # -> else raise "Unknown variable, global ?"
         parent_var = dict_vars[l_name[0]]
         attr = '.'.join(l_name[1:])
-        format_fct = lambda pv : pv + "." + attr
+        format_fct = lambda pv : ast.Name(pv.id + "." + attr)
         return aux_handle_attr(target,parent_var,format_fct,l_name[1:])
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -218,7 +217,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             new_node   = B_node(target=new_tg_id,fct="getattr")
             main_val   = main_var.get_value(calling_node=new_node)
             assert(isinstance(main_val,ast.Name)) # else TODO ?
-            new_node.make_code(ast.Name(f"{main_val.id}[{i}]"))
+            new_node.make_code(ast.Subscript(main_val,ast.Constant(i)))
             new_var    = B_var(ast.Name(new_tg_id),node=new_node)
             dict_vars[tg] = new_var
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -237,8 +236,11 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             parent_id  = args[0].id
             parent_var = dict_vars[parent_id]
             attr = args[1].value
-            if attr.isdigit(): format_fct = lambda pv : f"{pv}[{attr}]"
-            else: format_fct = lambda pv : f"getattr({pv},\"{attr}\")"
+            if attr.isdigit(): format_fct = lambda pv : ast.Subscript(pv,ast.Constant(int(attr)))
+            else: format_fct = lambda pv : ast.Call(
+                    func=ast.Name("getattr"),
+                    args=[pv,ast.Constant(attr)],
+                    keywords=[])
             return aux_handle_attr(target,parent_var,format_fct,[attr]) # might create one node
 
         # == torchscript's functions == -> must be removed because some refer to TS global var
