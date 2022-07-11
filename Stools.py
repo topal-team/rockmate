@@ -49,12 +49,15 @@ class S_node():
         self.all_targets = [target]
         self.req = set()
         self.used_by = set()
+
     def full_code(self):
         if self.main_code is None: mc = []
         else: mc = [self.main_code]
         return ast.Module(mc + self.body_code,[])
+
     def get_code(self):
         return ast_to_str(self.full_code())
+
     def insert(self,sub_n,strong):
         # self is the main node ; sub_n is the node inserted
         # if strong: delete sub_n else: sub_node <- artefact
@@ -97,6 +100,27 @@ class S_node():
         for sub_sub_n in merged_used_by:
             sub_sub_n.req.add(self)
 
+    def clear_children_artefact(self):
+        # clean useless artefact children of self
+        children = set(self.used_by)
+        for sub_n in children:
+            if sub_n.is_artefact:
+                assert(sub_n.req == {self})
+                if sub_n.used_by <= (self.used_by | set([sub_n])):
+                    for aux_n in sub_n.used_by:
+                        aux_n.req.remove(sub_n)
+                    self.used_by.remove(sub_n)
+                sub_n.req = set()
+                sub_n.used_by = set()
+
+    def clear_siblings_artefact(self):
+        real_req = set()
+        for req_n in self.req:
+            if not req_n.is_artefact:
+                real_req.add(req_n)
+        for req_n in real_req:
+            req_n.clear_children_artefact()
+
 class S_graph():
     def __init__(self,dg : D_graph = None):
         self.nodes = []
@@ -110,12 +134,43 @@ class S_graph():
             self.dict_info = {}
             self.dict_rand = {}
 
-    def clear(self): # remove unpluged nodes
-        l = []
+    def check_relations(self):
+        # n1 in n2.used_by iff n2 in n1.req
+        for n in self.nodes:
+            for req_n in n.req:
+                if not (n in req_n.used_by):
+                    raise Exception(
+                        f"{req_n.main_target} in {n.main_target}.req "\
+                        f"but one sided relation...")
+            for sub_n in n.used_by:
+                if not (n in sub_n.req):
+                    raise Exception(
+                        f"{sub_n.main_target} in {n.main_target}.used_by "\
+                        f"but one sided relation...")
+
+    def clear(self):
+        # -- remove unpluged nodes --
+        l1 = []
         for n in self.nodes:
             if n.req != set() or n.used_by != set():
-                l.append(n)
-        self.nodes = l
+                l1.append(n)
+
+        # -- remove useless artefacts --
+        l2 = []
+        for n in l1:
+            if n.is_artefact:
+                assert(len(n.req)==1)
+                req_n = list(n.req)[0]
+                if n.used_by <= (req_n.used_by | set([n])):
+                    print(f"{n.main_target} is a useless artefact of {req_n.main_target}")
+                    #for sub_n in n.used_by:
+                    #    sub_n.req.remove(n)
+                    #for sub_n in n.req:
+                    #    sub_n.used_by.remove(n)
+                else:
+                    l2.append(n)
+            else:   l2.append(n)
+        self.nodes = l1
 
     def assert_ready(self):
         # check if ready to be given to S_to_K
@@ -257,20 +312,46 @@ def size_children(g,n):
 
 def simplify_size(g : S_graph):
     # from leaves to root
-    nodes = list(g.nodes) ; nodes.reverse()
+    nodes = [g.init_node] + list(g.nodes) ; nodes.reverse()
     for n in nodes:
         if n.main_target != g.output:
             list_size = size_children(g,n)
             if list_size != []:
-                print("yes")
                 # -- merge into one node --
                 size_n = list_size[0]
                 for other_n in list_size[1:]:
                     size_n.insert(other_n,strong=True)
                 # -- insert their code --
-                n.insert(size_n,strong=False)
+                if n is g.init_node:
+                    n.insert(size_n,strong=True)
+                else: n.insert(size_n,strong=False)
     g.clear()
 
+# ==========================
+
+
+
+# ==========================
+# ==== Simplification 3 ====
+# === remove view nodes ====
+# ==========================
+
+def simplify_view(g):
+    # from root to leaves
+    for n in g.nodes:
+        if ( n.main_target != g.output
+            and (n.main_fct in list_view_fct
+            or n.main_fct == "getattr")):
+            # /!\ ASSERTION remaining getattr are just used for views !! 
+            real_req = []
+            for req_n in n.req:
+                if not req_n.is_artefact:
+                    real_req.append(req_n)
+            if len(real_req)==1:
+                req_n = real_req[0]
+                req_n.insert(n,strong=True)
+                req_n.clear_siblings_artefact()
+    g.clear()
 
 # ==========================
 
@@ -284,6 +365,8 @@ def D_to_S(dg):
     sg = D_to_S_init(dg)
     simplify_cheap(sg)
     simplify_size(sg)
+    simplify_view(sg)
+    sg.check_relations()
     sg.assert_ready()
     return sg
 
