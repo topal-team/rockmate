@@ -47,6 +47,7 @@ class S_node():
         self.body_code = [] # list of ast.Assign
         self.main_target = target # str
         self.all_targets = [target]
+        self.tensor_targets = None # done later
         self.req = set()
         self.used_by = set()
 
@@ -171,6 +172,16 @@ class S_graph():
         self.nodes = l1
         self.check_artefact()
         self.check_relations()
+
+    def make_tensor_targets(self):
+        for n in self.nodes:
+            if not n.is_artefact:
+                l = []
+                for tar in n.all_targets:
+                    if self.dict_info[tar].ttype==torch.Tensor:
+                        l.append(tar)
+                n.tensor_targets = l
+
 
     def assert_ready(self):
         # check if ready to be given to S_to_K
@@ -366,6 +377,7 @@ def D_to_S(dg):
     simplify_size(sg)
     simplify_view(sg)
     sg.check_relations()
+    sg.make_tensor_targets()
     sg.assert_ready()
     return sg
 
@@ -377,7 +389,7 @@ def D_to_S(dg):
 # === printing functions ===
 # ==========================
 
-def print_graph(g : D_graph,name=None):
+def print_S_graph(g : D_graph,name=None,open=True):
     print(len(g.nodes))
     if name is None:
         name = "forward S-graph"
@@ -392,7 +404,7 @@ def print_graph(g : D_graph,name=None):
     for n in g.nodes:
         for sub_n in n.req:
             dot.edge(sub_n.main_target,n.main_target)
-    dot.render(directory="graphviz_dir",view=True)
+    dot.render(directory="graphviz_dir",view=open)
 
 # ==========================
 

@@ -64,7 +64,7 @@ def get_info(x) -> FWD_info:
         tt = type(x)
     info.ttype = tt
     if tt==torch.Size:
-        info.tsize = x
+        info.tsize = int(x)
         info.requires_grad = False
     elif tt==torch.Tensor:
         info.tsize = x.shape
@@ -168,7 +168,7 @@ def print_info(info : FWD_info):
     print(f"\trequires_grad = {info.requires_grad}")
     print(f"\tsub_info = {info.sub_info}")
 
-def print_all_nodes(g,print_ast=True):
+def print_all_fw_nodes(g,print_ast=True):
     print(g.dict_rand)
     for n in g.nodes:
         if print_ast:
@@ -181,7 +181,7 @@ def print_all_nodes(g,print_ast=True):
             print(f"{tar} info :")
             print_info(info)
 
-def print_code(g : D_graph):
+def print_fw_code(g : D_graph):
     print(g.dict_rand)
     str_input = ','.join(g.inputs)
     print(f"def main({str_input}):")
@@ -191,7 +191,7 @@ def print_code(g : D_graph):
 
 import graphviz
 
-def print_graph(g : D_graph,name=None):
+def print_D_graph(g : D_graph,name=None,open=True):
     print(len(g.nodes))
     if name is None:
         name = "forward D-graph"
@@ -205,7 +205,7 @@ def print_graph(g : D_graph,name=None):
     for n in g.nodes:
         for sub_n in n.req:
             dot.edge(sub_n.target,n.target)
-    dot.render(directory="graphviz_dir",view=True)
+    dot.render(directory="graphviz_dir",view=open)
 
 # ==========================
 
@@ -215,7 +215,7 @@ def print_graph(g : D_graph,name=None):
 # === test forward code ====
 # ==========================
 
-def test_code(g : D_graph,nn_mod,dict_inputs : dict):
+def test_fw_code(g : D_graph,nn_mod,dict_inputs : dict):
     loc_dict = {}
     loc_dict["self"] = nn_mod
     for inp in g.inputs:
