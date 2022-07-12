@@ -32,16 +32,36 @@ class D_graph():
         self.inputs = [] # str list
         self.nodes  = [] # D_node list -> topo sorted
         self.output = None # str
-        self.output_node = None # D_node
+        #self.output_node = None # D_node
         self.dict_rand = {}
         self.dict_info = {} # target -> FWD_info
 
+def sort_based_on_req(n):
+    # n can be any type of node (B, D, S, K)
+    # we just need attribut req
+    dict_done = {}
+    nodes = []
+    def visit(n):
+        if n not in dict_done:
+            dict_done[n]=False
+            for sub_n in n.req:
+                visit(sub_n)
+            dict_done[n]=True
+            nodes.append(n)
+        elif not dict_done[n]:
+            raise Exception("Cycle in the graph. How could this happened ??")
+    visit(n)
+    return nodes
+
 def sort_nodes(g : B_graph): # -> B_node list 
-    # use output's node and trace everything, never use B_graph.nodes
+    # use output's node and trace everything
+    # /!\ never trust B_graph.nodes
     o_var = g.output
     if not o_var.has_node:
         return []
     else:
+        return sort_based_on_req(o_var.node)
+"""
         dict_done = {}
         nodes = []
         def visit(n):
@@ -55,7 +75,7 @@ def sort_nodes(g : B_graph): # -> B_node list
                 raise Exception("Cycle in the B_graph. How could this happened ??")
         visit(o_var.node)
         return nodes
-
+"""
 def get_info(x) -> FWD_info:
     info = FWD_info()
     if isinstance(x,int) or (isinstance(x,torch.Tensor) and x.shape==torch.Size([])):
@@ -147,8 +167,8 @@ def B_to_D(bg : B_graph,nn_mod,dict_inputs) -> D_graph:
     o_var = bg.output
     assert(isinstance(o_var.val,ast.Name))
     str_val = o_var.val.id
-    if o_var.has_node:
-        dg.output_node = dict_nodes[o_var.node]
+    #if o_var.has_node:
+    #    dg.output_node = dict_nodes[o_var.node]
     dg.output = str_val
 
     return dg

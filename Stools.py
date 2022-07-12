@@ -111,13 +111,19 @@ class S_node():
                     raise Exception(
                         f"{self.main_target} should be the only parent of "\
                         f"{sub_n.main_target} : {len(sub_n.req)}\n{s}")
-                assert(sub_n.req == {self})
-                if sub_n.used_by <= (self.used_by | set([sub_n])):
-                    for aux_n in sub_n.used_by:
-                        aux_n.req.remove(sub_n)
-                    self.used_by.remove(sub_n)
+                for aux_n in self.used_by:
+                    sub_n.used_by.discard(aux_n)
+                    aux_n.req.discard(sub_n)
+                if sub_n.used_by == set():
+                    for aux_n in sub_n.req:
+                        aux_n.used_by.remove(sub_n)
                     sub_n.req = set()
-                    sub_n.used_by = set()
+                #if sub_n.used_by <= (self.used_by | set([sub_n])):
+                #    for aux_n in sub_n.used_by:
+                #        aux_n.req.remove(sub_n)
+                #    self.used_by.remove(sub_n)
+                #    sub_n.used_by = set()
+                #    sub_n.req = set()
 
     def clear_siblings_artefact(self):
         real_req = set()
@@ -131,6 +137,7 @@ class S_graph():
     def __init__(self,dg : D_graph = None):
         self.nodes = []
         self.init_node = None
+        self.output_node = None
         if dg:
             self.output    = dg.output
             self.dict_info = dg.dict_info
@@ -142,8 +149,11 @@ class S_graph():
 
     def check_artefact(self):
         for n in self.nodes:
-            if n.is_artefact:
-                assert(len(n.req)==1)
+            if n.is_artefact:# and not (n is self.init_node):
+                if len(n.req)!=1:
+                    raise Exception(
+                        f"{n.main_target} is_artefact, but with "\
+                        f"len(req)={len(n.req)}")
                 req_n = list(n.req)[0]
                 if n.used_by <= (req_n.used_by | set([n])):
                     print(f"{n.main_target} is a useless "\
@@ -164,14 +174,22 @@ class S_graph():
                         f"but one sided relation...")
 
     def clear(self):
+        # -- re-sorting nodes -- 
+        # due to merging, the topo order may not be correct anymore
+        # by the way, remove unpluged nodes
+        self.nodes = sort_based_on_req(self.output_node)
+        self.nodes.remove(self.init_node)
+        """
         # -- remove unpluged nodes --
         l1 = []
         for n in self.nodes:
             if n.req != set() or n.used_by != set():
                 l1.append(n)
         self.nodes = l1
+        """
         self.check_artefact()
         self.check_relations()
+
 
     def make_tensor_targets(self):
         for n in self.nodes:
@@ -221,6 +239,7 @@ def D_to_S_init(dg : D_graph) -> S_graph:
         init_node.insert(dict_s_nodes[inp],strong=True)
     init_node.body_code = []
     sg.init_node = init_node
+    sg.output_node = dict_s_nodes[dg.output]
     sg.clear()
     return sg
 
@@ -357,10 +376,43 @@ def simplify_view(g):
             for req_n in n.req:
                 if not req_n.is_artefact:
                     real_req.append(req_n)
-            if len(real_req)==1: # otherwise I don't know which we should take
+            if len(real_req)==1:
                 req_n = real_req[0]
                 req_n.insert(n,strong=True)
                 req_n.clear_siblings_artefact()
+            elif len(real_req)==0 and len(n.req)>0:
+                # experimental : I assume that views which don't 
+                # require any real tensor are views over parameters
+                # so mem=0 and no bwd K_node, so I can insert them
+                # in their parents even if they are artefacts.
+                # But artefact nodes aren't safe, they might disappear
+                # if self.used_by sub set of self.parent.used_by
+                # so I must share the code with artifacts' parents
+                # I can insert the code in many different nodes
+                # because views operations are cheap.
+                # But I must avoid creating cycle dependancies, so
+                # for the moment I assert len(n.req)==1
+                if len(n.req)>1:
+                    if show_debug:
+                        print(f"{n.main_target} is a view op, but without "\
+                              f"a real parent, and several artifact dependancies")
+                else:
+                    art_req = list(n.req)[0]
+                    assert(len(art_req.req)==1)
+                    real_req = list(art_req.req)[0]
+                    for aux_n in [art_req,real_req]:
+                        aux_n.body_code.append(n.main_code)
+                        aux_n.body_code.extend(n.body_code)
+                    art_req.used_by.update(n.used_by)
+                    for sub_n in n.used_by:
+                        sub_n.req.add(art_req)
+                        sub_n.req.remove(n)
+                    art_req.used_by.remove(n)
+                    n.req = set()
+                    n.used_by = set()
+                    real_req.clear_children_artefact()
+
+
     g.clear()
 
 # ==========================

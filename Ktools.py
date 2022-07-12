@@ -98,7 +98,6 @@ def inspection(n : S_node,g : S_graph,our_global):
         duration = timer.measure_median(fct,samples=1)
         if duration < min_duration:
             number_repetitions = 1 + int(min_duration // duration)
-            #duration = timer.measure_median(fct, iterations = number_repetitions)
             for _ in range(1,number_repetitions):
                 if inter_fct:
                     inter_fct()
@@ -179,11 +178,6 @@ def S_to_K(sg : S_graph,nn_mod,dict_inputs,show_debug=False):
         n_req = set(n.req)
         n_req.discard(sg.init_node)
         Kreq = set(dict_Kfwd[sub_n.main_target] for sub_n in n_req)
-        #non_size_targets = []
-        #for tar in n.all_targets:
-        #    tar_info = sg.dict_info[tar]
-        #    if tar_info != torch.Size:
-        #        non_size_targets.append(tar)
         Kfwd = K_node(
                 is_artefact = n.is_artefact,
                 is_fwd     = True,
@@ -260,7 +254,7 @@ def S_to_K(sg : S_graph,nn_mod,dict_inputs,show_debug=False):
 
 import graphviz
 
-def print_K_nodes(g,name=None,open=True):
+def print_K_graph(g : K_graph,name=None,open=True):
     print(len(g.dict_nodes))
     if name is None:
         name = "K-nodes graph"
