@@ -389,7 +389,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
 
     raise Exception("error 4 : should have stoped with the ast.Return")
 
-def main(nn_mod,ex_inputs,concise_name=True,show_debug=False):
+def make_B_graph(nn_mod,ex_inputs,concise_name=True,show_debug=False):
     # main_mod must be a instance of torch.nn.Module
     # ex_inputs must be a tuple
     global concise, fresh_var, show_debug_msg, dict_rand, all_nodes

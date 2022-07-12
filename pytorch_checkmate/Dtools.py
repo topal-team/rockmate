@@ -1,4 +1,4 @@
-from read_trace_code import *
+from .read_trace_code import *
 import ast
 import torch
 from torch import tensor

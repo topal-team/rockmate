@@ -1,5 +1,5 @@
 import torch
-from Stools import *
+from .Stools import *
 try:
     from rotor.utils import *
 except:

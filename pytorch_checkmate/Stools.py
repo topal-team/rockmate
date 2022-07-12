@@ -1,4 +1,4 @@
-from Dtools import *
+from .Dtools import *
 import ast
 
 list_cheap_fct = ["torch.add","torch.sub","torch.mul","torch.div"]
