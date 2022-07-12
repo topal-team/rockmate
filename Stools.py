@@ -105,13 +105,18 @@ class S_node():
         children = set(self.used_by)
         for sub_n in children:
             if sub_n.is_artefact:
+                if sub_n.req != {self}:
+                    s = ",".join([aux_n.main_target for aux_n in sub_n.req])
+                    raise Exception(
+                        f"{self.main_target} should be the only parent of "\
+                        f"{sub_n.main_target} : {len(sub_n.req)}\n{s}")
                 assert(sub_n.req == {self})
                 if sub_n.used_by <= (self.used_by | set([sub_n])):
                     for aux_n in sub_n.used_by:
                         aux_n.req.remove(sub_n)
                     self.used_by.remove(sub_n)
-                sub_n.req = set()
-                sub_n.used_by = set()
+                    sub_n.req = set()
+                    sub_n.used_by = set()
 
     def clear_siblings_artefact(self):
         real_req = set()
@@ -134,6 +139,15 @@ class S_graph():
             self.dict_info = {}
             self.dict_rand = {}
 
+    def check_artefact(self):
+        for n in self.nodes:
+            if n.is_artefact:
+                assert(len(n.req)==1)
+                req_n = list(n.req)[0]
+                if n.used_by <= (req_n.used_by | set([n])):
+                    print(f"{n.main_target} is a useless "\
+                          f"artefact of {req_n.main_target}")
+
     def check_relations(self):
         # n1 in n2.used_by iff n2 in n1.req
         for n in self.nodes:
@@ -154,23 +168,9 @@ class S_graph():
         for n in self.nodes:
             if n.req != set() or n.used_by != set():
                 l1.append(n)
-
-        # -- remove useless artefacts --
-        l2 = []
-        for n in l1:
-            if n.is_artefact:
-                assert(len(n.req)==1)
-                req_n = list(n.req)[0]
-                if n.used_by <= (req_n.used_by | set([n])):
-                    print(f"{n.main_target} is a useless artefact of {req_n.main_target}")
-                    #for sub_n in n.used_by:
-                    #    sub_n.req.remove(n)
-                    #for sub_n in n.req:
-                    #    sub_n.used_by.remove(n)
-                else:
-                    l2.append(n)
-            else:   l2.append(n)
         self.nodes = l1
+        self.check_artefact()
+        self.check_relations()
 
     def assert_ready(self):
         # check if ready to be given to S_to_K
@@ -225,8 +225,6 @@ def D_to_S_init(dg : D_graph) -> S_graph:
 def insert_ast_code(main_n,mc,target : str,sc): # mc : main_code , sc : sub_code
     assert(isinstance(mc,ast.Assign))
     assert(isinstance(sc,ast.Assign))
-    if not isinstance(sc.targets[0],ast.Name):
-        print(ast.dump(sc,indent=4))
     assert(sc.targets[0].id == target)
     # assert main_code is a one layer Call (no sub calls)
     scv = sc.value
@@ -338,16 +336,17 @@ def simplify_size(g : S_graph):
 
 def simplify_view(g):
     # from root to leaves
+    g.init_node.is_artefact = True
     for n in g.nodes:
         if ( n.main_target != g.output
             and (n.main_fct in list_view_fct
             or n.main_fct == "getattr")):
-            # /!\ ASSERTION remaining getattr are just used for views !! 
+            # /!\ ASSERTION remaining getattr are related to views !! 
             real_req = []
             for req_n in n.req:
                 if not req_n.is_artefact:
                     real_req.append(req_n)
-            if len(real_req)==1:
+            if len(real_req)==1: # otherwise I don't know which we should take
                 req_n = real_req[0]
                 req_n.insert(n,strong=True)
                 req_n.clear_siblings_artefact()
