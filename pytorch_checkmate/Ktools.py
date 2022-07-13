@@ -8,11 +8,6 @@ except:
 from rotor.timing import *
 from rotor.memory import *
 
-if torch.cuda.is_available():
-    device = torch.device('cuda')
-else:
-    device = torch.device('cpu')
-
 min_duration = 0
 
 # ==========================
@@ -160,7 +155,20 @@ def inspection(n : S_node,g : S_graph,our_global):
     # ===============
     return ret
 
-def S_to_K(sg : S_graph,nn_mod,dict_inputs,show_debug=False):
+def S_to_K(sg : S_graph,nn_mod,dict_inputs,show_debug=False,K_device=None):
+    # -- device --
+    global device
+    if K_device is None:
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
+    else:
+        device = K_device
+    nn_mod.to(device)
+    for (k,x) in dict_inputs.items():
+        dict_inputs[k] = x.to(device)
+    # --
     # returns a list of K_nodes
     dict_Kbwd = dict() # dict : D_node.target -> K_node(bwd)
     dict_Kfwd = dict() # dict : D_node.target -> K_node(fwd)
