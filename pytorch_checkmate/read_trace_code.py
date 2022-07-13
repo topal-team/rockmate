@@ -179,7 +179,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             new_val = aux_make_ast(p_val,format_fct,l_attr)
             new_var = B_var(new_val,is_attr_of_self=True)
             new_var.inherits(parent_var,l_attr)
-        else: # in a future version, those things should no longer exist (??) TODO
+        else:
             if target is None:
                 new_id = get_fresh_var()
             else:
@@ -231,12 +231,12 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
         # == explicit getattr ==
         if len(l_name)==1 and l_name[0]=='getattr':
             assert(len(args)==2)
-            assert(isinstance(args[0],ast.Name))     # -> otherwise open_attr_until_name ?
-            assert(isinstance(args[1],ast.Constant)) # -> otherwise handle_expr ?
-            parent_id  = args[0].id
-            parent_var = dict_vars[parent_id]
+            assert(isinstance(args[1],ast.Constant))
+            # -> otherwise handle_expr ?
+            parent_var = handle_expr(args[0])
             attr = args[1].value
-            if attr.isdigit(): format_fct = lambda pv : ast.Subscript(pv,ast.Constant(int(attr)))
+            if attr.isdigit():
+                format_fct = lambda pv : ast.Subscript(pv,ast.Constant(int(attr)))
             else: format_fct = lambda pv : ast.Call(
                     func=ast.Name("getattr"),
                     args=[pv,ast.Constant(attr)],
