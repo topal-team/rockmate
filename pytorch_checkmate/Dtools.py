@@ -3,10 +3,6 @@ import ast
 import torch
 from torch import tensor
 
-if torch.cuda.is_available():
-    device = torch.device('cuda')
-else:
-    device = torch.device('cpu')
 
 
 # ==========================
@@ -122,7 +118,21 @@ def generate_tmp_local(g,dict_info,n):
     return tmp_local
 
 # == main function ==
-def B_to_D(bg : B_graph,nn_mod,dict_inputs) -> D_graph:
+def B_to_D(bg : B_graph,nn_mod,dict_inputs,D_device=None) -> D_graph:
+    # -- device --
+    global device
+    if D_device is None:
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
+    else:
+        device = D_device
+    nn_mod.to(device)
+    for (k,x) in dict_inputs.items():
+        dict_inputs[k] = x.to(device)
+    # --
+
     # --- init and sort ---
     dg = D_graph()
     inputs       = dg.inputs
