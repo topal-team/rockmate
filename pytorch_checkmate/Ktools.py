@@ -41,7 +41,7 @@ class K_graph():
     def __init__(self,sg : S_graph):
         self.dict_nodes = dict()
         self.output = sg.output
-        self.init_code = ast.Module(sg.init_node.body_code)
+        self.init_code = ast.Module(sg.init_node.body_code,[])
         self.dict_rand = sg.dict_rand
     def make_used_by(self):
         for n in self.dict_nodes.values():

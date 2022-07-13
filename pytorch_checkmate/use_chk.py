@@ -15,7 +15,7 @@ from checkmate.core.schedule import ScheduledResult, ILPAuxData
 from checkmate.core.solvers.cvxpy_solver import solve_checkmate_cvxpy
 from checkmate.plot.graph_plotting import plot_schedule
 
-def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False):
+def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False,show_debug=False):
     chk_gb = GraphBuilder()
     nodes = list(kg.dict_nodes.values())
     for kn in nodes:
@@ -28,8 +28,13 @@ def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False
             else:
                 print("yep, sometimes sub_n.fgt_mem is None")
     chk_g = chk_gb.make_graph()
+    max_cost = max(chk_g.cost_ram.values())
+    if show_debug:
+        for kn in nodes:
+            if -kn.fgt_mem.v == max_cost:
+                print(kn.get_code())
     print('total cost:', sum(chk_g.cost_ram.values()),
-          'max cost:', max(chk_g.cost_ram.values()),
+          'max cost:', max_cost,
           'budget:', budget)
 
     sched_result = solve_checkmate_cvxpy(
@@ -86,11 +91,11 @@ class Sched_to_Code():
         code=f"_{mt}.backward({mt}.grad)"
         bwd_code = (
             f"if _{mt}.data.shape == torch.Size([0]):\n"\
-            f"\t_{mt}.data = torch.zeros_like({targ}.grad,device=device)\n"\
-            f"\t{targ}.data = torch.zeros_like({targ}.grad,device=device)\n"\
+            f"\t_{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
+            f"\t{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
             f"\t{code}\n"\
-            f"\t_{targ}.data = torch.zeros(0,device=device)"\
-            f"\t{targ}.data = torch.zeros(0,device=device)\n"\
+            f"\t_{mt}.data = torch.zeros(0,device=device)"\
+            f"\t{mt}.data = torch.zeros(0,device=device)\n"\
             f"else:\n\t{code}\n" )
         self.live.append(n.name)
         return bwd_code
@@ -100,13 +105,14 @@ class Sched_to_Code():
         if n.is_artefact: return ""
         code = ""
         for v in n.tensor_targets:
-            code += f"{v}.data = torch.zeros(0,device=device);_{v}.data = torch.zeros(0,device=device);"
+            code += (f"{v}.data = torch.zeros(0,device=device); "\
+                     f"_{v}.data = torch.zeros(0,device=device);")
         self.live.remove(n.name)
         self.fgt.append(n.name)
         return code
-    
+
     def _fgt_bwd(self, n):
-        assert n.name in self.live
+        assert(n.name in self.live)
         code_list = []
         for sub_n in n.used_by:
             for sup_sub_n in sub_n.req:
@@ -118,7 +124,7 @@ class Sched_to_Code():
         self.live.remove(n.name)
         self.fgt.append(n.name)
         return ";".join(code_list)
-        
+
     def generate_sched_code(self, sched_result):
         self.schedule = sched_result.schedule
         self.sched_code = []
@@ -132,9 +138,9 @@ class Sched_to_Code():
                 if is_fwd:
                     code = self._run_fwd(node)
                 else:
-                    code = self._run_bwd(node) 
+                    code = self._run_bwd(node)
                 self.sched_code.append(code)
-                
+
             elif isinstance(op, DeallocateRegister):
                 node_name = self.g.node_names[op.op_id]
                 node = self.nodes[node_name]
@@ -142,15 +148,15 @@ class Sched_to_Code():
                 if is_fwd:
                     code = self._fgt_fwd(node)
                 else:
-                    code = self._fgt_bwd(node) 
-                
+                    code = self._fgt_bwd(node)
+
                 self.sched_code.append(code)
             elif isinstance(op, AllocateRegister):
                 self.sched_code.append("")
 
             else:
                 raise TypeError(f"Operation not recognize:{type(op)}")
-            
+
         return self.sched_code
 
 # ==========================
