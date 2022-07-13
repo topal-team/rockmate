@@ -295,7 +295,9 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
                 args_ast = [v.get_value(calling_node=new_node) for v in args_Bvar]
                 kwds_ast = []
                 for kw in expr.keywords:
-                    if not (((kw.arg=="dtype" or kw.arg=="layout")
+                    if var_impose_device and kw.arg=="device":
+                        kwds_ast.append(ast.keyword("device",ast.Name("device")))
+                    elif not (((kw.arg=="dtype" or kw.arg=="layout")
                         and isinstance(kw.value,ast.Constant)
                         and isinstance(kw.value.value,int))
                         or (kw.arg=="layout" and kw.value.value is None)):
@@ -390,12 +392,13 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
 
     raise Exception("error 4 : should have stoped with the ast.Return")
 
-def make_B_graph(nn_mod,ex_inputs,concise_name=True,show_debug=False):
+def make_B_graph(nn_mod,ex_inputs,concise_name=True,show_debug=False,impose_device=False):
     # main_mod must be a instance of torch.nn.Module
     # ex_inputs must be a tuple
-    global concise, fresh_var, show_debug_msg, dict_rand, all_nodes
+    global concise, fresh_var, show_debug_msg, var_impose_device, dict_rand, all_nodes
     all_nodes = [] ; dict_rand = {} ; fresh_var = 0
     concise = concise_name
+    var_impose_device = impose_device
     show_debug_msg = show_debug
     main_mod = trace_module(nn_mod, {'forward': ex_inputs}, check_trace=False)
     main_str = "self"
