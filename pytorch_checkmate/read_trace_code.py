@@ -259,14 +259,15 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             if l_name[0] in dict_vars:
                 sub_var = dict_vars[l_name[0]]
                 if show_debug_msg:
-                    print(f"In {sub_mod_str}.{sub_fct} try to sub open {sub_var.val}.{l_name[1]}")
+                    print(f"In {sub_mod_str}.{sub_fct} try to sub "\
+                          f"open {ast_to_str(sub_var.val)}.{l_name[1:]}")
                 assert(sub_var.is_attr_of_self)
-                assert(len(l_name)==2)
                 sub_sub_mod = sub_mod
-                for at in sub_var.path_from_self:
+                path_from_self = sub_var.path_from_self + l_name[1:-1]
+                for at in path_from_self:
                     sub_sub_mod = getattr(sub_sub_mod,at)
                 sub_sub_str = ast_to_str(sub_var.val)
-                sub_graph = open_sub_module(sub_sub_mod,sub_sub_str,l_name[1],args_Bvar)
+                sub_graph = open_sub_module(sub_sub_mod,sub_sub_str,l_name[-1],args_Bvar)
                 return sub_graph.output # which is a B_var !
 
             # == builtin functions ==
