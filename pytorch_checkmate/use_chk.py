@@ -74,21 +74,25 @@ class Sched_to_Code():
         if n.is_artefact:
             return n.get_code()
         assert(n.name not in self.live)
-        code = (n.get_code()).replace(n.main_target,"_"+n.main_target)
+        # code = (n.get_code())
+        code_list = n.get_code().split('\n')
+        code = code_list[0].replace(n.main_target,"_"+n.main_target)
+        # code_list[0] = code
+        
         self.live.append(n.name)
         if n.name not in self.fgt:
-            fwd_code = (
+            code_list[0] = (
                 f"{code} ; "\
                 f"{n.main_target} = _{n.main_target}.detach(); "\
                 f"{n.main_target}.requires_grad_()" )
         else: #i.e. recomputation
             #code = (n.code).replace(n.main_target,"_"+n.main_target)
-            fwd_code = (
+            code_list[0] = (
                 f"{code} ; "\
                 f"{n.main_target}.data = _{n.main_target}.data" )
         #if n.main_target == self.graph.output:
         #    fwd_code += f""
-        return fwd_code
+        return '\n'.join(code_list)
 
     def _run_bwd(self, n):
         assert(n.name not in self.live)
