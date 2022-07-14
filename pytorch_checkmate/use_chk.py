@@ -12,10 +12,11 @@ else:
 
 from checkmate.core.graph_builder import GraphBuilder
 from checkmate.core.schedule import ScheduledResult, ILPAuxData
+from checkmate.core.solvers.gurobi_solver import solve_ilp_gurobi
 from checkmate.core.solvers.cvxpy_solver import solve_checkmate_cvxpy
 from checkmate.plot.graph_plotting import plot_schedule
 
-def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False,show_debug=False):
+def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False,show_debug=False,use_gurobi=True):
     chk_gb = GraphBuilder()
     nodes = list(kg.dict_nodes.values())
     for kn in nodes:
@@ -36,11 +37,15 @@ def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False
     print('total cost:', sum(chk_g.cost_ram.values()),
           'max cost:', max_cost,
           'budget:', budget)
-
-    sched_result = solve_checkmate_cvxpy(
-            chk_g, budget,
-            solver_override=solver,
-            verbose =verbose)
+    
+    if use_gurobi:
+        sched_result = solve_ilp_gurobi(
+                chk_g, budget, print_to_console=not verbose)
+    else:
+        sched_result = solve_checkmate_cvxpy(
+                chk_g, budget,
+                solver_override=solver,
+                verbose =verbose)
     if sched_result.feasible: print('feasible schedule solved')
 
     if plot_sched: plot_schedule(sched_result)
@@ -77,7 +82,7 @@ class Sched_to_Code():
                 f"{n.main_target} = _{n.main_target}.detach(); "\
                 f"{n.main_target}.requires_grad_()" )
         else: #i.e. recomputation
-            code = (n.code).replace(n.main_target,"_"+n.main_target)
+            #code = (n.code).replace(n.main_target,"_"+n.main_target)
             fwd_code = (
                 f"{code} ; "\
                 f"{n.main_target}.data = _{n.main_target}.data" )
@@ -94,7 +99,7 @@ class Sched_to_Code():
             f"\t_{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
             f"\t{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
             f"\t{code}\n"\
-            f"\t_{mt}.data = torch.zeros(0,device=device)"\
+            f"\t_{mt}.data = torch.zeros(0,device=device);"\
             f"\t{mt}.data = torch.zeros(0,device=device)\n"\
             f"else:\n\t{code}\n" )
         self.live.append(n.name)
@@ -104,9 +109,11 @@ class Sched_to_Code():
         assert(n.name in self.live)
         if n.is_artefact: return ""
         code = ""
+        v = n.main_target
+        code += (f"{v}.data = torch.zeros(0,device=device); "\
+                 f"_{v}.data = torch.zeros(0,device=device);")
         for v in n.tensor_targets:
-            code += (f"{v}.data = torch.zeros(0,device=device); "\
-                     f"_{v}.data = torch.zeros(0,device=device);")
+            code += (f"{v}.data = torch.zeros(0,device=device); ")
         self.live.remove(n.name)
         self.fgt.append(n.name)
         return code
