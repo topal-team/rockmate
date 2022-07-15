@@ -12,10 +12,11 @@ else:
 
 from checkmate.core.graph_builder import GraphBuilder
 from checkmate.core.schedule import ScheduledResult, ILPAuxData
+from checkmate.core.solvers.gurobi_solver import solve_ilp_gurobi
 from checkmate.core.solvers.cvxpy_solver import solve_checkmate_cvxpy
 from checkmate.plot.graph_plotting import plot_schedule
 
-def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False,show_debug=False):
+def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False,show_debug=False,use_gurobi=True):
     chk_gb = GraphBuilder()
     nodes = list(kg.dict_nodes.values())
     for kn in nodes:
@@ -36,11 +37,15 @@ def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False
     print('total cost:', sum(chk_g.cost_ram.values()),
           'max cost:', max_cost,
           'budget:', budget)
-
-    sched_result = solve_checkmate_cvxpy(
-            chk_g, budget,
-            solver_override=solver,
-            verbose =verbose)
+    
+    if use_gurobi:
+        sched_result = solve_ilp_gurobi(
+                chk_g, budget, print_to_console=not verbose)
+    else:
+        sched_result = solve_checkmate_cvxpy(
+                chk_g, budget,
+                solver_override=solver,
+                verbose =verbose)
     if sched_result.feasible: print('feasible schedule solved')
 
     if plot_sched: plot_schedule(sched_result)
@@ -69,21 +74,25 @@ class Sched_to_Code():
         if n.is_artefact:
             return n.get_code()
         assert(n.name not in self.live)
-        code = (n.get_code()).replace(n.main_target,"_"+n.main_target)
+        # code = (n.get_code())
+        code_list = n.get_code().split('\n')
+        code = code_list[0].replace(n.main_target,"_"+n.main_target)
+        # code_list[0] = code
+        
         self.live.append(n.name)
         if n.name not in self.fgt:
-            fwd_code = (
+            code_list[0] = (
                 f"{code} ; "\
                 f"{n.main_target} = _{n.main_target}.detach(); "\
                 f"{n.main_target}.requires_grad_()" )
         else: #i.e. recomputation
-            code = (n.code).replace(n.main_target,"_"+n.main_target)
-            fwd_code = (
+            #code = (n.code).replace(n.main_target,"_"+n.main_target)
+            code_list[0] = (
                 f"{code} ; "\
                 f"{n.main_target}.data = _{n.main_target}.data" )
         #if n.main_target == self.graph.output:
         #    fwd_code += f""
-        return fwd_code
+        return '\n'.join(code_list)
 
     def _run_bwd(self, n):
         assert(n.name not in self.live)
@@ -94,7 +103,7 @@ class Sched_to_Code():
             f"\t_{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
             f"\t{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
             f"\t{code}\n"\
-            f"\t_{mt}.data = torch.zeros(0,device=device)"\
+            f"\t_{mt}.data = torch.zeros(0,device=device);"\
             f"\t{mt}.data = torch.zeros(0,device=device)\n"\
             f"else:\n\t{code}\n" )
         self.live.append(n.name)
@@ -104,9 +113,11 @@ class Sched_to_Code():
         assert(n.name in self.live)
         if n.is_artefact: return ""
         code = ""
+        v = n.main_target
+        code += (f"{v}.data = torch.zeros(0,device=device); "\
+                 f"_{v}.data = torch.zeros(0,device=device);")
         for v in n.tensor_targets:
-            code += (f"{v}.data = torch.zeros(0,device=device); "\
-                     f"_{v}.data = torch.zeros(0,device=device);")
+            code += (f"{v}.data = torch.zeros(0,device=device); ")
         self.live.remove(n.name)
         self.fgt.append(n.name)
         return code

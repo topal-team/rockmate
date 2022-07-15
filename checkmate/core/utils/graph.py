@@ -1,7 +1,7 @@
 import fractions
 from collections import defaultdict
 from functools import reduce
-
+import math
 from checkmate.core.utils.definitions import EdgeList, AdjList
 
 import numpy as np
@@ -55,4 +55,4 @@ def gcd(*args):
     intvalues = values.astype(np.int)
     if not np.allclose(intvalues, values):  # GCD is 1 if values are not integral
         return 1
-    return reduce(fractions.gcd, intvalues)
+    return reduce(math.gcd, intvalues)
