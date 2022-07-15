@@ -9,6 +9,7 @@
 # ------------------------------------
 
 import ast
+import astunparse
 import torch
 from torch.jit import trace_module
 
@@ -16,14 +17,20 @@ list_rand_fct = ["torch.randn"]
 dict_rand = {}
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+import sys
+svi = sys.version_info
+py_version = svi.major + svi.minor/10
+
 def ast_to_str(ast_code):
-    return ast.unparse(ast.fix_missing_locations(ast_code))
+    #return ast.unparse(ast.fix_missing_locations(ast_code))
+    return astunparse.unparse(ast_code)
 
 class B_node():
     def __init__(self,target="",code=None,fct="",req=None,is_input=False):
         # "code" must be an AST, "fct" is a string
         self.target = target
-        if code is None: code = ast.Constant("/!\\ not defined /!\\")
+        if code is None: code = make_ast_constant("/!\\ not defined /!\\")
         self.make_code(code)
         self.fct = fct
         if req is None:  self.req = set()
@@ -92,6 +99,54 @@ def open_attr_until_name(v):
     l_name.append(v.id)
     l_name.reverse()
     return l_name
+
+def make_ast_constant(v):
+    x = ast.Constant(v)
+    setattr(x,"kind",None)
+    return x
+
+def make_ast_module(l):
+    try:    return ast.Module(l,[])
+    except: return ast.Module(l)
+
+"""
+if py_version >= 3.8:
+        return ast.Constant(v)
+    else:
+        if isinstance(v,int):
+            return ast.Num(v)
+        elif isinstance(v,str):
+            return ast.Str(v)
+        elif v in ["True", "False", "None"]:
+            if py_version >= 3.4:
+                return ast.NameConstant(v)
+            else:
+                return ast.Name(v)
+        elif isinstance(v,list):
+            return ast.List([make_ast_constant(x) for x in v])
+        elif isinstance(v,tuple):
+            return ast.Tuple((make_ast_constant(x) for x in v))
+        elif isinstance(v,bytes):
+            return ast.Bytes(v)
+        else:
+            raise Exception(
+                f"unhandle type of constant : {type(v)} "
+                f"for old version of py ({py_version})")
+"""
+
+def is_constant(v):
+    if py_version >= 3.8:
+        return isinstance(v,ast.Constant)
+    else:
+        rep = type(v) in [
+            ast.Num,ast.Str,ast.Bytes,
+            ast.NameConstant]
+        if rep:
+            if isinstance(v,ast.Num):
+                setattr(v,"value",v.n)
+            elif isinstance(v,ast.Str) or isinstance(v,ast.Bytes):
+                setattr(v,"value",v.s)
+        return rep
 # =====
 
 all_nodes = [] # list of all the nodes generated
@@ -127,7 +182,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
         for i in range(1,nb_i):
             i_node = B_node(
                 target=inputs[i],
-                code=ast.Constant("INPUT"),
+                code=make_ast_constant("INPUT"),
                 fct="INPUT",
                 req=set(),
                 is_input=True)
@@ -169,7 +224,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             attr = '.'.join(l_attr)
             new_val = ast.Call(
                 func=ast.Name("getattr"),
-                args=[p_val,ast.Constant(attr)],
+                args=[p_val,make_ast_constant(attr)],
                 keywords=[])
         return new_val
 
@@ -217,7 +272,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             new_node   = B_node(target=new_tg_id,fct="getattr")
             main_val   = main_var.get_value(calling_node=new_node)
             assert(isinstance(main_val,ast.Name)) # else TODO ?
-            new_node.make_code(ast.Subscript(main_val,ast.Constant(i)))
+            new_node.make_code(ast.Subscript(main_val,make_ast_constant(i)))
             new_var    = B_var(ast.Name(new_tg_id),node=new_node)
             dict_vars[tg] = new_var
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -231,15 +286,16 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
         # == explicit getattr ==
         if len(l_name)==1 and l_name[0]=='getattr':
             assert(len(args)==2)
-            assert(isinstance(args[1],ast.Constant))
+            assert(is_constant(args[1]))
+            # assert(isinstance(args[1],ast.Constant))
             # -> otherwise handle_expr ?
             parent_var = handle_expr(args[0])
             attr = args[1].value
             if attr.isdigit():
-                format_fct = lambda pv : ast.Subscript(pv,ast.Constant(int(attr)))
+                format_fct = lambda pv : ast.Subscript(pv,make_ast_constant(int(attr)))
             else: format_fct = lambda pv : ast.Call(
                     func=ast.Name("getattr"),
-                    args=[pv,ast.Constant(attr)],
+                    args=[pv,make_ast_constant(attr)],
                     keywords=[])
             return aux_handle_attr(target,parent_var,format_fct,[attr]) # might create one node
 
@@ -298,7 +354,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
                     if var_impose_device and kw.arg=="device":
                         kwds_ast.append(ast.keyword("device",ast.Name("device")))
                     elif not (((kw.arg=="dtype" or kw.arg=="layout")
-                        and isinstance(kw.value,ast.Constant)
+                        and is_constant(kw.value) #and isinstance(kw.value,ast.Constant)
                         and isinstance(kw.value.value,int))
                         or (kw.arg=="layout" and kw.value.value is None)):
                         kwds_ast.append(ast.keyword(kw.arg,(handle_expr(kw.value)).get_value(new_node)))
@@ -333,7 +389,8 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
     # -> fct used in the main fct and to handle arguments given to a Call 
     # /!\ TorchScript's global constant vars must have been removed
     def handle_expr(expr,target : str = None) -> B_var :
-        if isinstance(expr,ast.Constant): # never creates any node
+        if is_constant(expr):
+        #if isinstance(expr,ast.Constant): # never creates any node
             return B_var(expr)
         elif isinstance(expr,ast.Name):
             assert(expr.id in dict_vars)
@@ -341,7 +398,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
         elif (  isinstance(expr,ast.Attribute) # -> special constants
             and isinstance(expr.value,ast.Name)
             and expr.value.id == 'CONSTANTS' ):
-            return B_var(ast.Constant(memory[expr.attr]))
+            return B_var(make_ast_constant(memory[expr.attr]))
         elif isinstance(expr,ast.Attribute):
             return handle_attr(expr,target) # may creates one node
         elif isinstance(expr,ast.Call):
@@ -352,7 +409,8 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             return aux_handle_tuple_or_list(expr,target,"tuple")
         elif isinstance(expr,ast.UnaryOp):
             assert(isinstance(expr.op,ast.USub)) # quick fix
-            assert(isinstance(expr.operand,ast.Constant))
+            assert(is_constant(expr.operand))
+            #assert(isinstance(expr.operand,ast.Constant))
             # return B_var(ast.Constant(f"-{expr.operand.value}"))
             return B_var(expr)
         else:

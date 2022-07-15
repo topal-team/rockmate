@@ -54,7 +54,7 @@ class S_node():
     def full_code(self):
         if self.main_code is None: mc = []
         else: mc = [self.main_code]
-        return ast.Module(mc + self.body_code,[])
+        return make_ast_module(mc + self.body_code)
 
     def get_code(self):
         return ast_to_str(self.full_code())

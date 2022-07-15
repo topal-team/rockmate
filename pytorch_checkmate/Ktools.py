@@ -41,7 +41,7 @@ class K_graph():
     def __init__(self,sg : S_graph):
         self.dict_nodes = dict()
         self.output = sg.output
-        self.init_code = ast.Module(sg.init_node.body_code,[])
+        self.init_code = make_ast_module(sg.init_node.body_code)
         self.dict_rand = sg.dict_rand
     def make_used_by(self):
         for n in self.dict_nodes.values():
@@ -78,7 +78,6 @@ def generate_tmp_local(n : S_node,g : S_graph,our_global):
             exec(g.dict_rand[sub_r],our_global,tmp_local)
     """
     return tmp_local
-
 
 def inspection(n : S_node,g : S_graph,our_global):
     mt = n.main_target
@@ -172,7 +171,7 @@ def S_to_K(sg : S_graph,nn_mod,dict_inputs,show_debug=False,K_device=None):
     # returns a list of K_nodes
     dict_Kbwd = dict() # dict : D_node.target -> K_node(bwd)
     dict_Kfwd = dict() # dict : D_node.target -> K_node(fwd)
-    our_global = globals().copy() | dict_inputs
+    our_global = dict(**(globals()) , **dict_inputs)
     our_global["self"] = nn_mod
     our_global["device"] = device
     our_global
