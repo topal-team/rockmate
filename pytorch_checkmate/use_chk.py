@@ -12,11 +12,18 @@ else:
 
 from checkmate.core.graph_builder import GraphBuilder
 from checkmate.core.schedule import ScheduledResult, ILPAuxData
-from checkmate.core.solvers.gurobi_solver import solve_ilp_gurobi
+try:
+    from checkmate.core.solvers.gurobi_solver import solve_ilp_gurobi
+except:
+    gurobi_installed = False
 from checkmate.core.solvers.cvxpy_solver import solve_checkmate_cvxpy
 from checkmate.plot.graph_plotting import plot_schedule
+import cvxpy
 
 def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False,show_debug=False,use_gurobi=True):
+    if solver not in cvxpy.installed_solvers():
+        raise AttributeError("please choose from the installed solvers:"+ str(cvxpy.installed_solvers()))
+    
     chk_gb = GraphBuilder()
     nodes = list(kg.dict_nodes.values())
     for kn in nodes:
@@ -37,7 +44,7 @@ def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False
     print('total cost:', sum(chk_g.cost_ram.values()),
           'max cost:', max_cost,
           'budget:', budget)
-    
+    if not gurobi_installed: use_gurobi=False
     if use_gurobi:
         sched_result = solve_ilp_gurobi(
                 chk_g, budget, print_to_console=not verbose)
