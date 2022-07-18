@@ -1,17 +1,8 @@
-import torch
-from .Stools import *
-try:
-    from rotor.utils import *
-except:
-    from torch.hub import load_state_dict_from_url
-    from rotor.utils import *
-from rotor.timing import *
-from rotor.memory import *
-
-min_duration = 0
+from .root import *
+from . import Stools # -> S structure
 
 # ==========================
-# = Move from S to K graph =
+# ====== K structure =======
 # ==========================
 
 class K_node():
@@ -38,7 +29,7 @@ class K_node():
         return ast_to_str(self.full_code)
 
 class K_graph():
-    def __init__(self,sg : S_graph):
+    def __init__(self,sg : Stools.S_graph):
         self.dict_nodes = dict()
         self.output = sg.output
         self.init_code = make_ast_module(sg.init_node.body_code)
@@ -48,30 +39,37 @@ class K_graph():
             for req_n in n.req:
                 req_n.used_by.add(n)
 
+# ==========================
 
-def generate_tmp_local(n : S_node,g : S_graph,our_global):
+
+
+# ==========================
+# = Move from S to K graph =
+# ==========================
+
+def generate_tmp_local(n : Stools.S_node,g : Stools.S_graph,our_global):
     tmp_local = {}
     exec(g.init_node.get_code(),our_global,tmp_local)
     for req_n in n.req:
         if not (req_n is g.init_node):
             # we create the main_target value, and we run the body_code
-            # but the body_code may require some artefacts
+            # but the body_code may requires some artefacts
             req_tar = req_n.main_target
             main_info = g.dict_info[req_tar]
-            tmp_local[req_tar] = generate_val(main_info) # from Dtools
+            tmp_local[req_tar] = generate_val(main_info,device) #root.py
             for req_req_n in req_n.req:
                 if not (req_req_n is g.init_node):
-                    #if req_req_n.is_artefact:
                     for req_req_tar in req_req_n.all_targets:
                         req_req_info = g.dict_info[req_req_tar]
-                        tmp_local[req_req_tar] = generate_val(req_req_info)
+                        tmp_local[req_req_tar] = (
+                            generate_val(req_req_info,device))
             for c in req_n.body_code:
                 try:
                     exec(ast_to_str(c),our_global,tmp_local)
                 except:
                     raise Exception(
-                        f"pb to gene {req_n.main_target} for {n.main_target} "\
-                        f"\n {ast_to_str(c)} impossible to exec")
+                      f"pb to generate {req_tar} for {n.main_target} "\
+                      f"\n {ast_to_str(c)} impossible to exec")
     """ TODO
     if n.is_rand:
         for sub_r in n.req_rand:
@@ -79,7 +77,8 @@ def generate_tmp_local(n : S_node,g : S_graph,our_global):
     """
     return tmp_local
 
-def inspection(n : S_node,g : S_graph,our_global):
+
+def inspection(n : Stools.S_node,g : Stools.S_graph,our_global):
     mt = n.main_target
     info = g.dict_info[mt]
     timer = make_timer(device)
@@ -122,9 +121,8 @@ def inspection(n : S_node,g : S_graph,our_global):
 
     # === BACKWARD ===
     if info.requires_grad:
-        tmp_local[mt].data = generate_val(info)
-        tmp_local[mt].grad = generate_val(info)
-        #tmp_local[mt].data = torch.zeros(0, device=device)
+        tmp_local[mt].data = generate_val(info,device)
+        tmp_local[mt].grad = generate_val(info,device)
 
         def fct_run_bwd():
             exec(f"{mt}.backward({mt}.grad)", our_global, tmp_local)
@@ -133,8 +131,6 @@ def inspection(n : S_node,g : S_graph,our_global):
                 #if not (req_n is g.init_node):
                 if not req_n.is_artefact:
                     for tar in req_n.tensor_targets:
-                        #tar_info = g.dict_info[tar]
-                        #if tar_info.ttype != torch.Size:
                         tmp_local[tar].grad = None
 
         # measure
@@ -143,7 +139,7 @@ def inspection(n : S_node,g : S_graph,our_global):
         _ , mem_fgt_bwd , _ = memUsage.measure(fct_fgt_bwd)
         fct_run_fwd()
         timer.measure_median(fct_run_fwd)
-        tmp_local[n.main_target].grad = generate_val(info)
+        tmp_local[n.main_target].grad = generate_val(info,device)
         time_run_bwd = measure_time(fct_run_bwd, fct_run_fwd)
         # overhead_bwd contains n.target.data now /!\
 
@@ -154,7 +150,10 @@ def inspection(n : S_node,g : S_graph,our_global):
     # ===============
     return ret
 
-def S_to_K(sg : S_graph,nn_mod,dict_inputs,show_debug=False,K_device=None):
+
+def S_to_K(sg : Stools.S_graph,
+        nn_mod,dict_inputs,
+        show_debug=False,K_device=None):
     # -- device --
     global device
     if K_device is None:
@@ -162,15 +161,15 @@ def S_to_K(sg : S_graph,nn_mod,dict_inputs,show_debug=False,K_device=None):
             device = torch.device('cuda')
         else:
             device = torch.device('cpu')
-    else:
-        device = K_device
+    else:   device = K_device
     nn_mod.to(device)
     for (k,x) in dict_inputs.items():
         dict_inputs[k] = x.to(device)
     # --
-    # returns a list of K_nodes
-    dict_Kbwd = dict() # dict : D_node.target -> K_node(bwd)
-    dict_Kfwd = dict() # dict : D_node.target -> K_node(fwd)
+
+    # -- init --
+    dict_Kbwd = dict() # dict : target -> K_node(bwd)
+    dict_Kfwd = dict() # dict : target -> K_node(fwd)
     our_global = dict(**(globals()) , **dict_inputs)
     our_global["self"] = nn_mod
     our_global["device"] = device
@@ -178,7 +177,7 @@ def S_to_K(sg : S_graph,nn_mod,dict_inputs,show_debug=False,K_device=None):
     kg = K_graph(sg)
 
     # ------------
-    def handle_node(n : S_node):
+    def handle_node(n : Stools.S_node):
         mt = n.main_target
         if show_debug: print(mt)
         # -- build Kfwd --
@@ -237,7 +236,8 @@ def S_to_K(sg : S_graph,nn_mod,dict_inputs,show_debug=False,K_device=None):
         is_fwd = True,
         target = "loss",
         req = {dict_Kfwd[sg.output]},
-        full_code = ast.Assign([ast.Name(f"{sg.output}.grad")],ast.Name("loss")))
+        full_code = (
+          ast.Assign([ast.Name(f"{sg.output}.grad")],ast.Name("loss"))))
     loss_node.run_mem  = MemSize(0)
     loss_node.fgt_mem  = MemSize(0)
     loss_node.overhead = MemSize(0)
@@ -249,8 +249,6 @@ def S_to_K(sg : S_graph,nn_mod,dict_inputs,show_debug=False,K_device=None):
     kg.make_used_by()
     return kg
 
-
-
 # ==========================
 
 
@@ -259,13 +257,12 @@ def S_to_K(sg : S_graph,nn_mod,dict_inputs,show_debug=False,K_device=None):
 # === printing functions ===
 # ==========================
 
-import graphviz
-
 def print_K_graph(g : K_graph,name=None,open=True):
     print(len(g.dict_nodes))
     if name is None:
         name = "K-nodes graph"
-    dot = graphviz.Digraph(name,comment="Forward + Backward graph")
+    dot = graphviz.Digraph(name,
+        comment="K_graph = Forward + Backward graph")
     def print_node(n):
         if n.main_target == "loss":
             dot.node(n.name,"loss placeholder",color="green")
@@ -279,7 +276,7 @@ def print_K_graph(g : K_graph,name=None,open=True):
     for n in nodes:
         for sub_n in n.req:
             dot.edge(sub_n.name,n.name)
-    dot.render(directory="graphviz_dir",view=open)
+    graph_render(dot,open,"K") # from root.py
 
 # ==========================
 

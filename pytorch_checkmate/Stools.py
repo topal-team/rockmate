@@ -1,42 +1,8 @@
-from .Dtools import *
-import ast
-
-list_cheap_fct = ["torch.add","torch.sub","torch.mul","torch.div"]
-# TODO : complete this list
-list_cheap_fct.extend(["list constructor","tuple constructor"])
-# because I treat them in the same way
-list_view_fct = [
-    "torch.adjoint","torch.Tensor.adjoint",
-    "torch.as_strided","torch.Tensor.as_strided",
-    "torch.Tensor.detach",
-    "torch.diagonal","torch.Tensor.diagonal",
-    "torch.Tensor.expand","torch.Tensor.expand_as",
-    "torch.movedim","torch.Tensor.movedim",
-    "torch.narrow","torch.Tensor.narrow",
-    "torch.permute","torch.Tensor.permute",
-    "torch.select","torch.Tensor.select",
-    "torch.squeeze","torch.Tensor.squeeze",
-    "torch.transpose","torch.Tensor.transpose",
-    "torch.view_as_real",
-    "torch.Tensor.unflatten",
-    "torch.Tensor.unfold",
-    "torch.unsqueeze","torch.Tensor.unsqueeze",
-    "torch.Tensor.view","torch.Tensor.view_as",
-    "torch.unbind","torch.Tensor.unbind",
-    "torch.split","torch.Tensor.split",
-    "torch.hsplit","torch.Tensor.hsplit",
-    "torch.vsplit","torch.Tensor.vsplit",
-    "torch.tensor_split","torch.Tensor.tensor_split",
-    "torch.split_with_sizes","torch.Tensor.split_with_sizes",
-    "torch.swapaxes","torch.Tensor.swapaxes",
-    "torch.swapdims","torch.Tensor.swapdims",
-    "torch.chunk","torch.Tensor.chunk",
-    "torch.Tensor.values","torch.Tensor.indices",
-    ]
-# list imported from https://pytorch.org/docs/stable/tensor_view.html
+from .root import *
+from . import Dtools # -> D structure
 
 # ==========================
-# = Init move from D to S  =
+# ====== S structure =======
 # ==========================
 
 class S_node():
@@ -60,15 +26,13 @@ class S_node():
         return ast_to_str(self.full_code())
 
     def insert(self,sub_n,strong):
-        # self is the main node ; sub_n is the node inserted
+        # S is a about merging node, this is the method to merge
+        # two nodes, we insert "sub_n" in "self"
         # if strong: delete sub_n else: sub_node <- artefact
         # in any case cut as many edges as possible
-        # -- disconnect sub_n and self --
 
-        #sub_n.req.discard(self)
-        #self.used_by.discard(sub_n)
         merged_req = (self.req | sub_n.req) - {self}
-        #merged_used_by = self.used_by | sub_n.used_by
+
         # -- disconnect sub_n with its children (if possible) --
         if strong: # e.g. for "view"
             for sub_sub_n in sub_n.used_by:
@@ -107,10 +71,11 @@ class S_node():
         for sub_n in children:
             if sub_n.is_artefact:
                 if sub_n.req != {self}:
-                    s = ",".join([aux_n.main_target for aux_n in sub_n.req])
+                    s = ",".join(
+                        [aux_n.main_target for aux_n in sub_n.req])
                     raise Exception(
-                        f"{self.main_target} should be the only parent of "\
-                        f"{sub_n.main_target} : {len(sub_n.req)}\n{s}")
+                      f"{self.main_target} should be the only parent of "\
+                      f"{sub_n.main_target} : {len(sub_n.req)}\n{s}")
                 for aux_n in self.used_by:
                     sub_n.used_by.discard(aux_n)
                     aux_n.req.discard(sub_n)
@@ -118,12 +83,6 @@ class S_node():
                     for aux_n in sub_n.req:
                         aux_n.used_by.remove(sub_n)
                     sub_n.req = set()
-                #if sub_n.used_by <= (self.used_by | set([sub_n])):
-                #    for aux_n in sub_n.used_by:
-                #        aux_n.req.remove(sub_n)
-                #    self.used_by.remove(sub_n)
-                #    sub_n.used_by = set()
-                #    sub_n.req = set()
 
     def clear_siblings_artefact(self):
         real_req = set()
@@ -134,7 +93,7 @@ class S_node():
             req_n.clear_children_artefact()
 
 class S_graph():
-    def __init__(self,dg : D_graph = None):
+    def __init__(self,dg : Dtools.D_graph = None):
         self.nodes = []
         self.init_node = None
         self.output_node = None
@@ -152,8 +111,8 @@ class S_graph():
             if n.is_artefact:# and not (n is self.init_node):
                 if len(n.req)!=1:
                     raise Exception(
-                        f"{n.main_target} is_artefact, but with "\
-                        f"len(req)={len(n.req)}")
+                      f"{n.main_target} is_artefact, but with "\
+                      f"len(req)={len(n.req)}")
                 req_n = list(n.req)[0]
                 if n.used_by <= (req_n.used_by | set([n])):
                     print(f"{n.main_target} is a useless "\
@@ -165,13 +124,13 @@ class S_graph():
             for req_n in n.req:
                 if not (n in req_n.used_by):
                     raise Exception(
-                        f"{req_n.main_target} in {n.main_target}.req "\
-                        f"but one sided relation...")
+                      f"{req_n.main_target} in {n.main_target}.req "\
+                      f"but one sided relation...")
             for sub_n in n.used_by:
                 if not (n in sub_n.req):
                     raise Exception(
-                        f"{sub_n.main_target} in {n.main_target}.used_by "\
-                        f"but one sided relation...")
+                      f"{sub_n.main_target} in {n.main_target}.used_by "\
+                      f"but one sided relation...")
 
     def clear(self):
         # -- re-sorting nodes -- 
@@ -179,17 +138,8 @@ class S_graph():
         # by the way, remove unpluged nodes
         self.nodes = sort_based_on_req(self.output_node)
         self.nodes.remove(self.init_node)
-        """
-        # -- remove unpluged nodes --
-        l1 = []
-        for n in self.nodes:
-            if n.req != set() or n.used_by != set():
-                l1.append(n)
-        self.nodes = l1
-        """
         self.check_artefact()
         self.check_relations()
-
 
     def make_tensor_targets(self):
         for n in self.nodes:
@@ -203,25 +153,31 @@ class S_graph():
 
     def assert_ready(self):
         # check if ready to be given to S_to_K
-        # -> main_targets are tensors, except if artefact -> sizes
+        # ie main_targets are tensors, except if artefact -> sizes
         for n in self.nodes:
             if not (n.main_target in self.dict_info):
                 raise Exception(
-                    f"{n.main_target} not in dict_info ??")
+                  f"{n.main_target} not in dict_info ??")
             info = self.dict_info[n.main_target]
             if not (info.ttype in [torch.Tensor,torch.Size]):
                 raise Exception(
-                    f"After simplifications there should "\
-                    f"only be tensors or sizes, but {info.ttype} "\
-                    f"found for {n.main_target}.")
+                  f"After simplifications there should "\
+                  f"only be tensors or sizes, but {info.ttype} "\
+                  f"found for {n.main_target}.")
             if info.ttype==torch.Size and not n.is_artefact:
                 raise Exception(
-                    f"After simplifications, all remaining "\
-                    f"\"size\" should be \"artefacts\", but "\
-                    f"{n.main_target} isn't an artefact")
+                  f"After simplifications, all remaining "\
+                  f"\"size\" should be \"artefacts\", but "\
+                  f"{n.main_target} isn't an artefact")
+
+# ==========================
 
 
-def D_to_S_init(dg : D_graph) -> S_graph:
+# ==========================
+# = Init move from D to S  =
+# ==========================
+
+def D_to_S_init(dg : Dtools.D_graph) -> S_graph:
     sg = S_graph(dg)
     init_node = S_node(target="-- inputs --")
     s_nodes = sg.nodes
@@ -252,10 +208,13 @@ def D_to_S_init(dg : D_graph) -> S_graph:
 # === remove cheap nodes ===
 # ==========================
 
-def insert_ast_code(main_n,mc,target : str,sc): # mc : main_code , sc : sub_code
+def insert_ast_code(main_n,mc,target : str,sc):
+    # mc : main_code , sc : sub_code
     assert(isinstance(mc,ast.Assign))
     assert(isinstance(sc,ast.Assign))
     assert(sc.targets[0].id == target)
+    # if not ast.Assign -> simplifications haven't been done in
+    # the right order ! (cheap -> size > view)
     # assert main_code is a one layer Call (no sub calls)
     scv = sc.value
     mcv = mc.value
@@ -392,10 +351,10 @@ def simplify_view(g):
                 # because views operations are cheap.
                 # But I must avoid creating cycle dependancies, so
                 # for the moment I assert len(n.req)==1
-                if len(n.req)>1:
-                    if show_debug:
-                        print(f"{n.main_target} is a view op, but without "\
-                              f"a real parent, and several artifact dependancies")
+                if len(n.req)>1: print(
+                    f"Warning : {n.main_target} is a view op, but without"\
+                    f" a real parent, and several artifact dependancies",
+                    file = sys.stderr)
                 else:
                     art_req = list(n.req)[0]
                     assert(len(art_req.req)==1)
@@ -411,7 +370,6 @@ def simplify_view(g):
                     n.req = set()
                     n.used_by = set()
                     real_req.clear_children_artefact()
-
 
     g.clear()
 
@@ -438,14 +396,27 @@ def D_to_S(dg):
 
 
 # ==========================
+# ==== Cut the graph in ====
+# ==== sequential parts ====
+# ==========================
+
+def cut(g : S_graph): # -> list of S_graph
+    pass
+
+# ==========================
+
+
+
+# ==========================
 # === printing functions ===
 # ==========================
 
-def print_S_graph(g : D_graph,name=None,open=True):
+def print_S_graph(g : S_graph,name=None,open=True):
     print(len(g.nodes))
     if name is None:
         name = "forward S-graph"
-    dot = graphviz.Digraph(name,comment="S_graph = Simplified forward graph")
+    dot = graphviz.Digraph(name,
+        comment="S_graph = Simplified forward graph")
     dot.node(g.init_node.main_target,g.init_node.get_code(),color="blue")
     for n in g.nodes:
         if n.main_target == g.output:
@@ -456,8 +427,6 @@ def print_S_graph(g : D_graph,name=None,open=True):
     for n in g.nodes:
         for sub_n in n.req:
             dot.edge(sub_n.main_target,n.main_target)
-    dot.render(directory="graphviz_dir",view=open)
+    graph_render(dot,open,"S") # from root.py
 
 # ==========================
-
-

@@ -1,27 +1,15 @@
-from .read_trace_code import *
-import ast
-import torch
-from torch import tensor
-
-
+from .root import *
+from . import Btools # -> B structure
 
 # ==========================
-# = Move from B to D graph =
+# ====== D structure =======
 # ==========================
 
-class D_node(B_node):
+class D_node(Btools.B_node):
     def __init__(self,target="",code=None,fct=""):
         # "code" must be an AST, "fct" is a string
         super().__init__(target,code,fct)
         self.used_by = set()
-
-class FWD_info(): # everything needed to randomly regenerate a var
-    def __init__(self):
-        self.dtype = None
-        self.ttype = None # target_type
-        self.tsize = None # target_size
-        self.sub_info = None # if ttype = list or tuple
-        self.requires_grad = None # if Tensor or Size
 
 class D_graph():
     def __init__(self):
@@ -32,49 +20,26 @@ class D_graph():
         self.dict_rand = {}
         self.dict_info = {} # target -> FWD_info
 
-def sort_based_on_req(n):
-    # n can be any type of node (B, D, S, K)
-    # we just need attribut req
-    dict_done = {}
-    nodes = []
-    def visit(n):
-        if n not in dict_done:
-            dict_done[n]=False
-            for sub_n in n.req:
-                visit(sub_n)
-            dict_done[n]=True
-            nodes.append(n)
-        elif not dict_done[n]:
-            raise Exception("Cycle in the graph. How could this happened ??")
-    visit(n)
-    return nodes
+# ==========================
 
-def sort_nodes(g : B_graph): # -> B_node list 
+
+# ==========================
+# = Move from B to D graph =
+# ==========================
+
+def sort_nodes(g : Btools.B_graph): # -> B_node list 
     # use output's node and trace everything
     # /!\ never trust B_graph.nodes
     o_var = g.output
-    if not o_var.has_node:
-        return []
-    else:
-        return sort_based_on_req(o_var.node)
-"""
-        dict_done = {}
-        nodes = []
-        def visit(n):
-            if n not in dict_done:
-                dict_done[n]=False
-                for sub_n in n.req:
-                    visit(sub_n)
-                dict_done[n]=True
-                nodes.append(n)
-            elif not dict_done[n]:
-                raise Exception("Cycle in the B_graph. How could this happened ??")
-        visit(o_var.node)
-        return nodes
-"""
+    if not o_var.has_node: return []
+    else: return sort_based_on_req(o_var.node)
+
+
 def get_info(x) -> FWD_info:
+    # for FWD_info see root.py
     info = FWD_info()
-    if isinstance(x,int) or (isinstance(x,torch.Tensor) and x.shape==torch.Size([])):
+    if (isinstance(x,int) or
+        (isinstance(x,torch.Tensor) and x.shape==torch.Size([]))):
         tt = torch.Size
     else:
         tt = type(x)
@@ -92,33 +57,23 @@ def get_info(x) -> FWD_info:
         raise Exception(f"The type {tt} is unknown")
     return info
 
-def generate_val(info):
-    tt = info.ttype
-    if tt==torch.Size:
-        return info.tsize
-    elif tt==torch.Tensor:
-        return torch.ones(info.tsize,
-            dtype=info.dtype,
-            requires_grad=info.requires_grad,
-            device=device)
-    else:
-        assert(tt==list or tt==tuple)
-        x = [generate_val(sub_info) for sub_info in info.sub_info]
-        return tt(x)
-
 def generate_tmp_local(g,dict_info,n):
     tmp_local = {}
     for sub_n in n.req:
         sub_info = dict_info[sub_n.target]
-        sub_x = generate_val(sub_info)
+        sub_x = generate_val(sub_info,device) # from root.py
         tmp_local[sub_n.target] = sub_x
     if n.is_rand:
         for sub_r in n.req_rand:
             exec(g.dict_rand[sub_r],our_global,tmp_local)
     return tmp_local
 
-# == main function ==
-def B_to_D(bg : B_graph,nn_mod,dict_inputs,D_device=None) -> D_graph:
+# ==========================
+
+# ===== Main function ======
+
+def B_to_D(bg : Btools.B_graph,nn_mod,dict_inputs,D_device=None):
+    # -> D_graph:
     # -- device --
     global device
     if D_device is None:
@@ -126,8 +81,7 @@ def B_to_D(bg : B_graph,nn_mod,dict_inputs,D_device=None) -> D_graph:
             device = torch.device('cuda')
         else:
             device = torch.device('cpu')
-    else:
-        device = D_device
+    else:   device = D_device
     nn_mod.to(device)
     for (k,x) in dict_inputs.items():
         dict_inputs[k] = x.to(device)
@@ -199,6 +153,7 @@ def print_info(info : FWD_info):
     print(f"\tsub_info = {info.sub_info}")
 
 def print_all_fw_nodes(g,print_ast=True):
+    # g : B or D graph
     print(g.dict_rand)
     for n in g.nodes:
         if print_ast:
@@ -219,8 +174,6 @@ def print_fw_code(g : D_graph):
         if not n.is_input: print(f"\t{n.get_code()}")
     print(f"\treturn {g.output}")
 
-import graphviz
-
 def print_D_graph(g : D_graph,name=None,open=True):
     print(len(g.nodes))
     if name is None:
@@ -235,7 +188,7 @@ def print_D_graph(g : D_graph,name=None,open=True):
     for n in g.nodes:
         for sub_n in n.req:
             dot.edge(sub_n.target,n.target)
-    dot.render(directory="graphviz_dir",view=open)
+    graph_render(dot,open,"D") # from root.py
 
 # ==========================
 
@@ -259,11 +212,5 @@ def test_fw_code(g : D_graph,nn_mod,dict_inputs : dict):
         if not n.is_input:
             exec(n.get_code(), globals(), loc_dict)
     return loc_dict[g.output]
-"""
-    ret = []
-    for out in g.outputs:
-        ret.append(loc_dict[out])
-    if len(ret)==1: return ret[0]
-    else: return tuple(ret)
-"""
+
 # ==========================

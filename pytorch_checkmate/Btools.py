@@ -1,36 +1,26 @@
 # ------------------------------------
+# --------- read trace code ----------
 # Use AST functions to extract information from jit_trace.code
 # Do some simplifications :
 # -> Remove some useless getattr
-# -> Decompose some operations (a = f(g(b)))
-# -> Remove some TorchScript's operations (e.g. ops.prim.NumToTensor)
+# -> Decompose operations (a = f(g(b)))
+# -> Remove TorchScript's operations (e.g. ops.prim.NumToTensor)
 # The code given is an AST obj
-# mostly "target = fct_name(const / var name / sub_obj,,,,)
+# mostly "target = fct_name(*(const / var name / sub_obj))
 # ------------------------------------
 
-import ast
-import astunparse
-import torch
-from torch.jit import trace_module
+from .root import *
 
-list_rand_fct = ["torch.randn"]
-dict_rand = {}
-
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-import sys
-svi = sys.version_info
-py_version = svi.major + svi.minor/10
-
-def ast_to_str(ast_code):
-    #return ast.unparse(ast.fix_missing_locations(ast_code))
-    return astunparse.unparse(ast_code)
+# ==========================
+# ====== B structure =======
+# ==========================
 
 class B_node():
     def __init__(self,target="",code=None,fct="",req=None,is_input=False):
         # "code" must be an AST, "fct" is a string
         self.target = target
-        if code is None: code = make_ast_constant("/!\\ not defined /!\\")
+        if code is None:
+            code = make_ast_constant("/!\\ not defined /!\\")
         self.make_code(code)
         self.fct = fct
         if req is None:  self.req = set()
@@ -49,7 +39,10 @@ class B_node():
         return ast_to_str(self.ast_code)
 
 class B_var():
-    def __init__(self,val,node : B_node = None, is_attr_of_self = False, path_from_self = None):
+    def __init__(self,val,
+            node : B_node = None,
+            is_attr_of_self = False,
+            path_from_self = None):
         # "val" must be an AST
         self.is_attr_of_self = is_attr_of_self
         self.path_from_self  = path_from_self
@@ -87,72 +80,20 @@ class B_graph():
         self.nodes  = [] # tmp -> should not be trusted
         self.output = None # B_var
         self.dict_rand = dict_rand # str code
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# ==========================
 
 
-# ===== SMALL AUX FUNCTIONS =====
-def open_attr_until_name(v):
-    l_name = []
-    while isinstance(v,ast.Attribute):
-        l_name.append(v.attr)
-        v = v.value
-    l_name.append(v.id)
-    l_name.reverse()
-    return l_name
+# ==========================
+# ====== Make B graph ======
+# ==========================
 
-def make_ast_constant(v):
-    x = ast.Constant(v)
-    setattr(x,"kind",None)
-    return x
-
-def make_ast_module(l):
-    try:    return ast.Module(l,[])
-    except: return ast.Module(l)
-
-"""
-if py_version >= 3.8:
-        return ast.Constant(v)
-    else:
-        if isinstance(v,int):
-            return ast.Num(v)
-        elif isinstance(v,str):
-            return ast.Str(v)
-        elif v in ["True", "False", "None"]:
-            if py_version >= 3.4:
-                return ast.NameConstant(v)
-            else:
-                return ast.Name(v)
-        elif isinstance(v,list):
-            return ast.List([make_ast_constant(x) for x in v])
-        elif isinstance(v,tuple):
-            return ast.Tuple((make_ast_constant(x) for x in v))
-        elif isinstance(v,bytes):
-            return ast.Bytes(v)
-        else:
-            raise Exception(
-                f"unhandle type of constant : {type(v)} "
-                f"for old version of py ({py_version})")
-"""
-
-def is_constant(v):
-    if py_version >= 3.8:
-        return isinstance(v,ast.Constant)
-    else:
-        rep = type(v) in [
-            ast.Num,ast.Str,ast.Bytes,
-            ast.NameConstant]
-        if rep:
-            if isinstance(v,ast.Num):
-                setattr(v,"value",v.n)
-            elif isinstance(v,ast.Str) or isinstance(v,ast.Bytes):
-                setattr(v,"value",v.s)
-        return rep
-# =====
-
+dict_rand = {} # all random targets
 all_nodes = [] # list of all the nodes generated
 fresh_var = 0 # count the number of vars used over all the prgm
 
-def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_graph:
+def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False):
+    # -> B_graph
     # ex : sub_mod     = jit_tr_GPT2.wpe 
     #      sub_mod_str = "self.wpe"
     #      sub_fct     = "forward"
@@ -196,29 +137,21 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
     # -> variables' names must be unique through all the program
-    unique_str = sub_mod_str.replace('.','_')+"_"+sub_fct
     def make_unique(s):
-        global fresh_var
-        fresh_var += 1
-        if concise:
-            return f"__{fresh_var}_{s}"
-        else:
-            return f"__{unique_str}__{fresh_var}_{s}"
+        global fresh_var ; fresh_var += 1
+        return f"__{fresh_var}_{s}"
     # -> In case we add new lines :
     def get_fresh_var():
-        global fresh_var
-        fresh_var += 1
-        if concise:
-            return f"__{fresh_var}_fv"
-        else:
-            return f"__{unique_str}__{fresh_var}_fv"
+        global fresh_var ; fresh_var += 1
+        return f"__{fresh_var}_fv"
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
     # ===== AUXILARY FUNCTIONS ===== 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
-    # -- handle attribute -- -> explicit "getattr" or using "." (e.g. self.wpe)
+    # -- handle attribute -- 
+    # -> explicit "getattr" or using "." (e.g. self.wpe)
     def aux_make_ast(p_val,format_fct,l_attr): # -> AST
-        if isinstance(p_val,ast.Name): # not always the case due to simplication
+        if isinstance(p_val,ast.Name):
             new_val = format_fct(p_val)
         else:
             attr = '.'.join(l_attr)
@@ -248,7 +181,8 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
 
     def handle_attr(expr : ast.Attribute,target : str):
         l_name = open_attr_until_name(expr)
-        assert(l_name[0] in dict_vars) # -> else raise "Unknown variable, global ?"
+        assert(l_name[0] in dict_vars)
+        # -> else raise "Unknown variable, global ?"
         parent_var = dict_vars[l_name[0]]
         attr = '.'.join(l_name[1:])
         format_fct = lambda pv : ast.Name(pv.id + "." + attr)
@@ -258,7 +192,6 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
     # -- open list of targets e.g. tuple --
     # -> so that each node has only one target
-    # in a future version, those things should no longer exist TODO
     # (e.g. l = ... ; a = l[0] ; b = l[1])
     def init_targets(list_tg):
         if len(list_tg)==1:
@@ -271,8 +204,10 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             new_tg_id  = make_unique(tg)
             new_node   = B_node(target=new_tg_id,fct="getattr")
             main_val   = main_var.get_value(calling_node=new_node)
-            assert(isinstance(main_val,ast.Name)) # else TODO ?
-            new_node.make_code(ast.Subscript(main_val,make_ast_constant(i)))
+            assert(isinstance(main_val,ast.Name))
+            # else : to much simplifications :/ 
+            new_node.make_code(
+                ast.Subscript(main_val,make_ast_constant(i)))
             new_var    = B_var(ast.Name(new_tg_id),node=new_node)
             dict_vars[tg] = new_var
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -292,14 +227,19 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             parent_var = handle_expr(args[0])
             attr = args[1].value
             if attr.isdigit():
-                format_fct = lambda pv : ast.Subscript(pv,make_ast_constant(int(attr)))
-            else: format_fct = lambda pv : ast.Call(
+                format_fct = lambda pv : ast.Subscript(
+                    value=pv,
+                    slice=make_ast_constant(int(attr)))
+            else:
+                format_fct = lambda pv : ast.Call(
                     func=ast.Name("getattr"),
                     args=[pv,make_ast_constant(attr)],
                     keywords=[])
-            return aux_handle_attr(target,parent_var,format_fct,[attr]) # might create one node
+            return aux_handle_attr(target,parent_var,format_fct,[attr])
+                # might create one node
 
-        # == torchscript's functions == -> must be removed because some refer to TS global var
+        # == torchscript's functions == 
+        # -> must be removed because some refer to TS global var
         elif l_name[0]=="ops":
             assert(len(args)==1)
             return handle_expr(args[0],target)
@@ -314,7 +254,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             # == sub module ==
             if l_name[0] in dict_vars:
                 sub_var = dict_vars[l_name[0]]
-                if show_debug_msg:
+                if B_show_debug:
                     print(f"In {sub_mod_str}.{sub_fct} try to sub "\
                           f"open {ast_to_str(sub_var.val)}.{l_name[1:]}")
                 assert(sub_var.is_attr_of_self)
@@ -323,7 +263,8 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
                 for at in path_from_self:
                     sub_sub_mod = getattr(sub_sub_mod,at)
                 sub_sub_str = ast_to_str(sub_var.val)
-                sub_graph = open_sub_module(sub_sub_mod,sub_sub_str,l_name[-1],args_Bvar)
+                sub_graph = open_sub_module(
+                        sub_sub_mod,sub_sub_str,l_name[-1],args_Bvar)
                 return sub_graph.output # which is a B_var !
 
             # == builtin functions ==
@@ -335,29 +276,37 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
                 if l_name[0]=="torch" and len(l_name)==2:
                     try: exec(f"torch.{l_name[1]}")
                     except:
-                        try: exec(f"torch.nn.functional.{l_name[1]}")
+                      try: exec(f"torch.nn.functional.{l_name[1]}")
+                      except:
+                        try: exec(f"torch.Tensor.{l_name[1]}")
                         except:
-                            try: exec(f"torch.Tensor.{l_name[1]}")
-                            except:
-                                raise Exception(f"torch.{l_name[1]} neither found in torch, torch.Tensor and torch.nn.functional")
-                            else: fct_name = f"torch.Tensor.{l_name[1]}"
-                        else: fct_name = f"torch.nn.functional.{l_name[1]}"
+                          raise Exception(
+                            f"torch.{l_name[1]} neither found in torch, "\
+                            f"torch.Tensor and torch.nn.functional")
+                        else: fct_name = f"torch.Tensor.{l_name[1]}"
+                      else: fct_name = f"torch.nn.functional.{l_name[1]}"
                     else: fct_name = f"torch.{l_name[1]}"
                 else:
                     fct_name = ".".join(l_name)
 
                 # == else ==
                 new_node = B_node(target=target,fct=fct_name)
-                args_ast = [v.get_value(calling_node=new_node) for v in args_Bvar]
+                args_ast = [
+                    v.get_value(calling_node=new_node)
+                    for v in args_Bvar]
                 kwds_ast = []
                 for kw in expr.keywords:
                     if var_impose_device and kw.arg=="device":
-                        kwds_ast.append(ast.keyword("device",ast.Name("device")))
+                        kwds_ast.append(
+                          ast.keyword("device",ast.Name("device")))
                     elif not (((kw.arg=="dtype" or kw.arg=="layout")
-                        and is_constant(kw.value) #and isinstance(kw.value,ast.Constant)
+                        and is_constant(kw.value)
                         and isinstance(kw.value.value,int))
                         or (kw.arg=="layout" and kw.value.value is None)):
-                        kwds_ast.append(ast.keyword(kw.arg,(handle_expr(kw.value)).get_value(new_node)))
+                        kwds_ast.append(
+                          ast.keyword(
+                            kw.arg,
+                            (handle_expr(kw.value)).get_value(new_node)))
                 new_node.make_code(ast.Call(
                     func=ast.Name(fct_name),
                     args=args_ast,
@@ -383,10 +332,11 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
     # -- handle any expr -- return type -> B_var
-    # if the expr is simple (e.g. constant or self attr) B_var.has_node == False
-    # otherwise, a node (= a piece of code) is created. The optional parameter 
-    # "target" imposes the name of the var created in this node
-    # -> fct used in the main fct and to handle arguments given to a Call 
+    # -> the main recursive fct to handle ast
+    # if the expr is simple (e.g. constant or self's attr) 
+    # -> B_var.has_node == False
+    # otherwise, a node (= a piece of code) is created. 
+    # The optional parameter  "target" imposes the name of the var created
     # /!\ TorchScript's global constant vars must have been removed
     def handle_expr(expr,target : str = None) -> B_var :
         if is_constant(expr):
@@ -402,7 +352,8 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
         elif isinstance(expr,ast.Attribute):
             return handle_attr(expr,target) # may creates one node
         elif isinstance(expr,ast.Call):
-            return handle_call(expr,target) # may creates nodes for inputs + for output
+            return handle_call(expr,target)
+            # may creates nodes for arguments (+ for output=target)
         elif isinstance(expr,ast.List):
             return aux_handle_tuple_or_list(expr,target,"list")
         elif isinstance(expr,ast.Tuple):
@@ -431,7 +382,9 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
                 for e in tg.elts: list_tg.append(e.id)
                 target_id = None
             else:
-                raise Exception("error 2 : ast.Call's target neither name, tuple or list ?")
+                raise Exception(
+                    f"ast.Call's target neither name, tuple or list ?"
+                    f"{type(tg)} found")
 
             # -- main --
             main_id  = init_targets(list_tg)
@@ -448,17 +401,27 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False) -> B_
             ret_graph.output = handle_expr(n.value,target=None)
             return ret_graph
 
-    raise Exception("error 4 : should have stoped with the ast.Return")
+    raise Exception("No ast.Return found at the end of jit.code ??!")
 
-def make_B_graph(nn_mod,ex_inputs,concise_name=True,show_debug=False,impose_device=False):
+# ==========================
+
+# ===== Main function ======
+
+def make_B(nn_mod,ex_inputs,show_debug=False,impose_device=False):
     # main_mod must be a instance of torch.nn.Module
-    # ex_inputs must be a tuple
-    global concise, fresh_var, show_debug_msg, var_impose_device, dict_rand, all_nodes
+    # ex_inputs can be either a tuple or a dict
+    # -- global vars --
+    global fresh_var, B_show_debug, var_impose_device, dict_rand, all_nodes
     all_nodes = [] ; dict_rand = {} ; fresh_var = 0
-    concise = concise_name
     var_impose_device = impose_device
-    show_debug_msg = show_debug
-    main_mod = trace_module(nn_mod, {'forward': ex_inputs}, check_trace=False)
+    B_show_debug = show_debug
+
+    # -- ex_inputs --
+    if isinstance(ex_inputs,dict):
+        ex_inputs = tuple(ex_inputs.values())
+
+    main_mod = trace_module(
+            nn_mod, {'forward': ex_inputs}, check_trace=False)
     main_str = "self"
     main_fct = "forward"
     main_g = open_sub_module(main_mod,main_str,main_fct,[],is_main=True)
