@@ -14,6 +14,7 @@ from checkmate.core.graph_builder import GraphBuilder
 from checkmate.core.schedule import ScheduledResult, ILPAuxData
 try:
     from checkmate.core.solvers.gurobi_solver import solve_ilp_gurobi
+    gurobi_installed = True
 except:
     gurobi_installed = False
 from checkmate.core.solvers.cvxpy_solver import solve_checkmate_cvxpy
