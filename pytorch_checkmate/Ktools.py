@@ -38,7 +38,10 @@ class K_node():
 class K_graph():
     def __init__(self,sg : S_graph):
         self.dict_nodes = dict()
-        self.output = sg.output
+        self.hidden_inputs  = sg.hidden_inputs
+        self.direct_inputs  = sg.direct_inputs
+        self.hidden_output  = sg.hidden_output
+        self.direct_outputs = sg.direct_outputs
         self.init_code = make_ast_module(sg.init_node.body_code)
         self.dict_rand = sg.dict_rand
     def make_used_by(self):
@@ -158,9 +161,9 @@ def inspection(n : S_node,g : S_graph,our_global):
     return ret
 
 
-def S_to_K(sg : S_graph,
-        nn_mod,dict_inputs,
-        show_debug=False,K_device=None):
+def S_to_K(sg : S_graph,nn_mod,dict_inputs,
+        show_debug=None,K_device=None):
+    if not (show_debug is None): ref_print_debug[0] = show_debug
     # -- device --
     global device
     if K_device is None:
@@ -186,7 +189,7 @@ def S_to_K(sg : S_graph,
     # ------------
     def handle_node(n : S_node):
         mt = n.main_target
-        if show_debug: print(mt)
+        print_debug(mt)
         # -- build Kfwd --
         n_req = set(n.req)
         n_req.discard(sg.init_node)
@@ -204,7 +207,7 @@ def S_to_K(sg : S_graph,
         # -- build Kbwd --
         info = sg.dict_info[mt]
         if info.requires_grad:
-            if show_debug: print(f"{mt} req bwd")
+            print_debug(f"{mt} req bwd")
             Kbwd = K_node(is_fwd=False, req=set(Kreq), target=mt)
             dict_Kbwd[mt] = Kbwd
             for sub_n in n.req:
@@ -242,15 +245,17 @@ def S_to_K(sg : S_graph,
     loss_node = K_node(
         is_fwd = True,
         target = "loss",
-        req = {dict_Kfwd[sg.output]},
+        req = {dict_Kfwd[sg.hidden_output]},
         main_code = (
-          ast.Assign([ast.Name(f"{sg.output}.grad")],ast.Name("loss"))),
+          ast.Assign(
+            [ast.Name(f"{sg.hidden_output}.grad")],
+            ast.Name("loss"))),
         body_code = [])
     loss_node.run_mem  = MemSize(0)
     loss_node.fgt_mem  = MemSize(0)
     loss_node.overhead = MemSize(0)
     loss_node.time     = 0
-    dict_Kbwd[sg.output].req.add(loss_node)
+    dict_Kbwd[sg.hidden_output].req.add(loss_node)
     dict_nodes["fwd_loss"] = loss_node
     # ------------
 
@@ -262,28 +267,77 @@ def S_to_K(sg : S_graph,
 
 
 # ==========================
+# = Move S list to K list ==
+# ==========================
+
+def S_list_to_K_list(list_sg,nn_mod,dict_inputs,
+        show_debug=None,K_device=None):
+    pass
+
+# ==========================
+
+
+
+# ==========================
 # === printing functions ===
 # ==========================
 
-def print_K_graph(g : K_graph,name=None,open=True):
-    print(len(g.dict_nodes))
-    if name is None:
-        name = "K-nodes graph"
-    dot = graphviz.Digraph(name,
-        comment="K_graph = Forward + Backward graph")
+def aux_print_graph(dot,g,uniq_num):
+    def uni(tar): return f"_{uniq_num}_{tar}"
+    def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
+    def edge(i1,i2): dot.edge(uni(i1),uni(i2))
     def print_node(n):
         if n.main_target == "loss":
-            dot.node(n.name,"loss placeholder",color="green")
+            node(n.name,
+                "LOSS\ncode: {n.get_code()}",
+                color="green")
         elif n.is_fwd:
-            dot.node(n.name,n.get_code(),color="blue")
+            node(n.name,n.get_code(),color="blue")
         else:
-            dot.node(n.name,f"backward of {n.main_target}",color="red")
+            node(n.name,f"backward of {n.main_target}",color="red")
     nodes = g.dict_nodes.values()
     for n in nodes:
         print_node(n)
     for n in nodes:
         for sub_n in n.req:
-            dot.edge(sub_n.name,n.name)
+            edge(sub_n.name,n.name)
+
+    # -- io --
+    str_inp = "\n".join(g.direct_inputs)
+    node("input_ph",
+        f"INPUTS : {str_inp}",
+        color="green",style="dashed")
+    str_out = "\n".join(g.hidden_inputs)
+    node("output_ph",
+        f"OUTPUTS : inputs' grad\n{str_out}",
+        color="green",style="dashed")
+    for n in nodes:
+        if n.req == set(): # src nodes
+            edge("input_ph",n.name)
+        if n.used_by == set(): # leaves
+            edge(n.name,"output_ph")
+
+
+def print_K_graph(g : K_graph,name=None,open=True):
+    print(f"Forward + Backward graph : {len(g.dict_nodes)} nodes")
+    if name is None: name = "backward K-graph"
+    dot = graphviz.Digraph(name,
+        comment="K_graph = Forward + Backward graph")
+    aux_print_graph(dot,g,0)
+    graph_render(dot,open,"K") # from root.py
+
+
+def print_list_K_graph(list_g,name=None,open=True):
+    s = "+".join([str(len(g.dict_nodes)) for g in list_g])
+    print(
+        f"{len(list_g)} blocs of K_graph, with {s} = "\
+        f"{sum([len(g.dict_nodes) for g in list_g])} nodes")
+    if name is None: name = "all K-graphs"
+    dot = graphviz.Digraph(
+        name,
+        comment="K_graph list : cut forward+backward graph")
+    for i in range(len(list_g)):
+        aux_print_graph(dot,list_g[i],i)
     graph_render(dot,open,"K") # from root.py
 
 # ==========================

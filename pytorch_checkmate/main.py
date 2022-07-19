@@ -26,14 +26,13 @@ def make_K(nn_mod,
     impose_device=False,
     D_device=None,
     K_device=None):
+    ref_print_debug[0] = show_debug
     check_inputs(nn_mod,dict_inputs)
     bg = Btools.make_B(nn_mod,dict_inputs,
-                       show_debug=show_debug,
                        impose_device=impose_device)
     dg = Dtools.B_to_D(bg,nn_mod,dict_inputs,D_device=D_device)
-    sg = Stools.D_to_S(dg)
+    sg = Stools.D_to_S(dg,keep_sequential=True)
     kg = Ktools.S_to_K(sg,nn_mod,dict_inputs,
-                       show_debug=show_debug,
                        K_device=K_device)
     return kg
 

@@ -10,6 +10,7 @@ class D_node(B_node):
         # "code" must be an AST, "fct" is a string
         super().__init__(target,code,fct)
         self.used_by = set()
+        self.protected = False
 
 class D_graph():
     def __init__(self):
@@ -19,19 +20,22 @@ class D_graph():
         self.output_node = None # D_node
         self.dict_rand = {}
         self.dict_info = {} # target -> FWD_info
-        self.cuttable = False
 
     def prepare_cut(self):
         # in case, after simplifications, we will cut / sequentialize
-        # we need to protect the separators from simplification
-        # but in case we have a chain of separators, we only protect
+        # we need to protect the separators from simplifications
+        # but in case of chain of separators, we only protect
         # the last one (we will keep a good structure, while reducing
         # the number of blocs)
-        self.cuttable = True
-        all_separators = cut_based_on_req(self)
-
-
-
+        all_sep = cut_based_on_req(self) # root.py : sep from inp to output
+        important_sep = []
+        for i in range(len(all_sep)-1):
+            sep = all_sep[i]
+            if sep.used_by != set([all_sep[i+1]]):
+                important_sep.append(sep)
+        important_sep.append(all_sep[-1])
+        print_debug([sep.target for sep in important_sep])
+        for sep in important_sep: sep.protected = True
 
 # ==========================
 
@@ -149,6 +153,7 @@ def B_to_D(bg : B_graph,nn_mod,dict_inputs,D_device=None):
     dg.output = str_val
 
     # -- prepares the sequencing --
+    dg.prepare_cut()
 
     return dg
 

@@ -42,6 +42,20 @@ py_version = svi.major + svi.minor/10
 
 
 # ==========================
+# ====== GLOBAL VARS =======
+# ==========================
+
+# -> print debug messages
+ref_print_debug = [False]
+def print_debug(*args, **kwargs):
+    if ref_print_debug[0]:
+        print(*args, **kwargs)
+
+# ==========================
+
+
+
+# ==========================
 # === LISTS OF FUNCTIONS ===
 # ==========================
 
@@ -174,13 +188,16 @@ def sort_based_on_req(n): # used on B and S
 def cut_based_on_req(g): # used on D and S
     # returns the list of all 1-separator of the graph.
     to_be_visited = [g.output_node]
+    seen = set([g.output_node])
     dict_nb_usages = dict([(m , len(m.used_by)) for m in g.nodes])
     separators = []
     while to_be_visited!=[]:
         n = to_be_visited.pop()
-        if to_be_visited==[]:
+        seen.remove(n)
+        if seen==set():
             separators.append(n)
         for req_n in n.req:
+            seen.add(req_n)
             dict_nb_usages[req_n]-=1
             if dict_nb_usages[req_n]==0:
                 to_be_visited.append(req_n)

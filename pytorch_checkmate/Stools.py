@@ -6,16 +6,17 @@ from .Dtools import D_node,D_graph
 # ==========================
 
 class S_node():
-    def __init__(self,code=None,fct="",target="No target"):
+    def __init__(self,code=None,protected=False,fct="",target="No target"):
         self.is_artefact = False
         self.main_code = code
         self.main_fct = fct
         self.body_code = [] # list of ast.Assign
         self.main_target = target # str
         self.all_targets = [target]
-        self.tensor_targets = None # done later
+        self.tensor_targets = [] # later
         self.req = set()
         self.used_by = set()
+        self.protected = protected
 
     def full_code(self):
         if self.main_code is None: mc = []
@@ -24,9 +25,8 @@ class S_node():
     def get_code(self):
         return ast_to_str(self.full_code())
 
-    def insert(self,sub_n,strong):
-        # S is a about merging node, this is the method to merge
-        # two nodes, we insert "sub_n" in "self"
+    def insert(self,sub_n,strong,g):
+        # this is the fct to merge nodes : we insert "sub_n" in "self"
         # if strong: delete sub_n else: sub_node <- artefact
         # in any case cut as many edges as possible
 
@@ -64,6 +64,10 @@ class S_node():
         for sub_sub_n in merged_used_by:
             sub_sub_n.req.add(self)
 
+        # -- special case if sub_n is the output --
+        if sub_n is g.output_node:
+            g.output_node = self
+
     def clear_children_artefact(self):
         # clean useless artefact children of self
         children = set(self.used_by)
@@ -93,17 +97,30 @@ class S_node():
 
 class S_graph():
     def __init__(self,dg : D_graph = None):
-        self.nodes = []
-        self.init_node = None
-        self.output_node = None
+        self.nodes          = []
+        self.init_node      = None
+        self.output_node    = None
+        self.hidden_inputs  = [] # str list
+        self.direct_inputs  = [] # str list
+        self.hidden_output  = "" # str
+        self.direct_outputs = [] # str list
+        self.dict_info      = {}
+        self.dict_rand      = {}
         if dg:
-            self.output    = dg.output
-            self.dict_info = dg.dict_info
-            self.dict_rand = dg.dict_rand
-        else:
-            self.output    = None
-            self.dict_info = {}
-            self.dict_rand = {}
+            self.hidden_inputs  = dg.inputs
+            self.direct_outputs = [dg.output]
+            self.dict_info      = dg.dict_info
+            self.dict_rand      = dg.dict_rand
+
+    def make_io(self):
+        # assert : hidden_inputs & direct_outputs exist
+        # assert : init_node & output_node exist
+        # make direct_inputs & hidden_ouput
+        self.hidden_output = self.output_node.main_target
+        self.direct_inputs = (
+            self.hidden_inputs + self.init_node.all_targets
+        )
+
 
     def check_artefact(self):
         for n in self.nodes:
@@ -139,6 +156,7 @@ class S_graph():
         self.nodes.remove(self.init_node)
         self.check_artefact()
         self.check_relations()
+        self.make_io()
 
     def make_tensor_targets(self):
         for n in self.nodes:
@@ -176,13 +194,18 @@ class S_graph():
 # = Init move from D to S  =
 # ==========================
 
-def D_to_S_init(dg : D_graph) -> S_graph:
+def D_to_S_init(dg : D_graph,keep_sequential=False) -> S_graph:
+    global ref_keep_seq ; ref_keep_seq = keep_sequential
     sg = S_graph(dg)
     init_node = S_node(target="-- inputs --")
+    init_node.all_targets=[]
     s_nodes = sg.nodes
     dict_s_nodes = {} # to translate D to S
     for n in dg.nodes:
-        sn = S_node(code=n.ast_code,fct=n.fct,target=n.target)
+        sn = S_node(code=n.ast_code,
+                protected=n.protected,
+                fct=n.fct,
+                target=n.target)
         s_nodes.append(sn)
         dict_s_nodes[n.target] = sn
         for req_n in n.req:
@@ -191,7 +214,7 @@ def D_to_S_init(dg : D_graph) -> S_graph:
             sreq_n.used_by.add(sn)
     # -- merge all the inputs in the special "init_node" --
     for inp in dg.inputs:
-        init_node.insert(dict_s_nodes[inp],strong=True)
+        init_node.insert(dict_s_nodes[inp],strong=True,g=sg)
     init_node.body_code = []
     sg.init_node = init_node
     sg.output_node = dict_s_nodes[dg.output]
@@ -270,7 +293,9 @@ def simplify_node(n):
 def simplify_cheap(g : S_graph):
     # from root to leaves
     for n in g.nodes:
-        if n.main_target != g.output and n.main_fct in list_cheap_fct:
+        if ( (not n is g.output_node)
+         and n.main_fct in list_cheap_fct
+         and (not ref_keep_seq or not n.protected)):
             simplify_node(n)
     g.clear()
 
@@ -300,17 +325,17 @@ def simplify_size(g : S_graph):
     # from leaves to root
     nodes = [g.init_node] + list(g.nodes) ; nodes.reverse()
     for n in nodes:
-        if n.main_target != g.output:
+        if not n is g.output_node:
             list_size = size_children(g,n)
             if list_size != []:
                 # -- merge into one node --
                 size_n = list_size[0]
                 for other_n in list_size[1:]:
-                    size_n.insert(other_n,strong=True)
+                    size_n.insert(other_n,strong=True,g=g)
                 # -- insert their code --
                 if n is g.init_node:
-                    n.insert(size_n,strong=True)
-                else: n.insert(size_n,strong=False)
+                    n.insert(size_n,strong=True,g=g)
+                else: n.insert(size_n,strong=False,g=g)
     g.clear()
 
 # ==========================
@@ -326,9 +351,9 @@ def simplify_view(g):
     # from root to leaves
     g.init_node.is_artefact = True
     for n in g.nodes:
-        if ( n.main_target != g.output
-            and (n.main_fct in list_view_fct
-            or n.main_fct == "getattr")):
+        #if ( n.main_target != g.output
+        #    and (not ref_keep_seq or not n.protected)
+         if n.main_fct in list_view_fct or n.main_fct == "getattr":
             # /!\ ASSERTION remaining getattr are related to views !! 
             real_req = []
             for req_n in n.req:
@@ -336,7 +361,7 @@ def simplify_view(g):
                     real_req.append(req_n)
             if len(real_req)==1:
                 req_n = real_req[0]
-                req_n.insert(n,strong=True)
+                req_n.insert(n,strong=True,g=g)
                 req_n.clear_siblings_artefact()
             elif len(real_req)==0 and len(n.req)>0:
                 # experimental : I assume that views which don't 
@@ -380,8 +405,8 @@ def simplify_view(g):
 # = Move from D to S graph =
 # ==========================
 
-def D_to_S(dg):
-    sg = D_to_S_init(dg)
+def D_to_S(dg,keep_sequential=False):
+    sg = D_to_S_init(dg,keep_sequential)
     simplify_cheap(sg)
     simplify_size(sg)
     simplify_view(sg)
@@ -399,8 +424,88 @@ def D_to_S(dg):
 # ==== sequential parts ====
 # ==========================
 
+def copy_node(n : S_node): # aux for copy_graph
+    new_n = S_node()
+    new_n.is_artefact    = n.is_artefact
+    new_n.main_code      = n.main_code
+    new_n.main_fct       = n.main_fct
+    new_n.body_code      = list(n.body_code)
+    new_n.main_target    = n.main_target
+    new_n.all_targets    = list(n.all_targets)
+    new_n.tensor_targets = list(n.tensor_targets)
+    new_n.req            = set() # /!\
+    new_n.used_by        = set() # /!\
+    new_n.protected      = n.protected
+    return new_n
+
+def copy_graph(g : S_graph):
+    # -> a copy of g with fresh nodes
+    new_g = S_graph()
+    new_g.hidden_inputs  = list(g.hidden_inputs)
+    new_g.direct_inputs  = list(g.direct_inputs)
+    new_g.hidden_output  = g.hidden_output
+    new_g.direct_outputs = list(g.direct_outputs)
+    new_g.dict_info      = g.dict_info
+    new_g.dict_rand      = g.dict_rand
+    dict_nodes = {}
+    new_init = copy_node(g.init_node)
+    new_nodes = []
+    dict_nodes[new_init.main_target] = new_init
+    for n in g.nodes:
+        new_n = copy_node(n)
+        new_nodes.append(new_n)
+        dict_nodes[n.main_target] = new_n
+        for req_n in n.req:
+            new_req = dict_nodes[req_n.main_target]
+            new_req.used_by.add(new_n)
+            new_n.req.add(new_req)
+    new_g.init_node     = new_init
+    new_g.output_node   = dict_nodes[g.hidden_output]
+    new_g.nodes         = new_nodes
+    return new_g
+
+
 def cut(g : S_graph): # -> list of S_graph
-    pass
+    main_g = copy_graph(g) # to protect from side effects
+    main_g.nodes.insert(0,main_g.init_node)
+    seps = cut_based_on_req(main_g)
+    print_debug(f"S separators : {[sep.main_target for sep in seps]}")
+    list_g = []
+    for i in range(1,len(seps)):
+        new_g = S_graph()
+        list_g.append(new_g)
+        # -- get nodes --
+        inp_node = seps[i-1]
+        out_node = seps[i]
+        inp_i = main_g.nodes.index(inp_node)
+        out_i = main_g.nodes.index(out_node)
+        nodes = main_g.nodes[inp_i+1:out_i+1]
+        new_g.nodes = nodes
+        print_debug(f"size of bloc {i} : {out_i}-{inp_i}")
+        # -- input --
+        if i==1:
+            new_g.init_node = main_g.init_node
+            new_g.hidden_inputs = main_g.hidden_inputs
+            new_g.direct_inputs = main_g.direct_inputs
+        else:
+            ino = S_node(
+                target=f"init_node of bloc {i}>1, should NEVER be used")
+            new_g.hidden_inputs = [inp_node.main_target]
+            new_g.direct_inputs = inp_node.all_targets
+            new_g.init_node = ino
+            for sub_n in inp_node.used_by:
+                sub_n.req.remove(inp_node)
+                sub_n.req.add(ino)
+                ino.used_by.add(sub_n)
+            inp_node.used_by = set() # previous bloc's output node
+        # -- output --
+        new_g.output_node    = out_node
+        new_g.hidden_output  = out_node.main_target
+        new_g.direct_outputs = out_node.all_targets
+        # --
+        new_g.dict_info = main_g.dict_info
+        new_g.dict_rand = main_g.dict_rand
+    return list_g
 
 # ==========================
 
@@ -410,22 +515,54 @@ def cut(g : S_graph): # -> list of S_graph
 # === printing functions ===
 # ==========================
 
-def print_S_graph(g : S_graph,name=None,open=True):
-    print(len(g.nodes))
-    if name is None:
-        name = "forward S-graph"
-    dot = graphviz.Digraph(name,
-        comment="S_graph = Simplified forward graph")
-    dot.node(g.init_node.main_target,g.init_node.get_code(),color="blue")
+def aux_print_graph(dot,g,uniq_num):
+    def uni(tar): return f"_{uniq_num}_{tar}"
+    def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
+    def edge(i1,i2): dot.edge(uni(i1),uni(i2))
+    str_ino = g.init_node.main_target
+    node(str_ino,g.init_node.get_code(),style="dashed")
     for n in g.nodes:
-        if n.main_target == g.output:
-            dot.node(n.main_target,n.get_code(),color="red")
-        elif n.is_artefact:
-            dot.node(n.main_target,n.get_code(),style="dashed")
-        else: dot.node(n.main_target,n.get_code())
+        if n.is_artefact:
+            node(n.main_target,n.get_code(),style="dashed")
+        else: node(n.main_target,n.get_code())
     for n in g.nodes:
         for sub_n in n.req:
-            dot.edge(sub_n.main_target,n.main_target)
+            edge(sub_n.main_target,n.main_target)
+
+    # -- io --
+    str_inp = "\n".join(g.direct_inputs)
+    node("input",
+        f"INPUT : {str_inp}",
+        color="green",style="dashed")
+    str_out = "\n".join(g.direct_outputs)
+    node("output",
+        f"OUTPUT : {str_out}\nhidden : {g.hidden_output}",
+        color="green",style="dashed")
+    edge("input",g.init_node.main_target)
+    edge(g.hidden_output,"output")
+
+
+def print_S_graph(g : S_graph,name=None,open=True):
+    print(f"Simplified forward graph : {len(g.nodes)} nodes")
+    if name is None: name = "forward S-graph"
+    dot = graphviz.Digraph(
+        name,
+        comment="S_graph = Simplified forward graph")
+    aux_print_graph(dot,g,0)
+    graph_render(dot,open,"S") # from root.py
+
+
+def print_list_S_graph(list_g,name=None,open=True):
+    s = "+".join([str(len(g.nodes)) for g in list_g])
+    print(
+        f"{len(list_g)} blocs of S_graph, with {s} = "\
+        f"{sum([len(g.nodes) for g in list_g])} nodes")
+    if name is None: name = "cut forward S-graph"
+    dot = graphviz.Digraph(
+        name,
+        comment="S_graph list : cut simplified forward graph")
+    for i in range(len(list_g)):
+        aux_print_graph(dot,list_g[i],i)
     graph_render(dot,open,"S") # from root.py
 
 # ==========================
