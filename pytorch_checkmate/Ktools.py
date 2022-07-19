@@ -1,5 +1,5 @@
 from .root import *
-from . import Stools # -> S structure
+from .Stools import S_node,S_graph
 
 # ==========================
 # ====== K structure =======
@@ -29,7 +29,7 @@ class K_node():
         return ast_to_str(self.full_code)
 
 class K_graph():
-    def __init__(self,sg : Stools.S_graph):
+    def __init__(self,sg : S_graph):
         self.dict_nodes = dict()
         self.output = sg.output
         self.init_code = make_ast_module(sg.init_node.body_code)
@@ -47,7 +47,7 @@ class K_graph():
 # = Move from S to K graph =
 # ==========================
 
-def generate_tmp_local(n : Stools.S_node,g : Stools.S_graph,our_global):
+def generate_tmp_local(n : S_node,g : S_graph,our_global):
     tmp_local = {}
     exec(g.init_node.get_code(),our_global,tmp_local)
     for req_n in n.req:
@@ -78,7 +78,7 @@ def generate_tmp_local(n : Stools.S_node,g : Stools.S_graph,our_global):
     return tmp_local
 
 
-def inspection(n : Stools.S_node,g : Stools.S_graph,our_global):
+def inspection(n : S_node,g : S_graph,our_global):
     mt = n.main_target
     info = g.dict_info[mt]
     timer = make_timer(device)
@@ -151,7 +151,7 @@ def inspection(n : Stools.S_node,g : Stools.S_graph,our_global):
     return ret
 
 
-def S_to_K(sg : Stools.S_graph,
+def S_to_K(sg : S_graph,
         nn_mod,dict_inputs,
         show_debug=False,K_device=None):
     # -- device --
@@ -177,7 +177,7 @@ def S_to_K(sg : Stools.S_graph,
     kg = K_graph(sg)
 
     # ------------
-    def handle_node(n : Stools.S_node):
+    def handle_node(n : S_node):
         mt = n.main_target
         if show_debug: print(mt)
         # -- build Kfwd --

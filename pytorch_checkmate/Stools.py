@@ -1,5 +1,5 @@
 from .root import *
-from . import Dtools # -> D structure
+from .Dtools import D_node,D_graph
 
 # ==========================
 # ====== S structure =======
@@ -93,7 +93,7 @@ class S_node():
             req_n.clear_children_artefact()
 
 class S_graph():
-    def __init__(self,dg : Dtools.D_graph = None):
+    def __init__(self,dg : D_graph = None):
         self.nodes = []
         self.init_node = None
         self.output_node = None
@@ -177,7 +177,7 @@ class S_graph():
 # = Init move from D to S  =
 # ==========================
 
-def D_to_S_init(dg : Dtools.D_graph) -> S_graph:
+def D_to_S_init(dg : D_graph) -> S_graph:
     sg = S_graph(dg)
     init_node = S_node(target="-- inputs --")
     s_nodes = sg.nodes

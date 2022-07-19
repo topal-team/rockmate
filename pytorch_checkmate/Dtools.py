@@ -1,11 +1,11 @@
 from .root import *
-from . import Btools # -> B structure
+from .Btools import B_node,B_graph
 
 # ==========================
 # ====== D structure =======
 # ==========================
 
-class D_node(Btools.B_node):
+class D_node(B_node):
     def __init__(self,target="",code=None,fct=""):
         # "code" must be an AST, "fct" is a string
         super().__init__(target,code,fct)
@@ -16,9 +16,15 @@ class D_graph():
         self.inputs = [] # str list
         self.nodes  = [] # D_node list -> topo sorted
         self.output = None # str
-        #self.output_node = None # D_node
+        self.output_node = None # D_node
         self.dict_rand = {}
         self.dict_info = {} # target -> FWD_info
+        self.cuttable = False
+
+    def prepare_cut(self):
+        # in case, after simplifications, we will cut / sequen
+        self.cuttable = True
+
 
 # ==========================
 
@@ -27,7 +33,7 @@ class D_graph():
 # = Move from B to D graph =
 # ==========================
 
-def sort_nodes(g : Btools.B_graph): # -> B_node list 
+def sort_nodes(g : B_graph): # -> B_node list 
     # use output's node and trace everything
     # /!\ never trust B_graph.nodes
     o_var = g.output
@@ -72,7 +78,7 @@ def generate_tmp_local(g,dict_info,n):
 
 # ===== Main function ======
 
-def B_to_D(bg : Btools.B_graph,nn_mod,dict_inputs,D_device=None):
+def B_to_D(bg : B_graph,nn_mod,dict_inputs,D_device=None):
     # -> D_graph:
     # -- device --
     global device
@@ -131,9 +137,11 @@ def B_to_D(bg : Btools.B_graph,nn_mod,dict_inputs,D_device=None):
     o_var = bg.output
     assert(isinstance(o_var.val,ast.Name))
     str_val = o_var.val.id
-    #if o_var.has_node:
-    #    dg.output_node = dict_nodes[o_var.node]
+    if o_var.has_node:
+        dg.output_node = dict_nodes[o_var.node]
     dg.output = str_val
+
+    # -- prepares the sequencing --
 
     return dg
 

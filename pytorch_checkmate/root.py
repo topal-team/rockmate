@@ -91,9 +91,18 @@ list_view_fct = [
 # = AUX FUNCTIONS FOR AST ==
 # ==========================
 
+def remove_prefix(text, prefix):
+    if text.startswith(prefix):
+        return text[len(prefix):]
+    return text
+def remove_suffix(text, suffix):
+    if text.endswith(suffix):
+        return text[:-len(suffix)]
+    return text
 def ast_to_str(ast_code):
     #return ast.unparse(ast.fix_missing_locations(ast_code))
-    return astunparse.unparse(ast_code)
+    code = astunparse.unparse(ast_code)
+    return remove_prefix(remove_suffix(code,"\n"),"\n")
 
 def open_attr_until_name(v):
     l_name = []
@@ -133,10 +142,10 @@ def is_constant(v):
 
 
 # ==========================
-# == TO TOPO SORT GRAPHS ===
+# ==== TOPO SORT GRAPHS ====
 # ==========================
 
-def sort_based_on_req(n):
+def sort_based_on_req(n): # used on B and S
     # n can be any type of node (B, D, S, K)
     # we just need attribut req
     dict_done = {}
@@ -153,6 +162,30 @@ def sort_based_on_req(n):
                 "Cycle in the graph. How could this happened ??")
     visit(n)
     return nodes
+
+# ==========================
+
+
+
+# ==========================
+# ======= CUT GRAPHS =======
+# ==========================
+
+def cut_based_on_req(g): # used on D and S
+    # returns the list of all 1-separator of the graph.
+    to_be_visited = [g.output_node]
+    dict_nb_usages = dict([(m , len(m.used_by)) for m in g.nodes])
+    separators = []
+    while to_be_visited!=[]:
+        n = to_be_visited.pop()
+        if to_be_visited==[]:
+            separators.append(n)
+        for req_n in n.req:
+            dict_nb_usages[req_n]-=1
+            if dict_nb_usages[req_n]==0:
+                to_be_visited.append(req_n)
+    separators.reverse()
+    return separators
 
 # ==========================
 
