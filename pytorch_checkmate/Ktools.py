@@ -10,7 +10,8 @@ class K_node():
             is_artefact=False,
             target="/!\\ No target /!\\",
             tensor_targets=None,
-            full_code=None):
+            main_code=None,
+            body_code=None):
         self.is_fwd = is_fwd
         self.main_target = target
         if tensor_targets is None: tensor_targets = [target]
@@ -22,11 +23,17 @@ class K_node():
         self.fgt_mem  = None
         self.overhead = None
         self.time = None
-        self.full_code = full_code
+        self.main_code = main_code
+        self.body_code = body_code
         self.req = req
         self.used_by = set()
+
+    def full_code(self):
+        if self.main_code is None: mc = []
+        else: mc = [self.main_code]
+        return make_ast_module(mc + self.body_code)
     def get_code(self):
-        return ast_to_str(self.full_code)
+        return ast_to_str(self.full_code())
 
 class K_graph():
     def __init__(self,sg : S_graph):
@@ -190,8 +197,8 @@ def S_to_K(sg : S_graph,
                 req        = Kreq,
                 target     = mt,
                 tensor_targets = n.tensor_targets,
-                #all_targets= non_size_targets,
-                full_code  = n.full_code())
+                main_code  = n.main_code,
+                body_code  = n.body_code)
         dict_Kfwd[mt] = Kfwd
 
         # -- build Kbwd --
@@ -236,8 +243,9 @@ def S_to_K(sg : S_graph,
         is_fwd = True,
         target = "loss",
         req = {dict_Kfwd[sg.output]},
-        full_code = (
-          ast.Assign([ast.Name(f"{sg.output}.grad")],ast.Name("loss"))))
+        main_code = (
+          ast.Assign([ast.Name(f"{sg.output}.grad")],ast.Name("loss"))),
+        body_code = [])
     loss_node.run_mem  = MemSize(0)
     loss_node.fgt_mem  = MemSize(0)
     loss_node.overhead = MemSize(0)

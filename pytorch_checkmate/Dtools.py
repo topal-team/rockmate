@@ -22,8 +22,15 @@ class D_graph():
         self.cuttable = False
 
     def prepare_cut(self):
-        # in case, after simplifications, we will cut / sequen
+        # in case, after simplifications, we will cut / sequentialize
+        # we need to protect the separators from simplification
+        # but in case we have a chain of separators, we only protect
+        # the last one (we will keep a good structure, while reducing
+        # the number of blocs)
         self.cuttable = True
+        all_separators = cut_based_on_req(self)
+
+
 
 
 # ==========================
