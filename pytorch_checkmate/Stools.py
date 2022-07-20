@@ -552,7 +552,7 @@ def print_S_graph(g : S_graph,name=None,open=True):
     graph_render(dot,open,"S") # from root.py
 
 
-def print_list_S_graph(list_g,name=None,open=True):
+def print_S_graph_list(list_g,name=None,open=True):
     s = "+".join([str(len(g.nodes)) for g in list_g])
     print(
         f"{len(list_g)} blocs of S_graph, with {s} = "\

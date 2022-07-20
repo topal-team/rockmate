@@ -160,11 +160,9 @@ def inspection(n : S_node,g : S_graph,our_global):
     # ===============
     return ret
 
-
-def S_to_K(sg : S_graph,nn_mod,dict_inputs,
-        show_debug=None,K_device=None):
+# aux function to handle show_debug and device
+def aux_init_S_to_K(nn_mod,show_debug,K_device):
     if not (show_debug is None): ref_print_debug[0] = show_debug
-    # -- device --
     global device
     if K_device is None:
         if torch.cuda.is_available():
@@ -173,18 +171,21 @@ def S_to_K(sg : S_graph,nn_mod,dict_inputs,
             device = torch.device('cpu')
     else:   device = K_device
     nn_mod.to(device)
-    for (k,x) in dict_inputs.items():
-        dict_inputs[k] = x.to(device)
-    # --
 
+
+# the function that does it all
+def aux_build_S_to_K(sg : S_graph,nn_mod):
     # -- init --
     dict_Kbwd = dict() # dict : target -> K_node(bwd)
     dict_Kfwd = dict() # dict : target -> K_node(fwd)
-    our_global = dict(**(globals()) , **dict_inputs)
+    our_global = globals().copy()
     our_global["self"] = nn_mod
     our_global["device"] = device
     our_global
     kg = K_graph(sg)
+    # -> rebuilt dict_inputs
+    for inp in sg.direct_inputs:
+        our_global[inp] = generate_val(sg.dict_info[inp],device) #root.py 
 
     # ------------
     def handle_node(n : S_node):
@@ -262,17 +263,15 @@ def S_to_K(sg : S_graph,nn_mod,dict_inputs,
     kg.make_used_by()
     return kg
 
-# ==========================
+
+def S_to_K(sg : S_graph,nn_mod,show_debug=None,K_device=None):
+    aux_init_S_to_K(nn_mod,show_debug,K_device)
+    return aux_build_S_to_K(sg,nn_mod)
 
 
-
-# ==========================
-# = Move S list to K list ==
-# ==========================
-
-def S_list_to_K_list(list_sg,nn_mod,dict_inputs,
-        show_debug=None,K_device=None):
-    pass
+def S_list_to_K_list(list_sg,nn_mod,show_debug=None,K_device=None):
+    aux_init_S_to_K(nn_mod,show_debug,K_device)
+    return [aux_build_S_to_K(sg,nn_mod) for sg in list_sg]
 
 # ==========================
 
@@ -327,7 +326,7 @@ def print_K_graph(g : K_graph,name=None,open=True):
     graph_render(dot,open,"K") # from root.py
 
 
-def print_list_K_graph(list_g,name=None,open=True):
+def print_K_graph_list(list_g,name=None,open=True):
     s = "+".join([str(len(g.dict_nodes)) for g in list_g])
     print(
         f"{len(list_g)} blocs of K_graph, with {s} = "\

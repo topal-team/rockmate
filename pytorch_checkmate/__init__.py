@@ -7,5 +7,5 @@ from . import Dtools
 from . import Stools
 from . import Ktools
 from .main import print_inputs
-from .main import make_K
+from .main import make_all_graphs
 from . import use_chk
