@@ -41,7 +41,7 @@ def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False
     if show_debug:
         for kn in nodes:
             if -kn.fgt_mem.v == max_cost:
-                print(kn.get_code())
+                print(f"the most expensive code : {kn.get_code()}")
     print('total cost:', sum(chk_g.cost_ram.values()),
           'max cost:', max_cost,
           'budget:', budget)

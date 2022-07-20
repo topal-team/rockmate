@@ -246,10 +246,10 @@ def graph_render(dot,open,graph_type):
     try:
       dot.render(directory="graphviz_dir",quiet=True,view=open)
     except:
-      print("Warning : issue with graphviz to print {graph_type}_graph, "\
-            "probably because Graphviz isn't installed on the computer "\
-            "(the software, not the python module). Normally the .gv "\
-            "has been generated, but not the .pdf",
+      print(f"Warning : issue with graphviz to print {graph_type}_graph, "\
+            f"probably because Graphviz isn't installed on the computer "\
+            f"(the software, not the python module). Normally the .gv "\
+            f"has been generated, but not the .pdf",
             file = sys.stderr)
 
 # ==========================
