@@ -59,3 +59,10 @@ def make_all_graphs(nn_mod,
     list_kg = Ktools.S_list_to_K_list(list_sg,nn_mod)
     return all_graphs(bg,dg,sg,kg,list_sg,list_kg)
 
+def print_all_graphs(a,name,open):
+    Dtools.print_D_graph(a.D_graph,name=f"{name}_D_graph",open=open)
+    Stools.print_S_graph(a.S_graph,name=f"{name}_S_graph",open=open)
+    Ktools.print_K_graph(a.K_graph,name=f"{name}_K_graph",open=open)
+    Stools.print_S_graph_list(a.S_graph_list,name=f"{name}_S_cut_graph",open=open)
+    Ktools.print_K_graph_list(a.K_graph_list,name=f"{name}_K_cut_graph",open=open)
+
