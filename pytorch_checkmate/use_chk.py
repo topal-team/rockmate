@@ -1,4 +1,5 @@
 from .Ktools import K_graph
+from .root import *
 import torch
 
 if torch.cuda.is_available():
@@ -21,7 +22,7 @@ from checkmate.core.solvers.cvxpy_solver import solve_checkmate_cvxpy
 from checkmate.plot.graph_plotting import plot_schedule
 import cvxpy
 
-def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False,show_debug=False,use_gurobi=True):
+def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=True,show_debug=False,use_gurobi=True):
     if solver not in cvxpy.installed_solvers():
         raise AttributeError("please choose from the installed solvers:"+ str(cvxpy.installed_solvers()))
     
@@ -83,24 +84,27 @@ class Sched_to_Code():
             return n.get_code()
         assert(n.name not in self.live)
         # code = (n.get_code())
-        code_list = n.get_code().split('\n')
-        code = code_list[0].replace(n.main_target,"_"+n.main_target)
+        # code_list = n.get_code().split('\n')
+        # code = code_list[0].replace(n.main_target,"_"+n.main_target)
         # code_list[0] = code
+        # code = n.main_code
+        code = ast_to_str(make_ast_module([n.main_code])) 
+        code = code.replace(n.main_target,"_"+n.main_target)
         
         self.live.append(n.name)
         if n.name not in self.fgt:
-            code_list[0] = (
+            code = (
                 f"{code} ; "\
                 f"{n.main_target} = _{n.main_target}.detach(); "\
                 f"{n.main_target}.requires_grad_()" )
         else: #i.e. recomputation
             #code = (n.code).replace(n.main_target,"_"+n.main_target)
-            code_list[0] = (
+            code = (
                 f"{code} ; "\
                 f"{n.main_target}.data = _{n.main_target}.data" )
         #if n.main_target == self.graph.output:
         #    fwd_code += f""
-        return '\n'.join(code_list)
+        return code+'\n'+ast_to_str(make_ast_module(n.body_code))
 
     def _run_bwd(self, n):
         assert(n.name not in self.live)
