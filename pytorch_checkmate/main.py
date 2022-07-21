@@ -3,6 +3,7 @@ from . import Btools
 from . import Dtools
 from . import Stools
 from . import Ktools
+from . import use_chk
 
 def print_inputs(nn_mod):
     s = inspect.signature(nn_mod.forward)
@@ -69,6 +70,10 @@ def print_all_graphs(a,name,open):
 
 
 def K_to_sched(g : Ktools.K_graph,budget):
+    sched_result, chk_g = use_chk.make_sched(g, budget)
+    Translator = use_chk.Sched_to_Code(chk_g,g)
+    sched_code = Translator.generate_sched_code(sched_result)
+    
     code_fw = "TODO"
     # |-> the code to compute the output variable of the K_graph
     mem_fw = MemSize(0)

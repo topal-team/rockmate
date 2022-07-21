@@ -160,11 +160,12 @@ context1  = torch.tensor([tokenizer.encode("The planet earth")], device=device)
 context2  = torch.tensor([tokenizer.encode("I'm upset with those tools")], device=device)
 print(context1)
 
+torch.random.manual_seed(0)
 model2 = GPT2(nlayers=1,dropout=0, d_model=768//2)
 model2.to(device)
 
-GPT2_Kg = pk.make_K(model2,{"src":context1})
-
+GPT2_graphs = pk.make_all_graphs(model2,{"src":context1})
+GPT2_Kg = GPT2_graphs.K_graph
 budget = 700000
 # reload(pytorch_checkmate)
 sched_result, g = pk.use_chk.make_sched(GPT2_Kg, budget, use_gurobi=True, verbose=True)
@@ -178,3 +179,26 @@ translator = pk.use_chk.Sched_to_Code(g, GPT2_Kg)
 sched_code = translator.generate_sched_code(sched_result)
 
 print("Great! You generated the execution code!")
+
+loss = torch.ones_like(model2(context1),device=device)
+tmp_local = {'self':model2, 'src':context1, '_loss':loss}
+
+# ==========DEBUG========
+sched_code[1] = "___11__2 = torch.arange(0, __10__1, 1, dtype=torch.int32, device=torch.device('cuda'), pin_memory=False) ; __11__2 = ___11__2.detach()\n__13_input = torch.unsqueeze(__11__2, 0)"
+sched_code[12] = sched_code[12].replace('tensor', 'torch.tensor')
+#sched_code[117] = "___11__2 = torch.arange(0, __10__1, 1, dtype=torch.int32, device=torch.device('cuda'), pin_memory=False) ; __11__2 = ___11__2.detach()\n__13_input = torch.unsqueeze(__11__2, 0)"
+torch.cuda.reset_peak_memory_stats()
+max_before = torch.cuda.max_memory_allocated()
+
+exec(pk.root.ast_to_str(GPT2_Kg.init_code), globals(), tmp_local)
+for i,code in enumerate(sched_code[:]):
+    #print(i,)
+    try:
+        exec(code, globals(), tmp_local)
+    except:
+        print(f"fail to execute code{i}")
+print("Great! You have executed the code!")
+
+print("=======EXEC SCHED CODE=======")
+print("weight grad:", torch.mean(tmp_local['self'].ln_f.weight.grad))
+print("peak memory:", torch.cuda.max_memory_allocated()-max_before)
