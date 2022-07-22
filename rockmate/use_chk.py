@@ -159,8 +159,21 @@ class Sched_to_Code():
 
             else:
                 raise TypeError(f"Operation not recognize:{type(op)}")
-
-        return self.sched_code
+        
+        fwd_code = []
+        bwd_code = []
+        fwd = True
+        for i,c in enumerate(self.sched_code):
+            if c.strip()=="":
+                continue
+            elif "loss" in c:
+                fwd=False
+            if fwd:
+                fwd_code.append(c)
+            else:
+                bwd_code.append(c)
+                
+        return fwd_code,bwd_code
 
 # ==========================
 

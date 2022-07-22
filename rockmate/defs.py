@@ -3,11 +3,11 @@ from .use_chk import make_sched, Sched_to_code
 
 class RK_fwd_option():
     def __init__(self,kg,budget):
-        #sched_result, chk_g = use_chk.make_sched(kg, budget)
-        #Translator = use_chk.Sched_to_Code(chk_g,kg)
-        #sched_code = Translator.generate_sched_code(sched_result)
-        self.code_fwd = ""
-        self.code_bwd = ""
+        sched_result, chk_g = use_chk.make_sched(kg, budget)
+        Translator = use_chk.Sched_to_Code(chk_g,kg)
+        fwd_code,bwd_code = Translator.generate_sched_code(sched_result)
+        self.code_fwd = "\n".join(fwd_code)
+        self.code_bwd = "\n".join(bwd_code)
         self.time_fwd = 0
         self.time_bwd = 0
         self.mem_peak_fwd = 0
