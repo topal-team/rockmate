@@ -29,13 +29,26 @@ class all_graphs():
         self.S_graph_list = list_sg
         self.K_graph_list = list_kg
 
+def print_all_graphs(a,name,open):
+    Dtools.print_D_graph(a.D_graph,name=f"{name}_D_graph",open=open)
+    Stools.print_S_graph(a.S_graph,name=f"{name}_S_graph",open=open)
+    Ktools.print_K_graph(a.K_graph,name=f"{name}_K_graph",open=open)
+    Stools.print_S_graph_list(a.S_graph_list,name=f"{name}_S_cut_graph",open=open)
+    Ktools.print_K_graph_list(a.K_graph_list,name=f"{name}_K_cut_graph",open=open)
+
+
+# ==========================
+# ===== Main function ======
+# ==========================
+
 def make_all_graphs(nn_mod,
     dict_inputs,
     show_debug=False,
-    impose_device=False,
-    D_device=None,
-    K_device=None):
-    """
+    impose_device=True, D_device=None, K_device=None,
+    bool_bg = True , bool_dg = True ,
+    bool_sg = True , bool_kg = True ,
+    bool_list_sg = True , bool_list_kg = True):
+    r"""
     this function returns an objet with attributes :
      -> .B_graph, .D_graph, .S_graph and .K_graph -> the whole module
      -> .S_graph_list and .K_graph_list -> the sequentialized module
@@ -46,24 +59,33 @@ def make_all_graphs(nn_mod,
       - pgb.Stools.print_S_graph_list
       - pgb.Ktools.print_K_graph_list
     """
+    bool_list_sg = bool_list_sg or bool_list_kg
+    bool_sg = bool_sg or bool_kg or bool_list_sg
+    bool_dg = bool_dg or bool_sg
+    bool_bg = bool_bg or bool_dg
+
     ref_print_debug[0] = show_debug
     check_inputs(nn_mod,dict_inputs)
     # -- the whole module --
-    bg = Btools.make_B(nn_mod,dict_inputs,
-                       impose_device=impose_device)
-    dg = Dtools.B_to_D(bg,nn_mod,dict_inputs,D_device=D_device)
-    sg = Stools.D_to_S(dg,keep_sequential=True)
-    kg = Ktools.S_to_K(sg,nn_mod,K_device=K_device)
+    if bool_bg:
+        bg = Btools.make_B(nn_mod,dict_inputs,
+                        impose_device=impose_device)
+    else: bg = None
+    if bool_dg: dg = Dtools.B_to_D(bg,nn_mod,dict_inputs,D_device=D_device)
+    else: dg = None
+    if bool_sg: sg = Stools.D_to_S(dg,keep_sequential=True)
+    else: sg = None
+    if bool_kg: kg = Ktools.S_to_K(sg,nn_mod,K_device=K_device)
+    else: kg = None
     # -- sequentialized --
-    list_sg = Stools.cut(sg)
-    list_kg = Ktools.S_list_to_K_list(list_sg,nn_mod)
+    if bool_list_sg:
+        list_sg = Stools.cut(sg)
+    else: list_sg = None
+    if bool_list_kg:
+        list_kg = Ktools.S_list_to_K_list(list_sg,nn_mod)
+    else: list_kg = None
+
     return all_graphs(bg,dg,sg,kg,list_sg,list_kg)
 
-
-def print_all_graphs(a,name,open):
-    Dtools.print_D_graph(a.D_graph,name=f"{name}_D_graph",open=open)
-    Stools.print_S_graph(a.S_graph,name=f"{name}_S_graph",open=open)
-    Ktools.print_K_graph(a.K_graph,name=f"{name}_K_graph",open=open)
-    Stools.print_S_graph_list(a.S_graph_list,name=f"{name}_S_cut_graph",open=open)
-    Ktools.print_K_graph_list(a.K_graph_list,name=f"{name}_K_cut_graph",open=open)
+# ==========================
 
