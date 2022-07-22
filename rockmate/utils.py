@@ -14,7 +14,7 @@
 from pytorch_gb.utils import *
 
 # to use pytorch graph builder
-import pytorch_gb
+import pytorch_gb as pgb
 
 # == for use_chk.py == -> K_graph and checkmate
 from pytorch_gb.Ktools import K_graph
