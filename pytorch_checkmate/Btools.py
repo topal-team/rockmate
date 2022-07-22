@@ -9,7 +9,7 @@
 # mostly "target = fct_name(*(const / var name / sub_obj))
 # ------------------------------------
 
-from .root import *
+from .utils import *
 
 # ==========================
 # ====== B structure =======
@@ -339,7 +339,6 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False):
     # /!\ TorchScript's global constant vars must have been removed
     def handle_expr(expr,target : str = None) -> B_var :
         if is_constant(expr):
-        #if isinstance(expr,ast.Constant): # never creates any node
             return B_var(expr)
         elif isinstance(expr,ast.Name):
             assert(expr.id in dict_vars)
@@ -360,8 +359,6 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False):
         elif isinstance(expr,ast.UnaryOp):
             assert(isinstance(expr.op,ast.USub)) # quick fix
             assert(is_constant(expr.operand))
-            #assert(isinstance(expr.operand,ast.Constant))
-            # return B_var(ast.Constant(f"-{expr.operand.value}"))
             return B_var(expr)
         else:
             raise Exception(f"{type(expr)} unknown")

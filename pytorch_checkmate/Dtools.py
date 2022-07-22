@@ -1,4 +1,4 @@
-from .root import *
+from .utils import *
 from .Btools import B_node,B_graph
 
 # ==========================
@@ -27,7 +27,7 @@ class D_graph():
         # but in case of chain of separators, we only protect
         # the last one (we will keep a good structure, while reducing
         # the number of blocs)
-        all_sep = cut_based_on_req(self) # root.py : sep from inp to output
+        all_sep = cut_based_on_req(self) # utils.py : sep from inp to output
         important_sep = []
         for i in range(len(all_sep)-1):
             sep = all_sep[i]
@@ -53,7 +53,7 @@ def sort_nodes(g : B_graph): # -> B_node list
 
 
 def get_info(x) -> FWD_info:
-    # for FWD_info see root.py
+    # for FWD_info see utils.py
     info = FWD_info()
     if (isinstance(x,int) or
         (isinstance(x,torch.Tensor) and x.shape==torch.Size([]))):
@@ -78,7 +78,7 @@ def generate_tmp_local(g,dict_info,n):
     tmp_local = {}
     for sub_n in n.req:
         sub_info = dict_info[sub_n.target]
-        sub_x = generate_val(sub_info,device) # from root.py
+        sub_x = generate_val(sub_info,device) # from utils.py
         tmp_local[sub_n.target] = sub_x
     if n.is_rand:
         for sub_r in n.req_rand:
@@ -93,12 +93,8 @@ def B_to_D(bg : B_graph,nn_mod,dict_inputs,D_device=None):
     # -> D_graph:
     # -- device --
     global device
-    if D_device is None:
-        if torch.cuda.is_available():
-            device = torch.device('cuda')
-        else:
-            device = torch.device('cpu')
-    else:   device = D_device
+    if D_device is None: device = get_device()
+    else: device = K_device
     nn_mod.to(device)
     for (k,x) in dict_inputs.items():
         dict_inputs[k] = x.to(device)
@@ -208,7 +204,7 @@ def print_D_graph(g : D_graph,name=None,open=True):
     for n in g.nodes:
         for sub_n in n.req:
             dot.edge(sub_n.target,n.target)
-    graph_render(dot,open,"D") # from root.py
+    graph_render(dot,open,"D") # from utils.py
 
 # ==========================
 

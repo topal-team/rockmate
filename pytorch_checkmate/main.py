@@ -1,9 +1,8 @@
-from .root import *
+from .utils import *
 from . import Btools
 from . import Dtools
 from . import Stools
 from . import Ktools
-from . import use_chk
 
 def print_inputs(nn_mod):
     s = inspect.signature(nn_mod.forward)
@@ -41,11 +40,11 @@ def make_all_graphs(nn_mod,
      -> .B_graph, .D_graph, .S_graph and .K_graph -> the whole module
      -> .S_graph_list and .K_graph_list -> the sequentialized module
     |--> on which you can use :
-      - pk.Dtools.print_D_graph
-      - pk.Stools.print_S_graph
-      - pk.Ktools.print_K_graph
-      - pk.Stools.print_S_graph_list
-      - pk.Ktools.print_K_graph_list
+      - pgb.Dtools.print_D_graph
+      - pgb.Stools.print_S_graph
+      - pgb.Ktools.print_K_graph
+      - pgb.Stools.print_S_graph_list
+      - pgb.Ktools.print_K_graph_list
     """
     ref_print_debug[0] = show_debug
     check_inputs(nn_mod,dict_inputs)
@@ -67,21 +66,4 @@ def print_all_graphs(a,name,open):
     Ktools.print_K_graph(a.K_graph,name=f"{name}_K_graph",open=open)
     Stools.print_S_graph_list(a.S_graph_list,name=f"{name}_S_cut_graph",open=open)
     Ktools.print_K_graph_list(a.K_graph_list,name=f"{name}_K_cut_graph",open=open)
-
-
-def K_to_sched(g : Ktools.K_graph,budget):
-    sched_result, chk_g = use_chk.make_sched(g, budget)
-    Translator = use_chk.Sched_to_Code(chk_g,g)
-    sched_code = Translator.generate_sched_code(sched_result)
-    
-    code_fw = "TODO"
-    # |-> the code to compute the output variable of the K_graph
-    mem_fw = MemSize(0)
-    # |-> the memory occupied at the end of this first forward
-    code_bw = "TODO"
-    # |-> the code to continue, from output.grad to input.grad
-    mem_peak_bw = MemSize(0)
-    # |-> the peak memory during this
-    return code_fw,mem_fw,code_bw,mem_peak_bw
-
 

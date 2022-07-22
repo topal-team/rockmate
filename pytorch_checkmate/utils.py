@@ -1,5 +1,5 @@
 # ==========================
-# This file is the root of the pk file 
+# This file is the root of the pgb file 
 # hierarchy. It contains the global vars
 # and auxiliary functions. But also all
 # the imports actions, even those specific
@@ -50,6 +50,13 @@ ref_print_debug = [False]
 def print_debug(*args, **kwargs):
     if ref_print_debug[0]:
         print(*args, **kwargs)
+
+# -> device
+def get_device():
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    else:
+        return torch.device('cpu')
 
 # ==========================
 

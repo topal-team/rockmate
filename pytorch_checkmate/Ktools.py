@@ -1,4 +1,4 @@
-from .root import *
+from .utils import *
 from .Stools import S_node,S_graph
 
 # ==========================
@@ -66,7 +66,7 @@ def generate_tmp_local(n : S_node,g : S_graph,our_global):
             # but the body_code may requires some artefacts
             req_tar = req_n.main_target
             main_info = g.dict_info[req_tar]
-            tmp_local[req_tar] = generate_val(main_info,device) #root.py
+            tmp_local[req_tar] = generate_val(main_info,device) #utils.py
             for req_req_n in req_n.req:
                 if not (req_req_n is g.init_node):
                     for req_req_tar in req_req_n.all_targets:
@@ -164,12 +164,8 @@ def inspection(n : S_node,g : S_graph,our_global):
 def aux_init_S_to_K(nn_mod,show_debug,K_device):
     if not (show_debug is None): ref_print_debug[0] = show_debug
     global device
-    if K_device is None:
-        if torch.cuda.is_available():
-            device = torch.device('cuda')
-        else:
-            device = torch.device('cpu')
-    else:   device = K_device
+    if K_device is None: device = get_device()
+    else: device = K_device
     nn_mod.to(device)
 
 
@@ -185,7 +181,7 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
     kg = K_graph(sg)
     # -> rebuilt dict_inputs
     for inp in sg.direct_inputs:
-        our_global[inp] = generate_val(sg.dict_info[inp],device) #root.py 
+        our_global[inp] = generate_val(sg.dict_info[inp],device) #utils.py 
 
     # ------------
     def handle_node(n : S_node):
@@ -247,10 +243,11 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
         is_fwd = True,
         target = "loss",
         req = {dict_Kfwd[sg.hidden_output]},
-        main_code = (
-          ast.Assign(
-            [ast.Name(f"{sg.hidden_output}.grad")],
-            ast.Name("loss"))),
+        main_code = make_ast_constant("LOSS"),
+        #main_code = (
+        #  ast.Assign(
+        #    [ast.Name(f"{sg.hidden_output}.grad")],
+        #    ast.Name("loss"))),
         body_code = [])
     loss_node.run_mem  = MemSize(0)
     loss_node.fgt_mem  = MemSize(0)
@@ -288,7 +285,7 @@ def aux_print_graph(dot,g,uniq_num):
     def print_node(n):
         if n.main_target == "loss":
             node(n.name,
-                "LOSS\ncode: {n.get_code()}",
+                f"LOSS\ncode: {n.get_code()}",
                 color="green")
         elif n.is_fwd:
             node(n.name,n.get_code(),color="blue")
@@ -323,7 +320,7 @@ def print_K_graph(g : K_graph,name=None,open=True):
     dot = graphviz.Digraph(name,
         comment="K_graph = Forward + Backward graph")
     aux_print_graph(dot,g,0)
-    graph_render(dot,open,"K") # from root.py
+    graph_render(dot,open,"K") # from utils.py
 
 
 def print_K_graph_list(list_g,name=None,open=True):
@@ -337,7 +334,7 @@ def print_K_graph_list(list_g,name=None,open=True):
         comment="K_graph list : cut forward+backward graph")
     for i in range(len(list_g)):
         aux_print_graph(dot,list_g[i],i)
-    graph_render(dot,open,"K") # from root.py
+    graph_render(dot,open,"K") # from utils.py
 
 # ==========================
 

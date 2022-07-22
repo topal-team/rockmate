@@ -1,4 +1,4 @@
-from .root import *
+from .utils import *
 from .Dtools import D_node,D_graph
 
 # ==========================
@@ -549,7 +549,7 @@ def print_S_graph(g : S_graph,name=None,open=True):
         name,
         comment="S_graph = Simplified forward graph")
     aux_print_graph(dot,g,0)
-    graph_render(dot,open,"S") # from root.py
+    graph_render(dot,open,"S") # from utils.py
 
 
 def print_S_graph_list(list_g,name=None,open=True):
@@ -563,6 +563,6 @@ def print_S_graph_list(list_g,name=None,open=True):
         comment="S_graph list : cut simplified forward graph")
     for i in range(len(list_g)):
         aux_print_graph(dot,list_g[i],i)
-    graph_render(dot,open,"S") # from root.py
+    graph_render(dot,open,"S") # from utils.py
 
 # ==========================

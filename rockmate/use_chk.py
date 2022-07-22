@@ -1,26 +1,11 @@
-from .Ktools import K_graph
-from .root import *
-import torch
-
-if torch.cuda.is_available():
-    device = torch.device('cuda')
-else:
-    device = torch.device('cpu')
+from .utils import *
+# all the imports are done in utils
 
 # ==========================
 # === make the schedule ====
 # ==========================
 
-from checkmate.core.graph_builder import GraphBuilder
-from checkmate.core.schedule import ScheduledResult, ILPAuxData
-try:
-    from checkmate.core.solvers.gurobi_solver import solve_ilp_gurobi
-    gurobi_installed = True
-except:
-    gurobi_installed = False
-from checkmate.core.solvers.cvxpy_solver import solve_checkmate_cvxpy
-from checkmate.plot.graph_plotting import plot_schedule
-import cvxpy
+device = get_device() # see utils.py
 
 def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=True,show_debug=False,use_gurobi=True):
     if solver not in cvxpy.installed_solvers():
@@ -67,11 +52,6 @@ def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=True,
 # ==========================
 # = translate the schedule =
 # ==========================
-
-from checkmate.core.schedule import (
-    OperatorEvaluation,
-    DeallocateRegister,
-    AllocateRegister)
 
 class Sched_to_Code():
     def __init__(self,g,K_graph):
