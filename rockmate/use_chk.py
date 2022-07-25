@@ -53,7 +53,14 @@ def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=True,
 # = translate the schedule =
 # ==========================
 
-class Sched_to_Code():
+class Operation():
+    def __init__(self,code,node,is_fgt=False):
+        self.code = code
+        self.node = node
+        self.is_fgt = is_fgt
+        self.is_fwd = True
+
+class Sched_to_ops():
     def __init__(self,g,K_graph):
         self.g = g
         self.graph = K_graph
@@ -128,9 +135,9 @@ class Sched_to_Code():
         self.fgt.append(n.name)
         return ";".join(code_list)
 
-    def generate_sched_code(self, sched_result):
+    def generate_sched_ops(self, sched_result):
         self.schedule = sched_result.schedule
-        self.sched_code = []
+        self.sched_ops = []
         self.live = []#record which grad is live
         self.fgt = []#record what is forgotten
         for op in self.schedule:
@@ -142,7 +149,8 @@ class Sched_to_Code():
                     code = self._run_fwd(node)
                 else:
                     code = self._run_bwd(node)
-                self.sched_code.append(code)
+                operation = Operation(code,node,is_fgt=False)
+                self.sched_ops.append(operation)
 
             elif isinstance(op, DeallocateRegister):
                 node_name = self.g.node_names[op.op_id]
@@ -152,28 +160,28 @@ class Sched_to_Code():
                     code = self._fgt_fwd(node)
                 else:
                     code = self._fgt_bwd(node)
+                operation = Operation(code,node,is_fgt=True)
+                self.sched_ops.append(operation)
 
-                self.sched_code.append(code)
             elif isinstance(op, AllocateRegister):
-                self.sched_code.append("")
+                pass
 
             else:
                 raise TypeError(f"Operation not recognize:{type(op)}")
         
-        fwd_code = []
-        bwd_code = []
+        fwd_ops = []
+        bwd_ops = []
         fwd = True
-        for i,c in enumerate(self.sched_code):
-            if c.strip()=="":
-                continue
-            elif "loss" in c:
+        for i,op in enumerate(self.sched_ops):
+            if "loss" in op.code:
                 fwd=False
             if fwd:
-                fwd_code.append(c)
+                fwd_ops.append(op)
             else:
-                bwd_code.append(c)
-                
-        return fwd_code,bwd_code
+                bwd_ops.append(op)    
+        return fwd_ops,bwd_ops 
+
+
 
 # ==========================
 
