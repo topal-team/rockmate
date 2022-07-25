@@ -9,6 +9,7 @@ class K_node():
     def __init__(self,is_fwd,req,
             is_artefact=False,
             target="/!\\ No target /!\\",
+            all_targets=None,
             tensor_targets=None,
             main_code=None,
             body_code=None):
@@ -16,6 +17,8 @@ class K_node():
         self.main_target = target
         if tensor_targets is None: tensor_targets = [target]
         self.tensor_targets = tensor_targets
+        if all_targets is None: all_targets = [target]
+        self.all_targets = all_targets
         if is_fwd: self.name = "fwd_"+target
         else:      self.name = "bwd_"+target
         self.is_artefact = is_artefact
@@ -32,6 +35,10 @@ class K_node():
         if self.main_code is None: mc = []
         else: mc = [self.main_code]
         return make_ast_module(mc + self.body_code)
+    def get_main_code(self):
+        if self.main_code is None: mc = []
+        else: mc = [self.main_code]
+        return ast_to_str(make_ast_module(mc))
     def get_code(self):
         return ast_to_str(self.full_code())
 
@@ -43,6 +50,7 @@ class K_graph():
         self.hidden_output  = sg.hidden_output
         self.direct_outputs = sg.direct_outputs
         self.init_code = make_ast_module(sg.init_node.body_code)
+        self.dict_info = sg.dict_info
         self.dict_rand = sg.dict_rand
         self.loss_node = None
     def make_used_by(self):
@@ -180,9 +188,13 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
     our_global["device"] = device
     our_global
     kg = K_graph(sg)
-    # -> rebuilt dict_inputs
+    # -> rebuilt dict_inputs and make memsize of inputs
+    memUsage = MeasureMemory(device)
     for inp in sg.direct_inputs:
-        our_global[inp] = generate_val(sg.dict_info[inp],device) #utils.py 
+        info = sg.dict_info[inp]
+        our_global[inp] , info.memsize , _ = (
+            memUsage.measure(generate_val,info,device))
+        # our_global[inp] = generate_val(sg.dict_info[inp],device) #utils
 
     # ------------
     def handle_node(n : S_node):
@@ -197,6 +209,7 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
                 is_fwd     = True,
                 req        = Kreq,
                 target     = mt,
+                all_targets    = n.all_targets,
                 tensor_targets = n.tensor_targets,
                 main_code  = n.main_code,
                 body_code  = n.body_code)
@@ -225,6 +238,7 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
             Kfwd.fgt_mem  = res["mem_fgt_fwd"]
             Kfwd.overhead = res["overhead_fwd"]
             Kfwd.time     = res["time_run_fwd"]
+            info.memsize  = res["mem_fgt_fwd"]
             if info.requires_grad:
                 Kbwd.run_mem  = res["mem_run_bwd"]
                 Kbwd.fgt_mem  = res["mem_fgt_bwd"]

@@ -166,7 +166,7 @@ def is_constant(v):
 # ==== TOPO SORT GRAPHS ====
 # ==========================
 
-def sort_based_on_req(n): # used on B and S
+def sort_based_on_req(n): # used on B, S and K
     # n can be any type of node (B, D, S, K)
     # we just need attribut req
     dict_done = {}
@@ -226,6 +226,7 @@ class FWD_info(): # everything needed to randomly regenerate a var
         self.tsize = None # target_size
         self.sub_info = None # if ttype = list or tuple
         self.requires_grad = None # if Tensor or Size
+        self.memsize = None # done much later
 
 def generate_val(info,device):
     tt = info.ttype

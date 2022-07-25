@@ -44,7 +44,19 @@ from checkmate.core.schedule import (
 
 
 # ==========================
-# ====== GLOBAL VARS =======
+# ===== AUX FUNCTIONS ======
+
+class piece_of_code():
+    def __init__(self,str_code,name):
+        self.str_code = str_code
+        self.name = name
+    def __repr__(self):
+        return self.name
+class bloc_of_code():
+    def __init__(self,l,name):
+        self.list_codes = l
+        self.name = name
+    def __repr__(self):
+        s = "\n\t".join([c.__repr__() for c in self.list_codes])
+        return f"{self.name}:\n\t{s}"
 # ==========================
-
-
