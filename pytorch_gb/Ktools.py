@@ -44,6 +44,7 @@ class K_graph():
         self.direct_outputs = sg.direct_outputs
         self.init_code = make_ast_module(sg.init_node.body_code)
         self.dict_rand = sg.dict_rand
+        self.loss_node = None
     def make_used_by(self):
         for n in self.dict_nodes.values():
             for req_n in n.req:
@@ -253,6 +254,7 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
     loss_node.fgt_mem  = MemSize(0)
     loss_node.overhead = MemSize(0)
     loss_node.time     = 0
+    kg.loss_node = loss_node
     dict_Kbwd[sg.hidden_output].req.add(loss_node)
     dict_nodes["fwd_loss"] = loss_node
     # ------------
