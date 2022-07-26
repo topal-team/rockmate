@@ -17,7 +17,7 @@ class RK_block_solution():
                     save[i:] -= op.node.fgt_mem.v
                 else:
                     save[i:] += op.node.fgt_mem.v
-                overhead[i] = op.node.overhead
+                overhead[i] = op.node.overhead.v
             return overhead, save
         
         fwd_overhead,fwd_save = ops_stats(fwd_ops)
@@ -29,7 +29,7 @@ class RK_block_solution():
         self.time_bwd = sum([op.time for op in bwd_ops])
         self.size_a_bar = fwd_save[-1]
         self.overhead_fwd = max(fwd_overhead+fwd_save) - fwd_save[-1]
-        self.overhead_bwd = max(bwd_overhead+fwd_save) - bwd_save[-1]
+        self.overhead_bwd = max(bwd_overhead+bwd_save) - bwd_save[-1]
 # Check if o_b is what you need
 # I need self.overhead_fwd/bwd in RK_block_solution
 
