@@ -59,6 +59,11 @@ class Operation():
         self.node = node
         self.is_fgt = is_fgt
         self.is_fwd = True
+        #TODO: measure the real time for fgt
+        if is_fgt:
+            self.time = 0
+        else:
+            self.time = node.time
 
 class Sched_to_ops():
     def __init__(self,g,K_graph):
