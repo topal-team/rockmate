@@ -27,6 +27,7 @@ except:
     from rotor.utils import *
 from rotor.timing import *
 from rotor.memory import *
+from rotor.inspection import tensorMsize
 min_duration = 0
 
 # for main -> get inputs
