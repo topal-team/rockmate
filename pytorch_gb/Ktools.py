@@ -194,7 +194,8 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
         info = sg.dict_info[inp]
         x = generate_val(info,device)
         our_global[inp]=x
-        info.memsize = tensorMsize(x)
+        if inp in sg.hidden_inputs:
+            info.memsize = MemSize(int(tensorMsize(x)))
         # our_global[inp] = generate_val(sg.dict_info[inp],device) #utils
 
     # ------------

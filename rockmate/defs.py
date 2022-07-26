@@ -80,6 +80,7 @@ class RK_block():
         nodes_done = set()
         current_mem = 0 ; mem_timeline = []
         def fwd_n(n):
+            nonlocal current_mem, mem_timeline
             current_mem += memsize(n.main_target)
             mem_timeline.append(current_mem)
             s = ", ".join(n.all_targets)
@@ -95,6 +96,7 @@ class RK_block():
                 if is_fwd(un) and not un in nodes_done:
                     b = False
             if b:
+                nonlocal current_mem, mem_timeline
                 current_mem -= memsize(n.main_target)
                 mem_timeline.append(current_mem)
                 s = ", ".join(n.all_targets)
@@ -104,7 +106,7 @@ class RK_block():
         for n in fwd_nodes: fwd_n(n)
         self.code_fast_fwd = bloc_of_code(ff,
             f"Fast forward {self.block_name}")
-        self.ff_overhead = max(mem_timeline) - mem_out
+        self.ff_overhead = max(mem_timeline) - self.mem_out
 
         # = -> code_fgt_inp =
         s = ", ".join(kg.direct_inputs)
