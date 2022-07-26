@@ -192,8 +192,9 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
     memUsage = MeasureMemory(device)
     for inp in sg.direct_inputs:
         info = sg.dict_info[inp]
-        our_global[inp] , info.memsize , _ = (
-            memUsage.measure(generate_val,info,device))
+        x = generate_val(info,device)
+        our_global[inp]=x
+        info.memsize = tensorMsize(x)
         # our_global[inp] = generate_val(sg.dict_info[inp],device) #utils
 
     # ------------

@@ -11,4 +11,5 @@ def test_everything(nn_mod,dict_inputs,show_debug=False):
     list_kg = pgb_res.K_graph_list
 
     # -- use checkmate to solve all the blocks, and create the chain --
-    chain = RK_chain(list_kg)
+    rk_chain = RK_chain(list_kg)
+    rotor_chain = rk_chain.build_rotor_chain()

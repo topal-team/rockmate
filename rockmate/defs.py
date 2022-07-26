@@ -35,17 +35,18 @@ class RK_block_solution():
         self.mem_peak_bwd = max(bwd_mem)
         self.size_a_bar = fwd_mem[-1]
 
+# I need self.overhead_fwd/bwd in RK_block_solution
+
 class RK_block():
     # self.bloc_name : str
-    # self.fwd_sols : RK_block_solution list
+    # self.sols : RK_block_solution list
     # self.code_fast_fwd : str list
     #  -> compute self's output, everything else is deleted (del) -> F_c
     # self.code_fgt_inp : str
     #  -> use it after code_fast_fwd to make F_n
-    # self.mem_inp : int
+    # self.mem_inp/out : int
     #  -> replace cweight
     # self.time_fwd : int 
-    #  -> for f in self.fwd_sols, assert(f.time_fwd==self.time_fwd)
 
     def __init__(self,kg,nb_budget_abar,nb_budget_all):
         self.block_name = (
@@ -55,7 +56,7 @@ class RK_block():
         max_budget  = sum(size_nodes)
         highest_mem = max(size_nodes)
 
-        sols = [] ; self.fwd_sols = sols
+        sols = [] ; self.sols = sols
         l_bd_abar = np.linspace(highest_mem,max_budget,nb_budget_abar)
         l_bd_all  = np.linspace(highest_mem,max_budget,nb_budget_all+2)[2:]
         for bd_abar in l_bd_abar:
@@ -97,6 +98,7 @@ class RK_block():
         # = -> mem_inp =
         memsize = lambda inp : kg.dict_info[inp].memsize
         self.mem_inp = sum([memsize(inp).v for inp in kg.hidden_inputs])
+        self.mem_out = memsize(kg.hidden_output)
 
         # = -> code_fgt_inp =
         s = ", ".join(kg.direct_inputs)
@@ -106,7 +108,7 @@ class RK_block():
 
         # = -> time_fwd =
         self.time_fwd = sum([n.time for n in fwd_nodes])
-        for sol in self.fwd_sols:
+        for sol in self.sols:
             if sol.time_fwd != self.time_fwd:
                 raise Exception(
                   f"One sol for {self.block_name} has a different "\
@@ -120,7 +122,7 @@ class RK_block():
         return (
           f"\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"\
           f"{self.block_name} :\n"\
-          f"\tnb of sol : {len(self.fwd_sols)}\n"\
+          f"\tnb of sol : {len(self.sols)}\n"\
           f"\tmem_inp   : {self.mem_inp}\n"\
           f"\ttime_fwd  : {self.time_fwd}\n"\
           f"\t== FF == : {s}\n"\
@@ -134,4 +136,31 @@ class RK_chain():
         for g in list_kg:
             l.append(RK_block(g,nb_budget_abar,nb_budget_all))
             print_debug(l[-1])
+
+    def build_rotor_chain(self):
+        # organizes the information for rotor_solver.py as in Rotor
+        # -> fw/bw/cw/cbw/fwd_tmp/bwd_tmp
+        # -> in those list, one dummy block is added at the end for Loss
+        ln = len(self.blocks)
+        mkl = lambda n : [[] for _ in range(n)]
+        fw = mkl(ln+1)      ; bw  = mkl(ln+1)
+        cw = [None]*(ln+2)  ; cbw = mkl(ln+2)
+        fwd_tmp = mkl(ln+1) ; bwd_tmp = mkl(ln+1)
+        for (i,b) in enumerate(self.blocks):
+            for sol in b.sols:
+                fw[i].append(sol.time_fwd)
+                bw[i].append(sol.time_bwd)
+                cbw[i+1].append(sol.size_a_bar)
+                fwd_tmp[i].append(sol.overhead_fwd)
+                bwd_tmp[i].append(sol.overhead_bwd)
+            cw[i] = b.mem_inp
+        cw[ln]=self.blocks[-1].mem_out # the final output
+        # for the Loss block :
+        fw[-1] = [0]    ; bw[-1] = [0]
+        cw[-1] = 0      ; cbw[-1] = [0]
+        fwd_tmp[-1]=[0] ; bwd_tmp[-1] = [0]
+        return (ln,fw,bw,cw,cbw,fwd_tmp,bwd_tmp)
+
+
+
 
