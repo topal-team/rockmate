@@ -8,33 +8,29 @@ class RK_block_solution():
         sched_result, chk_g = make_sched(kg, budget_all)
         Translator = Sched_to_ops(chk_g,kg)
         fwd_ops,bwd_ops = Translator.generate_sched_ops(sched_result)
-        _fwd_mem = []
-        _bwd_mem = []
-        fwd_code = []
-        bwd_code = []
-        for op in fwd_ops:
-            fwd_code.append(op.code)
-            if op.is_fgt:
-                _fwd_mem.append(-op.node.fgt_mem.v)
-            else:
-                _fwd_mem.append(op.node.fgt_mem.v)
-        for op in bwd_ops:
-            bwd_code.append(op.code)
-            if op.is_fgt:
-                _bwd_mem.append(-op.node.fgt_mem.v)
-            else:
-                _bwd_mem.append(op.node.fgt_mem.v)
-        fwd_mem = np.cumsum(np.array(_fwd_mem))
-        bwd_mem = np.cumsum(np.array(_bwd_mem))
+        def ops_stats(ops):
+            N = len(ops)
+            overhead = np.zeros(N)
+            save = np.zeros(N)
+            for i,op in enumerate(ops):
+                if op.is_fgt:
+                    save[i:] -= op.node.fgt_mem.v
+                else:
+                    save[i:] += op.node.fgt_mem.v
+                overhead[i] = op.node.overhead.v
+            return overhead, save
+        
+        fwd_overhead,fwd_save = ops_stats(fwd_ops)
+        bwd_overhead,bwd_save = ops_stats(bwd_ops)
 
-        self.code_fwd = "\n".join(fwd_code)
-        self.code_bwd = "\n".join(bwd_code)
-        self.time_fwd = sum([op.node.time for op in fwd_ops])
-        self.time_bwd = sum([op.node.time for op in bwd_ops])
-        self.mem_peak_fwd = max(fwd_mem)
-        self.mem_peak_bwd = max(bwd_mem)
-        self.size_a_bar = fwd_mem[-1]
-
+        self.code_fwd = "\n".join(op.code for op in fwd_ops)
+        self.code_bwd = "\n".join(op.code for op in bwd_ops)
+        self.time_fwd = sum([op.time for op in fwd_ops])
+        self.time_bwd = sum([op.time for op in bwd_ops])
+        self.size_a_bar = fwd_save[-1]
+        self.overhead_fwd = max(fwd_overhead+fwd_save) - fwd_save[-1]
+        self.overhead_bwd = max(bwd_overhead+bwd_save) - bwd_save[-1]
+# Check if o_b is what you need
 # I need self.overhead_fwd/bwd in RK_block_solution
 
 class RK_block():
