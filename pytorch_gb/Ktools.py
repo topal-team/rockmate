@@ -134,7 +134,7 @@ def inspection(n : S_node,g : S_graph,our_global):
     _ , mem_fgt_fwd , _ = memUsage.measure(fct_fgt_fwd)
     ret["overhead_fwd"] = overhead_fwd
     ret["mem_run_fwd"] = mem_run_fwd
-    ret["mem_fgt_fwd"] = mem_fgt_fwd
+    ret["mem_fgt_fwd"] = minus_mem(mem_fgt_fwd)
     ret["time_run_fwd"] = time_run_fwd
     # ===============
 

@@ -14,7 +14,7 @@ def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False
     chk_gb = GraphBuilder()
     nodes = list(kg.dict_nodes.values())
     for kn in nodes:
-        chk_gb.add_node(name=kn.name, cpu_cost=kn.time, ram_cost=-kn.fgt_mem.v)
+        chk_gb.add_node(name=kn.name, cpu_cost=kn.time, ram_cost=kn.fgt_mem.v)
     # TODO: add constraint to not forget artifact nodes
     for kn in nodes:
         for sub_n in kn.req:
@@ -26,7 +26,7 @@ def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False
     max_cost = max(chk_g.cost_ram.values())
     if show_debug:
         for kn in nodes:
-            if -kn.fgt_mem.v == max_cost:
+            if kn.fgt_mem.v == max_cost:
                 print(f"the most expensive code : {kn.get_code()}")
     print_debug('total cost:', sum(chk_g.cost_ram.values()),
           'max cost:', max_cost,

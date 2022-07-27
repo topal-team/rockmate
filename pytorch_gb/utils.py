@@ -29,6 +29,7 @@ from rotor.timing import *
 from rotor.memory import *
 from rotor.inspection import tensorMsize
 min_duration = 0
+minus_mem = lambda m : MemSize(- m.v)
 
 # for main -> get inputs
 import inspect
