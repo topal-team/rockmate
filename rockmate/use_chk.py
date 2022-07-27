@@ -7,7 +7,7 @@ from .utils import *
 
 device = get_device() # see pgb/utils.py
 
-def make_sched(kg : pgb.K_graph,budget,
+def make_sched(kg : pgb.Ktools.K_graph,budget,
         plot_sched=False,solver='SCIPY',
         verbose=None,use_gurobi=True):
     # == verbose ==
@@ -32,7 +32,7 @@ def make_sched(kg : pgb.K_graph,budget,
 
     for n in nodes: # -> build edges
         for sub_n in n.req:
-            chk_gb.add_deps(kn.name,sub_n.name)
+            chk_gb.add_deps(n.name,sub_n.name)
     chk_g = chk_gb.make_graph()
 
     # == use Checkmate solver ==

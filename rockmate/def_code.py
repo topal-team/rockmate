@@ -10,7 +10,7 @@ from .utils import *
 # ======== RAW CODE ========
 # ==========================
 class RawAtomCode:
-    def __init__(self,n : pgb.K_node,code)
+    def __init__(self,n : pgb.Ktools.K_node,code)
         self.node = n
         self.code = code # -> temporary str, should be Ast
 

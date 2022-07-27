@@ -11,7 +11,7 @@
 # ==========================
 
 # == pgb ==
-import pytorch_gb as pgb
+import pgb
 from pgb.utils import * # /!\
 
 # == checkmate == -> for use_chk.py
@@ -21,7 +21,7 @@ from checkmate.core.schedule \
     import (ScheduledResult     as CHK_ScheduledResult, # -> useless
             ILPAuxData          as CHK_ILPAuxData,      # -> useless
             OperatorEvaluation  as CHK_OperatorEvaluation,
-            DeallocateRegister  as CHK_DealloacteRegister,
+            DeallocateRegister  as CHK_DeallocateRegister,
             AllocateRegister    as CHK_AllocateRegister )
 import cvxpy
 from checkmate.core.solvers.cvxpy_solver \
