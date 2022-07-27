@@ -56,6 +56,10 @@ class RK_block():
         size_nodes = [n.fgt_mem.v for n in kg.dict_nodes.values()]
         max_budget  = sum(size_nodes)
         highest_mem = max(size_nodes)
+        print_debug(
+            f"=*=*=*=\nStart {self.block_name}, total cost : "\
+            f"{max_budget} and highest_mem : {highest_mem}\n=*=*=*="
+            )
 
         sols = self.sols = []
         l_bd_abar = np.linspace(highest_mem,max_budget,nb_budget_abar)
@@ -63,12 +67,18 @@ class RK_block():
         uniq_sols = set()
         for bd_abar in l_bd_abar:
             for bd_all in l_bd_all:
-                sol = RK_block_solution(kg,bd_abar,bd_all)
-                if sol.is_feasible:
-                    t = (sol.size_a_bar,sol.overhead_fwd,sol.overhead_bwd)
-                    if not (t in uniq_sols):
-                        uniq_sols.add(t)
-                        sols.append(sol)
+                if bd_all >= bd_abar:
+                    print_debug(
+                        f"ask {self.block_name} with : bd_abar = "\
+                        f"{bd_abar} and bd_all = {bd_all}")
+                    sol = RK_block_solution(kg,bd_abar,bd_all)
+                    if sol.is_feasible:
+                        t = (sol.size_a_bar,
+                            sol.overhead_fwd,
+                            sol.overhead_bwd)
+                        if not (t in uniq_sols):
+                            uniq_sols.add(t)
+                            sols.append(sol)
         kg.loss_node.fgt_mem = MemSize(0)
         # ====================================================
 
