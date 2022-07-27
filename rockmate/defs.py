@@ -2,7 +2,7 @@ from .utils import *
 from .use_chk import make_sched, Sched_to_ops
 import numpy as np
 
-class RK_block_solution():
+class RK_Block_solution():
     def __init__(self,kg,budget_abar,budget_all):
         kg.loss_node.fgt_mem = MemSize(budget_all - budget_abar)
         sched_result, chk_g = make_sched(kg, budget_all)
@@ -33,11 +33,11 @@ class RK_block_solution():
             self.overhead_fwd = max(fwd_overhead+fwd_save) - fwd_save[-1]
             self.overhead_bwd = max(bwd_overhead+bwd_save) - bwd_save[-1]
 # Check if o_b is what you need
-# I need self.overhead_fwd/bwd in RK_block_solution
+# I need self.overhead_fwd/bwd in RK_Block_solution
 
-class RK_block():
+class RK_Block():
     # self.bloc_name : str
-    # self.sols : RK_block_solution list
+    # self.sols : RK_Block_solution list
     # self.code_fast_fwd : str list
     #  -> compute self's output, everything else is deleted (del) -> F_c
     # self.ff_overhead : int
@@ -71,7 +71,7 @@ class RK_block():
                     print_debug(
                         f"ask {self.block_name} with : bd_abar = "\
                         f"{bd_abar} and bd_all = {bd_all}")
-                    sol = RK_block_solution(kg,bd_abar,bd_all)
+                    sol = RK_Block_solution(kg,bd_abar,bd_all)
                     if sol.is_feasible:
                         t = (sol.size_a_bar,
                             sol.overhead_fwd,
@@ -147,11 +147,11 @@ class RK_block():
           f"\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
 
 
-class RK_chain():
+class RK_Chain():
     def __init__(self,list_kg,nb_budget_abar=10,nb_budget_all=3):
         l = self.blocks = []
         for g in list_kg:
-            l.append(RK_block(g,nb_budget_abar,nb_budget_all))
+            l.append(RK_Block(g,nb_budget_abar,nb_budget_all))
             print_debug(l[-1])
 
     def build_rotor_chain(self):

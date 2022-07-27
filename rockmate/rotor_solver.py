@@ -4,12 +4,14 @@
 # ==========================
 
 from .utils import *
-from .defs import RK_chain
+from .defs import RK_Chain
+from .sequence import RK_Sequence
 
 # ==========================
 # ==== DYNAMIC PROGRAM =====
 # ==========================
-def compute_table(chain : RK_chain, mmax):
+
+def solve_dp(chain : RK_Chain, mmax):
     """Returns the optimal table:
     Opt[m][lmin][lmax] : int matrix
         with lmin = 0...chain.length
@@ -108,30 +110,37 @@ def compute_table(chain : RK_chain, mmax):
 
     return (opt,what)
 
+# ==========================
+
+
+
+# ==========================
+# ==== SEQUENCE BUILDER ====
+# ==========================
+
+def seq_builder_rec(chain : RK_Chain, lmin, lmax, cmem, opt_table):
+    opt, what = opt_table
+    seq = RK_Sequence()
+
+    if cmem <= 0:
+        raise ValueError(
+            f"Can't process a chain with neg mem {cmem}")
+    if opt[cmem][lmin][lmax] == float("inf"):
+        raise ValueError(
+            f"Can't process this chain from index "\
+            f"{lmin} to {lmax} with memory {cmem}")
+
+    if lmin == lmax:
+        if lmin == chain.length:
+            sequence.insert(SeqLoss())
+        else:
+            sequence.insert(ForwardEnable(lmin))
+            sequence.insert(Backward(lmin))
+        return sequence
 
 ##########################################
 ############ TODO ###################
 
-
-def persistent_rec(chain, lmin, lmax, cmem, opt_table, print_mem=False):
-    """ chain : the class describing the AC graph
-        lmin : index of the first forward to execute
-        lmax : upper bound index of the last forward to execute (not included)
-        cmem : number of available memory slots
-        Return the optimal sequence of makespan Opt_hete[cmem][lmin][lmax-lmin]"""
-    if cmem <= 0:
-        raise ValueError("Can not process a chain with negative memory {cmem}".format(cmem=cmem))
-    opt, what = opt_table
-    sequence = Sequence(Function("Persistent", lmax-lmin, cmem))
-    if opt[cmem][lmin][lmax] == float("inf"):
-        raise ValueError("Can not process this chain from index {lmin} to {lmax} with memory {cmem}".format(lmin=lmin, lmax=lmax, cmem=cmem))
-    if lmin == lmax:
-        if lmin == chain.length:
-            sequence.insert(Loss())
-        else: 
-            sequence.insert(ForwardEnable(lmin))
-            sequence.insert(Backward(lmin))
-        return sequence
     if print_mem:
         print(lmin,cmem)
     if what[cmem][lmin][lmax][0]:

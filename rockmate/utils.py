@@ -37,7 +37,18 @@ from checkmate.core.schedule import (
     DeallocateRegister,
     AllocateRegister)
 
-# ==
+# => to plot the memory used
+import matplotlib.pyplot as plt
+
+# ==========================
+
+
+
+# ==========================
+# ====== GLOBAL VARS =======
+# ==========================
+
+ref_print_atoms = [True]
 
 # ==========================
 

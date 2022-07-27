@@ -164,7 +164,7 @@ def inspection(n : S_node,g : S_graph,our_global):
 
         ret["overhead_bwd"] = overhead_bwd
         ret["mem_run_bwd"]  = mem_run_bwd
-        ret["mem_fgt_bwd"]  = mem_fgt_bwd
+        ret["mem_fgt_bwd"]  = minus_mem(mem_fgt_bwd)
         ret["time_run_bwd"] = time_run_bwd
     # ===============
     return ret
