@@ -1,11 +1,13 @@
 # ==========================
 # modified version of rotor algo
+# contains RK_Sequence builder -> depends on RK_Chain
 # based on rotor/algorithms/persistent.py
 # ==========================
 
 from .utils import *
-from .defs import RK_Chain
-from .sequence import RK_Sequence
+from .def_chain import RK_Chain
+from .def_sequence import RK_Sequence
+from .def_code import RK_Functions_Builder
 
 # ==========================
 # ==== DYNAMIC PROGRAM =====

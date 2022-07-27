@@ -43,7 +43,7 @@ def print_all_graphs(a,name,open):
 
 def make_all_graphs(nn_mod,
     dict_inputs,
-    show_debug=False,
+    verbose=False,
     impose_device=True, D_device=None, K_device=None,
     bool_bg = True , bool_dg = True ,
     bool_sg = True , bool_kg = True ,
@@ -64,7 +64,7 @@ def make_all_graphs(nn_mod,
     bool_dg = bool_dg or bool_sg
     bool_bg = bool_bg or bool_dg
 
-    ref_print_debug[0] = show_debug
+    ref_verbose[0] = verbose
     check_inputs(nn_mod,dict_inputs)
     # -- the whole module --
     if bool_bg:

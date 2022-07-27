@@ -16,22 +16,15 @@ import torch
 from torch import tensor
 import graphviz
 
-# for Btools -> get jit.code
-from torch.jit import trace_module
-
-# for Ktools -> inspection
-try:
-    from rotor.utils import *
-except:
-    from torch.hub import load_state_dict_from_url
-    from rotor.utils import *
-from rotor.timing import *
-from rotor.memory import *
+# == rotor == -> for inspection in Ktools.py
+import rotor.timing # -> use .make_timer
+import rotor.memory # -> use .MeasureMemory
+from rotor.memory import MemSize
 from rotor.inspection import tensorMsize
 min_duration = 0
 minus_mem = lambda m : MemSize(- m.v)
 
-# for main -> get inputs
+# for main.py -> get inputs
 import inspect
 
 # -> to support different versions of AST
@@ -48,9 +41,9 @@ py_version = svi.major + svi.minor/10
 # ==========================
 
 # -> print debug messages
-ref_print_debug = [False]
+ref_verbose = [False]
 def print_debug(*args, **kwargs):
-    if ref_print_debug[0]:
+    if ref_verbose[0]:
         print(*args, **kwargs)
 
 # -> device

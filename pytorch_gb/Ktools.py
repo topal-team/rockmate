@@ -100,8 +100,8 @@ def generate_tmp_local(n : S_node,g : S_graph,our_global):
 def inspection(n : S_node,g : S_graph,our_global):
     mt = n.main_target
     info = g.dict_info[mt]
-    timer = make_timer(device)
-    memUsage = MeasureMemory(device)
+    timer = rotor.timing.make_timer(device)
+    memUsage = rotor.memory.MeasureMemory(device)
     tmp_local = generate_tmp_local(n,g,our_global)
     ret = {}
 
@@ -169,9 +169,9 @@ def inspection(n : S_node,g : S_graph,our_global):
     # ===============
     return ret
 
-# aux function to handle show_debug and device
-def aux_init_S_to_K(nn_mod,show_debug,K_device):
-    if not (show_debug is None): ref_print_debug[0] = show_debug
+# aux function to handle verbose and device
+def aux_init_S_to_K(nn_mod,verbose,K_device):
+    if not (verbose is None): ref_verbose[0] = verbose
     global device
     if K_device is None: device = get_device()
     else: device = K_device
@@ -189,7 +189,6 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
     our_global
     kg = K_graph(sg)
     # -> rebuilt dict_inputs and make memsize of inputs
-    memUsage = MeasureMemory(device)
     for inp in sg.direct_inputs:
         info = sg.dict_info[inp]
         x = generate_val(info,device)
@@ -279,13 +278,13 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
     return kg
 
 
-def S_to_K(sg : S_graph,nn_mod,show_debug=None,K_device=None):
-    aux_init_S_to_K(nn_mod,show_debug,K_device)
+def S_to_K(sg : S_graph,nn_mod,verbose=None,K_device=None):
+    aux_init_S_to_K(nn_mod,verbose,K_device)
     return aux_build_S_to_K(sg,nn_mod)
 
 
-def S_list_to_K_list(list_sg,nn_mod,show_debug=None,K_device=None):
-    aux_init_S_to_K(nn_mod,show_debug,K_device)
+def S_list_to_K_list(list_sg,nn_mod,verbose=None,K_device=None):
+    aux_init_S_to_K(nn_mod,verbose,K_device)
     return [aux_build_S_to_K(sg,nn_mod) for sg in list_sg]
 
 # ==========================

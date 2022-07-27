@@ -10,34 +10,34 @@
 # ======== IMPORTS =========
 # ==========================
 
-# quick start : same useful things as pytorch graph builder
-from pytorch_gb.utils import *
-
-# to use pytorch graph builder
+# == pgb ==
 import pytorch_gb as pgb
+from pgb.utils import * # /!\
 
-# == for use_chk.py == -> K_graph and checkmate
-from pytorch_gb.Ktools import K_graph
+# == checkmate == -> for use_chk.py
+from checkmate.core.graph_builder \
+    import GraphBuilder         as CHK_GraphBuilder
+from checkmate.core.schedule \
+    import (ScheduledResult     as CHK_ScheduledResult, # -> useless
+            ILPAuxData          as CHK_ILPAuxData,      # -> useless
+            OperatorEvaluation  as CHK_OperatorEvaluation,
+            DeallocateRegister  as CHK_DealloacteRegister,
+            AllocateRegister    as CHK_AllocateRegister )
+import cvxpy
+from checkmate.core.solvers.cvxpy_solver \
+    import solve_checkmate_cvxpy as CHK_solve_checkmate_cvxpy
+from checkmate.plot.graph_plotting \
+    import plot_schedule        as CHK_plot_schedule
 
-# to solve checkmate
-from checkmate.core.graph_builder import GraphBuilder
-from checkmate.core.schedule import ScheduledResult, ILPAuxData
 try:
-    from checkmate.core.solvers.gurobi_solver import solve_ilp_gurobi
+    from checkmate.core.solvers.gurobi_solver \
+        import solve_ilp_gurobi as CHK_solve_ilp_gurobi
     gurobi_installed = True
 except:
     gurobi_installed = False
-from checkmate.core.solvers.cvxpy_solver import solve_checkmate_cvxpy
-from checkmate.plot.graph_plotting import plot_schedule
-import cvxpy
 
-# to translate the schedule
-from checkmate.core.schedule import (
-    OperatorEvaluation,
-    DeallocateRegister,
-    AllocateRegister)
-
-# => to plot the memory used
+# == annexe ==
+import numpy as np
 import matplotlib.pyplot as plt
 
 # ==========================

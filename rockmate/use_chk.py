@@ -5,46 +5,57 @@ from .utils import *
 # === make the schedule ====
 # ==========================
 
-device = get_device() # see utils.py
+device = get_device() # see pgb/utils.py
 
-def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False,show_debug=False,use_gurobi=True):
+def make_sched(kg : pgb.K_graph,budget,
+        plot_sched=False,solver='SCIPY',
+        verbose=None,use_gurobi=True):
+    # == verbose ==
+    if verbose is None: verbose = ref_verbose[0]
+    else: ref_verbose[0]=verbose
+
+    # == check solver ==
     if solver not in cvxpy.installed_solvers():
-        raise AttributeError("please choose from the installed solvers:"+ str(cvxpy.installed_solvers()))
-    
-    chk_gb = GraphBuilder()
-    nodes = list(kg.dict_nodes.values())
-    for kn in nodes:
-        chk_gb.add_node(name=kn.name, cpu_cost=kn.time, ram_cost=kn.fgt_mem.v)
-    # TODO: add constraint to not forget artifact nodes
-    for kn in nodes:
-        for sub_n in kn.req:
-            if sub_n.fgt_mem:
-                chk_gb.add_deps(kn.name,sub_n.name)
-            else:
-                print("yep, sometimes sub_n.fgt_mem is None")
-    chk_g = chk_gb.make_graph()
-    max_cost = max(chk_g.cost_ram.values())
-    if show_debug:
-        for kn in nodes:
-            if kn.fgt_mem.v == max_cost:
-                print(f"the most expensive code : {kn.get_code()}")
-    print_debug('total cost:', sum(chk_g.cost_ram.values()),
-          'max cost:', max_cost,
-          'budget:', budget)
+        raise AttributeError(
+            f"{solver} isn't installed ({cvxpy.installed_solvers()})")
+
+    # == try to choose Gurobi ==
     if not gurobi_installed: use_gurobi=False
+
+    # == build Checkmate graph ==
+    chk_gb = CHK_GraphBuilder()
+    nodes = kg.dict_nodes.values()
+    for n in nodes: # -> build nodes
+        if n.is_artefact:
+            raise Exception("Artefact nodes not supported in CHK yet")
+        chk_gb.add_node(name=n.name, cpu_cost=n.time, ram_cost=n.fgt_mem.v)
+
+    for n in nodes: # -> build edges
+        for sub_n in n.req:
+            chk_gb.add_deps(kn.name,sub_n.name)
+    chk_g = chk_gb.make_graph()
+
+    # == use Checkmate solver ==
+    print_debug(
+        f"Ask checkmate to solve a graph with :"\
+        f"\n\ttotal cost : {sum(chk_g.cost_ram.values())},"\
+        f"\n\tmax   cost : {max(chk_g.cost_ram.values())},"\
+        f"\n\tbudget     : {budget}")
     if use_gurobi:
-        sched_result = solve_ilp_gurobi(
-                chk_g, budget, print_to_console=not verbose)
+        sched_result = CHK_solve_ilp_gurobi(
+                chk_g, budget,
+                print_to_console=verbose)
     else:
-        sched_result = solve_checkmate_cvxpy(
+        sched_result = CHK_solve_checkmate_cvxpy(
                 chk_g, budget,
                 solver_override=solver,
-                verbose =verbose)
+                verbose=verbose)
+
+    # == result ==
     if sched_result.feasible:
         print("*",end="")
         print_debug('feasible schedule solved')
-
-    if plot_sched: plot_schedule(sched_result)
+    if plot_sched: CHK_plot_schedule(sched_result)
     return sched_result, chk_g
 
 # ==========================
@@ -148,7 +159,7 @@ class Sched_to_ops():
         self.live = []#record which grad is live
         self.fgt = []#record what is forgotten
         for op in self.schedule:
-            if isinstance(op, OperatorEvaluation):
+            if isinstance(op, CHK_OperatorEvaluation):
                 node_name = self.g.node_names[op.id]
                 node = self.nodes[node_name]
                 is_fwd = node.is_fwd
@@ -159,7 +170,7 @@ class Sched_to_ops():
                 operation = Operation(code,node,is_fgt=False)
                 self.sched_ops.append(operation)
 
-            elif isinstance(op, DeallocateRegister):
+            elif isinstance(op, CHK_DeallocateRegister):
                 node_name = self.g.node_names[op.op_id]
                 node = self.nodes[node_name]
                 is_fwd = node.is_fwd
@@ -170,7 +181,7 @@ class Sched_to_ops():
                 operation = Operation(code,node,is_fgt=True)
                 self.sched_ops.append(operation)
 
-            elif isinstance(op, AllocateRegister):
+            elif isinstance(op, CHK_AllocateRegister):
                 pass
 
             else:

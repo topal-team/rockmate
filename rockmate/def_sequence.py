@@ -1,6 +1,8 @@
 # ==========================
+# definition file of RK_Sequence
 # based on rotor/algorithms/sequence.py
 # ==========================
+
 from .utils import *
 
 # ==========================

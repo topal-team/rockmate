@@ -1,6 +1,11 @@
+# ==========================
+# definition file of RK_Chain
+# also contains RK_Chain builder -> depends on use_chk.py
+# based on rotor/algorithms/parameters.py
+# ==========================
+
 from .utils import *
 from .use_chk import make_sched, Sched_to_ops
-import numpy as np
 
 class RK_Block_solution():
     def __init__(self,kg,budget_abar,budget_all):

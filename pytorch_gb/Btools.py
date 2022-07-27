@@ -403,20 +403,20 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False):
 
 # ===== Main function ======
 
-def make_B(nn_mod,ex_inputs,show_debug=None,impose_device=False):
+def make_B(nn_mod,ex_inputs,verbose=None,impose_device=False):
     # main_mod must be a instance of torch.nn.Module
     # ex_inputs can be either a tuple or a dict
     # -- global vars --
     global fresh_var, var_impose_device, dict_rand, all_nodes
     all_nodes = [] ; dict_rand = {} ; fresh_var = 0
     var_impose_device = impose_device
-    if not (show_debug is None): ref_print_debug[0] = show_debug
+    if not (verbose is None): ref_verbose[0] = verbose
 
     # -- ex_inputs --
     if isinstance(ex_inputs,dict):
         ex_inputs = tuple(ex_inputs.values())
 
-    main_mod = trace_module(
+    main_mod = torch.jit.trace_module(
             nn_mod, {'forward': ex_inputs}, check_trace=False)
     main_str = "self"
     main_fct = "forward"
