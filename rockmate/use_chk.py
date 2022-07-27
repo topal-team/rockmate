@@ -7,7 +7,7 @@ from .utils import *
 
 device = get_device() # see utils.py
 
-def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=True,show_debug=False,use_gurobi=True):
+def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=False,show_debug=False,use_gurobi=True):
     if solver not in cvxpy.installed_solvers():
         raise AttributeError("please choose from the installed solvers:"+ str(cvxpy.installed_solvers()))
     
@@ -28,7 +28,7 @@ def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=True,
         for kn in nodes:
             if -kn.fgt_mem.v == max_cost:
                 print(f"the most expensive code : {kn.get_code()}")
-    print('total cost:', sum(chk_g.cost_ram.values()),
+    print_debug('total cost:', sum(chk_g.cost_ram.values()),
           'max cost:', max_cost,
           'budget:', budget)
     if not gurobi_installed: use_gurobi=False
@@ -40,7 +40,9 @@ def make_sched(kg : K_graph,budget,plot_sched=False,solver='SCIPY',verbose=True,
                 chk_g, budget,
                 solver_override=solver,
                 verbose =verbose)
-    if sched_result.feasible: print('feasible schedule solved')
+    if sched_result.feasible:
+        print("*",end="")
+        print_debug('feasible schedule solved')
 
     if plot_sched: plot_schedule(sched_result)
     return sched_result, chk_g

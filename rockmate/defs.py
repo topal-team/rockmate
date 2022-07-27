@@ -6,30 +6,32 @@ class RK_block_solution():
     def __init__(self,kg,budget_abar,budget_all):
         kg.loss_node.fgt_mem = MemSize(budget_all - budget_abar)
         sched_result, chk_g = make_sched(kg, budget_all)
-        Translator = Sched_to_ops(chk_g,kg)
-        fwd_ops,bwd_ops = Translator.generate_sched_ops(sched_result)
-        def ops_stats(ops):
-            N = len(ops)
-            overhead = np.zeros(N)
-            save = np.zeros(N)
-            for i,op in enumerate(ops):
-                if op.is_fgt:
-                    save[i:] -= op.node.fgt_mem.v
-                else:
-                    save[i:] += op.node.fgt_mem.v
-                overhead[i] = op.node.overhead.v
-            return overhead, save
-        
-        fwd_overhead,fwd_save = ops_stats(fwd_ops)
-        bwd_overhead,bwd_save = ops_stats(bwd_ops)
+        is_f = self.is_feasible = sched_result.feasible
+        if is_f:
+            Translator = Sched_to_ops(chk_g,kg)
+            fwd_ops,bwd_ops = Translator.generate_sched_ops(sched_result)
+            def ops_stats(ops):
+                N = len(ops)
+                overhead = np.zeros(N)
+                save = np.zeros(N)
+                for i,op in enumerate(ops):
+                    if op.is_fgt:
+                        save[i:] -= op.node.fgt_mem.v
+                    else:
+                        save[i:] += op.node.fgt_mem.v
+                    overhead[i] = op.node.overhead.v
+                return overhead, save
+            
+            fwd_overhead,fwd_save = ops_stats(fwd_ops)
+            bwd_overhead,bwd_save = ops_stats(bwd_ops)
 
-        self.code_fwd = "\n".join(op.code for op in fwd_ops)
-        self.code_bwd = "\n".join(op.code for op in bwd_ops)
-        self.time_fwd = sum([op.time for op in fwd_ops])
-        self.time_bwd = sum([op.time for op in bwd_ops])
-        self.size_a_bar = fwd_save[-1]
-        self.overhead_fwd = max(fwd_overhead+fwd_save) - fwd_save[-1]
-        self.overhead_bwd = max(bwd_overhead+bwd_save) - bwd_save[-1]
+            self.code_fwd = "\n".join(op.code for op in fwd_ops)
+            self.code_bwd = "\n".join(op.code for op in bwd_ops)
+            self.time_fwd = sum([op.time for op in fwd_ops])
+            self.time_bwd = sum([op.time for op in bwd_ops])
+            self.size_a_bar = fwd_save[-1]
+            self.overhead_fwd = max(fwd_overhead+fwd_save) - fwd_save[-1]
+            self.overhead_bwd = max(bwd_overhead+bwd_save) - bwd_save[-1]
 # Check if o_b is what you need
 # I need self.overhead_fwd/bwd in RK_block_solution
 
@@ -55,15 +57,18 @@ class RK_block():
         max_budget  = sum(size_nodes)
         highest_mem = max(size_nodes)
 
-        sols = [] ; self.sols = sols
+        sols = self.sols = []
         l_bd_abar = np.linspace(highest_mem,max_budget,nb_budget_abar)
         l_bd_all  = np.linspace(highest_mem,max_budget,nb_budget_all+2)[2:]
+        uniq_sols = set()
         for bd_abar in l_bd_abar:
             for bd_all in l_bd_all:
-                pass
-                #sol = RK_block_solution(kg,bd_abar,bd_all)
-                #if sol.is_feasible:
-                #    sols.append(sol)
+                sol = RK_block_solution(kg,bd_abar,bd_all)
+                if sol.is_feasible:
+                    t = (sol.size_a_bar,sol.overhead_fwd,sol.overhead_bwd)
+                    if not (t in uniq_sols):
+                        uniq_sols.add(t)
+                        sols.append(sol)
         kg.loss_node.fgt_mem = MemSize(0)
         # ====================================================
 
@@ -116,12 +121,6 @@ class RK_block():
 
         # = -> time_ff =
         self.time_ff = sum([n.time for n in fwd_nodes])
-        #for sol in self.sols:
-        #    if sol.time_fwd != self.time_fwd:
-        #        raise Exception(
-        #          f"One sol for {self.block_name} has a different "\
-        #          f"time_fwd : {sol.time_fwd} ; compared to "\
-        #          f"{self.time_fwd} for fast forward")
         # =====================================
 
     def __repr__(self):
@@ -140,7 +139,7 @@ class RK_block():
 
 class RK_chain():
     def __init__(self,list_kg,nb_budget_abar=10,nb_budget_all=3):
-        l = [] ; self.blocks = l
+        l = self.blocks = []
         for g in list_kg:
             l.append(RK_block(g,nb_budget_abar,nb_budget_all))
             print_debug(l[-1])

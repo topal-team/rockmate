@@ -6,6 +6,9 @@
 from .utils import *
 from .defs import RK_chain
 
+# ==========================
+# ==== DYNAMIC PROGRAM =====
+# ==========================
 def compute_table(chain : RK_chain, mmax):
     """Returns the optimal table:
     Opt[m][lmin][lmax] : int matrix
@@ -30,8 +33,8 @@ def compute_table(chain : RK_chain, mmax):
     ff_fw   = chain.ff_fw
     nb_sol  = chain.nb_sol
 
-    opt =  [[{} for _ in range(chain.length+1)] for _ in range(mmax + 1)]
-    what = [[{} for _ in range(chain.length+1)] for _ in range(mmax + 1)]
+    opt =  [[{} for _ in range(ln+1)] for _ in range(mmax + 1)]
+    what = [[{} for _ in range(ln+1)] for _ in range(mmax + 1)]
     # -> Last one is a dict because its indices go from i to l. 
     # -> Renumbering will wait for C implementation
 
