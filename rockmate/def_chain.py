@@ -14,8 +14,9 @@ class RK_Block_solution():
         is_f = self.is_feasible = sched_result.feasible
         if is_f:
             Translator = Sched_to_ops(chk_g,kg)
-            fwd_ops,bwd_ops = Translator.generate_sched_ops(sched_result)
-            def ops_stats(ops):
+            code_fwd,code_bwd = Translator.generate_sched_ops(sched_result)
+            def ops_stats(code):
+                ops = code.body
                 N = len(ops)
                 overhead = np.zeros(N)
                 save = np.zeros(N)
@@ -27,13 +28,13 @@ class RK_Block_solution():
                     overhead[i] = op.node.overhead.v
                 return overhead, save
             
-            fwd_overhead,fwd_save = ops_stats(fwd_ops)
-            bwd_overhead,bwd_save = ops_stats(bwd_ops)
+            fwd_overhead,fwd_save = ops_stats(code_fwd)
+            bwd_overhead,bwd_save = ops_stats(code_bwd)
 
-            self.code_fwd = "\n".join(op.code for op in fwd_ops)
-            self.code_bwd = "\n".join(op.code for op in bwd_ops)
-            self.time_fwd = sum([op.time for op in fwd_ops])
-            self.time_bwd = sum([op.time for op in bwd_ops])
+            self.code_fwd = code_fwd
+            self.code_bwd = code_bwd
+            self.time_fwd = sum([op.time for op in code_fwd.body])
+            self.time_bwd = sum([op.time for op in code_bwd.body])
             self.size_a_bar = fwd_save[-1]
             self.overhead_fwd = max(fwd_overhead+fwd_save) - fwd_save[-1]
             self.overhead_bwd = max(bwd_overhead+bwd_save) - bwd_save[-1]

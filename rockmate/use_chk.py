@@ -1,11 +1,16 @@
+# ==========================
+# rockmate interface with checkmate
+# use checkmate to get the schedule
+# and translate it from checkmate's R and S
+# ==========================
+
 from .utils import *
-# all the imports are done in utils
+from .def_code import RawAtomCode,RawBlockCode
 
 # ==========================
 # === make the schedule ====
 # ==========================
-
-device = get_device() # see pgb/utils.py
+# -> interface with checkmate
 
 def make_sched(kg : pgb.Ktools.K_graph,budget,
         plot_sched=False,solver='SCIPY',
@@ -65,18 +70,7 @@ def make_sched(kg : pgb.Ktools.K_graph,budget,
 # ==========================
 # = translate the schedule =
 # ==========================
-
-class Operation():
-    def __init__(self,code,node,is_fgt=False):
-        self.code = code
-        self.node = node
-        self.is_fgt = is_fgt
-        self.is_fwd = True
-        #TODO: measure the real time for fgt
-        if is_fgt:
-            self.time = 0
-        else:
-            self.time = node.time
+# -> return RawBlockCode
 
 class Sched_to_ops():
     def __init__(self,g,K_graph):
@@ -93,9 +87,9 @@ class Sched_to_ops():
         # code = code_list[0].replace(n.main_target,"_"+n.main_target)
         # code_list[0] = code
         # code = n.main_code
-        code = ast_to_str(make_ast_module([n.main_code])) 
+        code = ast_to_str(make_ast_module([n.main_code]))
         code = code.replace(n.main_target,"_"+n.main_target)
-        
+
         self.live.append(n.name)
         if n.name not in self.fgt:
             code = (
@@ -167,8 +161,8 @@ class Sched_to_ops():
                     code = self._run_fwd(node)
                 else:
                     code = self._run_bwd(node)
-                operation = Operation(code,node,is_fgt=False)
-                self.sched_ops.append(operation)
+                res = RawAtomCode(node,code,is_fgt=False,is_fwd=is_fwd)
+                self.sched_ops.append(res)
 
             elif isinstance(op, CHK_DeallocateRegister):
                 node_name = self.g.node_names[op.op_id]
@@ -178,15 +172,15 @@ class Sched_to_ops():
                     code = self._fgt_fwd(node)
                 else:
                     code = self._fgt_bwd(node)
-                operation = Operation(code,node,is_fgt=True)
-                self.sched_ops.append(operation)
+                res = RawAtomCode(node,code,is_fgt=True,is_fwd=is_fwd)
+                self.sched_ops.append(res)
 
             elif isinstance(op, CHK_AllocateRegister):
                 pass
 
             else:
                 raise TypeError(f"Operation not recognize:{type(op)}")
-        
+
         fwd_ops = []
         bwd_ops = []
         fwd = True
@@ -196,8 +190,8 @@ class Sched_to_ops():
             if fwd:
                 fwd_ops.append(op)
             else:
-                bwd_ops.append(op)    
-        return fwd_ops,bwd_ops 
+                bwd_ops.append(op)
+        return RawBlockCode(fwd_ops),RawBlockCode(bwd_ops)
 
 
 
