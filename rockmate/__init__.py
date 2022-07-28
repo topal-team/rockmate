@@ -1,4 +1,4 @@
-__all__ = ["use_chk","test_everything"]
+__all__ = ["use_chk","CheckpointedModule"]
 
 from . import use_chk
-from .main import test_everything
+from .main import CheckpointedModule

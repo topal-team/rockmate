@@ -6,8 +6,17 @@
 
 from .utils import *
 from .use_chk import make_sched, Sched_to_ops
+from .def_code import CodeAtom, CodeBlock
 
-class RK_Block_solution():
+# ==========================
+# ======== RK Block ========
+# ==========================
+# RK_Block_Solution :
+# -> Attributes : .code_fwd ; .code_bwd -> CodeBlock
+#                 .time_fwd ; .time_bwd -> int
+#                 .overhead_fwd ; .overhead_bwd ; .size_a_bar -> int
+# -> Methods    : __init__
+class RK_Block_Solution():
     def __init__(self,kg,budget_abar,budget_all):
         kg.loss_node.fgt_mem = MemSize(budget_all - budget_abar)
         sched_result, chk_g = make_sched(kg, budget_all)
@@ -15,21 +24,9 @@ class RK_Block_solution():
         if is_f:
             Translator = Sched_to_ops(chk_g,kg)
             code_fwd,code_bwd = Translator.generate_sched_ops(sched_result)
-            def ops_stats(code):
-                ops = code.body
-                N = len(ops)
-                overhead = np.zeros(N)
-                save = np.zeros(N)
-                for i,op in enumerate(ops):
-                    if op.is_fgt:
-                        save[i:] -= op.node.fgt_mem.v
-                    else:
-                        save[i:] += op.node.fgt_mem.v
-                    overhead[i] = op.node.overhead.v
-                return overhead, save
-            
-            fwd_overhead,fwd_save = ops_stats(code_fwd)
-            bwd_overhead,bwd_save = ops_stats(code_bwd)
+
+            fwd_overhead,fwd_save = code_fwd.mem_timeline()
+            bwd_overhead,bwd_save = code_bwd.mem_timeline()
 
             self.code_fwd = code_fwd
             self.code_bwd = code_bwd
@@ -38,38 +35,37 @@ class RK_Block_solution():
             self.size_a_bar = fwd_save[-1]
             self.overhead_fwd = max(fwd_overhead+fwd_save) - fwd_save[-1]
             self.overhead_bwd = max(bwd_overhead+bwd_save) - bwd_save[-1]
-# Check if o_b is what you need
-# I need self.overhead_fwd/bwd in RK_Block_solution
 
+
+# RK_Block :
+# -> Attributes : .block_name               -> str
+#                 .sols                     -> RK_Block_Solution list
+#                 .code_fn ; .code_fc       -> CodeBlock
+#                 .overhead_ff ; .time_ff   -> int
+#                 .mem_inp ; .mem_out       -> int
+#                 .overhead_fwd ; .overhead_bwd ; .size_a_bar -> int
+# -> Methods    : __init__
+# -> NB :
+#       ff means fast forward ie Fc ~ Fn
+#       TODO improve how overhead_ff is computed
 class RK_Block():
-    # self.bloc_name : str
-    # self.sols : RK_Block_solution list
-    # self.code_fast_fwd : str list
-    #  -> compute self's output, everything else is deleted (del) -> F_c
-    # self.ff_overhead : int
-    #  -> the overhead during fast forward computation
-    #  -> TODO : for now, the way I compute it is wrong
-    # self.code_fgt_inp : str
-    #  -> use it after code_fast_fwd to make F_n
-    # self.mem_inp/out : int
-    #  -> replace cweight
-    # self.time_ff : int 
-
-    def __init__(self,kg,nb_budget_abar,nb_budget_all):
+    def __init__(self,kg,nb_bdg_abar,nb_bdg_all):
         self.block_name = (
             f"Block[{kg.hidden_inputs}->{kg.direct_outputs}]")
-        # === apply chk nn_budget_abar*nb_budget_all times ===
-        size_nodes = [n.fgt_mem.v for n in kg.dict_nodes.values()]
-        max_budget  = sum(size_nodes)
-        highest_mem = max(size_nodes)
+
+        # == budgets to test ==
+        nodes_size = [n.fgt_mem.v for n in kg.dict_nodes.values()]
+        max_bdg = sum(nodes_size)
+        min_bdg = max(nodes_size)
+        l_bd_abar = np.linspace(min_bdg,max_bdg,nb_bdg_abar)
+        l_bd_all  = np.linspace(min_bdg,max_bdg,nb_bdg_all+2)[2:]
         print_debug(
             f"=*=*=*=\nStart {self.block_name}, total cost : "\
-            f"{max_budget} and highest_mem : {highest_mem}\n=*=*=*="
+            f"{max_bdg} and min_bdg : {min_bdg}\n=*=*=*="
             )
 
+        # == build .sols ==
         sols = self.sols = []
-        l_bd_abar = np.linspace(highest_mem,max_budget,nb_budget_abar)
-        l_bd_all  = np.linspace(highest_mem,max_budget,nb_budget_all+2)[2:]
         uniq_sols = set()
         for bd_abar in l_bd_abar:
             for bd_all in l_bd_all:
@@ -77,7 +73,7 @@ class RK_Block():
                     print_debug(
                         f"ask {self.block_name} with : bd_abar = "\
                         f"{bd_abar} and bd_all = {bd_all}")
-                    sol = RK_Block_solution(kg,bd_abar,bd_all)
+                    sol = RK_Block_Solution(kg,bd_abar,bd_all)
                     if sol.is_feasible:
                         t = (sol.size_a_bar,
                             sol.overhead_fwd,
@@ -86,28 +82,25 @@ class RK_Block():
                             uniq_sols.add(t)
                             sols.append(sol)
         kg.loss_node.fgt_mem = MemSize(0)
-        # ====================================================
 
-        # = -> mem_inp =
+        # == build .mem_inp/out ==
         memsize = lambda inp : kg.dict_info[inp].memsize.v
         self.mem_inp = sum([memsize(inp) for inp in kg.hidden_inputs])
         self.mem_out = memsize(kg.hidden_output)
 
-        # === other things needed for rotor ===
-        # = -> code_fast_fwd : compute output but del intermediate var =
-        # = -> I also compute ff_overhead =
+        # == build fast_forward code ==
         fwd_nodes = sort_based_on_req(kg.loss_node)[:-1] # from pgb/utils
-        ff = []
+        code_ff = []
         nodes_done = set()
         current_mem = 0 ; mem_timeline = []
         def fwd_n(n):
             nonlocal current_mem, mem_timeline
             current_mem += memsize(n.main_target)
             mem_timeline.append(current_mem)
-            s = ", ".join(n.all_targets)
-            ff.append(piece_of_code(
-                n.get_code(),
-                f"Fn : {n.main_target} ({s})"))
+            code_ff.append(CodeAtom(
+                code=n.get_code(),
+                is_fgt=False,
+                n=n))
             nodes_done.add(n)
             for req_n in n.req: try_del(req_n)
         def try_del(n):
@@ -121,25 +114,33 @@ class RK_Block():
                 current_mem -= memsize(n.main_target)
                 mem_timeline.append(current_mem)
                 s = ", ".join(n.all_targets)
-                ff.append(piece_of_code(
-                    f"del {s}",
-                    f"Del : {n.main_target} ({s})"))
+                code_ff.append(CodeAtom(
+                    code=f"del {s}",
+                    is_fgt=None,
+                    n=n))
         for n in fwd_nodes: fwd_n(n)
-        self.code_fast_fwd = bloc_of_code(ff,
-            f"Fast forward {self.block_name}")
-        self.ff_overhead = max(mem_timeline) - self.mem_out
 
-        # = -> code_fgt_inp =
+        # = build .code_fc =
+        self.code_fc = CodeBlock(code_ff)
+        # = build .code_fn =
         s = ", ".join(kg.direct_inputs)
-        self.code_fgt_inp = piece_of_code(
-            f"del {s}",
-            f"Del inputs : {s}")
+        code_fgt_inp = CodeAtom(
+            code=f"del {s}",
+            is_fgt=None,
+            main_var=kg.direct_inputs[0],
+            lvars=kg.direct_inputs,
+            is_fwd=True,
+            time=0,
+            mem=self.mem_inp)
+        self.code_fn = CodeBlock(code_ff+[code_fgt_inp])
 
-        # = -> time_ff =
+        # = build .overhead_ff =
+        self.overhead_ff = max(mem_timeline) - self.mem_out
+        # = build .time_ff ==
         self.time_ff = sum([n.time for n in fwd_nodes])
-        # =====================================
+    # =====================================
 
-    def __repr__(self):
+    def __str__(self):
         s = "..."
         # s = f"\n\t{self.code_fast_fwd}\n\t====="
         return (
@@ -148,14 +149,19 @@ class RK_Block():
           f"\tnb of sol : {len(self.sols)}\n"\
           f"\tmem_inp   : {self.mem_inp}\n"\
           f"\ttime_ff  : {self.time_ff}\n"\
-          f"\t== FF == : {s}\n"\
-          f"\tcode_fgt_inp : {self.code_fgt_inp}"\
           f"\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
 
+# ==========================
+
+
+
+# ==========================
+# ======== RK CHAIN ========
+# ==========================
 
 class RK_Chain():
     def __init__(self,list_kg,nb_budget_abar=10,nb_budget_all=3):
-        l = self.blocks = []
+        l = self.body = []
         for g in list_kg:
             l.append(RK_Block(g,nb_budget_abar,nb_budget_all))
             print_debug(l[-1])
@@ -166,7 +172,7 @@ class RK_Chain():
         # -> in those list, one dummy block is added at the end for Loss
 
         # -- init variables --
-        ln = len(self.blocks)
+        ln = len(self.body)
         mkl = lambda n : [[] for _ in range(n)]
         fw = mkl(ln+1)      ; bw  = mkl(ln+1)
         cw = [None]*(ln+2)  ; cbw = mkl(ln+2)
@@ -176,7 +182,7 @@ class RK_Chain():
         nb_sol = []
 
         # -- extract info from each block
-        for (i,b) in enumerate(self.blocks):
+        for (i,b) in enumerate(self.body):
             nb_sol.append(len(b.sols))
             if nb_sol[-1]==0:
                 raise Exception(
@@ -189,9 +195,9 @@ class RK_Chain():
                 fwd_tmp[i].append(sol.overhead_fwd)
                 bwd_tmp[i].append(sol.overhead_bwd)
             cw[i] = b.mem_inp
-            ff_fwd_tmp[i] = b.ff_overhead
+            ff_fwd_tmp[i] = b.overhead_ff
             ff_fw[i] = b.time_ff
-        cw[ln]=self.blocks[-1].mem_out # the final output
+        cw[ln]=self.body[-1].mem_out # the final output
 
         # for the Loss block :
         nb_sol.append(1)
@@ -213,6 +219,5 @@ class RK_Chain():
         self.ff_fw  = ff_fw
         self.nb_sol = nb_sol
 
-
-
+# ==========================
 

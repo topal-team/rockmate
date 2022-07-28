@@ -4,29 +4,28 @@
 # ==========================
 
 from .utils import *
+from .def_code import CodeAtom, CodeBlock, RK_Storage, RK_Function
 
 # ==========================
 # ====== Seq Atom Op =======
 # ==========================
-# -> Attributes : .name ; .var ; .mem/time_cost 
+# -> Attributes : .name(str) ; .mem(int) ; .time(int)
 # -> Methods    : __str__
-# -> Subclasses : Fwd/Bwd/Fgt/Del
 class SeqAtomOp:
-    def __init__(self,name,var,time_cost,mem_cost):
-        self.name=name ; self.var=var
-        self.time_cost = time_cost
-        self.mem_cost  =  mem_cost
+    def __init__(self,code : CodeAtom):
+        lvars = list(code.lvars)
+        try: lvars.remove(code.main_var)
+        except: pass
+        header = f"{code.op_type} {code.main_var}"
+        if lvars == list():
+            self.name = header
+        else:
+            s = ",".join(lvars)
+            self.name = f"{header} ({s})"
+        self.time = code.time
+        self.mem  = code.mem
     def __str__(self):
-        return f"{self.name} {self.var}"
-
-class SeqAtomFwd(SeqAtomOp):
-    def __init__(self,*args): super().__init__("Fwd",*args)
-class SeqAtomBwd(SeqAtomOp):
-    def __init__(self,*args): super().__init__("Bwd",*args)
-class SeqAtomFgt(SeqAtomOp):
-    def __init__(self,*args): super().__init__("Fgt",*args)
-class SeqAtomDel(SeqAtomOp):
-    def __init__(self,*args): super().__init__("Del",*args)
+        return self.name
 # ==========================
 
 
@@ -34,15 +33,15 @@ class SeqAtomDel(SeqAtomOp):
 # ==========================
 # ========= Seq Op =========
 # ==========================
-# -> Attributes : .name ; .mem/time_cost
+# -> Attributes : .name ; .mem/time
 # -> Methods    : __str__
 # -> Subclasses : Loss,BlockOp
 class SeqOp: pass
 
 class SeqLoss(SeqOp):
     def __init__(self):
-        self.time_cost = 0
-        self.mem_cost  = 0
+        self.time = 0
+        self.mem  = 0
     def __str__(self):
         return "Loss"
 # ==========================
@@ -52,18 +51,19 @@ class SeqLoss(SeqOp):
 # ==========================
 # ====== Seq Block Op ======
 # ==========================
-# -> Attributes : .body(SeqAtomOp list) ; .name ; .var ; .mem/time_cost
+# -> Attributes : .body(SeqAtomOp list) ; .name ; .var ; .mem/time
 # -> Methods    : __str__
 # -> Subclasses : Fn,Fc,Fe,Bwd
 class SeqBlockOp(SeqOp):
-    def __init__(self,name,index,body):
-        self.name=name ; self.index=index ; self.body=body
-        self.time_cost = sum(o.time_cost for o in body)
-        self.mem_cost  = sum(o.mem_cost  for o in body)
+    def __init__(self,name,index,code : CodeBlock):
+        self.name=name ; self.index=index
+        body = self.body = [SeqAtomOp(c) for c in code.body]
+        self.time = sum(o.time for o in body)
+        self.mem  = sum(o.mem  for o in body)
     def __str__(self):
-        header = f"{self.name} Block {self.index} in {self.time_cost}"
+        header = f"{self.name} Block {self.index} in {self.time}"
         if ref_print_atoms[0]:
-            sb = "\n|  ".join([o.__str__() for o in body])
+            sb = "\n|  ".join([o.__str__() for o in self.body])
             return f"{header}\n{sb}"
         else:
             return header
@@ -84,33 +84,61 @@ class SeqBlockBwd(SeqBlockOp):
 # ======== Sequence ========
 # ==========================
 # -> Attributes : seq (SeqOp list)
-# -> Methods    : insert ; insert_sequence ;
+# -> Methods    : insert ; insert_seq ;
 #                 __str__ ; plot_mem ; compute_time
 class RK_Sequence:
-    def __init__(self):
-        self.seq = []
+    def __init__(self,l=None):
+        if l: self.seq = l
+        else: self.seq = []
     def __str__(self):
-        return "\n".join(str(self.seq))
+        return "\n".join([str(o) for o in self.seq])
     def insert(self, op : SeqOp):
         self.seq.append(op)
-    def insert_sequence(self,sub_seq):
-        self.extend(sub_seq)
+    def insert_seq(self,sub_seq):
+        self.seq.extend(sub_seq.seq)
     def plot_mem(self):
         mem=0 ; l = [mem]
         if ref_print_atoms[0]:
             for blockop in self.seq:
-                for o in blockop.body:
-                    mem+=o.mem_cost
-                    l.append(mem)
+                if not (isinstance(blockop,SeqLoss)):
+                    for o in blockop.body:
+                        mem+=o.mem
+                        l.append(mem)
         else:
             for blockop in self.seq:
-                mem+=blockop.mem_cost
+                mem+=blockop.mem
                 l.append(mem)
         plt.plot(l)
         plt.title("Theoretical : memory used over time")
         plt.show()
     def compute_time(self):
-        return sum([o.time_cost for o in self.seq])
+        return sum([o.time for o in self.seq])
+    def cut_fwd_bwd(self):
+        ln = len(self.seq)
+        for i in range(ln):
+            if isinstance(self.seq[i],SeqLoss):
+                return (RK_Sequence(list(self.seq[:i])),
+                        RK_Sequence(list(self.seq[(i+1):])))
+        raise Exception(
+            f"Can't cut a Sequence which doesn't have SeqLoss")
+    def exec(self,storage,functions):
+        # storage : RK_Storage
+        # functions : RK_Function list
+        for o in self.seq:
+            if isinstance(o,SeqBlockFn):
+                functions[o.index].exec_fn(storage)
+            elif isinstance(o,SeqBlockFc):
+                functions[o.index].exec_fc(storage)
+            elif isinstance(o,SeqBlockFe):
+                functions[o.index].exec_fe(storage)
+            elif isinstance(o,SeqBlockBwd):
+                functions[o.index].exec_bwd(storage)
+            elif isinstance(o,SeqLoss):
+                raise Exception(
+                    "SeqLoss is impossible to exec, cut_fwd_bwd first")
+            else:
+                raise Exception(
+                    f"Unknown type in the Sequence : {type(o)})")
 # ==========================
 
 

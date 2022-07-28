@@ -5,7 +5,7 @@
 # ==========================
 
 from .utils import *
-from .def_code import RawAtomCode,RawBlockCode
+from .def_code import CodeAtom, CodeBlock
 
 # ==========================
 # === make the schedule ====
@@ -70,7 +70,7 @@ def make_sched(kg : pgb.Ktools.K_graph,budget,
 # ==========================
 # = translate the schedule =
 # ==========================
-# -> return RawBlockCode
+# -> return CodeBlock
 
 class Sched_to_ops():
     def __init__(self,g,K_graph):
@@ -161,7 +161,7 @@ class Sched_to_ops():
                     code = self._run_fwd(node)
                 else:
                     code = self._run_bwd(node)
-                res = RawAtomCode(node,code,is_fgt=False,is_fwd=is_fwd)
+                res = CodeAtom(code,is_fgt=False,n=node)
                 self.sched_ops.append(res)
 
             elif isinstance(op, CHK_DeallocateRegister):
@@ -172,7 +172,7 @@ class Sched_to_ops():
                     code = self._fgt_fwd(node)
                 else:
                     code = self._fgt_bwd(node)
-                res = RawAtomCode(node,code,is_fgt=True,is_fwd=is_fwd)
+                res = CodeAtom(code,is_fgt=True,n=node)
                 self.sched_ops.append(res)
 
             elif isinstance(op, CHK_AllocateRegister):
@@ -191,7 +191,7 @@ class Sched_to_ops():
                 fwd_ops.append(op)
             else:
                 bwd_ops.append(op)
-        return RawBlockCode(fwd_ops),RawBlockCode(bwd_ops)
+        return CodeBlock(fwd_ops),CodeBlock(bwd_ops)
 
 
 
