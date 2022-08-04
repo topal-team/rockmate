@@ -10,12 +10,13 @@ else:
     device = torch.device('cpu')
 
 torch.random.manual_seed(0)
-model2 = GPT2(nlayers=4,dropout=0, vcb_sz=6000)
-context1 = torch.tensor([[ 464, 5440, 4534]])
+model2 = GPT2(nlayers=4,dropout=0, vcb_sz=600)
+# context1 = torch.tensor([[ 464, 5440, 4534]])
+context1 = torch.randint(0,600, [10,10])
 d = {"src":context1}
 
 import warnings ; warnings.filterwarnings("ignore")
-newmod = rk.CheckpointedModule(model2,d, mem_limit = 2e7)
+newmod = rk.CheckpointedModule(model2,d, mem_limit = 6e7)
 
 for p in model2.parameters():
     p.grad = None
@@ -48,10 +49,10 @@ print("peak memory:", torch.cuda.max_memory_allocated()-max_before)
 print("runtime: %.4f"%timer.elapsed())
 
 torch.random.manual_seed(0)
-model1 = GPT2(nlayers=4,dropout=0, vcb_sz=6000).to(device)
-context1 = torch.tensor([[ 464, 5440, 4534]]).to(device)
-
-
+model1 = GPT2(nlayers=4,dropout=0, vcb_sz=600).to(device)
+# context1 = torch.tensor([[ 464, 5440, 4534]]).to(device)
+# context1 = torch.randint(0,6000, [1,1000]).to(device)
+context1 = torch.clone(context1)
 torch.cuda.reset_peak_memory_stats()
 max_before = torch.cuda.max_memory_allocated()
 allo_before = torch.cuda.memory_allocated()

@@ -106,7 +106,7 @@ class Sched_to_ops():
                 f"{n.main_target}.data = _{n.main_target}.data" )
             for c in n.body_code:
                 if "view" in ast_to_str(c.value):
-                    body_code += ast_to_str(c.targets) + ".data = " + ast_to_str(c.value)
+                    body_code += ast_to_str(c.targets) + ".data = " + ast_to_str(c.value)+";"
 
         #if n.main_target == self.graph.output:
         #    fwd_code += f""
