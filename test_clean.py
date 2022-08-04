@@ -2,21 +2,33 @@ import torch
 import pgb
 from example_modules import GPT2
 import rockmate as rk
+from rotor import timing
+
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+else:
+    device = torch.device('cpu')
 
 torch.random.manual_seed(0)
-model2 = GPT2(nlayers=2,dropout=0, vcb_sz=6000)
+model2 = GPT2(nlayers=4,dropout=0, vcb_sz=6000)
 context1 = torch.tensor([[ 464, 5440, 4534]])
 d = {"src":context1}
 
 import warnings ; warnings.filterwarnings("ignore")
-import sys; sys.tracebacklimit = 0
-newmod = rk.CheckpointedModule(model2,d)
+newmod = rk.CheckpointedModule(model2,d, mem_limit = 2e7)
 
 for p in model2.parameters():
     p.grad = None
     
 print("")
-context1 = context1.to('cuda')
+
+torch.cuda.reset_peak_memory_stats()
+max_before = torch.cuda.max_memory_allocated()
+allo_before = torch.cuda.memory_allocated()
+timer = timing.make_timer(device)
+
+timer.start()
+context1 = context1.to(device)
 torch.random.manual_seed(0)
 y1 = newmod.forward(context1)
 
@@ -28,20 +40,41 @@ newmod.storage.ld["loss"].backward()
 torch.random.manual_seed(0)
 newmod.backward()
 
-print("Finish execution")
+timer.end()
+
+print("Great! You have executed the code!")
+print("=======ROCKMATE MODULE=======")
+print("peak memory:", torch.cuda.max_memory_allocated()-max_before)
+print("runtime: %.4f"%timer.elapsed())
 
 torch.random.manual_seed(0)
-model1 = GPT2(nlayers=2,dropout=0, vcb_sz=6000).to('cuda')
-context1 = torch.tensor([[ 464, 5440, 4534]]).to('cuda')
+model1 = GPT2(nlayers=4,dropout=0, vcb_sz=6000).to(device)
+context1 = torch.tensor([[ 464, 5440, 4534]]).to(device)
+
+
+torch.cuda.reset_peak_memory_stats()
+max_before = torch.cuda.max_memory_allocated()
+allo_before = torch.cuda.memory_allocated()
+timer = timing.make_timer(device)
+timer.start()
 
 torch.random.manual_seed(0)
-
 y = model1(context1)
 loss = torch.mean(y)
-print("Same loss obtained:", torch.allclose(loss,newmod.storage.ld["loss"]))
+
 # print("Same loss from our module and original module:", torch.eq(newmod.storage.ld["__534_fv"], y))
 torch.random.manual_seed(0)
 loss.backward()
+timer.end()
+
+
+print("=======ORIGINAL MODULE=======")
+print("peak memory:", torch.cuda.max_memory_allocated()-max_before)
+print("runtime: %.4f"%timer.elapsed())
+
+if torch.allclose(loss, newmod.storage.ld["loss"]):
+    print("Same loss obtained!")
+
 same_grad = True
 for n,p in model2.named_parameters():
     if not torch.allclose(model2.get_parameter(n), model1.get_parameter(n)):
