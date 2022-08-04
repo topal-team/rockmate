@@ -78,10 +78,13 @@ class Sched_to_ops():
         self.graph = K_graph
         self.nodes = K_graph.dict_nodes
 
-    def _run_fwd(self, n):
-        if n.is_artefact:
-            return n.get_code()
+    def _run_fwd(self, n, non_grad=False):
         assert(n.name not in self.live)
+        self.live.append(n.name)
+        if n.is_artefact or non_grad:
+            return n.get_code()
+        if "LOSS" in n.get_code():
+            return n.get_code()
         # code = (n.get_code())
         # code_list = n.get_code().split('\n')
         # code = code_list[0].replace(n.main_target,"_"+n.main_target)
@@ -89,21 +92,25 @@ class Sched_to_ops():
         # code = n.main_code
         code = ast_to_str(make_ast_module([n.main_code]))
         code = code.replace(n.main_target,"_"+n.main_target)
-
-        self.live.append(n.name)
+        body_code = ""
         if n.name not in self.fgt:
             code = (
                 f"{code} ; "\
                 f"{n.main_target} = _{n.main_target}.detach(); "\
                 f"{n.main_target}.requires_grad_()" )
+            body_code = ast_to_str(make_ast_module(n.body_code))
         else: #i.e. recomputation
             #code = (n.code).replace(n.main_target,"_"+n.main_target)
             code = (
                 f"{code} ; "\
                 f"{n.main_target}.data = _{n.main_target}.data" )
+            for c in n.body_code:
+                if "view" in ast_to_str(c.value):
+                    body_code += ast_to_str(c.targets) + ".data = " + ast_to_str(c.value)
+
         #if n.main_target == self.graph.output:
         #    fwd_code += f""
-        return code+'\n'+ast_to_str(make_ast_module(n.body_code))
+        return code+'\n'+body_code
 
     def _run_bwd(self, n):
         assert(n.name not in self.live)
@@ -120,13 +127,14 @@ class Sched_to_ops():
         self.live.append(n.name)
         return bwd_code
 
-    def _fgt_fwd(self, n):
+    def _fgt_fwd(self, n, non_grad=False):
         assert(n.name in self.live)
         if n.is_artefact: return ""
         code = ""
         v = n.main_target
-        code += (f"{v}.data = torch.zeros(0,device=device); "\
-                 f"_{v}.data = torch.zeros(0,device=device);")
+        code += f"{v}.data = torch.zeros(0,device=device); "
+        if not non_grad:
+            code += f"_{v}.data = torch.zeros(0,device=device);"
         for v in n.tensor_targets:
             code += (f"{v}.data = torch.zeros(0,device=device); ")
         self.live.remove(n.name)
@@ -158,7 +166,13 @@ class Sched_to_ops():
                 node = self.nodes[node_name]
                 is_fwd = node.is_fwd
                 if is_fwd:
-                    code = self._run_fwd(node)
+                    # TODO: this should be a attribute of node
+                    if 'loss' in node_name:
+                        code = self._run_fwd(node, non_grad=False)
+                    elif self.graph.dict_info[node_name[4:]].requires_grad:
+                        code = self._run_fwd(node)
+                    else:
+                        code = self._run_fwd(node, non_grad=True)
                 else:
                     code = self._run_bwd(node)
                 res = CodeAtom(code,is_fgt=False,n=node)
@@ -169,7 +183,10 @@ class Sched_to_ops():
                 node = self.nodes[node_name]
                 is_fwd = node.is_fwd
                 if is_fwd:
-                    code = self._fgt_fwd(node)
+                    if 'loss' in node_name or self.graph.dict_info[node_name[4:]].requires_grad:
+                        code = self._fgt_fwd(node)
+                    else:
+                        code = self._fgt_fwd(node, non_grad=True)
                 else:
                     code = self._fgt_bwd(node)
                 res = CodeAtom(code,is_fgt=True,n=node)
@@ -185,7 +202,7 @@ class Sched_to_ops():
         bwd_ops = []
         fwd = True
         for i,op in enumerate(self.sched_ops):
-            if "loss" in op.code:
+            if "LOSS" in op.code:
                 fwd=False
             if fwd:
                 fwd_ops.append(op)

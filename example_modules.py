@@ -130,7 +130,7 @@ class GPT2(nn.Module):
             module.weight.data.fill_(1.0)
 
     def forward(self, src, labels=None, pos_ids=None, return_inp=False, dropout=0.1):
-        if pos_ids is None: pos_ids = torch.arange(0, src.size(-1), dtype=torch.long).unsqueeze(0)
+        if pos_ids is None: pos_ids = torch.arange(0, src.size(-1), dtype=torch.long,device=self.wpe.weight.device).unsqueeze(0)
         inp = self.drop((self.wte(src)+self.wpe(pos_ids)))
         if return_inp: return inp
         for i in range(self.nlayers): inp = self.h[0](inp)

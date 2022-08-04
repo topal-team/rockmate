@@ -22,9 +22,10 @@ class CheckpointedModule(): #torch.nn.Module):
         self.device = get_device()
         # -- use pytorch graph builder to get the list of K_graphs --
         pgb_res = pgb.make_all_graphs(
-            original_mod,dict_inputs,
-            verbose=verbose,
-            bool_kg = False) # we don't need the whole K_graph
+           original_mod,dict_inputs,
+           verbose=verbose,
+           bool_kg = False) # we don't need the whole K_graph
+        # pgb_res = pgb.make_all_graphs(original_mod, dict_inputs)
         list_kg = pgb_res.K_graph_list
 
         self.init_code = ast_to_str(list_kg[0].init_code)
@@ -51,7 +52,7 @@ class CheckpointedModule(): #torch.nn.Module):
         return storage.get_val(self.output)
 
     def backward(self):
-        self.bwd_seq.exec(storage,self.functions)
+        self.bwd_seq.exec(self.storage,self.functions)
 
 
 
