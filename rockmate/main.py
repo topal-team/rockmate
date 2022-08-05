@@ -27,16 +27,16 @@ class CheckpointedModule(): #torch.nn.Module):
            original_mod,dict_inputs,
            verbose=verbose,
            bool_kg = False) # we don't need the whole K_graph
-        list_kg = pgb_res.K_graph_list
+        self.list_kg = pgb_res.K_graph_list
 
-        self.init_code = ast_to_str(list_kg[0].init_code)
+        self.init_code = ast_to_str(self.list_kg[0].init_code)
 
-        self.output = list_kg[-1].direct_outputs[-1]
+        self.output = self.list_kg[-1].direct_outputs[-1]
 
-        print_memsizes(list_kg) # to debug
+        print_memsizes(self.list_kg) # to debug
 
         # -- use checkmate to solve all the blocks --
-        rk_chain = RK_Chain(list_kg,2,2)
+        rk_chain = RK_Chain(self.list_kg,2,2)
 
         # -- solve the chain like rotor --
         seq,functions = seq_builder(rk_chain, mem_limit)

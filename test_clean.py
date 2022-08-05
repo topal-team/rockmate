@@ -3,24 +3,28 @@ import pgb
 from example_modules import GPT2
 import rockmate as rk
 from rotor import timing
-
+import pickle
 if torch.cuda.is_available():
     device = torch.device('cuda')
 else:
     device = torch.device('cpu')
 
 torch.random.manual_seed(0)
-model2 = GPT2(nlayers=4,dropout=0, vcb_sz=600)
-# context1 = torch.tensor([[ 464, 5440, 4534]])
-context1 = torch.randint(0,600, [10,10])
+#
+model2 = GPT2(nlayers=12,dropout=1e-8, vcb_sz=600)
+context1 = torch.randint(0,600, [1000,20])
 d = {"src":context1}
 
 import warnings ; warnings.filterwarnings("ignore")
-newmod = rk.CheckpointedModule(model2,d, mem_limit = 6e7)
-
+newmod = rk.CheckpointedModule(model2,d, mem_limit = 1e10)
+with open("/beegfs/xzhao/newmod.pk","wb") as f:
+    pickle.dump(newmod, f)
 for p in model2.parameters():
     p.grad = None
     
+rk.utils.ref_print_atoms[0] = True
+#print(newmod.fwd_seq) 
+#print(newmod.bwd_seq) 
 print("")
 
 torch.cuda.reset_peak_memory_stats()
@@ -49,9 +53,7 @@ print("peak memory:", torch.cuda.max_memory_allocated()-max_before)
 print("runtime: %.4f"%timer.elapsed())
 
 torch.random.manual_seed(0)
-model1 = GPT2(nlayers=4,dropout=0, vcb_sz=600).to(device)
-# context1 = torch.tensor([[ 464, 5440, 4534]]).to(device)
-# context1 = torch.randint(0,6000, [1,1000]).to(device)
+model1 = GPT2(nlayers=12,dropout=1e-8, vcb_sz=600).to(device)
 context1 = torch.clone(context1)
 torch.cuda.reset_peak_memory_stats()
 max_before = torch.cuda.max_memory_allocated()
@@ -63,7 +65,6 @@ torch.random.manual_seed(0)
 y = model1(context1)
 loss = torch.mean(y)
 
-# print("Same loss from our module and original module:", torch.eq(newmod.storage.ld["__534_fv"], y))
 torch.random.manual_seed(0)
 loss.backward()
 timer.end()
