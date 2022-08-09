@@ -287,7 +287,8 @@ def seq_builder(chain : RK_Chain, memory_limit):
             j = w[1]
             seq.insert(SeqBlockFc(lmin,functions[lmin].code_fc))
             for k in range(lmin+1,j):
-                seq.insert(SeqBlockFn(lmin,functions[lmin].code_fn))
+                #seq.insert(SeqBlockFn(lmin,functions[lmin].code_fn))
+                seq.insert(SeqBlockFn(k,functions[k].code_fn))
             seq.insert_seq(seq_builder_rec(j,lmax,cmem-chain.cw[j]))
             seq.insert_seq(seq_builder_rec(lmin,j-1,cmem))
         return seq

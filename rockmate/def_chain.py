@@ -57,7 +57,8 @@ class RK_Block():
         nodes_size = [n.fgt_mem.v for n in kg.dict_nodes.values()]
         max_bdg = sum(nodes_size)
         min_bdg = max(nodes_size)
-        l_bd_abar = np.linspace(min_bdg,max_bdg,nb_bdg_abar)
+        #l_bd_abar = np.linspace(min_bdg,max_bdg,nb_bdg_abar)
+        l_bd_abar = np.linspace(0,max_bdg,nb_bdg_abar)
         l_bd_all  = np.linspace(min_bdg,max_bdg,nb_bdg_all+2)[2:]
         print_debug(
             f"=*=*=*=\nStart {self.block_name}, total cost : "\
