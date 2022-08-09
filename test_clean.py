@@ -12,9 +12,9 @@ else:
 torch.random.manual_seed(0)
 #
 model2 = GPT2(nlayers=12,dropout=1e-8, vcb_sz=600)
-context1 = torch.randint(0,600, [1000,20])
+context1 = torch.randint(0,600, [100,20])
 d = {"src":context1}
-
+src = context1
 import warnings ; warnings.filterwarnings("ignore")
 newmod = rk.CheckpointedModule(model2,d, mem_limit = 1e10)
 with open("/beegfs/xzhao/newmod.pk","wb") as f:

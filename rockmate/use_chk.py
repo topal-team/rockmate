@@ -113,26 +113,27 @@ class Sched_to_ops():
         #    fwd_code += f""
         return code+'\n'+body_code
 
-    def _run_bwd(self, n, rec=False):
+    def _run_bwd(self, n, rec=False, sub_list=None):
         assert(n.name not in self.live)
         mt = n.main_target
         if rec:#TODO: check if retain_graph=True changes memory need
             rec_list = []
-            if sub_list is None:
+            if sub_list is None:#TODO: future work to allow recompute grad separately
                 for sub_n in n.used_by:
                     if sub_n.name in self.fgt:
                         rec_list += sub_n.tensor_targets
-            code=f"_{mt}.backward({mt}.grad, inputs={rec_list}, retain_graph=True)"
+            inputs = ",".join(rec_list)           
+            code=f"_{mt}.backward({mt}.grad, inputs=[{inputs}], retain_graph=True)"
         else:
             code=f"_{mt}.backward({mt}.grad, retain_graph=True)"
-            bwd_code = (
-                f"if _{mt}.data.shape == torch.Size([0]):\n"\
-                f"\t_{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
-                f"\t{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
-                f"\t{code}\n"\
-                f"\t_{mt}.data = torch.zeros(0,device=device);"\
-                f"\t{mt}.data = torch.zeros(0,device=device)\n"\
-                f"else:\n\t{code}\n" )
+        bwd_code = (
+            f"if _{mt}.data.shape == torch.Size([0]):\n"\
+            f"\t_{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
+            f"\t{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
+            f"\t{code}\n"\
+            f"\t_{mt}.data = torch.zeros(0,device=device);"\
+            f"\t{mt}.data = torch.zeros(0,device=device)\n"\
+            f"else:\n\t{code}\n" )
         self.live.append(n.name)
         return bwd_code
 

@@ -114,11 +114,23 @@ class RK_Block():
                 nonlocal current_mem, mem_timeline
                 current_mem -= memsize(n.main_target)
                 mem_timeline.append(current_mem)
-                s = ", ".join(n.all_targets)
-                code_ff.append(CodeAtom(
-                    code=f"del {s}",
-                    is_fgt=None,
-                    n=n))
+                #s = ", ".join(n.all_targets)
+                #code_ff.append(CodeAtom(
+                #    code=f"del {s}",
+                #    is_fgt=None,
+                #    n=n))
+                code = ""
+                v = n.main_target
+                code += f"{v}.data = torch.zeros(0,device=device); "
+                #TODO: detect if _{v} exists outside code
+                #code += f"\nif {v}.requires_grad:\n\t_{v}.data = torch.zeros(0,device=device);"
+                for v in n.tensor_targets:
+                    code += (f"{v}.data = torch.zeros(0,device=device); ")
+                for t in n.tensor_targets:
+                    code_ff.append(CodeAtom(
+                        code=code,
+                        is_fgt=None,
+                        n=n))
         for n in fwd_nodes: fwd_n(n)
 
         # = build .code_fc =
@@ -126,7 +138,8 @@ class RK_Block():
         # = build .code_fn =
         s = ", ".join(kg.direct_inputs)
         code_fgt_inp = CodeAtom(
-            code=f"del {s}",
+            #code=f"del {s}",
+            code=f"{s}.data = torch.zeros(0,device=device);",
             is_fgt=None,
             main_var=kg.direct_inputs[0],
             lvars=kg.direct_inputs,
