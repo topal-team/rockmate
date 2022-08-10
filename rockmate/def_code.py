@@ -32,11 +32,14 @@ class RK_Storage:
 # give it a K_node or all the attributes needed
 class CodeAtom:
     def __init__(self,code,is_fgt,
-            n : pgb.Ktools.K_node=None,
+            n : pgb.Ktools.K_node=None,no_grad=None,
             main_var=None,lvars=None,is_fwd=None,time=None,mem=None):
         # is_fgt : ternaire boolean (is_fgt = None means Del)
         self.code = code
+        self.is_fgt = is_fgt
+        self.no_grad=no_grad
         if n:
+            self.n = n
             self.overhead = n.overhead.v
             self.main_var = n.main_target
             self.lvars    = n.all_targets
@@ -65,7 +68,7 @@ class CodeAtom:
         else:
             if is_fwd: self.op_type = "Fwd"
             else: self.op_type = "Bwd"
-
+        self.name = self.op_type+" "+self.main_var
 
 class CodeBlock:
     def __init__(self,body):
@@ -82,9 +85,12 @@ class CodeBlock:
     def exec(self,storage : RK_Storage):
         for c in self.body:
             try:
-                exec(c.code,storage.gd,storage.ld)
+                #exec(c.code,storage.gd,storage.ld)
+                executor = storage.gd['executor']
+                executor.exec(c)
             except:
-                raise ValueError(f"failed to execute {c.code}")
+                code = executor.code[-1]
+                raise ValueError(f"failed to execute {code}")
 
 class RK_Function:
     def __init__(self,code_fe,code_fn,code_fc,code_bwd):

@@ -11,20 +11,20 @@ else:
 
 torch.random.manual_seed(0)
 #
-model2 = GPT2(nlayers=12,dropout=1e-8, vcb_sz=600)
-context1 = torch.randint(0,600, [100,20])
+model2 = GPT2(nlayers=12,dropout=1e-9, vcb_sz=600)
+context1 = torch.randint(0,600, [20,20])
 d = {"src":context1}
 src = context1
 import warnings ; warnings.filterwarnings("ignore")
-newmod = rk.CheckpointedModule(model2,d, mem_limit = 1e10)
-with open("/beegfs/xzhao/newmod.pk","wb") as f:
-    pickle.dump(newmod, f)
+newmod = rk.CheckpointedModule(model2,d, mem_limit = 1e8)
+#with open("/beegfs/xzhao/newmod.pk","wb") as f:
+#    pickle.dump(newmod, f)
 for p in model2.parameters():
     p.grad = None
     
-rk.utils.ref_print_atoms[0] = True
-#print(newmod.fwd_seq) 
-#print(newmod.bwd_seq) 
+rk.utils.ref_print_atoms[0] = False 
+print(newmod.fwd_seq) 
+print(newmod.bwd_seq) 
 print("")
 
 torch.cuda.reset_peak_memory_stats()
@@ -53,7 +53,7 @@ print("peak memory:", torch.cuda.max_memory_allocated()-max_before)
 print("runtime: %.4f"%timer.elapsed())
 
 torch.random.manual_seed(0)
-model1 = GPT2(nlayers=12,dropout=1e-8, vcb_sz=600).to(device)
+model1 = GPT2(nlayers=12,dropout=1e-9, vcb_sz=600).to(device)
 context1 = torch.clone(context1)
 torch.cuda.reset_peak_memory_stats()
 max_before = torch.cuda.max_memory_allocated()
@@ -84,8 +84,20 @@ for n,p in model2.named_parameters():
         same_grad = False
         
     if model2.get_parameter(n).grad!=None:
-        if not torch.allclose(model2.get_parameter(n).grad, model1.get_parameter(n).grad):
+        grad1 = model1.get_parameter(n).grad
+        grad2 = model2.get_parameter(n).grad
+        if not torch.allclose(grad1,grad2):
             print("Unequal grad found in:", n)
+            print(torch.mean((grad1-grad2)/grad1))
             same_grad = False
 if same_grad:
     print("Same grad obtained!")
+if True:
+    for c in newmod.executor.done:
+        print(c)
+    for c in newmod.fwd_code+newmod.bwd_code:
+        print(c)
+
+#with open("/beegfs/xzhao/seq.pk","wb") as f:
+#    pickle.dump(newmod.storage.gd["executor"], f)
+    

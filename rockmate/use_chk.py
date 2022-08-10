@@ -78,10 +78,10 @@ class Sched_to_ops():
         self.graph = K_graph
         self.nodes = K_graph.dict_nodes
 
-    def _run_fwd(self, n, non_grad=False, rec=False):
+    def _run_fwd(self, n, no_grad=False, rec=False):
         assert(n.name not in self.live)
         self.live.append(n.name)
-        if n.is_artefact or non_grad:
+        if n.is_artefact or no_grad:
             return n.get_code()
         if "LOSS" in n.get_code():
             return n.get_code()
@@ -137,13 +137,13 @@ class Sched_to_ops():
         self.live.append(n.name)
         return bwd_code
 
-    def _fgt_fwd(self, n, non_grad=False):
+    def _fgt_fwd(self, n, no_grad=False):
         assert(n.name in self.live)
         if n.is_artefact: return ""
         code = ""
         v = n.main_target
         code += f"{v}.data = torch.zeros(0,device=device); "
-        if not non_grad:
+        if not no_grad:
             code += f"_{v}.data = torch.zeros(0,device=device);"
         for v in n.tensor_targets:
             code += (f"{v}.data = torch.zeros(0,device=device); ")
@@ -182,30 +182,34 @@ class Sched_to_ops():
                 node = self.nodes[node_name]
                 is_fwd = node.is_fwd
                 rec = True if node_name in self.ops else False
+                no_grad = False
                 if is_fwd:
                     # TODO: this should be a attribute of node
                     if 'loss' in node_name or self.graph.dict_info[node_name[4:]].requires_grad:
                         code = self._run_fwd(node, rec=rec)
                     else:
-                        code = self._run_fwd(node, non_grad=True, rec=rec)
+                        code = self._run_fwd(node, no_grad=True, rec=rec)
+                        no_grad = True
                 else:
                     code = self._run_bwd(node, rec=rec)
                 self.ops.append(node_name)
-                res = CodeAtom(code,is_fgt=False,n=node)
+                res = CodeAtom(code,is_fgt=False,n=node,no_grad=no_grad)
                 self.sched_ops.append(res)
 
             elif isinstance(op, CHK_DeallocateRegister):
                 node_name = self.g.node_names[op.op_id]
                 node = self.nodes[node_name]
                 is_fwd = node.is_fwd
+                no_grad = False
                 if is_fwd:
                     if 'loss' in node_name or self.graph.dict_info[node_name[4:]].requires_grad:
                         code = self._fgt_fwd(node)
                     else:
-                        code = self._fgt_fwd(node, non_grad=True)
+                        code = self._fgt_fwd(node, no_grad=True)
+                        no_grad = True
                 else:
                     code = self._fgt_bwd(node)
-                res = CodeAtom(code,is_fgt=True,n=node)
+                res = CodeAtom(code,is_fgt=True,n=node,no_grad=no_grad)
                 self.sched_ops.append(res)
 
             elif isinstance(op, CHK_AllocateRegister):

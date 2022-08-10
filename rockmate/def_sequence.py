@@ -24,6 +24,7 @@ class SeqAtomOp:
             self.name = f"{header} ({s})"
         self.time = code.time
         self.mem  = code.mem
+        self.code = code
     def __str__(self):
         return self.name
 # ==========================

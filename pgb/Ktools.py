@@ -12,7 +12,8 @@ class K_node():
             all_targets=None,
             tensor_targets=None,
             main_code=None,
-            body_code=None):
+            body_code=None,
+            info=None):
         self.is_fwd = is_fwd
         self.main_target = target
         if tensor_targets is None: tensor_targets = [target]
@@ -30,6 +31,7 @@ class K_node():
         self.body_code = body_code
         self.req = req
         self.used_by = set()
+        self.info = info
 
     def full_code(self):
         if self.main_code is None: mc = []
@@ -205,6 +207,7 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
         n_req = set(n.req)
         n_req.discard(sg.init_node)
         Kreq = set(dict_Kfwd[sub_n.main_target] for sub_n in n_req)
+        info = sg.dict_info[mt]
         Kfwd = K_node(
                 is_artefact = n.is_artefact,
                 is_fwd     = True,
@@ -213,14 +216,15 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
                 all_targets    = n.all_targets,
                 tensor_targets = n.tensor_targets,
                 main_code  = n.main_code,
-                body_code  = n.body_code)
+                body_code  = n.body_code,
+                info = info)
         dict_Kfwd[mt] = Kfwd
 
         # -- build Kbwd --
         info = sg.dict_info[mt]
         if info.requires_grad:
             print_debug(f"{mt} req bwd")
-            Kbwd = K_node(is_fwd=False, req=set(Kreq), target=mt)
+            Kbwd = K_node(is_fwd=False, req=set(Kreq), target=mt, info=info)
             dict_Kbwd[mt] = Kbwd
             for sub_n in n.req:
                 sub_tar = sub_n.main_target
