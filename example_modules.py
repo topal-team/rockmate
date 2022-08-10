@@ -29,6 +29,7 @@ class FeedForward(nn.Module):
         self.c_proj  = Conv1D(nx, d_model)
         self.act     = F.gelu
         self.dropout = nn.Dropout(dropout)
+        self.dropout = nn.Identity()
 
     def forward(self, x):
         return self.dropout(self.c_proj(self.act(self.c_fc(x))))
@@ -44,6 +45,7 @@ class Attention(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
         self.register_buffer("bias", torch.tril(torch.ones(n_ctx, n_ctx)).view(1, 1, n_ctx, n_ctx))
         self.dropout = nn.Dropout(dropout)
+        self.dropout = nn.Identity()
         self.c_proj  = Conv1D(d_model, d_model)
 
     def split_heads(self, x):
@@ -111,6 +113,7 @@ class GPT2(nn.Module):
         self.wte     = nn.Embedding(vcb_sz, d_model)
         self.wpe     = nn.Embedding(n_ctx, d_model)
         self.drop    = nn.Dropout(dropout)
+        self.drop    = nn.Identity()
         self.ln_f    = LayerNorm(d_model)
         self.out     = nn.Linear(d_model, vcb_sz, bias=False)
         self.loss_fn = nn.CrossEntropyLoss()
