@@ -46,7 +46,16 @@ class Executor():#to execute CodeAtom
         #assert(f"{mt}.data" not in self.live)
         #self.live.append(n.name)
         if n.is_artefact or "LOSS" in n.get_code() or not code_atom.n.info.requires_grad: 
-            code = n.get_code()
+            if rec:
+                code = ""
+                mc = [n.main_code] if n.main_code else []
+                for c in mc+n.body_code:
+                    if c in n.tensor_targets:
+                        code += ast_to_str(c.targets) + ".data = " + ast_to_str(c.value)+";"
+                    else:
+                        code += ast_to_str(c)+";"
+            else:
+                code = n.get_code()
             self.code.append(code)
             #exec(code, self.storage.gd, self.storage.ld)
             self.done.append(code_atom.name) 
@@ -55,7 +64,7 @@ class Executor():#to execute CodeAtom
         code = ast_to_str(make_ast_module([n.main_code]))
         code = code.replace(mt,"_"+mt)
         body_code = ""
-        if rec:#code_atom.name not in self.live[f"{mt}.data"]:#i.e. recomputation
+        if rec:#i.e. recomputation
             code = (
                 f"{code} ; "\
                 f"{mt}.data = _{mt}.data" )
@@ -117,14 +126,11 @@ class Executor():#to execute CodeAtom
         else:
             mt = n.main_target
             #code = f"{mt}.data = torch.zeros(0,device=device); "
+            code =""
             if code_atom.n.info and code_atom.n.info.requires_grad:
                 code += f"_{mt}.data = torch.zeros(0,device=device);"
-                for v in n.tensor_targets:
-                    code += (f"{v}.data = torch.zeros(0,device=device); ")
-            else:
-                for v in n.tensor_targets:
-                    code += (f"{v} = torch.zeros(0,device=device); ")
-
+            for v in n.tensor_targets:
+                code += (f"{v}.data = torch.zeros(0,device=device); ")
             self.live[f"{mt}.data"].remove("Fwd "+code_atom.main_var)
         self.code.append(code)
         #exec(code, self.storage.gd, self.storage.ld)
