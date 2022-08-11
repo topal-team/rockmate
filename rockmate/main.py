@@ -116,11 +116,15 @@ class Executor():#to execute CodeAtom
         if n.is_artefact: code = ""
         else:
             mt = n.main_target
-            code = f"{mt}.data = torch.zeros(0,device=device); "
+            #code = f"{mt}.data = torch.zeros(0,device=device); "
             if code_atom.n.info and code_atom.n.info.requires_grad:
                 code += f"_{mt}.data = torch.zeros(0,device=device);"
-            for v in n.tensor_targets:
-                code += (f"{v}.data = torch.zeros(0,device=device); ")
+                for v in n.tensor_targets:
+                    code += (f"{v}.data = torch.zeros(0,device=device); ")
+            else:
+                for v in n.tensor_targets:
+                    code += (f"{v} = torch.zeros(0,device=device); ")
+
             self.live[f"{mt}.data"].remove("Fwd "+code_atom.main_var)
         self.code.append(code)
         #exec(code, self.storage.gd, self.storage.ld)
@@ -163,7 +167,7 @@ class CheckpointedModule(): #torch.nn.Module):
         print_memsizes(self.list_kg) # to debug
 
         # -- use checkmate to solve all the blocks --
-        rk_chain = RK_Chain(self.list_kg,2,2)
+        rk_chain = RK_Chain(self.list_kg,10,3)
 
         # -- solve the chain like rotor --
         seq,functions = seq_builder(rk_chain, mem_limit)
