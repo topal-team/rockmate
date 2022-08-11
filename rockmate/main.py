@@ -50,10 +50,12 @@ class Executor():#to execute CodeAtom
                 code = ""
                 mc = [n.main_code] if n.main_code else []
                 for c in mc+n.body_code:
-                    if c in n.tensor_targets:
-                        code += ast_to_str(c.targets) + ".data = " + ast_to_str(c.value)+";"
-                    else:
-                        code += ast_to_str(c)+";"
+                    try:
+                        if ast_to_str(c.targets) in n.tensor_targets:
+                            code += ast_to_str(c.targets) + ".data = " + ast_to_str(c.value)+";"
+                        else:
+                            code += ast_to_str(c)+";"
+                    except: code += ast_to_str(c)+";"
             else:
                 code = n.get_code()
             self.code.append(code)
