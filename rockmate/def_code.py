@@ -30,67 +30,47 @@ class RK_Storage:
 #                 .main_var / .lvars
 # CodeAtom.__init__ is polymorphic, either you
 # give it a K_node or all the attributes needed
-class CodeAtom:
-    def __init__(self,code,is_fgt,
-            n : pgb.Ktools.K_node=None,no_grad=None,
-            main_var=None,lvars=None,is_fwd=None,time=None,mem=None):
-        # is_fgt : ternaire boolean (is_fgt = None means Del)
-        self.code = code
+class CodeAtom: pass
+
+class Op:
+    def __init__(self,is_fgt,
+            n:pgb.Ktools.K_node):
         self.is_fgt = is_fgt
-        self.no_grad=no_grad
-        if n:
-            self.n = n
-            self.overhead = n.overhead.v
-            self.main_var = n.main_target
-            self.lvars    = n.all_targets
-            is_fwd   = n.is_fwd
-            if is_fgt is None: # Del
-                self.time = 0
-                self.mem  = n.run_mem.v
-            elif is_fgt: # Fgt
-                self.time = 0
-                self.mem  = - n.fgt_mem.v
-            else:
-                self.time = n.time
-                self.mem  = n.fgt_mem.v
-        else:
-            self.overhead = 0
-            self.main_var = main_var
-            self.lvars    = lvars
-            self.time     = time
-            self.mem      = mem
-        # = op_type : =
-        if is_fgt is None:
-            self.op_type = "Del"
-        elif is_fgt:
-            if is_fwd: self.op_type = "FgtFwd"
+        self.n = n
+        self.overhead = n.overhead.v
+        self.main_var = n.main_target
+        self.lvars    = n.all_targets
+        if is_fgt: # Fgt
+            self.time = 0#Fgt could happen in ILP solution even Infinity mem
+            self.mem  = - n.fgt_mem.v
+            if n.is_fwd: self.op_type = "FgtFwd"
             else: self.op_type = "FgtBwd"
         else:
-            if is_fwd: self.op_type = "Fwd"
+            self.time = n.time
+            self.mem  = n.fgt_mem.v
+            if n.is_fwd: self.op_type = "Fwd"
             else: self.op_type = "Bwd"
         self.name = self.op_type+" "+self.main_var
+        
 
-class CodeBlock:
-    def __init__(self,body):
-        self.body = body
-
-    def mem_timeline(self):
-        overhead = [o.overhead for o in self.body]
-        current_mem = 0 ; mem_timeline = []
+class OpBlock:
+    def __init__(self, op_list):
+        self.body = op_list
+        save_mem = []
+        tmp_mem = []
         for o in self.body:
-            current_mem += o.mem
-            mem_timeline.append(current_mem)
-        return np.array(overhead),np.array(mem_timeline)
+            save_mem.append(o.mem)
+            tmp_mem.append(o.overhead)
+        self.save_timeline = np.cumsum(np.array(save_mem))
+        self.overhead_timeline = np.cumsum(np.array(tmp_mem))
 
-    def exec(self,storage : RK_Storage):
-        for c in self.body:
-            try:
-                #exec(c.code,storage.gd,storage.ld)
-                executor = storage.gd['executor']
-                executor.exec(c)
-            except:
-                code = executor.code[-1]
-                raise ValueError(f"failed to execute {code}")
+        self.save = self.save_timeline[-1]
+        self.overhead = max(self.save_timeline+self.overhead_timeline) - self.save
+        self.time = sum([op.time for op in self.body])
+
+
+
+class CodeBlock: pass
 
 class RK_Function:
     def __init__(self,code_fe,code_fn,code_fc,code_bwd):

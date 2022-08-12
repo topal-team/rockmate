@@ -42,6 +42,8 @@ class Executor():#to execute CodeAtom
     def _run_fwd(self, code_atom):
         rec = code_atom.name in self.done
         n = code_atom.n
+        if "loss" in n.name:
+            return None
         mt = n.main_target
         #assert(f"{mt}.data" not in self.live)
         #self.live.append(n.name)
@@ -90,10 +92,12 @@ class Executor():#to execute CodeAtom
 
     def _run_bwd(self, code_atom, sub_list=None):
         n = code_atom.n
+        if "loss" in n.name:
+            return None
         mt = n.main_target 
         rec = code_atom.name in self.done
         #assert(f"{mt}.data" not in self.live)
-        if rec:#TODO: check if retain_graph=True changes memory need
+        if rec:
             rec_list = []
             if sub_list is None:#TODO: future work to allow recompute grad separately
                 for sub_n in n.used_by:
@@ -114,7 +118,7 @@ class Executor():#to execute CodeAtom
         else:
             bwd_code = code
         for sub_n in n.used_by:
-            if True:#TODO:sub_n.requires_grad
+            if sub_n.info.requires_grad:
                 smt = sub_n.main_target
                 self.live[f"{smt}.grad"].append(code_atom.name)
         self.code.append(bwd_code)
@@ -123,6 +127,8 @@ class Executor():#to execute CodeAtom
 
     def _fgt_fwd(self, code_atom):
         n = code_atom.n
+        if "loss" in n.name:
+            return None
         #assert(f"{mt}.data" in self.live)
         if n.is_artefact: code = ""
         else:
@@ -141,6 +147,8 @@ class Executor():#to execute CodeAtom
     def _fgt_bwd(self, code_atom):
         n = code_atom.n
         #assert(n.name in self.live)
+        if "loss" in n.name:
+            return None
         code_list = []
         for sub_n in n.used_by:
             smt = sub_n.main_target
@@ -175,40 +183,48 @@ class CheckpointedModule(): #torch.nn.Module):
         print_memsizes(self.list_kg) # to debug
 
         # -- use checkmate to solve all the blocks --
-        rk_chain = RK_Chain(self.list_kg,10,3)
+        rk_chain = RK_Chain(self.list_kg,2,2)
 
         # -- solve the chain like rotor --
-        seq,functions = seq_builder(rk_chain, mem_limit)
-
-        self.functions = functions
+        seq = seq_builder(rk_chain, mem_limit)
         self.fwd_seq,self.bwd_seq = seq.cut_fwd_bwd()
         self.original_mod = original_mod
         self.storage =  RK_Storage(self.device,self.original_mod)
         self.executor = Executor(self.storage)
         for sb in self.fwd_seq.seq:
             for sa in sb.body:
-                self.executor.translate(sa.code)
+                try:
+                    self.executor.translate(sa.op)
+                except:
+                    print(f"Failed to translate {sa.op.name}")
         self.fwd_code = self.executor.code[:]
         self.executor.code = []
         for sb in self.bwd_seq.seq:
             for sa in sb.body:
-                self.executor.translate(sa.code)
+                try:
+                    self.executor.translate(sa.op)
+                except:
+                    print(f"Failed to translate {sa.op.name}")
         self.bwd_code = self.executor.code
 
     def forward(self,input):
         self.storage.add_val("src",input) # hardcoded
-        #self.storage.gd["executor"] = self.executor 
         exec(self.init_code,self.storage.gd,self.storage.ld)
-        #self.fwd_seq.exec(self.storage,self.functions)
         for code in self.fwd_code:
-            exec(code,self.storage.gd,self.storage.ld)
-
+            try:
+                exec(code,self.storage.gd,self.storage.ld)
+            except:
+                print(f"Failed to execute code:\n {code}")
+                break
         return self.storage.get_val(self.output)
 
     def backward(self):
         for code in self.bwd_code:
-            exec(code,self.storage.gd,self.storage.ld)
-        #self.bwd_seq.exec(self.storage,self.functions)
+            try:
+                exec(code,self.storage.gd,self.storage.ld)
+            except:
+                print(f"Failed to execute code:\n {code}")
+                break
 
 
 

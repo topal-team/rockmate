@@ -242,17 +242,9 @@ def solve_dp_iterative(chain : RK_Chain, mmax):
 def seq_builder(chain : RK_Chain, memory_limit):
     # returns :
     # - the optimal sequence of computation using mem-persistent algo
-    # - "Functions" : RK_Function list -> to exec the code
     chain.build_rotor_chain()
     mmax = memory_limit - chain.cw[0]
     opt, what = solve_dp_functionnal(chain,mmax)
-    functions = []
-    for block in chain.body:
-        functions.append(RK_Function(
-            code_fe  = None,
-            code_fn  = block.code_fn,
-            code_fc  = block.code_fc,
-            code_bwd = None))
 
     # ~~~~~~~~~~~~~~~~~~
     def seq_builder_rec(lmin, lmax, cmem):
@@ -275,27 +267,24 @@ def seq_builder(chain : RK_Chain, memory_limit):
         if w[0]:
             k = w[1]
             sol = chain.body[lmin].sols[k]
-            functions[lmin].code_fe  = sol.code_fwd
-            functions[lmin].code_bwd = sol.code_bwd
-            seq.insert(SeqBlockFe(lmin,sol.code_fwd))
+            seq.insert(SeqBlockFe(lmin,sol.op_block_fwd))
             seq.insert_seq(
                 seq_builder_rec(lmin+1,lmax,cmem-chain.cbw[lmin+1][k]))
-            seq.insert(SeqBlockBwd(lmin,sol.code_bwd))
+            seq.insert(SeqBlockBwd(lmin,sol.op_block_bwd))
 
         # -- Solution 1 --
         else:
             j = w[1]
-            seq.insert(SeqBlockFc(lmin,functions[lmin].code_fc))
+            seq.insert(SeqBlockFc(lmin,chain.body[lmin].op_block_fc))
             for k in range(lmin+1,j):
-                #seq.insert(SeqBlockFn(lmin,functions[lmin].code_fn))
-                seq.insert(SeqBlockFn(k,functions[k].code_fn))
+                seq.insert(SeqBlockFn(k,chain.body[k].op_block_fn))
             seq.insert_seq(seq_builder_rec(j,lmax,cmem-chain.cw[j]))
             seq.insert_seq(seq_builder_rec(lmin,j-1,cmem))
         return seq
     # ~~~~~~~~~~~~~~~~~~
 
     seq = seq_builder_rec(0, chain.ln, mmax)
-    return seq,functions
+    return seq
 
 # ==========================
 

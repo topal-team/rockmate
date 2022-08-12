@@ -5,7 +5,7 @@
 # ==========================
 
 from .utils import *
-from .def_code import CodeAtom, CodeBlock
+from .def_code import Op, OpBlock
 
 # ==========================
 # === make the schedule ====
@@ -57,180 +57,30 @@ def make_sched(kg : pgb.Ktools.K_graph,budget,
                 verbose=verbose)
 
     # == result ==
+    op_list = [] 
     if sched_result.feasible:
         print("*",end="")
         print_debug('feasible schedule solved')
-    if plot_sched: CHK_plot_schedule(sched_result)
-    return sched_result, chk_g
-
-# ==========================
-
-
-
-# ==========================
-# = translate the schedule =
-# ==========================
-# -> return CodeBlock
-
-class Sched_to_ops():
-    def __init__(self,g,K_graph):
-        self.g = g
-        self.graph = K_graph
-        self.nodes = K_graph.dict_nodes
-
-    def _run_fwd(self, n, no_grad=False, rec=False):
-        assert(n.name not in self.live)
-        self.live.append(n.name)
-        if n.is_artefact or no_grad:
-            return n.get_code()
-        if "LOSS" in n.get_code():
-            return n.get_code()
-        # code = (n.get_code())
-        # code_list = n.get_code().split('\n')
-        # code = code_list[0].replace(n.main_target,"_"+n.main_target)
-        # code_list[0] = code
-        # code = n.main_code
-        code = ast_to_str(make_ast_module([n.main_code]))
-        code = code.replace(n.main_target,"_"+n.main_target)
-        body_code = ""
-        if rec: #i.e. recomputation
-            #code = (n.code).replace(n.main_target,"_"+n.main_target)
-            code = (
-                f"{code} ; "\
-                f"{n.main_target}.data = _{n.main_target}.data" )
-            for c in n.body_code:
-                if "view" in ast_to_str(c.value):
-                    body_code += ast_to_str(c.targets) + ".data = " + ast_to_str(c.value)+";"
-                else:
-                    body_code += ast_to_str(c)+";"
-        else:
-            code = (
-                f"{code} ; "\
-                f"{n.main_target} = _{n.main_target}.detach(); "\
-                f"{n.main_target}.requires_grad_()" )
-            body_code = ast_to_str(make_ast_module(n.body_code))
-        #if n.main_target == self.graph.output:
-        #    fwd_code += f""
-        return code+'\n'+body_code
-
-    def _run_bwd(self, n, rec=False, sub_list=None):
-        assert(n.name not in self.live)
-        mt = n.main_target
-        if rec:#TODO: check if retain_graph=True changes memory need
-            rec_list = []
-            if sub_list is None:#TODO: future work to allow recompute grad separately
-                for sub_n in n.used_by:
-                    if sub_n.name in self.fgt:
-                        rec_list += sub_n.tensor_targets
-            inputs = ",".join(rec_list)           
-            code=f"_{mt}.backward({mt}.grad, inputs=[{inputs}], retain_graph=True)"
-        else:
-            code=f"_{mt}.backward({mt}.grad, retain_graph=True)"
-        bwd_code = (
-            f"if _{mt}.data.shape == torch.Size([0]):\n"\
-            f"\t_{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
-            f"\t{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
-            f"\t{code}\n"\
-            f"\t_{mt}.data = torch.zeros(0,device=device);"\
-            f"\t{mt}.data = torch.zeros(0,device=device)\n"\
-            f"else:\n\t{code}\n" )
-        self.live.append(n.name)
-        return bwd_code
-
-    def _fgt_fwd(self, n, no_grad=False):
-        assert(n.name in self.live)
-        if n.is_artefact: return ""
-        code = ""
-        v = n.main_target
-        code += f"{v}.data = torch.zeros(0,device=device); "
-        if not no_grad:
-            code += f"_{v}.data = torch.zeros(0,device=device);"
-        for v in n.tensor_targets:
-            code += (f"{v}.data = torch.zeros(0,device=device); ")
-        self.live.remove(n.name)
-        self.fgt.append(n.name)
-        return code
-
-    def _fgt_bwd(self, n):
-        assert(n.name in self.live)
-        code_list = []
-        for sub_n in n.used_by:
-            to_fgt = True
-            for sup_sub_n in sub_n.req:
-                if sup_sub_n in self.live:
-                    #TODO: mark the output grad that can be fgt
-                    to_fgt = False
-                    continue
-            if to_fgt:
-                self.fgt.append(sub_n.name)
-                for t in sub_n.tensor_targets:
-                    code = f"{t}.grad = None"
-                    code_list.append(code)
-        self.live.remove(n.name)
-        #self.fgt.append(n.name)
-        return ";".join(code_list)
-
-    def generate_sched_ops(self, sched_result):
-        self.schedule = sched_result.schedule
-        self.sched_ops = []
-        self.ops = []
-        self.live = []#record which grad is live
-        self.fgt = []#record what is forgotten
-        for op in self.schedule:
+        for op in sched_result.schedule:
             if isinstance(op, CHK_OperatorEvaluation):
-                node_name = self.g.node_names[op.id]#"fwd_"+main_target
-                node = self.nodes[node_name]
-                is_fwd = node.is_fwd
-                rec = True if node_name in self.ops else False
-                no_grad = False
-                if is_fwd:
-                    # TODO: this should be a attribute of node
-                    if 'loss' in node_name or self.graph.dict_info[node_name[4:]].requires_grad:
-                        code = self._run_fwd(node, rec=rec)
-                    else:
-                        code = self._run_fwd(node, no_grad=True, rec=rec)
-                        no_grad = True
-                else:
-                    code = self._run_bwd(node, rec=rec)
-                self.ops.append(node_name)
-                res = CodeAtom(code,is_fgt=False,n=node,no_grad=no_grad)
-                self.sched_ops.append(res)
+                node_name = chk_g.node_names[op.id]#"fwd_"+main_target
+                node = kg.dict_nodes[node_name]
+                #print(node_name, node.name)
+                op_list.append(Op(is_fgt=False,n=node))
 
             elif isinstance(op, CHK_DeallocateRegister):
-                node_name = self.g.node_names[op.op_id]
-                node = self.nodes[node_name]
-                is_fwd = node.is_fwd
-                no_grad = False
-                if is_fwd:
-                    if 'loss' in node_name or self.graph.dict_info[node_name[4:]].requires_grad:
-                        code = self._fgt_fwd(node)
-                    else:
-                        code = self._fgt_fwd(node, no_grad=True)
-                        no_grad = True
-                else:
-                    code = self._fgt_bwd(node)
-                res = CodeAtom(code,is_fgt=True,n=node,no_grad=no_grad)
-                self.sched_ops.append(res)
+                node_name = chk_g.node_names[op.op_id]#"fwd_"+main_target
+                node = kg.dict_nodes[node_name]
+                op_list.append(Op(is_fgt=True,n=node))
 
             elif isinstance(op, CHK_AllocateRegister):
                 pass
 
             else:
                 raise TypeError(f"Operation not recognize:{type(op)}")
-
-        fwd_ops = []
-        bwd_ops = []
-        fwd = True
-        for i,op in enumerate(self.sched_ops):
-            if "LOSS" in op.code:
-                fwd=False
-            if fwd:
-                fwd_ops.append(op)
-            else:
-                bwd_ops.append(op)
-        return CodeBlock(fwd_ops),CodeBlock(bwd_ops)
-
-
+    
+    if plot_sched: CHK_plot_schedule(sched_result)
+    
+    return sched_result, op_list, chk_g
 
 # ==========================
-

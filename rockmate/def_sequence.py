@@ -4,7 +4,8 @@
 # ==========================
 
 from .utils import *
-from .def_code import CodeAtom, CodeBlock, RK_Storage, RK_Function
+from .def_code import RK_Storage, RK_Function
+from .def_code import Op, OpBlock
 
 # ==========================
 # ====== Seq Atom Op =======
@@ -12,19 +13,19 @@ from .def_code import CodeAtom, CodeBlock, RK_Storage, RK_Function
 # -> Attributes : .name(str) ; .mem(int) ; .time(int)
 # -> Methods    : __str__
 class SeqAtomOp:
-    def __init__(self,code : CodeAtom):
-        lvars = list(code.lvars)
-        try: lvars.remove(code.main_var)
+    def __init__(self,op : Op):
+        lvars = list(op.lvars)
+        try: lvars.remove(op.main_var)
         except: pass
-        header = f"{code.op_type} {code.main_var}"
+        header = f"{op.op_type} {op.main_var}"
         if lvars == list():
             self.name = header
         else:
             s = ",".join(lvars)
             self.name = f"{header} ({s})"
-        self.time = code.time
-        self.mem  = code.mem
-        self.code = code
+        self.time = op.time
+        self.mem  = op.mem
+        self.op = op
     def __str__(self):
         return self.name
 # ==========================
@@ -56,9 +57,9 @@ class SeqLoss(SeqOp):
 # -> Methods    : __str__
 # -> Subclasses : Fn,Fc,Fe,Bwd
 class SeqBlockOp(SeqOp):
-    def __init__(self,name,index,code : CodeBlock):
+    def __init__(self,name,index,op_block : OpBlock):
         self.name=name ; self.index=index
-        body = self.body = [SeqAtomOp(c) for c in code.body]
+        body = self.body = [SeqAtomOp(o) for o in op_block.body]
         self.time = sum(o.time for o in body)
         self.mem  = sum(o.mem  for o in body)
     def __str__(self):
@@ -122,24 +123,6 @@ class RK_Sequence:
                         RK_Sequence(list(self.seq[(i+1):])))
         raise Exception(
             f"Can't cut a Sequence which doesn't have SeqLoss")
-    def exec(self,storage,functions):
-        # storage : RK_Storage
-        # functions : RK_Function list
-        for o in self.seq:
-            if isinstance(o,SeqBlockFn):
-                functions[o.index].exec_fn(storage)
-            elif isinstance(o,SeqBlockFc):
-                functions[o.index].exec_fc(storage)
-            elif isinstance(o,SeqBlockFe):
-                functions[o.index].exec_fe(storage)
-            elif isinstance(o,SeqBlockBwd):
-                functions[o.index].exec_bwd(storage)
-            elif isinstance(o,SeqLoss):
-                raise Exception(
-                    "SeqLoss is impossible to exec, cut_fwd_bwd first")
-            else:
-                raise Exception(
-                    f"Unknown type in the Sequence : {type(o)})")
 # ==========================
 
 

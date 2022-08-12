@@ -5,8 +5,8 @@
 # ==========================
 
 from .utils import *
-from .use_chk import make_sched, Sched_to_ops
-from .def_code import CodeAtom, CodeBlock
+from .use_chk import make_sched
+from .def_code import Op, OpBlock
 
 # ==========================
 # ======== RK Block ========
@@ -19,22 +19,25 @@ from .def_code import CodeAtom, CodeBlock
 class RK_Block_Solution():
     def __init__(self,kg,budget_abar,budget_all):
         kg.loss_node.fgt_mem = MemSize(budget_all - budget_abar)
-        sched_result, chk_g = make_sched(kg, budget_all)
+        sched_result, op_list, chk_g = make_sched(kg, budget_all)
         is_f = self.is_feasible = sched_result.feasible
         if is_f:
-            Translator = Sched_to_ops(chk_g,kg)
-            code_fwd,code_bwd = Translator.generate_sched_ops(sched_result)
+            #TODO: find a better way to split
+            for i,op in enumerate(op_list):
+                if "loss" in op.n.name:
+                    loss_i = i
+                    break
+            self.op_block_fwd = OpBlock(op_list[:loss_i+1])
+            self.op_block_bwd = OpBlock(op_list[loss_i+1:])
+            self.time_fwd = self.op_block_fwd.time
+            self.time_bwd = self.op_block_bwd.time
 
-            fwd_overhead,fwd_save = code_fwd.mem_timeline()
-            bwd_overhead,bwd_save = code_bwd.mem_timeline()
+            #fwd_overhead,fwd_save = op_block_fwd.mem_timeline()
+            #bwd_overhead,bwd_save = op_block_bwd.mem_timeline()
 
-            self.code_fwd = code_fwd
-            self.code_bwd = code_bwd
-            self.time_fwd = sum([op.time for op in code_fwd.body])
-            self.time_bwd = sum([op.time for op in code_bwd.body])
-            self.size_a_bar = fwd_save[-1]
-            self.overhead_fwd = max(fwd_overhead+fwd_save) - fwd_save[-1]
-            self.overhead_bwd = max(bwd_overhead+bwd_save) - bwd_save[-1]
+            self.size_a_bar = self.op_block_fwd.save
+            self.overhead_fwd = self.op_block_fwd.overhead 
+            self.overhead_bwd = self.op_block_bwd.overhead 
 
 
 # RK_Block :
@@ -92,16 +95,18 @@ class RK_Block():
         # == build fast_forward code ==
         fwd_nodes = sort_based_on_req(kg.loss_node)[:-1] # from pgb/utils
         code_ff = []
+        op_list_ff = []
         nodes_done = set()
         current_mem = 0 ; mem_timeline = []
         def fwd_n(n):
             nonlocal current_mem, mem_timeline
             current_mem += memsize(n.main_target)
             mem_timeline.append(current_mem)
-            code_ff.append(CodeAtom(
-                code=n.get_code(),
-                is_fgt=False,
-                n=n))
+            #code_ff.append(CodeAtom(
+            #    code=n.get_code(),
+            #    is_fgt=False,
+            #    n=n))
+            op_list_ff.append(Op(is_fgt=False,n=n))
             nodes_done.add(n)
             for req_n in n.req: try_del(req_n)
         def try_del(n):
@@ -122,12 +127,12 @@ class RK_Block():
                 code = ""
                 v = n.main_target
                 code += f"{v}.data = torch.zeros(0,device=device); "
-                #TODO: detect if _{v} exists outside code
                 code += f"\nif {v}.requires_grad:\n\t_{v}.data = torch.zeros(0,device=device);"
-                code_ff.append(CodeAtom(
-                    code=code,
-                    is_fgt=True,
-                    n=n))
+                #code_ff.append(CodeAtom(
+                #    code=code,
+                #    is_fgt=True,
+                #    n=n))
+                op_list_ff.append(Op(is_fgt=True,n=n))
                 #for v in n.tensor_targets:
                 #    code += (f"{v}.data = torch.zeros(0,device=device); ")
                 #    code_ff.append(CodeAtom(
@@ -137,27 +142,31 @@ class RK_Block():
         for n in fwd_nodes: fwd_n(n)
 
         # = build .code_fc =
-        self.code_fc = CodeBlock(code_ff)
+        #self.code_fc = CodeBlock(code_ff)
+        self.op_block_fc = OpBlock(op_list_ff)
+        self.op_block_fn = OpBlock(op_list_ff+[])#TODO:add fgt outputs node from the previous 
         # = build .code_fn =
         #s = ", ".join(kg.direct_inputs)
-        s = "".join(kg.direct_inputs).strip("src")
-        code_fgt_inp = CodeAtom(
-            code=f"del {s}",
-            #n=kg.dict_nodes["fwd_"+s],
-            #code=f"{s}.data = torch.zeros(0,device=device);",
-            is_fgt=True,
-            main_var=kg.direct_inputs[0],
-            lvars=kg.direct_inputs,
-            is_fwd=True,
-            time=0,
-            mem=self.mem_inp)
+        #s = "".join(kg.direct_inputs).strip("src")
+        #code_fgt_inp = CodeAtom(
+        #    code=f"del {s}",
+        #    #n=kg.dict_nodes["fwd_"+s],
+        #    #code=f"{s}.data = torch.zeros(0,device=device);",
+        #    is_fgt=True,
+        #    main_var=kg.direct_inputs[0],
+        #    lvars=kg.direct_inputs,
+        #    is_fwd=True,
+        #    time=0,
+        #    mem=self.mem_inp)
         #self.code_fn = CodeBlock(code_ff+[code_fgt_inp])
-        self.code_fn = CodeBlock(code_ff)#TODO: fix Fn by remove the output node of the last block
+        #self.code_fn = CodeBlock(code_ff)#TODO: fix Fn by remove the output node of the last block
 
         # = build .overhead_ff =
-        self.overhead_ff = max(mem_timeline) - self.mem_out
+        #self.overhead_ff = max(mem_timeline) - self.mem_out
+        self.overhead_ff = self.op_block_fc.overhead 
         # = build .time_ff ==
-        self.time_ff = sum([n.time for n in fwd_nodes])
+        #self.time_ff = sum([n.time for n in fwd_nodes])
+        self.time_ff = self.op_block_fc.time
     # =====================================
 
     def __str__(self):

@@ -12,17 +12,17 @@ else:
 torch.random.manual_seed(0)
 #
 model2 = GPT2(nlayers=12,dropout=1e-9, vcb_sz=600)
-context1 = torch.randint(0,600, [20,20])
+context1 = torch.randint(0,600, [1000,20])
 d = {"src":context1}
 src = context1
 import warnings ; warnings.filterwarnings("ignore")
-newmod = rk.CheckpointedModule(model2,d, mem_limit = 1e8)
+newmod = rk.CheckpointedModule(model2,d, mem_limit = 4e9)
 #with open("/beegfs/xzhao/newmod.pk","wb") as f:
 #    pickle.dump(newmod, f)
 for p in model2.parameters():
     p.grad = None
     
-rk.utils.ref_print_atoms[0] = False 
+rk.utils.ref_print_atoms[0] = False#True 
 print(newmod.fwd_seq) 
 print(newmod.bwd_seq) 
 print("")
@@ -92,12 +92,8 @@ for n,p in model2.named_parameters():
             same_grad = False
 if same_grad:
     print("Same grad obtained!")
-if True:
+if False:
     for c in newmod.executor.done:
         print(c)
     for c in newmod.fwd_code+newmod.bwd_code:
         print(c)
-
-#with open("/beegfs/xzhao/seq.pk","wb") as f:
-#    pickle.dump(newmod.storage.gd["executor"], f)
-    
