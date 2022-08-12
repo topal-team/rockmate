@@ -43,7 +43,6 @@ class RK_Block_Solution():
 # RK_Block :
 # -> Attributes : .block_name               -> str
 #                 .sols                     -> RK_Block_Solution list
-#                 .code_fn ; .code_fc       -> CodeBlock
 #                 .overhead_ff ; .time_ff   -> int
 #                 .mem_inp ; .mem_out       -> int
 #                 .overhead_fwd ; .overhead_bwd ; .size_a_bar -> int
@@ -116,51 +115,13 @@ class RK_Block():
                 if is_fwd(un) and not un in nodes_done:
                     b = False
             if b:
-                nonlocal current_mem, mem_timeline
-                current_mem -= memsize(n.main_target)
-                mem_timeline.append(current_mem)
-                #s = ", ".join(n.all_targets)
-                #code_ff.append(CodeAtom(
-                #    code=f"del {s}",
-                #    is_fgt=None,
-                #    n=n))
-                code = ""
-                v = n.main_target
-                code += f"{v}.data = torch.zeros(0,device=device); "
-                code += f"\nif {v}.requires_grad:\n\t_{v}.data = torch.zeros(0,device=device);"
-                #code_ff.append(CodeAtom(
-                #    code=code,
-                #    is_fgt=True,
-                #    n=n))
                 op_list_ff.append(Op(is_fgt=True,n=n))
-                #for v in n.tensor_targets:
-                #    code += (f"{v}.data = torch.zeros(0,device=device); ")
-                #    code_ff.append(CodeAtom(
-                #        code=code,
-                #        is_fgt=None,
-                #        n=n))
         for n in fwd_nodes: fwd_n(n)
 
         # = build .code_fc =
         #self.code_fc = CodeBlock(code_ff)
         self.op_block_fc = OpBlock(op_list_ff)
         self.op_block_fn = OpBlock(op_list_ff+[])#TODO:add fgt outputs node from the previous 
-        # = build .code_fn =
-        #s = ", ".join(kg.direct_inputs)
-        #s = "".join(kg.direct_inputs).strip("src")
-        #code_fgt_inp = CodeAtom(
-        #    code=f"del {s}",
-        #    #n=kg.dict_nodes["fwd_"+s],
-        #    #code=f"{s}.data = torch.zeros(0,device=device);",
-        #    is_fgt=True,
-        #    main_var=kg.direct_inputs[0],
-        #    lvars=kg.direct_inputs,
-        #    is_fwd=True,
-        #    time=0,
-        #    mem=self.mem_inp)
-        #self.code_fn = CodeBlock(code_ff+[code_fgt_inp])
-        #self.code_fn = CodeBlock(code_ff)#TODO: fix Fn by remove the output node of the last block
-
         # = build .overhead_ff =
         #self.overhead_ff = max(mem_timeline) - self.mem_out
         self.overhead_ff = self.op_block_fc.overhead 

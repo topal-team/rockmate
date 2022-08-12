@@ -288,3 +288,152 @@ def seq_builder(chain : RK_Chain, memory_limit):
 
 # ==========================
 
+
+
+class Executor():#to execute Op 
+    def __init__(self,storage):
+        self.storage = storage
+        self.live = {}#variables -> CodeAtom
+        self.fgt = []#variables been fgt
+        self.done = []#CodeAtom already did
+        self.code = []
+        self.grad = {}
+
+    def translate(self,op):
+        if op.n.is_fwd:
+            if op.is_fgt==None or op.is_fgt:
+                self._fgt_fwd(op)
+            else:
+                self._run_fwd(op)
+        else:
+            if op.is_fgt:
+                self._fgt_bwd(op)
+            else:
+                self._run_bwd(op)
+
+    def exec(self):
+        for code in self.code:
+            exec(code, self.storage.gd, self.storage.ld)
+
+    def _run_fwd(self, op):
+        rec = op.name in self.done
+        n = op.n
+        if "loss" in n.name:
+            return None
+        mt = n.main_target
+        #assert(f"{mt}.data" not in self.live)
+        #self.live.append(n.name)
+        if n.is_artefact or "LOSS" in n.get_code() or not op.n.info.requires_grad: 
+            if rec:
+                code = ""
+                mc = [n.main_code] if n.main_code else []
+                for c in mc+n.body_code:
+                    try:
+                        if ast_to_str(c.targets) in n.tensor_targets:
+                            code += ast_to_str(c.targets) + ".data = " + ast_to_str(c.value)+";"
+                        else:
+                            code += ast_to_str(c)+";"
+                    except: code += ast_to_str(c)+";"
+            else:
+                code = n.get_code()
+            self.code.append(code)
+            #exec(code, self.storage.gd, self.storage.ld)
+            self.done.append(op.name) 
+            self.live[f"{mt}.data"] = [op.name]#we assume .data can only from one op
+            return None 
+        code = ast_to_str(make_ast_module([n.main_code]))
+        code = code.replace(mt,"_"+mt)
+        body_code = ""
+        if rec:#i.e. recomputation
+            code = (
+                f"{code} ; "\
+                f"{mt}.data = _{mt}.data" )
+            for c in n.body_code:
+                if "view" in ast_to_str(c.value):
+                    body_code += ast_to_str(c.targets) + ".data = " + ast_to_str(c.value)+";"
+                else:
+                    body_code += ast_to_str(c)+";"
+        else:
+            code = (
+                f"{code} ; "\
+                f"{mt} = _{mt}.detach(); "\
+                f"{mt}.requires_grad_()" )
+            body_code = ast_to_str(make_ast_module(n.body_code))
+            self.grad[f"{mt}"] = {}
+            self.live[f"{mt}.grad"] = []
+        self.live[f"{mt}.data"] = [op.name]#we assume .data can only from one op
+        self.code.append(code+'\n'+body_code)
+        #exec(code+'\n'+body_code, self.storage.gd, self.storage.ld)
+        self.done.append(op.name) 
+
+    def _run_bwd(self, op, sub_list=None):
+        n = op.n
+        if "loss" in n.name:
+            return None
+        mt = n.main_target 
+        rec = op.name in self.done
+        #assert(f"{mt}.data" not in self.live)
+        if rec:
+            rec_list = []
+            if sub_list is None:#TODO: future work to allow recompute grad separately
+                for sub_n in n.used_by:
+                    smt = sub_n.main_target
+                    if op.name not in self.live[f"{smt}.grad"]:
+                        rec_list += sub_n.tensor_targets
+            inputs = ",".join(rec_list)
+            code=f"_{mt}.backward({mt}.grad, inputs=[{inputs}], retain_graph=True)"
+        else:
+            code=f"_{mt}.backward({mt}.grad, retain_graph=True)"
+        if len(self.live[f"{mt}.data"])==0:
+            bwd_code = (
+                f"_{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
+                f"{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
+                f"{code}\n"\
+                f"_{mt}.data = torch.zeros(0,device=device);"\
+                f"{mt}.data = torch.zeros(0,device=device)\n")
+        else:
+            bwd_code = code
+        for sub_n in n.used_by:
+            if sub_n.info.requires_grad:
+                smt = sub_n.main_target
+                self.live[f"{smt}.grad"].append(op.name)
+        self.code.append(bwd_code)
+        #exec(bwd_code, self.storage.gd, self.storage.ld)
+        self.done.append(op.name) 
+
+    def _fgt_fwd(self, op):
+        n = op.n
+        if "loss" in n.name:
+            return None
+        #assert(f"{mt}.data" in self.live)
+        if n.is_artefact: code = ""
+        else:
+            mt = n.main_target
+            #code = f"{mt}.data = torch.zeros(0,device=device); "
+            code =""
+            if op.n.info and op.n.info.requires_grad:
+                code += f"_{mt}.data = torch.zeros(0,device=device);"
+            for v in n.tensor_targets:
+                code += (f"{v}.data = torch.zeros(0,device=device); ")
+            self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
+        self.code.append(code)
+        #exec(code, self.storage.gd, self.storage.ld)
+        self.done.append(op.name) 
+
+    def _fgt_bwd(self, op):
+        n = op.n
+        #assert(n.name in self.live)
+        if "loss" in n.name:
+            return None
+        code_list = []
+        for sub_n in n.used_by:
+            smt = sub_n.main_target
+            self.live[f"{smt}.grad"].remove("Bwd "+op.main_var)
+            if len(self.live[f"{smt}.grad"])==0:
+                code_list.append(f"{smt}.grad = None")
+                for t in sub_n.tensor_targets:
+                    code = f"{t}.grad = None"
+                    code_list.append(code)
+        self.code.append(";".join(code_list))
+        #exec(";".join(code_list), self.storage.gd, self.storage.ld)
+        self.done.append(op.name) 
