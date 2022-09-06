@@ -21,11 +21,11 @@ class CheckpointedModule(): #torch.nn.Module):
         ref_verbose[0] = verbose
         self.device = get_device()
         # -- use pytorch graph builder to get the list of K_graphs --
-        pgb_res = pgb.make_all_graphs(
+        self.pgb_res = pgb.make_all_graphs(
            original_mod,dict_inputs,
            verbose=verbose,
            bool_kg = False) # we don't need the whole K_graph
-        self.list_kg = pgb_res.K_graph_list
+        self.list_kg = self.pgb_res.K_graph_list
 
         self.init_code = ast_to_str(self.list_kg[0].init_code)
 
@@ -34,10 +34,10 @@ class CheckpointedModule(): #torch.nn.Module):
         print_memsizes(self.list_kg) # to debug
 
         # -- use checkmate to solve all the blocks --
-        rk_chain = RK_Chain(self.list_kg,10,3)
+        self.rk_chain = RK_Chain(self.list_kg,10,3)
 
         # -- solve the chain like rotor --
-        seq = seq_builder(rk_chain, mem_limit)
+        seq = seq_builder(self.rk_chain, mem_limit)
         self.fwd_seq,self.bwd_seq = seq.cut_fwd_bwd()
         self.original_mod = original_mod
         self.storage =  RK_Storage(self.device,self.original_mod)

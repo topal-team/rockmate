@@ -40,6 +40,7 @@ class Op:
         self.overhead = n.overhead.v
         self.main_var = n.main_target
         self.lvars    = n.all_targets
+        self.run_mem = n.run_mem.v#for debugging
         if is_fgt: # Fgt
             self.time = 0#Fgt could happen in ILP solution even Infinity mem
             self.mem  = - n.fgt_mem.v
@@ -62,7 +63,8 @@ class OpBlock:
             save_mem.append(o.mem)
             tmp_mem.append(o.overhead)
         self.save_timeline = np.cumsum(np.array(save_mem))
-        self.overhead_timeline = np.cumsum(np.array(tmp_mem))
+        #self.overhead_timeline = np.cumsum(np.array(tmp_mem))
+        self.overhead_timeline = np.array(tmp_mem)
 
         self.save = self.save_timeline[-1]
         self.overhead = max(self.save_timeline+self.overhead_timeline) - self.save

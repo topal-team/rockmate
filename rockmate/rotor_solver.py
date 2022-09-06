@@ -254,6 +254,15 @@ def seq_builder(chain : RK_Chain, memory_limit):
             raise ValueError(
                 f"Can't process a chain with neg mem {cmem}")
         if opt[cmem][lmin][lmax] == float("inf"):
+            """
+            print('a')
+            print(chain.cw)
+            print('abar')
+            for i in range(chain.ln):
+                print(chain.cbw[i])
+                print(chain.fwd_tmp[i])
+                print(chain.bwd_tmp[i])
+            """
             raise ValueError(
                 f"Can't process this chain from index "\
                 f"{lmin} to {lmax} with memory {cmem}")
@@ -298,6 +307,7 @@ class Executor():#to execute Op
         self.done = []#CodeAtom already did
         self.code = []
         self.grad = {}
+        self.op_list = []
 
     def translate(self,op):
         if op.n.is_fwd:
@@ -365,6 +375,7 @@ class Executor():#to execute Op
         self.code.append(code+'\n'+body_code)
         #exec(code+'\n'+body_code, self.storage.gd, self.storage.ld)
         self.done.append(op.name) 
+        self.op_list.append(op)
 
     def _run_bwd(self, op, sub_list=None):
         n = op.n
@@ -400,6 +411,7 @@ class Executor():#to execute Op
         self.code.append(bwd_code)
         #exec(bwd_code, self.storage.gd, self.storage.ld)
         self.done.append(op.name) 
+        self.op_list.append(op)
 
     def _fgt_fwd(self, op):
         n = op.n
@@ -419,6 +431,7 @@ class Executor():#to execute Op
         self.code.append(code)
         #exec(code, self.storage.gd, self.storage.ld)
         self.done.append(op.name) 
+        self.op_list.append(op)
 
     def _fgt_bwd(self, op):
         n = op.n
@@ -437,3 +450,4 @@ class Executor():#to execute Op
         self.code.append(";".join(code_list))
         #exec(";".join(code_list), self.storage.gd, self.storage.ld)
         self.done.append(op.name) 
+        self.op_list.append(op)
