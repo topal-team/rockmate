@@ -25,6 +25,7 @@ class K_node():
         self.is_artefact = is_artefact
         self.run_mem  = None
         self.fgt_mem  = None
+        self.del_mem  = None
         self.overhead = None
         self.time = None
         self.main_code = main_code
@@ -32,6 +33,7 @@ class K_node():
         self.req = req
         self.used_by = set()
         self.info = info
+        self.abar = None
 
     def full_code(self):
         if self.main_code is None: mc = []
@@ -55,6 +57,7 @@ class K_graph():
         self.dict_info = sg.dict_info
         self.dict_rand = sg.dict_rand
         self.loss_node = None
+        self.sg = sg
     def make_used_by(self):
         for n in self.dict_nodes.values():
             for req_n in n.req:
@@ -77,7 +80,8 @@ def generate_tmp_local(n : S_node,g : S_graph,our_global):
             # but the body_code may requires some artefacts
             req_tar = req_n.main_target
             main_info = g.dict_info[req_tar]
-            tmp_local[req_tar] = generate_val(main_info,device) #utils.py
+            tmp_local[req_tar] = generate_val(main_info,device)#.detach()
+            # if g.dict_info[req_tar].requires_grad: tmp_local[req_tar].requires_grad_()#utils.py
             for req_req_n in req_n.req:
                 if not (req_req_n is g.init_node):
                     for req_req_tar in req_req_n.all_targets:
@@ -128,15 +132,25 @@ def inspection(n : S_node,g : S_graph,our_global):
             #tar_info = g.dict_info[tar]
             #assert(tar_info.ttype == torch.Tensor)
             tmp_local[tar].data = torch.zeros(0,device=device)
+            # del tmp_local[tar]
+            
+    def fct_del_fwd():
+        for tar in n.all_targets:
+            #tar_info = g.dict_info[tar]
+            #assert(tar_info.ttype == torch.Tensor)
+            # tmp_local[tar].data = torch.zeros(0,device=device)
+            del tmp_local[tar]
 
     # -- measure forward --
     _ , mem_run_fwd , peak_fwd = memUsage.measure(fct_run_fwd)
     overhead_fwd = peak_fwd - mem_run_fwd
+    _ , mem_del_fwd , _ = memUsage.measure(fct_del_fwd)
     time_run_fwd = measure_time(fct_run_fwd)
     _ , mem_fgt_fwd , _ = memUsage.measure(fct_fgt_fwd)
     ret["overhead_fwd"] = overhead_fwd
     ret["mem_run_fwd"] = mem_run_fwd
     ret["mem_fgt_fwd"] = minus_mem(mem_fgt_fwd)
+    ret["mem_del_fwd"] = minus_mem(mem_del_fwd)
     ret["time_run_fwd"] = time_run_fwd
     # ===============
 
@@ -230,17 +244,20 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
                 sub_tar = sub_n.main_target
                 if sub_tar in dict_Kbwd: # requires_grad
                     dict_Kbwd[sub_tar].req.add(Kbwd)
+            
 
         # -- inspection --
         if info.ttype == torch.Size:
             Kfwd.run_mem  = MemSize(0)
             Kfwd.fgt_mem  = MemSize(0)
+            Kfwd.del_mem  = MemSize(0)
             Kfwd.overhead = MemSize(0)
             Kfwd.time     = 0
         else:
             res = inspection(n,sg,our_global)
             Kfwd.run_mem  = res["mem_run_fwd"]
             Kfwd.fgt_mem  = res["mem_fgt_fwd"]
+            Kfwd.del_mem  = res["mem_del_fwd"]
             Kfwd.overhead = res["overhead_fwd"]
             Kfwd.time     = res["time_run_fwd"]
             info.memsize  = res["mem_fgt_fwd"]
@@ -249,6 +266,12 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
                 Kbwd.fgt_mem  = res["mem_fgt_bwd"]
                 Kbwd.overhead = res["overhead_bwd"]
                 Kbwd.time     = res["time_run_bwd"]
+                
+            if Kfwd.run_mem != Kfwd.fgt_mem:#a_bar case
+                Kfwd.abar = True
+                if info.requires_grad:
+                    Kbwd.abar = True
+                    Kbwd.req.add(Kfwd)
     # ------------
     for n in sg.nodes:
         handle_node(n)

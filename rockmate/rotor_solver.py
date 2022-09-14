@@ -320,6 +320,9 @@ class Executor():#to execute Op
                 self._fgt_bwd(op)
             else:
                 self._run_bwd(op)
+        self.done.append(op.name) 
+        self.op_list.append(op)
+
 
     def exec(self):
         for code in self.code:
@@ -348,13 +351,12 @@ class Executor():#to execute Op
                 code = n.get_code()
             self.code.append(code)
             #exec(code, self.storage.gd, self.storage.ld)
-            self.done.append(op.name) 
             self.live[f"{mt}.data"] = [op.name]#we assume .data can only from one op
             return None 
         code = ast_to_str(make_ast_module([n.main_code]))
         code = code.replace(mt,"_"+mt)
         body_code = ""
-        if rec:#i.e. recomputation
+        if rec and not n.abar:#i.e. recomputation
             code = (
                 f"{code} ; "\
                 f"{mt}.data = _{mt}.data" )
@@ -373,9 +375,6 @@ class Executor():#to execute Op
             self.live[f"{mt}.grad"] = []
         self.live[f"{mt}.data"] = [op.name]#we assume .data can only from one op
         self.code.append(code+'\n'+body_code)
-        #exec(code+'\n'+body_code, self.storage.gd, self.storage.ld)
-        self.done.append(op.name) 
-        self.op_list.append(op)
 
     def _run_bwd(self, op, sub_list=None):
         n = op.n
@@ -409,9 +408,6 @@ class Executor():#to execute Op
                 smt = sub_n.main_target
                 self.live[f"{smt}.grad"].append(op.name)
         self.code.append(bwd_code)
-        #exec(bwd_code, self.storage.gd, self.storage.ld)
-        self.done.append(op.name) 
-        self.op_list.append(op)
 
     def _fgt_fwd(self, op):
         n = op.n
@@ -419,6 +415,15 @@ class Executor():#to execute Op
             return None
         #assert(f"{mt}.data" in self.live)
         if n.is_artefact: code = ""
+        elif n.abar:
+            mt = n.main_target
+            #code = f"{mt}.data = torch.zeros(0,device=device); "
+            code =""
+            if op.n.info and op.n.info.requires_grad:
+                code += f"del _{mt};"
+            for v in n.all_targets:
+                code += (f"del {v}; ")
+            self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
         else:
             mt = n.main_target
             #code = f"{mt}.data = torch.zeros(0,device=device); "
@@ -429,9 +434,6 @@ class Executor():#to execute Op
                 code += (f"{v}.data = torch.zeros(0,device=device); ")
             self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
         self.code.append(code)
-        #exec(code, self.storage.gd, self.storage.ld)
-        self.done.append(op.name) 
-        self.op_list.append(op)
 
     def _fgt_bwd(self, op):
         n = op.n
@@ -448,6 +450,3 @@ class Executor():#to execute Op
                     code = f"{t}.grad = None"
                     code_list.append(code)
         self.code.append(";".join(code_list))
-        #exec(";".join(code_list), self.storage.gd, self.storage.ld)
-        self.done.append(op.name) 
-        self.op_list.append(op)
