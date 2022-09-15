@@ -407,7 +407,7 @@ def aux_print_graph(dot,g,uniq_num):
 
 def print_K_graph(g : K_graph,name=None,open=True):
     print(f"Forward + Backward graph : {len(g.dict_nodes)} nodes")
-    if name is None: name = "backward K-graph"
+    if name is None: name = "backward_K-graph"
     dot = graphviz.Digraph(name,
         comment="K_graph = Forward + Backward graph")
     aux_print_graph(dot,g,0)
@@ -419,7 +419,7 @@ def print_K_graph_list(list_g,name=None,open=True):
     print(
         f"{len(list_g)} blocs of K_graph, with {s} = "\
         f"{sum([len(g.dict_nodes) for g in list_g])} nodes")
-    if name is None: name = "all K-graphs"
+    if name is None: name = "all_K-graphs"
     dot = graphviz.Digraph(
         name,
         comment="K_graph list : cut forward+backward graph")

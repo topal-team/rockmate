@@ -81,7 +81,10 @@ class CodeBlock:
 
     def exec(self,storage : RK_Storage):
         for c in self.body:
-            exec(c.code,storage.gd,storage.ld)
+            try:
+                exec(c.code,storage.gd,storage.ld)
+            except:
+                raise ValueError(f"failed to execute {c.code}")
 
 class RK_Function:
     def __init__(self,code_fe,code_fn,code_fc,code_bwd):

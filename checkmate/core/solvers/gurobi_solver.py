@@ -184,7 +184,9 @@ class ILPSolverGurobi:
 
         infeasible = self.m.status == GRB.INFEASIBLE
         if infeasible:
-            raise ValueError("Infeasible model, check constraints carefully. Insufficient memory?")
+            self.feasible = False
+            return (None, None, None, None)
+            # raise ValueError("Infeasible model, check constraints carefully. Insufficient memory?")
 
         if self.m.solCount < 1:
             raise ValueError("Model status is {} (not infeasible), but solCount is {}".format(self.m.status, self.m.solCount))
@@ -223,7 +225,8 @@ class ILPSolverGurobi:
         # prune R using closed-form solver
         if self.solve_r and self.integral:
             Rout = solve_r_opt(self.g, Sout)
-
+        
+        self.feasible = True
         return Rout, Sout, Uout, Free_Eout
 
 
@@ -279,7 +282,7 @@ def solve_ilp_gurobi(
     ilpsolver.build_model()
     try:
         r, s, u, free_e = ilpsolver.solve()
-        ilp_feasible = True
+        ilp_feasible = ilpsolver.feasible
     except ValueError as e:
         logging.exception(e)
         r, s, u, free_e = (None, None, None, None)
