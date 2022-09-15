@@ -31,6 +31,8 @@ class K_node():
         self.req = req
         self.used_by = set()
 
+        self.phantoms = []
+
     def full_code(self):
         if self.main_code is None: mc = []
         else: mc = [self.main_code]
@@ -95,6 +97,73 @@ def generate_tmp_local(n : S_node,g : S_graph,our_global):
             exec(g.dict_rand[sub_r],our_global,tmp_local)
     """
     return tmp_local
+
+
+def get_dependencies_and_phantoms(n : S_node,g : S_graph,our_global):
+    print(f"Try to open {n.main_target}'s grad_fn")
+    # == INIT ==
+    tmp_local = generate_tmp_local(n,g,our_global)
+    exec(n.get_code(), our_global, tmp_local)
+    mt = n.main_target
+    fn = tmp_local[mt].grad_fn
+    used_vars = set()    # set of torch.Tensor
+    phantom_vars = [] # set of "path" from fn
+
+    # == SEARCH THROUGH GRAD_FN == 
+    def aux(f,path):
+        if hasattr(f,"variable"):
+            used_vars.add(f.variable)
+        for attr in dir(f):
+            if (isinstance(getattr(f,attr),torch.Tensor)
+                and attr != "variable"):
+                phantom_vars.append((attr,path))
+        if hasattr(f,"next_functions"):
+            for k,t in enumerate(f.next_functions):
+                aux(t[0],path+[k])
+    aux(fn,[])
+
+    # == get dependencies -> recognize required_nodes' tensor ==
+    dependencies = set()
+    for used_var in used_vars:
+        # we are looking for used_var
+        keys = [k for (k,v) in tmp_local.items() if v is used_var]
+        if len(keys) == 0: pass
+            # -> a parameter ?
+        else:
+            if len(keys) > 1:
+                print(f"warning : used_var matchs several variables"\
+                      f"{keys} \n one has been chosen arbitrarily")
+            dependencies.add(keys[0])
+
+    # == GENERATE AST NAME FOR PHANTOM VARS ==
+    """
+    def make_ast_fgt(tensor):
+        return ast.Assign(
+            [ast.Attribute(tensor,"data")],
+            ast.Call(
+                ast.Attribute(ast.Name("torch"),"zeros"),
+                [make_ast_constant(0)],
+                []
+                )
+            )
+    """
+    def make_ast_path(attr,path):
+        ast_code = ast.Attribute(ast.Name(mt),"grad_fn")
+        for k in path:
+            ast_code = ast.Attribute(ast_code,"next_functions")
+            ast_code = ast.Subscript(ast_code,make_ast_constant(k))
+            ast_code = ast.Subscript(ast_code,make_ast_constant(0))
+        return ast.Attribute(ast_code,attr)
+
+    phantoms = [
+        make_ast_path(attr,path)
+        for (attr,path) in phantom_vars
+        ]
+
+    return (
+        dependencies , # str set
+        phantoms) # ast.Module
+
 
 
 def inspection(n : S_node,g : S_graph,our_global):
@@ -216,11 +285,16 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
                 body_code  = n.body_code)
         dict_Kfwd[mt] = Kfwd
 
+        # -- extract "real" dependencies through grad_fn --
+        dep , phantoms = get_dependencies_and_phantoms(n,sg,our_global)
+        Kbwd_req = set(dict_Kfwd[d] for d in dep)
+        Kfwd.phantoms = phantoms
+
         # -- build Kbwd --
         info = sg.dict_info[mt]
         if info.requires_grad:
             print_debug(f"{mt} req bwd")
-            Kbwd = K_node(is_fwd=False, req=set(Kreq), target=mt)
+            Kbwd = K_node(is_fwd=False, req=Kbwd_req, target=mt)
             dict_Kbwd[mt] = Kbwd
             for sub_n in n.req:
                 sub_tar = sub_n.main_target
