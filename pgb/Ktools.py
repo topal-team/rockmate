@@ -106,7 +106,7 @@ def generate_tmp_local(n : S_node,g : S_graph,our_global):
 
 
 def get_dependencies_and_phantoms(n : S_node,g : S_graph,our_global):
-    print(f"Try to open {n.main_target}'s grad_fn")
+    print_debug(f"Try to open {n.main_target}'s grad_fn")
     # == INIT ==
     tmp_local = generate_tmp_local(n,g,our_global)
     exec(n.get_code(), our_global, tmp_local)
@@ -303,15 +303,17 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
                 info = info)
         dict_Kfwd[mt] = Kfwd
 
-        # -- extract "real" dependencies through grad_fn --
-        dep , phantoms = get_dependencies_and_phantoms(n,sg,our_global)
-        Kbwd_req = set(dict_Kfwd[d] for d in dep)
-        Kfwd.phantoms = phantoms
 
         # -- build Kbwd --
         info = sg.dict_info[mt]
         if info.requires_grad:
             print_debug(f"{mt} req bwd")
+            # -- extract "real" dependencies through grad_fn --
+            dep , phantoms = get_dependencies_and_phantoms(
+                    n,sg,our_global)
+            Kbwd_req = set(dict_Kfwd[d] for d in dep)
+            Kfwd.phantoms = phantoms
+
             Kbwd = K_node(
                 is_fwd=False, req=Kbwd_req, target=mt, info=info)
             dict_Kbwd[mt] = Kbwd
