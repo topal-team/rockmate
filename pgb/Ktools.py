@@ -25,7 +25,7 @@ class K_node():
         self.is_artefact = is_artefact
         self.run_mem  = None
         self.fgt_mem  = None
-        self.del_mem  = None
+        self.del_mem  = MemSize(0)#None
         self.overhead = None
         self.time = None
         self.main_code = main_code
@@ -47,6 +47,18 @@ class K_node():
         return ast_to_str(make_ast_module(mc))
     def get_code(self):
         return ast_to_str(self.full_code())
+    def get_fgt_code(self):
+        code = ""
+        for tar in self.phantoms:
+            code += ast.Assign(
+                [ast.Attribute(tar,"data")],
+                ast.Call(
+                    ast.Attribute(ast.Name("torch"),"zeros"),
+                    [make_ast_constant(0)],
+                    []
+                    )
+                )
+        return code
 
 class K_graph():
     def __init__(self,sg : S_graph):
@@ -172,7 +184,7 @@ def get_dependencies_and_phantoms(n : S_node,g : S_graph,our_global):
 
 
 
-def inspection(n : S_node,g : S_graph,our_global):
+def inspection(n : S_node,g : S_graph,our_global, phantoms=[]):
     mt = n.main_target
     info = g.dict_info[mt]
     timer = rotor.timing.make_timer(device)
@@ -204,11 +216,29 @@ def inspection(n : S_node,g : S_graph,our_global):
             # del tmp_local[tar]
             
     def fct_del_fwd():
-        for tar in n.all_targets:
+        for tar in n.tensor_targets:
+            #tar_info = g.dict_info[tar]
+            #assert(tar_info.ttype == torch.Tensor)
+            tmp_local[tar].data = torch.zeros(0,device=device)
+        #code = ""
+        for tar in phantoms:
+            tmp_local[tar].data = torch.zeros(0,device=device)
+            """
+            code += ast.Assign(
+                [ast.Attribute(tar,"data")],
+                ast.Call(
+                    ast.Attribute(ast.Name("torch"),"zeros"),
+                    [make_ast_constant(0)],
+                    []
+                    )
+                )
+        exec(code, our_global, tmp_local)
+        """
+    #    for tar in n.all_targets:
             #tar_info = g.dict_info[tar]
             #assert(tar_info.ttype == torch.Tensor)
             # tmp_local[tar].data = torch.zeros(0,device=device)
-            del tmp_local[tar]
+    #        del tmp_local[tar]
 
     # -- measure forward --
     _ , mem_run_fwd , peak_fwd = memUsage.measure(fct_run_fwd)
@@ -371,6 +401,7 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
         body_code = [])
     loss_node.run_mem  = MemSize(0)
     loss_node.fgt_mem  = MemSize(0)
+    loss_node.del_mem  = MemSize(0)
     loss_node.overhead = MemSize(0)
     loss_node.time     = 0
     kg.loss_node = loss_node
