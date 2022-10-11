@@ -1,0 +1,86 @@
+import torch
+import math
+import copy
+import torch.nn as nn
+import torch.nn as nn
+import pgb
+from pgb.utils import *
+import rockmate as rk
+import numpy as np
+import random
+#from rockmate.defs import RK_block_solution
+#from rotor.inspection import tensorMsize
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+else:
+    device = torch.device('cpu')
+from example_modules import GPT2
+from transformers import GPT2Tokenizer
+
+def mod():
+    random.seed(0)
+    torch.random.manual_seed(0)
+    model2 = GPT2(nlayers=4,dropout=1e-10, vcb_sz=600)
+    context1 = torch.randint(0,600, [10,10])
+    d = {"src":context1}
+    src = context1
+    import warnings ; warnings.filterwarnings("ignore")
+    newmod = rk.CheckpointedModule(model2,d, mem_limit = 3.2e7)
+    return newmod
+
+def get_n(i,newmod):
+    return newmod.executor.op_list[i].n
+
+def run(newmod, context, stop=-1, device=torch.device('cuda')):
+    context1 = context.to(device)
+    torch.random.manual_seed(0)
+    newmod.storage.add_val("src",context1)
+    exec(newmod.init_code,newmod.storage.gd,newmod.storage.ld)
+    mem_before  = torch.cuda.memory_allocated()
+    doc = []
+    for i,c in enumerate(newmod.fwd_code[:stop]):
+        op = newmod.executor.op_list[i]#op.n.get_code()
+        exec(c, newmod.storage.gd,newmod.storage.ld)
+        doc.append((i,c, torch.cuda.memory_allocated()-mem_before))
+        mem_before = torch.cuda.memory_allocated()
+    return doc
+
+def mem_op(op, print_code=False):
+    print("run mem", op.n.run_mem)
+    print("del mem", op.n.del_mem)
+    if print_code:
+        print(op.n.main_code)
+        
+def measure(n, g, newmod):
+    print(inspection(n, g=g, our_global=newmod.storage.gd))
+
+def find_code(var, code_list):
+    for c in code_list:
+        if var in c:
+            print(c)
+
+def compare(doc, newmod):
+    for i,c,m in doc:
+        op = newmod.executor.op_list[i]
+        if op.is_fgt:
+            if abs(m) != abs(op.n.del_mem.v):
+                print(i,c,m,op.n.del_mem.v)
+        else:
+            if abs(m) !=abs(op.n.run_mem.v):
+                print(i,c,m,op.n.run_mem.v)
+
+def plot_mem(mem_real, mem_theory):
+    import matplotlib.pyplot as plt
+    """
+    for i,c,m in doc:
+        mem_real.append(m)
+        op = newmod.executor.op_list[i]
+        if op.is_fgt:
+            mem_theory.append(-op.n.del_mem.v)
+        else:
+            mem_theory.append(op.n.del_mem.v)
+    """
+    plt.plot(np.cumsum(np.array(mem_real)), label='real')
+    plt.plot(np.cumsum(np.array(mem_theory)), label='theory')
+    plt.legend()
+    plt.show()
