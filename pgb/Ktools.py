@@ -485,7 +485,7 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
             Kfwd.phantoms = phantoms
 
             Kbwd = K_node(
-                is_fwd=False, req=Kbwd_req, target=mt, info=info)
+                is_fwd=False, req=Kbwd_req, target=mt, info=info,body_code=[])
             dict_Kbwd[mt] = Kbwd
             for sub_n in n.req:
                 sub_tar = sub_n.main_target

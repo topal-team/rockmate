@@ -320,6 +320,7 @@ class Executor():#to execute Op
                 self._fgt_bwd(op)
             else:
                 self._run_bwd(op)
+
         self.done.append(op.name) 
         self.op_list.append(op)
 
@@ -332,6 +333,7 @@ class Executor():#to execute Op
         rec = op.name in self.done
         n = op.n
         if "loss" in n.name:
+            self.code.append("")
             return None
         mt = n.main_target
         #assert(f"{mt}.data" not in self.live)
@@ -356,7 +358,7 @@ class Executor():#to execute Op
         code = ast_to_str(make_ast_module([n.main_code]))
         code = code.replace(mt,"_"+mt)
         body_code = ""
-        if rec and not n.abar:#i.e. recomputation
+        if rec:# and not n.abar:#i.e. recomputation
             code = (
                 f"{code} ; "\
                 f"{mt}.data = _{mt}.data" )
@@ -379,6 +381,7 @@ class Executor():#to execute Op
     def _run_bwd(self, op, sub_list=None):
         n = op.n
         if "loss" in n.name:
+            self.code.append("")
             return None
         mt = n.main_target 
         rec = op.name in self.done
@@ -404,6 +407,8 @@ class Executor():#to execute Op
         else:
             bwd_code = code
         for sub_n in n.used_by:
+            # if sub_n.main_target == n.main_target:
+            #     continue
             if sub_n.info.requires_grad:
                 smt = sub_n.main_target
                 self.live[f"{smt}.grad"].append(op.name)
@@ -412,18 +417,19 @@ class Executor():#to execute Op
     def _fgt_fwd(self, op):
         n = op.n
         if "loss" in n.name:
+            self.code.append("")
             return None
         #assert(f"{mt}.data" in self.live)
         if n.is_artefact: code = ""
-        elif n.abar:
-            mt = n.main_target
-            #code = f"{mt}.data = torch.zeros(0,device=device); "
-            code =""
-            if op.n.info and op.n.info.requires_grad:
-                code += f"del _{mt};"
-            for v in n.all_targets:
-                code += (f"del {v}; ")
-            self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
+        # elif n.abar:
+        #     mt = n.main_target
+        #     #code = f"{mt}.data = torch.zeros(0,device=device); "
+        #     code =""
+        #     if op.n.info and op.n.info.requires_grad:
+        #         code += f"del _{mt};"
+        #     for v in n.all_targets:
+        #         code += (f"del {v}; ")
+        #     self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
         else:
             mt = n.main_target
             #code = f"{mt}.data = torch.zeros(0,device=device); "
@@ -433,20 +439,34 @@ class Executor():#to execute Op
             for v in n.tensor_targets:
                 code += (f"{v}.data = torch.zeros(0,device=device); ")
             self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
+                        
+            for tar in n.phantoms:
+                # if ast_to_str(tar).split('.')[0] not in our_global.keys():
+                code += "_"+ast_to_str(ast.Assign(
+                    [ast.Attribute(tar,"data")],
+                    ast.Call(
+                        ast.Attribute(ast.Name("torch"),"zeros"),
+                        [make_ast_constant(0)],
+                        [ast.alias("device=device")]
+                        )
+                    ))+";"
         self.code.append(code)
 
     def _fgt_bwd(self, op):
         n = op.n
         #assert(n.name in self.live)
         if "loss" in n.name:
+            self.code.append("")
             return None
         code_list = []
         for sub_n in n.used_by:
-            smt = sub_n.main_target
-            self.live[f"{smt}.grad"].remove("Bwd "+op.main_var)
-            if len(self.live[f"{smt}.grad"])==0:
-                code_list.append(f"{smt}.grad = None")
-                for t in sub_n.tensor_targets:
-                    code = f"{t}.grad = None"
-                    code_list.append(code)
+            if sub_n.info.requires_grad:
+                smt = sub_n.main_target
+
+                self.live[f"{smt}.grad"].remove("Bwd "+op.main_var)
+                if len(self.live[f"{smt}.grad"])==0:
+                    code_list.append(f"{smt}.grad = None")
+                    for t in sub_n.tensor_targets:
+                        code = f"{t}.grad = None"
+                        code_list.append(code)
         self.code.append(";".join(code_list))
