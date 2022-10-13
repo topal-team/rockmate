@@ -49,16 +49,8 @@ class K_node():
         return ast_to_str(make_ast_module(mc))
     def get_code(self):
         return ast_to_str(self.full_code())
-    def get_del_code(self):
-        code = ""
-        for tar in self.tensor_targets:
-            code += f"del {tar};"
-        return code
     def get_fgt_code(self):
         code = ""
-        for tar in self.tensor_targets:
-            code += f"{tar}.data = torch.zeros(0,device=device);"
-        """
         for tar in self.phantoms:
             code += ast.Assign(
                 [ast.Attribute(tar,"data")],
@@ -68,7 +60,6 @@ class K_node():
                     []
                     )
                 )
-        """
         return code
 
 class K_graph():
@@ -294,8 +285,8 @@ class inspector():
                         [ast.alias("device=device")]
                         )
                     ))+'\n'
-            self.code_del_fwd = code#Only include the phantom part 
             """
+            self.code_del_fwd = code#Only include the phantom part 
             exec(self.code_del_fwd, self.our_global, self.tmp_local)
         gc.disable()
         _ , mem_run_fwd , peak_fwd = self.memUsage.measure(fct_run_fwd)
@@ -621,7 +612,6 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
         info = sg.dict_info[mt]
         if info.requires_grad:
             print_debug(f"{mt} req bwd")
-            """
             #if '__116_input0' in our_global.keys(): print(our_global['__116_input0'].shape, n.main_target)
 
             # -- extract "real" dependencies through grad_fn --
@@ -632,10 +622,10 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
                 print(n.get_code(), our_global['__13_input0'].shape)
                 # print(our_global['self'].h[0].ln_1.weight.shape)
             #     if '__116_input0' in our_global.keys(): print(our_global['__116_input0'].shape, n.main_target)
-            """
+
             try:Kbwd_req = set(dict_Kfwd[d] for d in dep)
             except: print(dict_Kfwd, dep, n.get_code())
-            #Kfwd.phantoms = phantoms
+            Kfwd.phantoms = phantoms
 
             Kbwd = K_node(
                 is_fwd=False, req=Kbwd_req, target=mt, info=info,body_code=[])
@@ -656,7 +646,7 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
             Kfwd.time     = 0
         else:
             #res = inspection(n,sg,our_global,Kfwd.phantoms)
-            ins = inspector(Kfwd,sg,our_global)#,Kfwd.phantoms)
+            ins = inspector(Kfwd,sg,our_global,Kfwd.phantoms)
             ins.measure_fwd()
             ins.measure_bwd()
             res = ins.ret
