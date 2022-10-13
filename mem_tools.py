@@ -31,7 +31,8 @@ def mod():
 def get_n(i,newmod):
     return newmod.executor.op_list[i].n
 
-def run(newmod, context, stop=-1, device=torch.device('cuda')):
+def run(newmod, context, bwd=False, 
+        stop=-1, device=torch.device('cuda')):
     context1 = context.to(device)
     torch.random.manual_seed(0)
     newmod.storage.add_val("src",context1)
@@ -43,6 +44,16 @@ def run(newmod, context, stop=-1, device=torch.device('cuda')):
         exec(c, newmod.storage.gd,newmod.storage.ld)
         doc.append((i,c, torch.cuda.memory_allocated()-mem_before))
         mem_before = torch.cuda.memory_allocated()
+    if bwd:
+        newmod.storage.ld[newmod.output].grad = torch.ones_like(newmod.storage.ld[newmod.output])
+        for i,c in enumerate(newmod.bwd_code):
+            op = newmod.executor.op_list[i+len(newmod.fwd_code)]#op.n.get_code()
+            try:
+                exec(c, newmod.storage.gd,newmod.storage.ld)
+            except:print(f'failed to execte {c}')
+            doc.append((i,c, torch.cuda.memory_allocated()-mem_before))
+            mem_before = torch.cuda.memory_allocated()
+
     return doc
 
 def mem_op(op, print_code=False):
@@ -59,15 +70,19 @@ def find_code(var, code_list):
         if var in c:
             print(c)
 
-def compare(doc, newmod):
+def compare(doc, newmod,print_code=True):
     for i,c,m in doc:
         op = newmod.executor.op_list[i]
         if op.is_fgt:
             if abs(m) != abs(op.n.del_mem.v):
-                print(i,c,m,op.n.del_mem.v)
+                print(i,'real:',m,'theory:',-op.n.del_mem.v)
+                if print_code: print(c)
+                print('\n')
         else:
             if abs(m) !=abs(op.n.run_mem.v):
-                print(i,c,m,op.n.run_mem.v)
+                print(i,'real:',m,'theory:',op.n.run_mem.v)
+                if print_code: print(c)
+                print('\n')
 
 def plot_mem(mem_real, mem_theory):
     import matplotlib.pyplot as plt

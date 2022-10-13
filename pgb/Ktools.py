@@ -1,6 +1,7 @@
 from .utils import *
 from .Stools import S_node,S_graph
 import copy
+import gc
 # ==========================
 # ====== K structure =======
 # ==========================
@@ -48,8 +49,16 @@ class K_node():
         return ast_to_str(make_ast_module(mc))
     def get_code(self):
         return ast_to_str(self.full_code())
+    def get_del_code(self):
+        code = ""
+        for tar in self.tensor_targets:
+            code += f"del {tar};"
+        return code
     def get_fgt_code(self):
         code = ""
+        for tar in self.tensor_targets:
+            code += f"{tar}.data = torch.zeros(0,device=device);"
+        """
         for tar in self.phantoms:
             code += ast.Assign(
                 [ast.Attribute(tar,"data")],
@@ -59,6 +68,7 @@ class K_node():
                     []
                     )
                 )
+        """
         return code
 
 class K_graph():
@@ -233,6 +243,7 @@ class inspector():
     # ---------
 
     # === FORWARD ===
+    """
     def fct_run_fwd(self):
         self.code_run_fwd = self.n.get_code() 
         exec(self.code_run_fwd, self.our_global, self.tmp_local)
@@ -256,21 +267,51 @@ class inspector():
                 ))+'\n'
         self.code_del_fwd = code#Only include the phantom part 
         exec(self.code_del_fwd, self.our_global, self.tmp_local)
+    """
     # -- measure forward --
     def measure_fwd(self,only_run=False):
-        _ , mem_run_fwd , peak_fwd = self.memUsage.measure(self.fct_run_fwd)
+        def fct_run_fwd():
+            self.code_run_fwd = self.n.get_code() 
+            exec(self.code_run_fwd, self.our_global, self.tmp_local)
+
+        def fct_fgt_fwd():
+            for tar in self.n.tensor_targets:
+                self.tmp_local[tar].data = torch.zeros(0,device=device)
+            
+        def fct_del_fwd():
+            code = ""
+            for tar in self.n.tensor_targets:
+                code += f"del {tar};"
+                """
+                self.tmp_local[tar].data = torch.zeros(0,device=device)
+            code = ""
+            for tar in self.phantoms:
+                code += ast_to_str(ast.Assign(
+                    [ast.Attribute(tar,"data")],
+                    ast.Call(
+                        ast.Attribute(ast.Name("torch"),"zeros"),
+                        [make_ast_constant(0)],
+                        [ast.alias("device=device")]
+                        )
+                    ))+'\n'
+            self.code_del_fwd = code#Only include the phantom part 
+            """
+            exec(self.code_del_fwd, self.our_global, self.tmp_local)
+        gc.disable()
+        _ , mem_run_fwd , peak_fwd = self.memUsage.measure(fct_run_fwd)
         overhead_fwd = peak_fwd - mem_run_fwd
         self.ret["overhead_fwd"] = overhead_fwd
         self.ret["mem_run_fwd"] = mem_run_fwd
         if not only_run:
-            _ , mem_del_fwd , _ = self.memUsage.measure(self.fct_del_fwd)
+            _ , mem_del_fwd , _ = self.memUsage.measure(fct_del_fwd)
             self.ret["mem_del_fwd"] = minus_mem(mem_del_fwd)
-            _ , _ , _ = self.memUsage.measure(self.fct_run_fwd)
+            _ , _ , _ = self.memUsage.measure(fct_run_fwd)
 
-            _ , mem_fgt_fwd , _ = self.memUsage.measure(self.fct_fgt_fwd)
-            time_run_fwd = self.measure_time(self.fct_run_fwd)
+            _ , mem_fgt_fwd , _ = self.memUsage.measure(fct_fgt_fwd)
+            time_run_fwd = self.measure_time(fct_run_fwd)
             self.ret["mem_fgt_fwd"] = minus_mem(mem_fgt_fwd)
             self.ret["time_run_fwd"] = time_run_fwd
+        gc.enable()
     # ===============
 
     # === BACKWARD ===
@@ -286,24 +327,28 @@ class inspector():
 
     # measure
     def measure_bwd(self):
+        def fct_run_fwd():
+            self.code_run_fwd = self.n.get_code() 
+            exec(self.code_run_fwd, self.our_global, self.tmp_local)
         if self.info.requires_grad:
             self.tmp_local[self.mt].data = generate_val(self.info,device)
             self.tmp_local[self.mt].grad = generate_val(self.info,device)
+            gc.disable()
             _ , mem_run_bwd , peak_bwd = self.memUsage.measure(self.fct_run_bwd)
             overhead_bwd = peak_bwd - mem_run_bwd
             _ , mem_fgt_bwd , _ = self.memUsage.measure(self.fct_fgt_bwd)
-            self.fct_run_fwd()
-            self.timer.measure_median(self.fct_run_fwd)
+            fct_run_fwd()
+            self.timer.measure_median(fct_run_fwd)
             self.tmp_local[self.n.main_target].grad = generate_val(self.info,device)
-            time_run_bwd = self.measure_time(self.fct_run_bwd, self.fct_run_fwd)
+            time_run_bwd = self.measure_time(self.fct_run_bwd, fct_run_fwd)
             # overhead_bwd contains n.target.data now /!\
-
+            gc.enable()
             self.ret["overhead_bwd"] = overhead_bwd
             self.ret["mem_run_bwd"]  = mem_run_bwd
             self.ret["mem_fgt_bwd"]  = minus_mem(mem_fgt_bwd)
             self.ret["time_run_bwd"] = time_run_bwd
     # # ===============
-
+"""
 def inspection(n : S_node,g : S_graph,our_global, phantoms=[]):
     mt = n.main_target
     info = g.dict_info[mt]
@@ -403,7 +448,7 @@ def inspection(n : S_node,g : S_graph,our_global, phantoms=[]):
         ret["time_run_bwd"] = time_run_bwd
     # # ===============
     return ret
-
+"""
 # def inspection_del(n : S_node,g : S_graph,our_global, phantoms=[]):
 #     mt = n.main_target
 #     info = g.dict_info[mt]
@@ -521,7 +566,7 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
     # -- init --
     dict_Kbwd = dict() # dict : target -> K_node(bwd)
     dict_Kfwd = dict() # dict : target -> K_node(fwd)
-    our_global = globals().copy()
+    our_global = {}#globals().copy()
     our_global["self"] = nn_mod
     our_global["device"] = device
     our_global
@@ -560,12 +605,23 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
                 body_code  = n.body_code,
                 info = info)
         dict_Kfwd[mt] = Kfwd
+        our_global = globals().copy()
+        our_global["self"] = nn_mod
+        our_global["device"] = device
+        for inp in sg.direct_inputs:
+            # print('input:', inp)
+            info = sg.dict_info[inp]
+            x = generate_val(info,device)
+            our_global[inp]=x
+            if inp in sg.hidden_inputs:
+                info.memsize = MemSize(int(tensorMsize(x)))
 
         # print(dict_Kfwd.keys())
         # -- build Kbwd --
         info = sg.dict_info[mt]
         if info.requires_grad:
             print_debug(f"{mt} req bwd")
+            """
             #if '__116_input0' in our_global.keys(): print(our_global['__116_input0'].shape, n.main_target)
 
             # -- extract "real" dependencies through grad_fn --
@@ -576,10 +632,10 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
                 print(n.get_code(), our_global['__13_input0'].shape)
                 # print(our_global['self'].h[0].ln_1.weight.shape)
             #     if '__116_input0' in our_global.keys(): print(our_global['__116_input0'].shape, n.main_target)
-
+            """
             try:Kbwd_req = set(dict_Kfwd[d] for d in dep)
             except: print(dict_Kfwd, dep, n.get_code())
-            Kfwd.phantoms = phantoms
+            #Kfwd.phantoms = phantoms
 
             Kbwd = K_node(
                 is_fwd=False, req=Kbwd_req, target=mt, info=info,body_code=[])
@@ -600,7 +656,7 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
             Kfwd.time     = 0
         else:
             #res = inspection(n,sg,our_global,Kfwd.phantoms)
-            ins = inspector(n,sg,our_global,Kfwd.phantoms)
+            ins = inspector(Kfwd,sg,our_global)#,Kfwd.phantoms)
             ins.measure_fwd()
             ins.measure_bwd()
             res = ins.ret
@@ -623,7 +679,7 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
                 Kbwd.time     = res["time_run_bwd"]
                 Kbwd.inspector = ins
                 
-            if Kfwd.run_mem != Kfwd.fgt_mem:#a_bar case
+            if Kfwd.run_mem.v != Kfwd.fgt_mem.v:#a_bar case
                 Kfwd.abar = True
                 if info.requires_grad:
                     Kbwd.abar = True
