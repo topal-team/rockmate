@@ -300,37 +300,58 @@ def seq_builder(chain : RK_Chain, memory_limit):
 
 
 class Executor():#to execute Op 
-    def __init__(self,storage):
+    def __init__(self,storage, fwd_seq, bwd_seq):
         self.storage = storage
         self.live = {}#variables -> CodeAtom
         self.fgt = []#variables been fgt
-        self.done = []#CodeAtom already did
+#        self.done = []#CodeAtom already did
         self.code = []
         self.grad = {}
-        self.op_list = []
+        self.fwd_op_list = []
+        self.bwd_op_list = []
+        self.op_info = []
+        for sb in fwd_seq.seq:
+            for sa in sb.body:
+                self.op_info.append((sa.op.n.main_target, 
+                                         sa.op.is_fgt, sa.op.n.is_fwd))
+                self.fwd_op_list.append(sa.op)
+        for sb in bwd_seq.seq:
+            for sa in sb.body:
+                self.op_info.append((sa.op.n.main_target, 
+                                         sa.op.is_fgt, sa.op.n.is_fwd))
+                self.bwd_op_list.append(sa.op)
+        self.op_list = self.fwd_op_list+self.bwd_op_list
 
-    def translate(self,op):
-        if op.n.is_fwd:
+    def translate(self,bwd=True):
+        for i,op in enumerate(self.fwd_op_list):
+            rec = self.op_info[i] in self.op_info[:i]
+            last = self.op_info[i] not in self.op_info[i+1:]
+
             if op.is_fgt==None or op.is_fgt:
-                self._fgt_fwd(op)
+                self._fgt_fwd(op,rec=rec,last=last)
             else:
-                self._run_fwd(op)
-        else:
-            if op.is_fgt:
-                self._fgt_bwd(op)
-            else:
-                self._run_bwd(op)
+                self._run_fwd(op,rec=rec,last=last)
+        self.fwd_code = self.code
+        self.code = []
+        if bwd:
+            for i,op in enumerate(self.bwd_op_list):
+                rec = self.op_info[i] in self.op_info[:i]
+                last = self.op_info[i] not in self.op_info[i+1:]
+                if op.is_fgt:
+                    self._fgt_bwd(op,rec=rec,last=last)
+                else:
+                    self._run_bwd(op,rec=rec,last=last)
+        self.bwd_code = self.code
 
-        self.done.append(op.name) 
-        self.op_list.append(op)
+#        self.done.append(op.name) 
 
 
     def exec(self):
         for code in self.code:
             exec(code, self.storage.gd, self.storage.ld)
 
-    def _run_fwd(self, op):
-        rec = op.name in self.done
+    def _run_fwd(self, op, rec=False, last=False):
+        #rec = op.name in self.done
         n = op.n
         if "loss" in n.name:
             self.code.append("")
@@ -356,29 +377,34 @@ class Executor():#to execute Op
             self.live[f"{mt}.data"] = [op.name]#we assume .data can only from one op
             return None 
         code = ast_to_str(make_ast_module([n.main_code]))
-        code = code.replace(mt,"_"+mt)
         body_code = ""
         if rec:# and not n.abar:#i.e. recomputation
+            if not n.abar: code = code.replace(mt,f"_{mt}.data")
+            else: code = code.replace(mt,f"_{mt}")
             code = (
                 f"{code} ; "\
-                f"{mt}.data = _{mt}.data" )
+                f"{mt}.data = _{mt}.data;"\
+                f"{mt}.requires_grad_()")
             for c in n.body_code:
                 if "view" in ast_to_str(c.value):
                     body_code += ast_to_str(c.targets) + ".data = " + ast_to_str(c.value)+";"
                 else:
                     body_code += ast_to_str(c)+";"
         else:
+            code = code.replace(mt,f"_{mt}")
             code = (
                 f"{code} ; "\
                 f"{mt} = _{mt}.detach(); "\
-                f"{mt}.requires_grad_()" )
+                f"{mt}.requires_grad_()")
             body_code = ast_to_str(make_ast_module(n.body_code))
             self.grad[f"{mt}"] = {}
             self.live[f"{mt}.grad"] = []
+        #if True:
+        #    code += f"{mt}.requires_grad_()"
         self.live[f"{mt}.data"] = [op.name]#we assume .data can only from one op
         self.code.append(code+'\n'+body_code)
 
-    def _run_bwd(self, op, sub_list=None):
+    def _run_bwd(self, op, rec=False, last=False, sub_list=None):
         n = op.n
         if "loss" in n.name:
             self.code.append("")
@@ -414,7 +440,24 @@ class Executor():#to execute Op
                 self.live[f"{smt}.grad"].append(op.name)
         self.code.append(bwd_code)
 
-    def _fgt_fwd(self, op):
+    def _del_fwd(self, op):
+        n = op.n
+        if "loss" in n.name:
+            self.code.append("")
+            return None
+        #assert(f"{mt}.data" in self.live)
+        if n.is_artefact: code = ""
+        else:
+            mt = n.main_target
+            code =""
+            if op.n.info and op.n.info.requires_grad:
+                code += f"del _{mt};"
+            for v in n.tensor_targets:
+                code += (f"del {v}; ")
+            self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
+
+    def _fgt_fwd(self, op, rec=False, last=False):
+        """
         n = op.n
         if "loss" in n.name:
             self.code.append("")
@@ -433,26 +476,57 @@ class Executor():#to execute Op
         else:
             mt = n.main_target
             #code = f"{mt}.data = torch.zeros(0,device=device); "
+            code = ""
+            for tar in n.tensor_targets:
+                code += f"del {tar};"
+            if op.n.info and op.n.info.requires_grad:
+                code += f"del _{mt};"
+
+            #    code += f"_{mt}.data = torch.zeros(0,device=device);"
+            #for v in n.tensor_targets:
+            #    code += (f"{v}.data = torch.zeros(0,device=device); ")
+            self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
+            #            
+            #for tar in n.phantoms:
+            #    # if ast_to_str(tar).split('.')[0] not in our_global.keys():
+            #    code += "_"+ast_to_str(ast.Assign(
+            #        [ast.Attribute(tar,"data")],
+            #        ast.Call(
+            #            ast.Attribute(ast.Name("torch"),"zeros"),
+            #            [make_ast_constant(0)],
+            #            [ast.alias("device=device")]
+            #            )
+            #        ))+";"
+        self.code.append(code)
+        """
+        n = op.n
+        if "loss" in n.name:
+            return None
+        #assert(f"{mt}.data" in self.live)
+        if n.is_artefact: code = ""
+        elif n.abar:
+            mt = n.main_target
+            #code = f"{mt}.data = torch.zeros(0,device=device); "
             code =""
             if op.n.info and op.n.info.requires_grad:
-                code += f"_{mt}.data = torch.zeros(0,device=device);"
+                code += f"del _{mt};"
             for v in n.tensor_targets:
                 code += (f"{v}.data = torch.zeros(0,device=device); ")
             self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
-                        
-            for tar in n.phantoms:
-                # if ast_to_str(tar).split('.')[0] not in our_global.keys():
-                code += "_"+ast_to_str(ast.Assign(
-                    [ast.Attribute(tar,"data")],
-                    ast.Call(
-                        ast.Attribute(ast.Name("torch"),"zeros"),
-                        [make_ast_constant(0)],
-                        [ast.alias("device=device")]
-                        )
-                    ))+";"
+        #if n.abar:code = f"del _{mt};" 
+                
+        else:
+            mt = n.main_target
+            code =""
+            if op.n.info and op.n.info.requires_grad:
+                code += f"_{mt}.data = torch.zeros(0,device=device);"
+            #code = f"{mt}.data = torch.zeros(0,device=device); "
+            for v in n.tensor_targets:
+                code += (f"{v}.data = torch.zeros(0,device=device); ")
+            self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
         self.code.append(code)
 
-    def _fgt_bwd(self, op):
+    def _fgt_bwd(self, op, rec=False, last=False):
         n = op.n
         #assert(n.name in self.live)
         if "loss" in n.name:
