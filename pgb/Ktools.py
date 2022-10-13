@@ -234,31 +234,6 @@ class inspector():
     # ---------
 
     # === FORWARD ===
-    """
-    def fct_run_fwd(self):
-        self.code_run_fwd = self.n.get_code() 
-        exec(self.code_run_fwd, self.our_global, self.tmp_local)
-
-    def fct_fgt_fwd(self):
-        for tar in self.n.tensor_targets:
-            self.tmp_local[tar].data = torch.zeros(0,device=device)
-        
-    def fct_del_fwd(self):
-        for tar in self.n.tensor_targets:
-            self.tmp_local[tar].data = torch.zeros(0,device=device)
-        code = ""
-        for tar in self.phantoms:
-            code += ast_to_str(ast.Assign(
-                [ast.Attribute(tar,"data")],
-                ast.Call(
-                    ast.Attribute(ast.Name("torch"),"zeros"),
-                    [make_ast_constant(0)],
-                    [ast.alias("device=device")]
-                    )
-                ))+'\n'
-        self.code_del_fwd = code#Only include the phantom part 
-        exec(self.code_del_fwd, self.our_global, self.tmp_local)
-    """
     # -- measure forward --
     def measure_fwd(self,only_run=False):
         def fct_run_fwd():
@@ -273,19 +248,6 @@ class inspector():
             code = ""
             for tar in self.n.tensor_targets:
                 code += f"del {tar};"
-                """
-                self.tmp_local[tar].data = torch.zeros(0,device=device)
-            code = ""
-            for tar in self.phantoms:
-                code += ast_to_str(ast.Assign(
-                    [ast.Attribute(tar,"data")],
-                    ast.Call(
-                        ast.Attribute(ast.Name("torch"),"zeros"),
-                        [make_ast_constant(0)],
-                        [ast.alias("device=device")]
-                        )
-                    ))+'\n'
-            """
             self.code_del_fwd = code#Only include the phantom part 
             exec(self.code_del_fwd, self.our_global, self.tmp_local)
         gc.disable()
@@ -339,209 +301,6 @@ class inspector():
             self.ret["mem_fgt_bwd"]  = minus_mem(mem_fgt_bwd)
             self.ret["time_run_bwd"] = time_run_bwd
     # # ===============
-"""
-def inspection(n : S_node,g : S_graph,our_global, phantoms=[]):
-    mt = n.main_target
-    info = g.dict_info[mt]
-    timer = rotor.timing.make_timer(device)
-    memUsage = rotor.memory.MeasureMemory(device)
-    tmp_local = generate_tmp_local(n,g,our_global)
-    ret = {}
-
-    # -- aux --
-    def measure_time(fct, inter_fct=None):
-        duration = timer.measure_median(fct,samples=1)
-        if duration < min_duration:
-            number_repetitions = 1 + int(min_duration // duration)
-            for _ in range(1,number_repetitions):
-                if inter_fct:
-                    inter_fct()
-                duration += timer.measure_median(fct,samples=1)
-        else: number_repetitions = 1
-        return duration/number_repetitions
-    # ---------
-
-    # === FORWARD ===
-    def fct_run_fwd():
-        exec(n.get_code(), our_global, tmp_local)
-    def fct_fgt_fwd():
-        for tar in n.tensor_targets:
-            #tar_info = g.dict_info[tar]
-            #assert(tar_info.ttype == torch.Tensor)
-            tmp_local[tar].data = torch.zeros(0,device=device)
-            # del tmp_local[tar]
-        
-    #    for tar in n.all_targets:
-            #tar_info = g.dict_info[tar]
-            #assert(tar_info.ttype == torch.Tensor)
-            # tmp_local[tar].data = torch.zeros(0,device=device)
-    #        del tmp_local[tar]
-    def fct_del_fwd():
-        for tar in n.tensor_targets:
-            #tar_info = g.dict_info[tar]
-            #assert(tar_info.ttype == torch.Tensor)
-            tmp_local[tar].data = torch.zeros(0,device=device)
-        code = ""
-        for tar in phantoms:
-            # if ast_to_str(tar).split('.')[0] not in our_global.keys():
-            code += ast_to_str(ast.Assign(
-                [ast.Attribute(tar,"data")],
-                ast.Call(
-                    ast.Attribute(ast.Name("torch"),"zeros"),
-                    [make_ast_constant(0)],
-                    [ast.alias("device=device")]
-                    )
-                ))+'\n'
-        exec(code, our_global, tmp_local)
-    # -- measure forward --
-    _ , mem_run_fwd , peak_fwd = memUsage.measure(fct_run_fwd)
-    #if mem_run_fwd.v<0: print(n.get_code())
-    overhead_fwd = peak_fwd - mem_run_fwd
-    _ , mem_del_fwd , _ = memUsage.measure(fct_del_fwd)
-    ret["mem_del_fwd"] = minus_mem(mem_del_fwd)
-    _ , _ , _ = memUsage.measure(fct_run_fwd)
-
-    _ , mem_fgt_fwd , _ = memUsage.measure(fct_fgt_fwd)
-    time_run_fwd = measure_time(fct_run_fwd)
-    ret["overhead_fwd"] = overhead_fwd
-    ret["mem_run_fwd"] = mem_run_fwd
-    ret["mem_fgt_fwd"] = minus_mem(mem_fgt_fwd)
-    ret["time_run_fwd"] = time_run_fwd
-    # ===============
-
-    # === BACKWARD ===
-    if info.requires_grad:
-        tmp_local[mt].data = generate_val(info,device)
-        tmp_local[mt].grad = generate_val(info,device)
-
-        def fct_run_bwd():
-            exec(f"{mt}.backward({mt}.grad)", our_global, tmp_local)
-        def fct_fgt_bwd():
-            for req_n in n.req:
-                #if not (req_n is g.init_node):
-                if not req_n.is_artefact:
-                    for tar in req_n.tensor_targets:
-                        tmp_local[tar].grad = None
-
-        # measure
-        _ , mem_run_bwd , peak_bwd = memUsage.measure(fct_run_bwd)
-        overhead_bwd = peak_bwd - mem_run_bwd
-        _ , mem_fgt_bwd , _ = memUsage.measure(fct_fgt_bwd)
-        fct_run_fwd()
-        timer.measure_median(fct_run_fwd)
-        tmp_local[n.main_target].grad = generate_val(info,device)
-        time_run_bwd = measure_time(fct_run_bwd, fct_run_fwd)
-        # overhead_bwd contains n.target.data now /!\
-
-        ret["overhead_bwd"] = overhead_bwd
-        ret["mem_run_bwd"]  = mem_run_bwd
-        ret["mem_fgt_bwd"]  = minus_mem(mem_fgt_bwd)
-        ret["time_run_bwd"] = time_run_bwd
-    # # ===============
-    return ret
-"""
-# def inspection_del(n : S_node,g : S_graph,our_global, phantoms=[]):
-#     mt = n.main_target
-#     info = g.dict_info[mt]
-#     timer = rotor.timing.make_timer(device)
-#     memUsage = rotor.memory.MeasureMemory(device)
-#     tmp_local = generate_tmp_local(n,g,our_global)
-#     ret = {}
-
-#     # -- aux --
-#     def measure_time(fct, inter_fct=None):
-#         duration = timer.measure_median(fct,samples=1)
-#         if duration < min_duration:
-#             number_repetitions = 1 + int(min_duration // duration)
-#             for _ in range(1,number_repetitions):
-#                 if inter_fct:
-#                     inter_fct()
-#                 duration += timer.measure_median(fct,samples=1)
-#         else: number_repetitions = 1
-#         return duration/number_repetitions
-#     # ---------
-
-#     # === FORWARD ===
-#     def fct_run_fwd():
-#         exec(n.get_code(), our_global, tmp_local)
-#     def fct_fgt_fwd():
-#         for tar in n.tensor_targets:
-#             #tar_info = g.dict_info[tar]
-#             #assert(tar_info.ttype == torch.Tensor)
-#             tmp_local[tar].data = torch.zeros(0,device=device)
-#             # del tmp_local[tar]
-            
-#     def fct_del_fwd():
-#         for tar in n.tensor_targets:
-#             #tar_info = g.dict_info[tar]
-#             #assert(tar_info.ttype == torch.Tensor)
-#             tmp_local[tar].data = torch.zeros(0,device=device)
-#         code = ""
-#         for tar in phantoms:
-#             # if ast_to_str(tar).split('.')[0] not in our_global.keys():
-#             code += ast_to_str(ast.Assign(
-#                 [ast.Attribute(tar,"data")],
-#                 ast.Call(
-#                     ast.Attribute(ast.Name("torch"),"zeros"),
-#                     [make_ast_constant(0)],
-#                     [ast.alias("device=device")]
-#                     )
-#                 ))+'\n'
-#         if "src" not in n.get_code():#TODO: find a better way to deal with src
-#             exec(code, our_global, tmp_local)
-    # -- measure forward --
-#     _ , mem_run_fwd , peak_fwd = memUsage.measure(fct_run_fwd)
-#     overhead_fwd = peak_fwd - mem_run_fwd
-#     _ , mem_fgt_fwd , _ = memUsage.measure(fct_fgt_fwd)
-#     time_run_fwd = measure_time(fct_run_fwd)
-#     ret["overhead_fwd"] = overhead_fwd
-#     ret["mem_run_fwd"] = mem_run_fwd
-#     ret["mem_fgt_fwd"] = minus_mem(mem_fgt_fwd)
-#     ret["time_run_fwd"] = time_run_fwd
-#     # ===============
-
-#     # === BACKWARD ===
-#     if info.requires_grad:
-#         tmp_local[mt].data = generate_val(info,device)
-#         tmp_local[mt].grad = generate_val(info,device)
-
-#         def fct_run_bwd():
-#             exec(f"{mt}.backward({mt}.grad)", our_global, tmp_local)
-#         def fct_fgt_bwd():
-#             for req_n in n.req:
-#                 #if not (req_n is g.init_node):
-#                 if not req_n.is_artefact:
-#                     for tar in req_n.tensor_targets:
-#                         tmp_local[tar].grad = None
-
-#         # measure
-#         _ , mem_run_bwd , peak_bwd = memUsage.measure(fct_run_bwd)
-#         overhead_bwd = peak_bwd - mem_run_bwd
-#         _ , mem_fgt_bwd , _ = memUsage.measure(fct_fgt_bwd)
-#         fct_run_fwd()
-#         timer.measure_median(fct_run_fwd)
-#         tmp_local[n.main_target].grad = generate_val(info,device)
-#         time_run_bwd = measure_time(fct_run_bwd, fct_run_fwd)
-#         # overhead_bwd contains n.target.data now /!\
-
-#         ret["overhead_bwd"] = overhead_bwd
-#         ret["mem_run_bwd"]  = mem_run_bwd
-#         ret["mem_fgt_bwd"]  = minus_mem(mem_fgt_bwd)
-#         ret["time_run_bwd"] = time_run_bwd
-    # ===============
-    # _ , _ , _ = memUsage.measure(fct_run_fwd)
-    # _ , mem_del_fwd , _ = memUsage.measure(fct_del_fwd)
-    # ret["mem_del_fwd"] = minus_mem(mem_del_fwd)
-    # tmp_local = generate_tmp_local(n,g,our_global)
-    # try:
-    #     _ , _ , _ = memUsage.measure(fct_run_fwd)
-    # except:
-    #     print(n.get_code())
-    #     print(our_global['self'].wte.weight)
-    #     print(g.init_node.get_code())
-    #     print(our_global['src'])
-    #     print(tmp_local['src'])
-    # return ret
 
 # aux function to handle verbose and device
 def aux_init_S_to_K(nn_mod,verbose,K_device):
@@ -612,30 +371,24 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
         info = sg.dict_info[mt]
         if info.requires_grad:
             print_debug(f"{mt} req bwd")
-            #if '__116_input0' in our_global.keys(): print(our_global['__116_input0'].shape, n.main_target)
+            #try:
+            #    dep , phantoms = get_dependencies_and_phantoms(
+            #        n,sg,our_global)
+            #except: 
+            #    print(n.get_code(), our_global['__13_input0'].shape)
 
-            # -- extract "real" dependencies through grad_fn --
-            try:
-                dep , phantoms = get_dependencies_and_phantoms(
-                    n,sg,our_global)
-            except: 
-                print(n.get_code(), our_global['__13_input0'].shape)
-                # print(our_global['self'].h[0].ln_1.weight.shape)
-            #     if '__116_input0' in our_global.keys(): print(our_global['__116_input0'].shape, n.main_target)
-
-            try:Kbwd_req = set(dict_Kfwd[d] for d in dep)
-            except: print(dict_Kfwd, dep, n.get_code())
-            Kfwd.phantoms = phantoms
+            #try:Kbwd_req = set(dict_Kfwd[d] for d in dep)
+            #except: print(dict_Kfwd, dep, n.get_code())
+            #Kfwd.phantoms = phantoms
 
             Kbwd = K_node(
-                is_fwd=False, req=Kbwd_req, target=mt, info=info,body_code=[])
+                is_fwd=False, req=set(Kreq), target=mt, info=info,body_code=[])
             dict_Kbwd[mt] = Kbwd
             for sub_n in n.req:
                 sub_tar = sub_n.main_target
                 if sub_tar in dict_Kbwd: # requires_grad
                     dict_Kbwd[sub_tar].req.add(Kbwd)
             
-        # print(dict_Kfwd.keys())
         
         # -- inspection --
         if info.ttype == torch.Size:
@@ -646,7 +399,7 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
             Kfwd.time     = 0
         else:
             #res = inspection(n,sg,our_global,Kfwd.phantoms)
-            ins = inspector(Kfwd,sg,our_global,Kfwd.phantoms)
+            ins = inspector(Kfwd,sg,our_global)
             ins.measure_fwd()
             ins.measure_bwd()
             res = ins.ret
@@ -654,11 +407,6 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
             Kfwd.fgt_mem  = res["mem_fgt_fwd"]
             Kfwd.del_mem  = res["mem_del_fwd"]
             Kfwd.inspector = ins
-            # del_global = our_global.copy()
-            # Kfwd.del_mem  = inspection_del(n,sg,our_global,Kfwd.phantoms)["mem_del_fwd"]
-            # if our_global['self'].h[0].attn.c_attn.weight.shape[0]<1:print([ast_to_str(p) for p in Kfwd.phantoms])
-
-            #if '__116_input0' in our_global.keys(): print(our_global['__116_input0'].shape, n.main_target)
             Kfwd.overhead = res["overhead_fwd"]
             Kfwd.time     = res["time_run_fwd"]
             info.memsize  = res["mem_fgt_fwd"]
@@ -693,10 +441,6 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
         target = "loss",
         req = {dict_Kfwd[sg.hidden_output]},
         main_code = make_ast_constant("LOSS"),
-        #main_code = (
-        #  ast.Assign(
-        #    [ast.Name(f"{sg.hidden_output}.grad")],
-        #    ast.Name("loss"))),
         body_code = [])
     loss_node.run_mem  = MemSize(0)
     loss_node.fgt_mem  = MemSize(0)
