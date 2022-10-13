@@ -335,12 +335,19 @@ class Executor():#to execute Op
         self.code = []
         if bwd:
             for i,op in enumerate(self.bwd_op_list):
-                rec = self.op_info[i] in self.op_info[:i]
-                last = self.op_info[i] not in self.op_info[i+1:]
-                if op.is_fgt:
-                    self._fgt_bwd(op,rec=rec,last=last)
+                j = i+ len(self.fwd_op_list)
+                rec = self.op_info[j] in self.op_info[:j]
+                last = self.op_info[j] not in self.op_info[j+1:]
+                if op.n.is_fwd:
+                    if op.is_fgt==None or op.is_fgt:
+                        self._fgt_fwd(op,rec=rec,last=last)
+                    else:
+                        self._run_fwd(op,rec=rec,last=last)
                 else:
-                    self._run_bwd(op,rec=rec,last=last)
+                    if op.is_fgt:
+                        self._fgt_bwd(op,rec=rec,last=last)
+                    else:
+                        self._run_bwd(op,rec=rec,last=last)
         self.bwd_code = self.code
 
 #        self.done.append(op.name) 
@@ -410,14 +417,15 @@ class Executor():#to execute Op
             self.code.append("")
             return None
         mt = n.main_target 
-        rec = op.name in self.done
+        #rec = op.name in self.done
         #assert(f"{mt}.data" not in self.live)
         if rec:
             rec_list = []
             if sub_list is None:#TODO: future work to allow recompute grad separately
                 for sub_n in n.used_by:
                     smt = sub_n.main_target
-                    if op.name not in self.live[f"{smt}.grad"]:
+                    if "Bwd "+op.main_var not in self.live[f"{smt}.grad"]:
+                        self.live[f"{smt}.g`rad"].append("Bwd "+op.main_var)
                         rec_list += sub_n.tensor_targets
             inputs = ",".join(rec_list)
             code=f"_{mt}.backward({mt}.grad, inputs=[{inputs}], retain_graph=True)"
@@ -437,7 +445,7 @@ class Executor():#to execute Op
             #     continue
             if sub_n.info.requires_grad:
                 smt = sub_n.main_target
-                self.live[f"{smt}.grad"].append(op.name)
+                self.live[f"{smt}.grad"].append("Bwd "+op.main_var)
         self.code.append(bwd_code)
 
     def _del_fwd(self, op):
@@ -534,6 +542,7 @@ class Executor():#to execute Op
             return None
         code_list = []
         for sub_n in n.used_by:
+            if "loss" in sub_n.name:continue
             if sub_n.info.requires_grad:
                 smt = sub_n.main_target
 
