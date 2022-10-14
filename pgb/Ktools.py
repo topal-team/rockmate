@@ -216,6 +216,7 @@ class inspector():
         self.timer = rotor.timing.make_timer(device)
         self.memUsage = rotor.memory.MeasureMemory(device)
         self.our_global = our_global
+        #with torch.no_grad():
         self.tmp_local = generate_tmp_local(self.n,g,our_global)
         self.phantoms = phantoms
         self.ret = {}
@@ -270,7 +271,15 @@ class inspector():
     # === BACKWARD ===
 
     def fct_run_bwd(self):
-        exec(f"{self.mt}.backward({self.mt}.grad)", self.our_global, self.tmp_local)
+        rec_list = []
+        for sub_n in self.n.used_by:
+            rec_list += sub_n.tensor_targets
+        inputs = ",".join(rec_list)
+        if inputs:
+            exec(f"{self.mt}.backward({self.mt}.grad, inputs=[{inputs}])", self.our_global, self.tmp_local)
+        else:
+            exec(f"{self.mt}.backward({self.mt}.grad)", self.our_global, self.tmp_local)
+
     def fct_fgt_bwd(self):
         for req_n in self.n.req:
             #if not (req_n is g.init_node):

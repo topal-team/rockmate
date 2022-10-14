@@ -509,6 +509,7 @@ class Executor():#to execute Op
         """
         n = op.n
         if "loss" in n.name:
+            self.code.append("")
             return None
         #assert(f"{mt}.data" in self.live)
         if n.is_artefact: code = ""

@@ -41,7 +41,12 @@ class CheckpointedModule(): #torch.nn.Module):
         self.fwd_seq,self.bwd_seq = seq.cut_fwd_bwd()
         self.original_mod = original_mod
         self.storage =  RK_Storage(self.device,self.original_mod)
-        self.executor = Executor(self.storage)
+        self.executor = Executor(self.storage,self.fwd_seq,self.bwd_seq)
+        self.executor.translate(bwd=True)
+        self.fwd_code = self.executor.fwd_code
+        self.bwd_code = self.executor.bwd_code
+
+        """
         for sb in self.fwd_seq.seq:
             for sa in sb.body:
                 try:
@@ -57,6 +62,7 @@ class CheckpointedModule(): #torch.nn.Module):
                 except:
                     print(f"Failed to translate {sa.op.name}")
         self.bwd_code = self.executor.code
+        """
 
     def forward(self,input):
         self.storage.add_val("src",input) # hardcoded
