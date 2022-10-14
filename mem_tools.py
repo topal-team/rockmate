@@ -21,13 +21,13 @@ def mod():
     random.seed(0)
     torch.random.manual_seed(0)
     model2 = GPT2(nlayers=4,dropout=1e-10, vcb_sz=600)
-    for p in model2.parameters():
-        p.grad = torch.zeros_like(p)
     context1 = torch.randint(0,600, [10,10])
     d = {"src":context1}
     src = context1
     import warnings ; warnings.filterwarnings("ignore")
     newmod = rk.CheckpointedModule(model2,d, mem_limit = 3.2e7)
+    for p in model2.parameters():
+        p.grad = torch.zeros_like(p)
     return newmod
 
 def get_n(i,newmod):
