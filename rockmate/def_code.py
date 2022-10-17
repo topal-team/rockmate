@@ -43,12 +43,12 @@ class Op:
         self.run_mem = n.run_mem.v#for debugging
         if is_fgt: # Fgt
             self.time = 0#Fgt could happen in ILP solution even Infinity mem
-            self.mem  = - n.fgt_mem.v
+            self.mem  = - n.run_mem.v
             if n.is_fwd: self.op_type = "FgtFwd"
             else: self.op_type = "FgtBwd"
         else:
             self.time = n.time
-            self.mem  = n.fgt_mem.v
+            self.mem  = n.run_mem.v
             if n.is_fwd: self.op_type = "Fwd"
             else: self.op_type = "Bwd"
         self.name = self.op_type+" "+self.main_var

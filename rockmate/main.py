@@ -16,8 +16,10 @@ def print_memsizes(list_kg):
 
 class CheckpointedModule(): #torch.nn.Module):
     def __init__(self,original_mod,dict_inputs,verbose=False, mem_limit=None):
-        if not mem_limit:
-            mem_limit = torch.cuda.get_device_properties(0).total_memory*0.9
+        if mem_limit:
+            self.mem_limit = mem_limit
+        else:
+            self.mem_limit = torch.cuda.get_device_properties(0).total_memory*0.9
         ref_verbose[0] = verbose
         self.device = get_device()
         # -- use pytorch graph builder to get the list of K_graphs --
@@ -37,7 +39,7 @@ class CheckpointedModule(): #torch.nn.Module):
         self.rk_chain = RK_Chain(self.list_kg,10,3)
 
         # -- solve the chain like rotor --
-        seq = seq_builder(self.rk_chain, mem_limit)
+        seq = seq_builder(self.rk_chain, self.mem_limit)
         self.fwd_seq,self.bwd_seq = seq.cut_fwd_bwd()
         self.original_mod = original_mod
         self.storage =  RK_Storage(self.device,self.original_mod)

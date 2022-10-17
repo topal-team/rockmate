@@ -33,7 +33,7 @@ def make_sched(kg : pgb.Ktools.K_graph,budget,
     for n in nodes: # -> build nodes
         if n.is_artefact:
             raise Exception("Artefact nodes not supported in CHK yet")
-        chk_gb.add_node(name=n.name, cpu_cost=n.time, ram_cost=n.fgt_mem.v)
+        chk_gb.add_node(name=n.name, cpu_cost=n.time, ram_cost=n.run_mem.v)
 
     for n in nodes: # -> build edges
         for sub_n in n.req:
@@ -59,7 +59,7 @@ def make_sched(kg : pgb.Ktools.K_graph,budget,
     # == result ==
     op_list = [] 
     if sched_result.feasible:
-        print("*",end="")
+        print_debug("*",end="")
         print_debug('feasible schedule solved')
         for op in sched_result.schedule:
             if isinstance(op, CHK_OperatorEvaluation):

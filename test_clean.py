@@ -1,32 +1,8 @@
-import torch
-import pgb
-from example_modules import GPT2
-import rockmate as rk
+from mem_tools import *
+newmod = mod()
+
 from rotor import timing
-import pickle
-if torch.cuda.is_available():
-    device = torch.device('cuda')
-else:
-    device = torch.device('cpu')
-
-torch.random.manual_seed(0)
-#
-model2 = GPT2(nlayers=12,dropout=1e-9, vcb_sz=600)
-context1 = torch.randint(0,600, [1000,20])
-d = {"src":context1}
-src = context1
-import warnings ; warnings.filterwarnings("ignore")
-newmod = rk.CheckpointedModule(model2,d, mem_limit = 4e9)
-#with open("/beegfs/xzhao/newmod.pk","wb") as f:
-#    pickle.dump(newmod, f)
-for p in model2.parameters():
-    p.grad = None
-    
-rk.utils.ref_print_atoms[0] = False#True 
-print(newmod.fwd_seq) 
-print(newmod.bwd_seq) 
-print("")
-
+context1 = torch.randint(0,600, [10,10])
 torch.cuda.reset_peak_memory_stats()
 max_before = torch.cuda.max_memory_allocated()
 allo_before = torch.cuda.memory_allocated()
@@ -52,9 +28,11 @@ print("=======ROCKMATE MODULE=======")
 print("peak memory:", torch.cuda.max_memory_allocated()-max_before)
 print("runtime: %.4f"%timer.elapsed())
 
+
+# device = torch.device('cpu')
 torch.random.manual_seed(0)
-model1 = GPT2(nlayers=12,dropout=1e-9, vcb_sz=600).to(device)
-context1 = torch.clone(context1)
+model1 = GPT2(nlayers=4,dropout=1e-8, vcb_sz=600).to(device)
+context1 = torch.clone(context1).to(device)
 torch.cuda.reset_peak_memory_stats()
 max_before = torch.cuda.max_memory_allocated()
 allo_before = torch.cuda.memory_allocated()
@@ -78,22 +56,15 @@ if torch.allclose(loss, newmod.storage.ld["loss"]):
     print("Same loss obtained!")
 
 same_grad = True
+model2 = newmod.original_mod
 for n,p in model2.named_parameters():
-    if not torch.allclose(model2.get_parameter(n), model1.get_parameter(n)):
+    if not torch.allclose(model2.get_parameter(n).to(device), model1.get_parameter(n)):
         print("Unequal weight found in:", n)
         same_grad = False
         
-    if model2.get_parameter(n).grad!=None:
-        grad1 = model1.get_parameter(n).grad
-        grad2 = model2.get_parameter(n).grad
-        if not torch.allclose(grad1,grad2):
+    if model1.get_parameter(n).grad!=None:
+        if not torch.allclose(model2.get_parameter(n).grad.to(device), model1.get_parameter(n).grad):
             print("Unequal grad found in:", n)
-            print(torch.mean((grad1-grad2)/grad1))
             same_grad = False
 if same_grad:
     print("Same grad obtained!")
-if False:
-    for c in newmod.executor.done:
-        print(c)
-    for c in newmod.fwd_code+newmod.bwd_code:
-        print(c)

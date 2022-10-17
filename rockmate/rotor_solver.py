@@ -425,7 +425,7 @@ class Executor():#to execute Op
                 for sub_n in n.used_by:
                     smt = sub_n.main_target
                     if "Bwd "+op.main_var not in self.live[f"{smt}.grad"]:
-                        self.live[f"{smt}.g`rad"].append("Bwd "+op.main_var)
+                        self.live[f"{smt}.grad"].append("Bwd "+op.main_var)
                         rec_list += sub_n.tensor_targets
             inputs = ",".join(rec_list)
             code=f"_{mt}.backward({mt}.grad, inputs=[{inputs}], retain_graph=True)"

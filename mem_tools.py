@@ -17,15 +17,18 @@ else:
 from example_modules import GPT2
 from transformers import GPT2Tokenizer
 
-def mod():
+def mod(mem):
     random.seed(0)
     torch.random.manual_seed(0)
     model2 = GPT2(nlayers=4,dropout=1e-10, vcb_sz=600)
+    for p in model2.parameters():
+        p.grad = torch.zeros_like(p)
     context1 = torch.randint(0,600, [10,10])
     d = {"src":context1}
     src = context1
     import warnings ; warnings.filterwarnings("ignore")
-    newmod = rk.CheckpointedModule(model2,d, mem_limit = 3.2e7)
+    if not mem:mem = 2e7
+    newmod = rk.CheckpointedModule(model2,d, mem_limit = mem)
     for p in model2.parameters():
         p.grad = torch.zeros_like(p)
     return newmod
@@ -50,6 +53,7 @@ def run(newmod, context, bwd=False,
         except:print(f'failed to execte {c}')
         doc.append((i,c, torch.cuda.memory_allocated()-mem_before))
         mem_before = torch.cuda.memory_allocated()
+    torch.random.manual_seed(0)
     if bwd:
         newmod.storage.ld[newmod.output].grad = torch.ones_like(newmod.storage.ld[newmod.output])
         for i,c in enumerate(newmod.bwd_code):
@@ -112,3 +116,84 @@ def plot_mem(mem_real, mem_theory):
     plt.plot(np.cumsum(np.array(mem_theory)), label='theory')
     plt.legend()
     plt.show()
+
+def experiment(mem, origin=False, check_valid=False, print_res=False):
+    result = {}
+    newmod = mod(mem)
+    context1 = torch.randint(0,600, [10,10])
+    
+    torch.cuda.reset_peak_memory_stats()
+    max_before = torch.cuda.max_memory_allocated()
+    allo_before = torch.cuda.memory_allocated()
+    timer = timing.make_timer(device)
+
+    timer.start()
+    context1 = context1.to(device)
+    torch.random.manual_seed(0)
+    y1 = newmod.forward(context1)
+
+    rk.utils.ref_print_atoms[0] = False
+
+    # Run loss node by hand
+    newmod.storage.ld["loss"] = newmod.storage.ld["_loss"] = torch.mean(y1)
+    newmod.storage.ld["loss"].backward()
+    torch.random.manual_seed(0)
+    newmod.backward()
+
+    timer.end()
+    # print('')
+    
+    result['runtime'] = timer.elapsed()
+    result['mem_limit'] = newmod.mem_limit
+    result['mem_peak'] = torch.cuda.max_memory_allocated()-max_before
+    if print_res:
+        print("Great! You have executed the code!")
+        print("=======ROCKMATE MODULE=======")
+        print("Given memory limit:", result['mem_limit'])
+        print("Real peak memory:", result['mem_peak'])
+        print("Runtime: %.4f"%result['runtime'])
+    
+    
+
+    if origin:
+        # device = torch.device('cpu')
+        torch.random.manual_seed(0)
+        model1 = GPT2(nlayers=4,dropout=1e-8, vcb_sz=600).to(device)
+        context1 = torch.clone(context1).to(device)
+        torch.cuda.reset_peak_memory_stats()
+        max_before = torch.cuda.max_memory_allocated()
+        allo_before = torch.cuda.memory_allocated()
+        timer = timing.make_timer(device)
+        timer.start()
+
+        torch.random.manual_seed(0)
+        y = model1(context1)
+        loss = torch.mean(y)
+
+        torch.random.manual_seed(0)
+        loss.backward()
+        timer.end()
+
+        print("=======ORIGINAL MODULE=======")
+        print("Real peak memory:", torch.cuda.max_memory_allocated()-max_before)
+        print("Runtime: %.4f"%timer.elapsed())
+    
+    if check_valid:
+        if torch.allclose(loss, newmod.storage.ld["loss"]):
+            print("Same loss obtained!")
+
+        same_grad = True
+        model2 = newmod.original_mod
+        for n,p in model2.named_parameters():
+            if not torch.allclose(model2.get_parameter(n).to(device), model1.get_parameter(n)):
+                print("Unequal weight found in:", n)
+                same_grad = False
+
+            if model1.get_parameter(n).grad!=None:
+                if not torch.allclose(model2.get_parameter(n).grad.to(device), model1.get_parameter(n).grad):
+                    print("Unequal grad found in:", n)
+                    same_grad = False
+        if same_grad:
+            print("Same grad obtained!\n")
+            
+    return result

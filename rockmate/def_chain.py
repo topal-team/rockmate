@@ -18,7 +18,7 @@ from .def_code import Op, OpBlock
 # -> Methods    : __init__
 class RK_Block_Solution():
     def __init__(self,kg,budget_abar,budget_all):
-        kg.loss_node.fgt_mem = MemSize(budget_all - budget_abar)
+        kg.loss_node.run_mem = MemSize(budget_all - budget_abar)
         sched_result, op_list, chk_g = make_sched(kg, budget_all)
         is_f = self.is_feasible = sched_result.feasible
         if is_f:
@@ -56,7 +56,7 @@ class RK_Block():
             f"Block[{kg.hidden_inputs}->{kg.direct_outputs}]")
 
         # == budgets to test ==
-        nodes_size = [n.fgt_mem.v for n in kg.dict_nodes.values()]
+        nodes_size = [n.run_mem.v for n in kg.dict_nodes.values()]
         max_bdg = sum(nodes_size)
         min_bdg = max(nodes_size)
         #l_bd_abar = np.linspace(min_bdg,max_bdg,nb_bdg_abar)
@@ -84,7 +84,7 @@ class RK_Block():
                         if not (t in uniq_sols):
                             uniq_sols.add(t)
                             sols.append(sol)
-        kg.loss_node.fgt_mem = MemSize(0)
+        kg.loss_node.run_mem = MemSize(0)
 
         # == build .mem_inp/out ==
         memsize = lambda inp : kg.dict_info[inp].memsize.v
@@ -160,6 +160,9 @@ class RK_Chain():
         # organizes the information for rotor_solver.py as in Rotor
         # -> fw/bw/cw/cbw/fwd_tmp/bwd_tmp
         # -> in those list, one dummy block is added at the end for Loss
+        # fw/bw: runtime of fwd/bwd
+        # cbw: saved memory in each solution
+        # cw: saved memory for each checkpoint solution (only the input)
 
         # -- init variables --
         ln = len(self.body)
