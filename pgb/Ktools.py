@@ -431,6 +431,7 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
                 if info.requires_grad:
                     Kbwd.abar = True
                     Kbwd.req.add(Kfwd)
+            else: Kfwd.del_mem = Kfwd.fgt_mem
         # print(dict_Kfwd.keys())
     # ------------
     for n in sg.nodes:
