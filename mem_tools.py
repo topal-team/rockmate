@@ -8,6 +8,7 @@ from pgb.utils import *
 import rockmate as rk
 import numpy as np
 import random
+from rotor import timing
 #from rockmate.defs import RK_block_solution
 #from rotor.inspection import tensorMsize
 if torch.cuda.is_available():
@@ -17,20 +18,21 @@ else:
 from example_modules import GPT2
 from transformers import GPT2Tokenizer
 
-def mod(mem):
+def mod(mem=None):
     random.seed(0)
     torch.random.manual_seed(0)
-    model2 = GPT2(nlayers=4,dropout=1e-10, vcb_sz=600)
+    model2 = GPT2(nlayers=8,dropout=1e-10, vcb_sz=600)
     for p in model2.parameters():
         p.grad = torch.zeros_like(p)
-    context1 = torch.randint(0,600, [10,10])
+    context1 = torch.randint(0,600, [200,20])
     d = {"src":context1}
     src = context1
     import warnings ; warnings.filterwarnings("ignore")
-    if not mem:mem = 2e7
+    if not mem:mem = 5.e8
     newmod = rk.CheckpointedModule(model2,d, mem_limit = mem)
-    for p in model2.parameters():
-        p.grad = torch.zeros_like(p)
+    #for p in model2.parameters():
+    #    p.grad = torch.zeros_like(p)
+    model2.zero_grad()
     return newmod
 
 def get_n(i,newmod):
@@ -120,7 +122,7 @@ def plot_mem(mem_real, mem_theory):
 def experiment(mem, origin=False, check_valid=False, print_res=False):
     result = {}
     newmod = mod(mem)
-    context1 = torch.randint(0,600, [10,10])
+    context1 = torch.randint(0,600, [200,20])
     
     torch.cuda.reset_peak_memory_stats()
     max_before = torch.cuda.max_memory_allocated()
@@ -144,6 +146,7 @@ def experiment(mem, origin=False, check_valid=False, print_res=False):
     # print('')
     
     result['runtime'] = timer.elapsed()
+    result['runtime_theory'] = newmod.fwd_seq.compute_time()+newmod.bwd_seq.compute_time()
     result['mem_limit'] = newmod.mem_limit
     result['mem_peak'] = torch.cuda.max_memory_allocated()-max_before
     if print_res:
@@ -158,7 +161,7 @@ def experiment(mem, origin=False, check_valid=False, print_res=False):
     if origin:
         # device = torch.device('cpu')
         torch.random.manual_seed(0)
-        model1 = GPT2(nlayers=4,dropout=1e-8, vcb_sz=600).to(device)
+        model1 = GPT2(nlayers=8,dropout=1e-8, vcb_sz=600).to(device)
         context1 = torch.clone(context1).to(device)
         torch.cuda.reset_peak_memory_stats()
         max_before = torch.cuda.max_memory_allocated()
