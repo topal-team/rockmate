@@ -14,8 +14,9 @@ def print_memsizes(list_kg):
             except: print_debug("\nloss")
     print_debug("\n")
 
-class CheckpointedModule(): #torch.nn.Module):
+class CheckpointedModule(torch.nn.Module):
     def __init__(self,original_mod,dict_inputs,verbose=False, mem_limit=None):
+        super(CheckpointedModule,self).__init__()
         if mem_limit:
             self.mem_limit = mem_limit
         else:
@@ -28,7 +29,7 @@ class CheckpointedModule(): #torch.nn.Module):
            verbose=verbose,
            bool_kg = False) # we don't need the whole K_graph
         self.list_kg = self.pgb_res.K_graph_list
-
+        #print("kgraph",torch.cuda.memory_allocated())
         self.init_code = ast_to_str(self.list_kg[0].init_code)
 
         self.output = self.list_kg[-1].direct_outputs[-1]
@@ -37,13 +38,17 @@ class CheckpointedModule(): #torch.nn.Module):
 
         # -- use checkmate to solve all the blocks --
         self.rk_chain = RK_Chain(self.list_kg,10,3)
+        #print("rkchain",torch.cuda.memory_allocated())
 
         # -- solve the chain like rotor --
         seq = seq_builder(self.rk_chain, self.mem_limit)
+        #print("seqbuilder",torch.cuda.memory_allocated())
+        
         self.fwd_seq,self.bwd_seq = seq.cut_fwd_bwd()
         self.original_mod = original_mod
         self.storage =  RK_Storage(self.device,self.original_mod)
         self.executor = Executor(self.storage,self.fwd_seq,self.bwd_seq)
+        #print("executor",torch.cuda.memory_allocated())
         self.executor.translate(bwd=True)
         self.fwd_code = self.executor.fwd_code
         self.bwd_code = self.executor.bwd_code
@@ -72,8 +77,9 @@ class CheckpointedModule(): #torch.nn.Module):
         for code in self.fwd_code:
             try:
                 exec(code,self.storage.gd,self.storage.ld)
-            except:
+            except Exception as e:
                 print(f"Failed to execute code:\n {code}")
+                print(e)
                 break
         return self.storage.get_val(self.output)
 
