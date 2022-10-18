@@ -91,6 +91,15 @@ class CheckpointedModule(torch.nn.Module):
                 print(f"Failed to execute code:\n {code}")
                 break
 
+    def expect_time(self):
+        # Sum of the measured time of each operation for one batch
+        return self.fwd_seq.compute_time()+self.bwd_seq.compute_time() 
 
-
-
+    def expect_mem(self, save=False):
+        # Peak mem based on the measured memory/overhead of each operation
+        mem = 0;l=[mem]
+        for op in self.executor.op_list:
+            mem += op.mem
+            l.append(mem)
+            if not save: l[-1]+= op.overhead
+        return l
