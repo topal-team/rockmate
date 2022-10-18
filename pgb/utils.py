@@ -104,6 +104,19 @@ list_view_fct = [
 
 
 # ==========================
+# === SMALL USEFULL FCT ====
+# ==========================
+def check_attr(o1,o2,list_attr):
+    for s in list_attr:
+        if getattr(o1,s) != getattr(o2,s): return False
+    return True
+def vdir(c):
+    return [s for s in dir(c) if not s.startswith("__")]
+# ==========================
+
+
+
+# ==========================
 # = AUX FUNCTIONS FOR AST ==
 # ==========================
 
@@ -161,15 +174,21 @@ def is_constant(v):
 # ==== TOPO SORT GRAPHS ====
 # ==========================
 
+def sort_targets(l):
+    if len(l)==0: return list(l)
+    tar = "target" if hasattr(next(iter(l)),"target") else "main_target"
+    return sorted(l,key = lambda n : getattr(n,tar))
+
 def sort_based_on_req(n): # used on B, S and K
     # n can be any type of node (B, D, S, K)
     # we just need attribut req
+    tar = "target" if hasattr(n,"target") else "main_target"
     dict_done = {}
     nodes = []
     def visit(n):
         if n not in dict_done:
             dict_done[n]=False
-            for sub_n in n.req:
+            for sub_n in sort_targets(n.req):
                 visit(sub_n)
             dict_done[n]=True
             nodes.append(n)
@@ -222,6 +241,12 @@ class FWD_info(): # everything needed to randomly regenerate a var
         self.sub_info = None # if ttype = list or tuple
         self.requires_grad = None # if Tensor or Size
         self.memsize = None # done much later
+    def __eq__(self,i2):
+        d = vdir(self)
+        for s in d:
+            if getattr(self,s) != getattr(i2,s): return False
+        return True
+
 
 def generate_val(info,device):
     tt = info.ttype

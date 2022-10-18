@@ -11,6 +11,17 @@ class D_node(B_node):
         super().__init__(target,code,fct)
         self.used_by = set()
         self.protected = False
+    def __eq__(self,n2):
+        n1 = self
+        b = check_attr(n1,n2,["protected","target","fct","is_rand"])
+        mkstr = lambda nl : [rn.target for rn in sort_targets(nl)]
+        b = (b
+            and (mkstr(n1.req) == mkstr (n2.req))
+            and (mkstr(n1.used_by) == mkstr (n2.used_by))
+            and (n1.get_code() == n2.get_code()))
+        return b # missing req_rand equality
+    def __hash__(self):
+        return id(self) # __eq__ => need __hash__
 
 class D_graph():
     def __init__(self):
@@ -20,6 +31,11 @@ class D_graph():
         self.output_node = None # D_node
         self.dict_rand = {}
         self.dict_info = {} # target -> FWD_info
+    def __eq__(self,g2):
+        return check_attr(self,g2,
+            ["inputs","output","dict_info","nodes"])
+    def __hash__(self):
+        return id(self)
 
     def prepare_cut(self):
         # in case, after simplifications, we will cut / sequentialize
@@ -230,3 +246,4 @@ def test_fw_code(g : D_graph,nn_mod,dict_inputs : dict):
     return loc_dict[g.output]
 
 # ==========================
+
