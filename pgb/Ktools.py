@@ -251,7 +251,7 @@ class inspector():
                 code += f"del {tar};"
             self.code_del_fwd = code#Only include the phantom part 
             exec(self.code_del_fwd, self.our_global, self.tmp_local)
-        gc.disable()
+        #gc.disable()
         _ , mem_run_fwd , peak_fwd = self.memUsage.measure(fct_run_fwd)
         overhead_fwd = peak_fwd - mem_run_fwd
         self.ret["overhead_fwd"] = overhead_fwd
@@ -265,7 +265,7 @@ class inspector():
             time_run_fwd = self.measure_time(fct_run_fwd)
             self.ret["mem_fgt_fwd"] = minus_mem(mem_fgt_fwd)
             self.ret["time_run_fwd"] = time_run_fwd
-        gc.enable()
+        #gc.enable()
     # ===============
 
     # === BACKWARD ===
@@ -295,7 +295,7 @@ class inspector():
         if self.info.requires_grad:
             self.tmp_local[self.mt].data = generate_val(self.info,device)
             self.tmp_local[self.mt].grad = generate_val(self.info,device)
-            gc.disable()
+            #gc.disable()
             _ , mem_run_bwd , peak_bwd = self.memUsage.measure(self.fct_run_bwd)
             overhead_bwd = peak_bwd - mem_run_bwd
             _ , mem_fgt_bwd , _ = self.memUsage.measure(self.fct_fgt_bwd)
@@ -304,7 +304,7 @@ class inspector():
             self.tmp_local[self.n.main_target].grad = generate_val(self.info,device)
             time_run_bwd = self.measure_time(self.fct_run_bwd, fct_run_fwd)
             # overhead_bwd contains n.target.data now /!\
-            gc.enable()
+            #gc.enable()
             self.ret["overhead_bwd"] = overhead_bwd
             self.ret["mem_run_bwd"]  = mem_run_bwd
             self.ret["mem_fgt_bwd"]  = minus_mem(mem_fgt_bwd)
@@ -432,6 +432,8 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
                     Kbwd.abar = True
                     Kbwd.req.add(Kfwd)
             else: Kfwd.del_mem = Kfwd.fgt_mem
+        k_list = list(ins.tmp_local.keys())
+        for k in k_list: del ins.tmp_local[k]
         # print(dict_Kfwd.keys())
     # ------------
     for n in sg.nodes:
