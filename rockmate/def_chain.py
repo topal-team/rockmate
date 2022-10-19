@@ -7,7 +7,7 @@
 from .utils import *
 from .use_chk import make_sched
 from .def_code import Op, OpBlock
-
+import math
 # ==========================
 # ======== RK Block ========
 # ==========================
@@ -150,13 +150,12 @@ class RK_Block():
 # ==========================
 
 class RK_Chain():
-    def __init__(self,list_kg,nb_budget_abar=10,nb_budget_all=3):
+    def __init__(self,list_kg, nb_budget_abar=10,nb_budget_all=3, mem_unit=1024**2):
+        self.mem_unit = mem_unit
         l = self.body = []
         for g in list_kg:
             l.append(RK_Block(g,nb_budget_abar,nb_budget_all))
             print_debug(l[-1])
-
-    def build_rotor_chain(self):
         # organizes the information for rotor_solver.py as in Rotor
         # -> fw/bw/cw/cbw/fwd_tmp/bwd_tmp
         # -> in those list, one dummy block is added at the end for Loss
@@ -204,13 +203,16 @@ class RK_Chain():
         self.ln     = ln
         self.fw     = fw
         self.bw     = bw
-        self.cw     = cw
-        self.cbw    = cbw
-        self.fwd_tmp    = fwd_tmp
-        self.bwd_tmp    = bwd_tmp
-        self.ff_fwd_tmp = ff_fwd_tmp
+        self.cw     = self.discretize(cw)
+        self.cbw    = [self.discretize(x) for x in cbw]
+        self.fwd_tmp    = [self.discretize(x) for x in fwd_tmp]
+        self.bwd_tmp    = [self.discretize(x) for x in bwd_tmp]
+        self.ff_fwd_tmp = self.discretize(ff_fwd_tmp)
         self.ff_fw  = ff_fw
         self.nb_sol = nb_sol
+
+    def discretize(self, values):
+        return [math.ceil(value/self.mem_unit) for value in values]
 
 # ==========================
 

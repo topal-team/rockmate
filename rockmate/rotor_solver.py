@@ -242,7 +242,6 @@ def solve_dp_iterative(chain : RK_Chain, mmax):
 def seq_builder(chain : RK_Chain, memory_limit):
     # returns :
     # - the optimal sequence of computation using mem-persistent algo
-    chain.build_rotor_chain()
     mmax = memory_limit - chain.cw[0]
     opt, what = solve_dp_functionnal(chain,mmax)
 

@@ -15,12 +15,13 @@ def print_memsizes(list_kg):
     print_debug("\n")
 
 class CheckpointedModule(torch.nn.Module):
-    def __init__(self,original_mod,dict_inputs,verbose=False, mem_limit=None):
+    def __init__(self,original_mod,dict_inputs,verbose=False, mem_limit=None, mem_slots=500):
         super(CheckpointedModule,self).__init__()
         if mem_limit:
             self.mem_limit = mem_limit
         else:
             self.mem_limit = torch.cuda.get_device_properties(0).total_memory*0.9
+        self.mem_slots = mem_slots
         ref_verbose[0] = verbose
         self.device = get_device()
         # -- use pytorch graph builder to get the list of K_graphs --
@@ -37,11 +38,14 @@ class CheckpointedModule(torch.nn.Module):
         print_memsizes(self.list_kg) # to debug
 
         # -- use checkmate to solve all the blocks --
-        self.rk_chain = RK_Chain(self.list_kg,10,3)
+        mem_unit = self.mem_limit//self.mem_slots
+        print_debug("mem_unit", mem_unit)
+        print_debug("mem_limit", self.mem_limit)
+        self.rk_chain = RK_Chain(self.list_kg,10,3, mem_unit=mem_unit)
         #print("rkchain",torch.cuda.memory_allocated())
 
         # -- solve the chain like rotor --
-        seq = seq_builder(self.rk_chain, self.mem_limit)
+        seq = seq_builder(self.rk_chain, self.mem_limit//mem_unit)
         #print("seqbuilder",torch.cuda.memory_allocated())
         
         self.fwd_seq,self.bwd_seq = seq.cut_fwd_bwd()
