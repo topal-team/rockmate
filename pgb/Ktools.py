@@ -104,7 +104,7 @@ class K_graph():
                 req_n.used_by.add(n)
     def __eq__(self,g2):
         if ast_to_str(self.init_code) != ast_to_str(g2.init_code):
-            return False
+            raise Exception("diff init_code")
         return check_attr(self,g2,["sg",
             "direct_inputs","hidden_inputs",
             "direct_outputs","hidden_output",
