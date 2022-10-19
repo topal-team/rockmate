@@ -36,8 +36,32 @@ class K_node():
         self.info = info
         self.abar = None
         self.inspector = None
-
-        self.phantoms = []
+        # self.phantoms = []
+    def __eq__(self,n2):
+        # agressive tests, if diff then raise Error
+        n1 = self
+        b = check_attr(n1,n2,[
+            "is_fwd","main_target",
+            "all_targets","tensor_targets",
+            "name","is_artefact","info","abar",
+            "run_mem","fgt_mem","del_mem","overhead"],
+            raise_exception=True)
+        mkstr = lambda nl : [rn.main_target for rn in sort_targets(nl)]
+        b = (b
+            and (mkstr(n1.req) == mkstr (n2.req))
+            and (mkstr(n1.used_by) == mkstr (n2.used_by))
+            and (n1.get_code() == n2.get_code()))
+        # TIME AND MEMORY : if not equal then raise Exception
+        if not b: raise Exception("not equal on req,used_by or code")
+        t1 = n1.time ; t2 = n2.time ; r = ref_reasonable_rate[0]
+        if not (((t1 == t2)
+            or (isinstance(t1,float) and isinstance(t2,float)
+            and (abs(t1 - t2) < (r * max(t1,t2)))))):
+            raise Exception(
+                f"time diff - t1: {t1} - t2: {t2} on {n1.main_target}")
+        return True
+    def __hash__(self):
+        return id(self) # __eq__ => need __hash__
 
     def full_code(self):
         if self.main_code is None: mc = []
@@ -49,18 +73,18 @@ class K_node():
         return ast_to_str(make_ast_module(mc))
     def get_code(self):
         return ast_to_str(self.full_code())
-    def get_fgt_code(self):
-        code = ""
-        for tar in self.phantoms:
-            code += ast.Assign(
-                [ast.Attribute(tar,"data")],
-                ast.Call(
-                    ast.Attribute(ast.Name("torch"),"zeros"),
-                    [make_ast_constant(0)],
-                    []
-                    )
-                )
-        return code
+    #def get_fgt_code(self):
+    #    code = ""
+    #    for tar in self.phantoms:
+    #        code += ast.Assign(
+    #            [ast.Attribute(tar,"data")],
+    #            ast.Call(
+    #                ast.Attribute(ast.Name("torch"),"zeros"),
+    #                [make_ast_constant(0)],
+    #                []
+    #                )
+    #            )
+    #    return code
 
 class K_graph():
     def __init__(self,sg : S_graph):
@@ -78,6 +102,15 @@ class K_graph():
         for n in self.dict_nodes.values():
             for req_n in n.req:
                 req_n.used_by.add(n)
+    def __eq__(self,g2):
+        if ast_to_str(self.init_code) != ast_to_str(g2.init_code):
+            return False
+        return check_attr(self,g2,["sg",
+            "direct_inputs","hidden_inputs",
+            "direct_outputs","hidden_output",
+            "dict_info","dict_nodes","loss_node"])
+    def __hash__(self):
+        return id(self)
 
 # ==========================
 

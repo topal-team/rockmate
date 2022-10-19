@@ -53,6 +53,12 @@ def get_device():
     else:
         return torch.device('cpu')
 
+# -> acceptance rate for two time measures to be declared equal
+ref_reasonable_rate = [0.4]
+def change_reasonable_rate(x):
+    assert(0<=x)
+    ref_reasonable_rate[0] = x
+
 # ==========================
 
 
@@ -106,9 +112,12 @@ list_view_fct = [
 # ==========================
 # === SMALL USEFULL FCT ====
 # ==========================
-def check_attr(o1,o2,list_attr):
+def check_attr(o1,o2,list_attr,raise_exception=False):
     for s in list_attr:
-        if getattr(o1,s) != getattr(o2,s): return False
+        if getattr(o1,s) != getattr(o2,s):
+            if raise_exception:
+                raise Exception(f"attr diff {s}")
+            return False
     return True
 def vdir(c):
     return [s for s in dir(c) if not s.startswith("__")]
