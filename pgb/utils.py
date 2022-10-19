@@ -13,6 +13,7 @@
 import ast
 import astunparse
 import torch
+import numpy as np
 from torch import tensor
 import graphviz
 
@@ -21,7 +22,6 @@ import rotor.timing # -> use .make_timer
 import rotor.memory # -> use .MeasureMemory
 from rotor.memory import MemSize
 from rotor.inspection import tensorMsize
-min_duration = 0
 minus_mem = lambda m : MemSize(- m.v)
 
 # for main.py -> get inputs
@@ -39,6 +39,9 @@ py_version = svi.major + svi.minor/10
 # ==========================
 # ====== GLOBAL VARS =======
 # ==========================
+
+time_min_duration = 0
+time_min_repeat = 5
 
 # -> print debug messages
 ref_verbose = [False]

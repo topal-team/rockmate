@@ -110,7 +110,7 @@ def B_to_D(bg : B_graph,nn_mod,dict_inputs,D_device=None):
     # -- device --
     global device
     if D_device is None: device = get_device()
-    else: device = K_device
+    else: device = D_device
     nn_mod.to(device)
     for (k,x) in dict_inputs.items():
         dict_inputs[k] = x.to(device)

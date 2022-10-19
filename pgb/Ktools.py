@@ -256,15 +256,15 @@ class inspector():
     
     # -- aux --
     def measure_time(self, fct, inter_fct=None):
-        duration = self.timer.measure_median(fct,samples=1)
-        if duration < min_duration:
-            number_repetitions = 1 + int(min_duration // duration)
-            for _ in range(1,number_repetitions):
-                if inter_fct:
-                    inter_fct()
-                duration += self.timer.measure_median(fct,samples=1)
-        else: number_repetitions = 1
-        return duration/number_repetitions
+        t = self.timer.measure_median(fct,samples=1)
+        nb_repeat = 1
+        measures = [t] ; tot = t
+        while (tot < time_min_duration or nb_repeat < time_min_repeat):
+            if inter_fct: inter_fct()
+            t = self.timer.measure_median(fct,samples=1)
+            measures.append(t)
+            tot += t ; nb_repeat += 1
+        return np.median(measures)
     # ---------
 
     # === FORWARD ===
@@ -319,23 +319,30 @@ class inspector():
             if not req_n.is_artefact:
                 for tar in req_n.tensor_targets:
                     self.tmp_local[tar].grad = None
+    def fct_prepare_bwd(self):
+        self.code_run_fwd = self.n.get_code()
+        exec(self.code_run_fwd, self.our_global, self.tmp_local)
+        self.tmp_local[self.n.main_target].grad = generate_val(self.info,device)
 
     # measure
     def measure_bwd(self):
-        def fct_run_fwd():
-            self.code_run_fwd = self.n.get_code() 
-            exec(self.code_run_fwd, self.our_global, self.tmp_local)
+        #def fct_run_fwd():
+        #    self.code_run_fwd = self.n.get_code() 
+        #    exec(self.code_run_fwd, self.our_global, self.tmp_local)
         if self.info.requires_grad:
-            self.tmp_local[self.mt].data = generate_val(self.info,device)
-            self.tmp_local[self.mt].grad = generate_val(self.info,device)
+            #self.tmp_local[self.mt].data = generate_val(self.info,device)
+            #self.tmp_local[self.mt].grad = generate_val(self.info,device)
             #gc.disable()
+            self.fct_prepare_bwd()
             _ , mem_run_bwd , peak_bwd = self.memUsage.measure(self.fct_run_bwd)
             overhead_bwd = peak_bwd - mem_run_bwd
             _ , mem_fgt_bwd , _ = self.memUsage.measure(self.fct_fgt_bwd)
-            fct_run_fwd()
-            self.timer.measure_median(fct_run_fwd)
-            self.tmp_local[self.n.main_target].grad = generate_val(self.info,device)
-            time_run_bwd = self.measure_time(self.fct_run_bwd, fct_run_fwd)
+            #fct_run_fwd()
+            #self.timer.measure_median(fct_run_fwd)
+
+            #self.tmp_local[self.n.main_target].grad = generate_val(self.info,device)
+            self.fct_prepare_bwd()
+            time_run_bwd = self.measure_time(self.fct_run_bwd, self.fct_prepare_bwd)
             # overhead_bwd contains n.target.data now /!\
             #gc.enable()
             self.ret["overhead_bwd"] = overhead_bwd
