@@ -103,3 +103,9 @@ class CheckpointedModule(torch.nn.Module):
             l.append(mem)
             if not save: l[-1]+= op.overhead
         return l
+    def reinit(self):
+        self.original_mod.zero_grad()
+        self.storage.ld = {}
+
+        #k_l = list(self.storage.ld.keys())
+        #for k in k_l: del self.storage.ld[k]
