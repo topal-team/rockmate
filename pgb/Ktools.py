@@ -61,7 +61,8 @@ class K_node():
                 f"time diff - t1: {t1} - t2: {t2} on {n1.main_target}")
         return True
     def __hash__(self):
-        return id(self) # __eq__ => need __hash__
+        return self.target.__hash__()
+        #return id(self) # __eq__ => need __hash__
 
     def full_code(self):
         if self.main_code is None: mc = []

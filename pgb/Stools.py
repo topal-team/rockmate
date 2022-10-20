@@ -30,7 +30,8 @@ class S_node():
             and (n1.get_code() == n2.get_code()))
         return b
     def __hash__(self):
-        return id(self) # __eq__ => need __hash__
+        return self.main_target.__hash__()
+        #return id(self) # __eq__ => need __hash__
 
     def full_code(self):
         if self.main_code is None: mc = []
@@ -336,7 +337,8 @@ def simplify_cheap(g : S_graph):
 def size_children(g,n):
     # give the list of child nodes of n which are size
     ret = []
-    for sub_n in sort_targets(n.used_by):
+    #for sub_n in sort_targets(n.used_by):
+    for sub_n in n.used_by:
         if g.dict_info[sub_n.main_target].ttype == torch.Size:
             ret.append(sub_n)
     return ret

@@ -21,7 +21,8 @@ class D_node(B_node):
             and (n1.get_code() == n2.get_code()))
         return b # missing req_rand equality
     def __hash__(self):
-        return id(self) # __eq__ => need __hash__
+        return self.target.__hash__()
+        #return id(self) # __eq__ => need __hash__
 
 class D_graph():
     def __init__(self):
