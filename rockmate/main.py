@@ -15,7 +15,7 @@ def print_memsizes(list_kg):
     print_debug("\n")
 
 class CheckpointedModule(torch.nn.Module):
-    def __init__(self,original_mod,dict_inputs,verbose=False, mem_limit=None, mem_slots=500):
+    def __init__(self,original_mod,dict_inputs,verbose=False, mem_limit=None, mem_slots=5000):
         super(CheckpointedModule,self).__init__()
         if mem_limit:
             self.mem_limit = mem_limit

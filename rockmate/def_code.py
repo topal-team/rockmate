@@ -60,6 +60,7 @@ class OpBlock:
         save_mem = []
         tmp_mem = []
         for o in self.body:
+            if "loss" in o.name:continue
             save_mem.append(o.mem)
             tmp_mem.append(o.overhead)
         self.save_timeline = np.cumsum(np.array(save_mem))

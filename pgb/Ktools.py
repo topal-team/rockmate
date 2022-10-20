@@ -108,7 +108,7 @@ class K_graph():
         return check_attr(self,g2,["sg",
             "direct_inputs","hidden_inputs",
             "direct_outputs","hidden_output",
-            "dict_info","dict_nodes","loss_node"])
+            "dict_info","dict_nodes","loss_node"],raise_exception=True)
     def __hash__(self):
         return id(self)
 
@@ -264,7 +264,9 @@ class inspector():
             t = self.timer.measure_median(fct,samples=1)
             measures.append(t)
             tot += t ; nb_repeat += 1
-        return np.median(measures)
+        if len(measures)>2:
+            return (sum(measures)-max(measures)-min(measures))/(len(measures)-2)
+        else:np.median(measures)
     # ---------
 
     # === FORWARD ===
