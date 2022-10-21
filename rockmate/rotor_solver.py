@@ -264,7 +264,7 @@ def seq_builder(chain : RK_Chain, memory_limit):
             """
             raise ValueError(
                 f"Can't process this chain from index "\
-                f"{lmin} to {lmax} with memory {cmem}")
+                f"{lmin} to {lmax} with memory {memory_limit}")
 
         if lmin == chain.ln:
             seq.insert(SeqLoss())

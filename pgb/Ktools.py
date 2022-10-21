@@ -45,23 +45,23 @@ class K_node():
             "all_targets","tensor_targets",
             "name","is_artefact","info","abar",
             "run_mem","fgt_mem","del_mem","overhead"],
-            raise_exception=True)
+            raise_exception=False)
         mkstr = lambda nl : [rn.main_target for rn in sort_targets(nl)]
         b = (b
             and (mkstr(n1.req) == mkstr (n2.req))
             and (mkstr(n1.used_by) == mkstr (n2.used_by))
             and (n1.get_code() == n2.get_code()))
         # TIME AND MEMORY : if not equal then raise Exception
-        if not b: raise Exception("not equal on req,used_by or code")
+        if not b: return False#raise Exception("not equal on req,used_by or code")
         t1 = n1.time ; t2 = n2.time ; r = ref_reasonable_rate[0]
         if not (((t1 == t2)
             or (isinstance(t1,float) and isinstance(t2,float)
-            and (abs(t1 - t2) < (r * max(t1,t2)))))):
-            raise Exception(
-                f"time diff - t1: {t1} - t2: {t2} on {n1.main_target}")
+            and (abs(t1 - t2) < (r * max(t1,t2)))))):return False
+            #raise Exception(
+            #    f"time diff - t1: {t1} - t2: {t2} on {n1.main_target}")
         return True
     def __hash__(self):
-        return self.target.__hash__()
+        return self.main_target.__hash__()
         #return id(self) # __eq__ => need __hash__
 
     def full_code(self):

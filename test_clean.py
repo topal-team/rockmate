@@ -2,7 +2,7 @@ from mem_tools import *
 newmod = mod()
 
 from rotor import timing
-context1 = torch.randint(0,600, [10,10])
+context1 = torch.randint(0,600, [100,10])
 torch.cuda.reset_peak_memory_stats()
 max_before = torch.cuda.max_memory_allocated()
 allo_before = torch.cuda.memory_allocated()
@@ -31,7 +31,7 @@ print("runtime: %.4f"%timer.elapsed())
 
 # device = torch.device('cpu')
 torch.random.manual_seed(0)
-model1 = GPT2(nlayers=4,dropout=1e-8, vcb_sz=600).to(device)
+model1 = GPT2(nlayers=8,dropout=1e-8, vcb_sz=600).to(device)
 context1 = torch.clone(context1).to(device)
 torch.cuda.reset_peak_memory_stats()
 max_before = torch.cuda.max_memory_allocated()

@@ -15,7 +15,8 @@ def print_memsizes(list_kg):
     print_debug("\n")
 
 class CheckpointedModule(torch.nn.Module):
-    def __init__(self,original_mod,dict_inputs,verbose=False, mem_limit=None, mem_slots=5000):
+    def __init__(self,original_mod,dict_inputs,verbose=False, 
+                 mem_limit=None, mem_slots=5000):
         super(CheckpointedModule,self).__init__()
         if mem_limit:
             self.mem_limit = mem_limit
@@ -41,7 +42,7 @@ class CheckpointedModule(torch.nn.Module):
         mem_unit = self.mem_limit//self.mem_slots
         print_debug("mem_unit", mem_unit)
         print_debug("mem_limit", self.mem_limit)
-        self.rk_chain = RK_Chain(self.list_kg,10,3, mem_unit=mem_unit)
+        self.rk_chain = RK_Chain(self.list_kg,20,5, mem_unit=mem_unit)
         #print("rkchain",torch.cuda.memory_allocated())
 
         # -- solve the chain like rotor --
@@ -75,9 +76,12 @@ class CheckpointedModule(torch.nn.Module):
         self.bwd_code = self.executor.code
         """
 
-    def forward(self,input):
+    def forward(self,input, record_mem = False):
         self.storage.add_val("src",input) # hardcoded
         exec(self.init_code,self.storage.gd,self.storage.ld)
+        torch.cuda.reset_peak_memory_stats()
+        self.max_mem = [torch.cuda.max_memory_allocated()]
+        self.allo_mem = [torch.cuda.memory_allocated()]
         for code in self.fwd_code:
             try:
                 exec(code,self.storage.gd,self.storage.ld)
@@ -85,15 +89,21 @@ class CheckpointedModule(torch.nn.Module):
                 print(f"Failed to execute code:\n {code}")
                 print(e)
                 break
+            if record_mem:
+                self.max_mem.append(torch.cuda.max_memory_allocated())
+                self.allo_mem.append(torch.cuda.memory_allocated())
         return self.storage.get_val(self.output)
 
-    def backward(self):
+    def backward(self,record_mem=False):
         for code in self.bwd_code:
             try:
                 exec(code,self.storage.gd,self.storage.ld)
             except:
                 print(f"Failed to execute code:\n {code}")
                 break
+            if record_mem:
+                self.max_mem.append(torch.cuda.max_memory_allocated())
+                self.allo_mem.append(torch.cuda.memory_allocated())
 
     def expect_time(self):
         # Sum of the measured time of each operation for one batch
