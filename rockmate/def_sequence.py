@@ -61,8 +61,7 @@ class SeqBlockOp(SeqOp):
         self.name=name ; self.index=index
         body = self.body = [SeqAtomOp(o) for o in op_block.body]
         self.time = sum(o.time for o in body)
-        self.mem  = sum(o.mem  for o in body)
-        self.overhead = op_block.overhead
+        self.mem  = op_block.save#sum(o.mem  for o in body)
     def __str__(self):
         header = f"{self.name} Block {self.index} in {self.time}"
         if ref_print_atoms[0]:
