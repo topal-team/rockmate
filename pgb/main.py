@@ -29,14 +29,6 @@ class all_graphs():
         self.S_graph_list = list_sg
         self.K_graph_list = list_kg
 
-def print_all_graphs(a,name,open):
-    Dtools.print_D_graph(a.D_graph,name=f"{name}_D_graph",open=open)
-    Stools.print_S_graph(a.S_graph,name=f"{name}_S_graph",open=open)
-    Ktools.print_K_graph(a.K_graph,name=f"{name}_K_graph",open=open)
-    Stools.print_S_graph_list(a.S_graph_list,name=f"{name}_S_cut_graph",open=open)
-    Ktools.print_K_graph_list(a.K_graph_list,name=f"{name}_K_cut_graph",open=open)
-
-
 # ==========================
 # ===== Main function ======
 # ==========================
@@ -44,20 +36,17 @@ def print_all_graphs(a,name,open):
 def make_all_graphs(nn_mod,
     dict_inputs,
     verbose=False,
-    impose_device=True, D_device=None, K_device=None,
+    impose_device=True,
     bool_bg = True , bool_dg = True ,
     bool_sg = True , bool_kg = True ,
-    bool_list_sg = True , bool_list_kg = True):
+    bool_list_sg = True , bool_list_kg = True,
+    check_device_is_gpu = True):
     r"""
     this function returns an objet with attributes :
      -> .B_graph, .D_graph, .S_graph and .K_graph -> the whole module
      -> .S_graph_list and .K_graph_list -> the sequentialized module
-    |--> on which you can use :
-      - pgb.Dtools.print_D_graph
-      - pgb.Stools.print_S_graph
-      - pgb.Ktools.print_K_graph
-      - pgb.Stools.print_S_graph_list
-      - pgb.Ktools.print_K_graph_list
+    on which you can use :
+    pgb.print_graph and pgb.print_graph_list or pgb.print_all_graphs
     """
     bool_list_sg = bool_list_sg or bool_list_kg
     bool_sg = bool_sg or bool_kg or bool_list_sg
@@ -66,16 +55,37 @@ def make_all_graphs(nn_mod,
 
     ref_verbose[0] = verbose
     check_inputs(nn_mod,dict_inputs)
+    warning_msg = lambda key : (
+        f"WARNING : You ask PGB to measure the time and memory used\n"\
+        f"by all the computation nodes. But measuring memory can only\n"\
+        f"be done with cuda, therefore model's and inputs' device\n"\
+        f"should be cuda to get relevant results. You can use the \n"\
+        f"parameter \"check_device_is_gpu\" to avoid this warning.\n"\
+        f"HERE {key}'s device isn't cuda.")
+    if bool_kg and check_device_is_gpu:
+        for (key,inp) in dict_inputs.items():
+            if not isinstance(inp,torch.Tensor):
+                raise Exception(
+                    f"Sorry, all inputs should have type torch.Tensor\n"\
+                    f"{key} has type {type(inp)}")
+            if inp.device != torch.device("cuda"):
+                print(warning_msg(key))
+        try:
+            if next(nn_mod.parameters()).device != torch.device("cuda"):
+                print(warning_msg("model"))
+        except: pass # no param
+
+
     # -- the whole module --
     if bool_bg:
         bg = Btools.make_B(nn_mod,dict_inputs,
-                        impose_device=impose_device)
+            impose_device=impose_device)
     else: bg = None
-    if bool_dg: dg = Dtools.B_to_D(bg,nn_mod,dict_inputs,D_device=D_device)
+    if bool_dg: dg = Dtools.B_to_D(bg,nn_mod,dict_inputs)
     else: dg = None
     if bool_sg: sg = Stools.D_to_S(dg,keep_sequential=True)
     else: sg = None
-    if bool_kg: kg = Ktools.S_to_K(sg,nn_mod,K_device=K_device)
+    if bool_kg: kg = Ktools.S_to_K(sg,nn_mod)
     else: kg = None
     # -- sequentialized --
     if bool_list_sg:
@@ -86,6 +96,60 @@ def make_all_graphs(nn_mod,
     else: list_kg = None
 
     return all_graphs(bg,dg,sg,kg,list_sg,list_kg)
+
+# ==========================
+
+
+
+# ==========================
+# === printing functions ===
+# ==========================
+
+def print_graph(g,name=None,open=True):
+    r"""To visualize D, S or K graph.
+    This function creates a .gv file, and using
+    graphviz's dot function builds a .pdf file.
+    They are stored in "graphviz_dir" sub-directory.
+    inputs:
+    name (string):
+        To name .gv and .pdf files.
+        By default named after the type of the graph.
+    open (boolean):
+        To automatically open the .pdf with the default reader.
+    """
+    if isinstance(g,Dtools.D_graph): Dtools.print_D_graph(g,name,open)
+    elif isinstance(g,Stools.S_graph): Stools.print_S_graph(g,name,open)
+    elif isinstance(g,Ktools.K_graph): Ktools.print_K_graph(g,name,open)
+    else: raise Exception("g is neither of type D_graph, S_graph or K_graph")
+
+def print_graph_list(gl,name=None,open=True):
+    r"""The equivalent of pgb.print_graph for a list of graph.
+    Generates all graphs next to each other in a single pdf.
+    Note:
+         Originally intented to visualize a sequentialized graph :
+         i.e. one graph cut by PGB in blocks
+         i.e. S_graph_list of K_graph_list
+    """
+    if len(gl) == 0: print("Empty list, no graph to visualize")
+    else:
+        t = type(gl[0])
+        for i in range(1,len(gl)):
+            if type(gl[i]) != t: raise Exception(
+              f"All graphs in the list must share the same type"\
+              f"type(gl[{i}])={type(gl[i])} and type(gl[0])={t}")
+        if t == Stools.S_graph:
+            Stools.print_S_graph_list(gl,name,open)
+        elif t == Ktools.K_graph:
+            Ktools.print_K_graph_list(gl,name,open)
+        else:
+            raise Exception("gl is neither a S_graph list or K_graph list")
+
+def print_all_graphs(a,name,open):
+    print_graph(a.D_graph,f"{name}_D_graph",open)
+    print_graph(a.S_graph,f"{name}_S_graph",open)
+    print_graph(a.K_graph,f"{name}_K_graph",open)
+    print_graph_list(a.S_graph_list,f"{name}_S_cut_graph",open)
+    print_graph_list(a.K_graph_list,f"{name}_K_cut_graph",open)
 
 # ==========================
 

@@ -403,7 +403,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False):
 
 # ===== Main function ======
 
-def make_B(nn_mod,ex_inputs,verbose=None,impose_device=False):
+def make_B(nn_mod,ex_inputs,verbose=None,impose_device=True):
     # main_mod must be a instance of torch.nn.Module
     # ex_inputs can be either a tuple or a dict
     # -- global vars --
