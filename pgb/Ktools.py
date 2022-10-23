@@ -355,21 +355,20 @@ class inspector():
     # # ===============
 
 # aux function to handle verbose and device
-def aux_init_S_to_K(nn_mod,verbose,K_device):
-    if not (verbose is None): ref_verbose[0] = verbose
+def aux_init_S_to_K(model,verbose,d):
     global device
-    if K_device is None: device = get_device()
-    else: device = K_device
-    nn_mod.to(device)
+    device = d if d else (
+        get_device_and_check_all_same_device(model,dict(),True))
+    if not (verbose is None): ref_verbose[0] = verbose
 
 
 # the function that does it all
-def aux_build_S_to_K(sg : S_graph,nn_mod):
+def aux_build_S_to_K(sg : S_graph,model):
     # -- init --
     dict_Kbwd = dict() # dict : target -> K_node(bwd)
     dict_Kfwd = dict() # dict : target -> K_node(fwd)
     our_global = {}#globals().copy()
-    our_global["self"] = nn_mod
+    our_global["self"] = model
     our_global["device"] = device
     our_global
     kg = K_graph(sg)
@@ -408,7 +407,7 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
                 info = info)
         dict_Kfwd[mt] = Kfwd
         our_global = globals().copy()
-        our_global["self"] = nn_mod
+        our_global["self"] = model
         our_global["device"] = device
         for inp in sg.direct_inputs:
             # print('input:', inp)
@@ -511,14 +510,14 @@ def aux_build_S_to_K(sg : S_graph,nn_mod):
     return kg
 
 
-def S_to_K(sg : S_graph,nn_mod,verbose=None,K_device=None):
-    aux_init_S_to_K(nn_mod,verbose,K_device)
-    return aux_build_S_to_K(sg,nn_mod)
+def S_to_K(sg : S_graph,model,verbose=None,device=None):
+    aux_init_S_to_K(model,verbose,device)
+    return aux_build_S_to_K(sg,model)
 
 
-def S_list_to_K_list(list_sg,nn_mod,verbose=None,K_device=None):
-    aux_init_S_to_K(nn_mod,verbose,K_device)
-    return [aux_build_S_to_K(sg,nn_mod) for sg in list_sg]
+def S_list_to_K_list(list_sg,model,verbose=None,device=None):
+    aux_init_S_to_K(model,verbose,device)
+    return [aux_build_S_to_K(sg,model) for sg in list_sg]
 
 # ==========================
 

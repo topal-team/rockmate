@@ -403,8 +403,9 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False):
 
 # ===== Main function ======
 
-def make_B(nn_mod,ex_inputs,verbose=None,impose_device=True):
-    # main_mod must be a instance of torch.nn.Module
+def make_B(model,ex_inputs,verbose=None,
+        impose_device=True,device=None):
+    # main_model must be a instance of torch.nn.Module
     # ex_inputs can be either a tuple or a dict
     # -- global vars --
     global fresh_var, var_impose_device, dict_rand, all_nodes
@@ -412,15 +413,20 @@ def make_B(nn_mod,ex_inputs,verbose=None,impose_device=True):
     var_impose_device = impose_device
     if not (verbose is None): ref_verbose[0] = verbose
 
-    # -- ex_inputs --
+    # device :
+    if not device:
+        device = get_device_and_check_all_same_device(model,ex_inputs)
+
+    # -- ex_inputs -- # for previous versions compatibility
     if isinstance(ex_inputs,dict):
         ex_inputs = tuple(ex_inputs.values())
 
-    main_mod = torch.jit.trace_module(
-            nn_mod, {'forward': ex_inputs}, check_trace=False)
+
+    main_model = torch.jit.trace_module(
+            model, {'forward': ex_inputs}, check_trace=False)
     main_str = "self"
     main_fct = "forward"
-    main_g = open_sub_module(main_mod,main_str,main_fct,[],is_main=True)
+    main_g = open_sub_module(main_model,main_str,main_fct,[],is_main=True)
     main_g.nodes = all_nodes
     all_nodes = []
     return main_g

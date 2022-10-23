@@ -49,12 +49,45 @@ def print_debug(*args, **kwargs):
     if ref_verbose[0]:
         print(*args, **kwargs)
 
+# -> to raise exceptions with lambda functions
+def raise_(s):
+    raise Exception(s)
+
 # -> device
 def get_device():
-    if torch.cuda.is_available():
-        return torch.device('cuda')
-    else:
-        return torch.device('cpu')
+    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+def get_device_and_check_all_same_device(
+        model,dict_inputs,without_inp=False):
+    d = None
+    k = None
+    print_err = lambda k1,d1,k2,d2 : raise_(
+      f"Carelessness ! All inputs and parameters of the model\n"\
+      f"must share the same device. Here {k1}'s device is {d1}\n"\
+      f"and {k2}'s device is {d2}.")
+
+    if not isinstance(dict_inputs,dict):
+        dict_inputs = dict(enumerate(dict_inputs))
+
+    for (key,inp) in dict_inputs.items():
+        if isinstance(inp,torch.Tensor):
+            if d is None: d = inp.device ; k = f"input {key}"
+            else:
+                if d != inp.device:
+                    print_err(f"input {key}",inp.device,k,d)
+    i = -1
+    for p in model.parameters():
+        i += 1
+        if d is None: d = p.device ; k = f"{i}-th parameter"
+        else:
+            if d != p.device:
+                print_err(f"{i}-th parameter",p.device,k,d)
+    if d: return d
+    elif without_inp: return get_device()
+    else: raise Exception(
+        "Sorry, at least one input or one parameter should be a tensor.")
+
+
 
 # -> acceptance rate for two time measures to be declared equal
 ref_reasonable_rate = [0.4]

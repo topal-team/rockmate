@@ -106,16 +106,10 @@ def generate_tmp_local(g,dict_info,n):
 
 # ===== Main function ======
 
-def B_to_D(bg : B_graph,nn_mod,dict_inputs,D_device=None):
-    # -> D_graph:
-    # -- device --
-    global device
-    if D_device is None: device = get_device()
-    else: device = D_device
-    nn_mod.to(device)
-    for (k,x) in dict_inputs.items():
-        dict_inputs[k] = x.to(device)
-    # --
+def B_to_D(bg : B_graph,model,dict_inputs,device=None):
+    if not device:
+        device = get_device_and_check_all_same_device(model,dict_inputs)
+    globals()["device"] = device
 
     # --- init and sort ---
     dg = D_graph()
@@ -133,7 +127,7 @@ def B_to_D(bg : B_graph,nn_mod,dict_inputs,D_device=None):
     # 2) exec the code to generate the node value
     # 3) extract the info for this node, and forget the tensors
     our_global = globals().copy()
-    our_global["self"] = nn_mod
+    our_global["self"] = model
     our_global["device"] = device
 
     for n in b_nodes:
@@ -231,9 +225,9 @@ def print_D_graph(g : D_graph,name=None,open=True):
 # === test forward code ====
 # ==========================
 
-def test_fw_code(g : D_graph,nn_mod,dict_inputs : dict):
+def test_fw_code(g : D_graph,model,dict_inputs : dict):
     loc_dict = {}
-    loc_dict["self"] = nn_mod
+    loc_dict["self"] = model
     for inp in g.inputs:
         loc_dict[inp] = dict_inputs[inp]
     for v in g.dict_rand:
