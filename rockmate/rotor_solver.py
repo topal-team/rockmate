@@ -299,37 +299,6 @@ def seq_builder(chain : RK_Chain, memory_limit):
 
 
 class Executor():#to execute Op 
-    def _resort_aggressive(self):
-        # resort self.bwd_op_list
-        inp_done = dict() # inp str -> op which *really* fgt inp.grad
-        new_op_list = []
-        # FIRST : extract the wrong op
-        for op in self.bwd_op_list:
-            if ( op.is_fgt
-              and not op.n.is_fwd
-              and len(op.n.used_by) == 0
-              and len(op.n.used_by_global) == 1):
-                inp = next(iter(op.n.used_by_global)).main_target
-                if inp not in inp_done:
-                    dict[inp] = op
-                    continue
-            new_op_list.append(op)
-
-        # THEN : reinsert them
-        for (inp,op_to_insert) in dict.items():
-            nb_rest = len(new_op_list)
-            for i in range(nb_rest-1,-1,-1):
-                op = new_op_list[i]
-                if (op.n.main_target == inp
-                  and not op.is_fwd
-                  and not op.is_fgt):
-                    new_op_list.insert(i+1,op_to_insert)
-                    break
-        self.bwd_op_list = new_op_list
-
-
-
-
     def __init__(self,storage, fwd_seq, bwd_seq):
         self.storage = storage
         self.live = {}#variables -> CodeAtom
@@ -350,7 +319,59 @@ class Executor():#to execute Op
                 self.op_info.append((sa.op.n.main_target, 
                                          sa.op.is_fgt, sa.op.n.is_fwd))
                 self.bwd_op_list.append(sa.op)
+        #self._resort_safe()
+        self._resort_aggressive()
         self.op_list = self.fwd_op_list+self.bwd_op_list
+
+    def _resort_aggressive(self):
+        # resort self.bwd_op_list
+        inp_done = dict() # inp str -> op which *really* fgt inp.grad
+        new_op_list = []
+        # FIRST : extract the wrong op
+        for op in self.bwd_op_list[::-1]:
+            if ( op.is_fgt
+              and not op.n.is_fwd
+              and len(op.n.used_by) == 0
+              and len(op.n.used_by_global) == 1):
+                inp = next(iter(op.n.used_by_global)).main_target
+                if inp not in inp_done:
+                    inp_done[inp] = op
+                    continue
+            new_op_list.append(op)
+
+        # THEN : reinsert them
+        for (inp,op_to_insert) in inp_done.items():
+            nb_rest = len(new_op_list)
+            for i in range(nb_rest-1,-1,-1):
+                op = new_op_list[i]
+                if (op.n.main_target == inp
+                  and not op.n.is_fwd
+                  and not op.is_fgt):
+                    new_op_list.insert(i+1,op_to_insert)
+                    break
+        self.bwd_op_list = new_op_list
+
+    def _resort_safe(self):
+        def insert_l(l,i,j):
+            x = l[i]
+            l.insert(j, x)
+            l.pop(i)
+        l = len(self.bwd_op_list)
+        for i in range(l):
+            op = self.bwd_op_list[i]
+            fwd_len = len(self.fwd_op_list)
+            last = self.op_info[i+fwd_len] not in self.op_info[i+fwd_len+1:]
+            if not op.is_fgt or op.n.is_fwd or not last: continue
+            #assert (op.n.main_target, False, False) not in self.op_info[i+fwd_len:]
+            if (op.n.main_target, False, False) in self.op_info[i+fwd_len:]: print(op.name)
+            #to make sure every run_bwd will be fgt
+            j = 0
+            for sub_n in op.n.used_by_global:
+                if (sub_n.main_target,False,False) in self.op_info[i+fwd_len:]:
+                    j = max(j, self.op_info[fwd_len:].index(
+                                        (sub_n.main_target,False,False),i+1))
+            if j: insert_l(self.bwd_op_list, i,j)
+
 
     def translate(self,bwd=True):
         for i,op in enumerate(self.fwd_op_list):
@@ -368,16 +389,18 @@ class Executor():#to execute Op
                 j = i+ len(self.fwd_op_list)
                 rec = self.op_info[j] in self.op_info[:j]
                 last = self.op_info[j] not in self.op_info[j+1:]
-                if op.n.is_fwd:
-                    if op.is_fgt==None or op.is_fgt:
-                        self._fgt_fwd(op,rec=rec,last=last)
+                try:
+                    if op.n.is_fwd:
+                        if op.is_fgt==None or op.is_fgt:
+                            self._fgt_fwd(op,rec=rec,last=last)
+                        else:
+                            self._run_fwd(op,rec=rec,last=last)
                     else:
-                        self._run_fwd(op,rec=rec,last=last)
-                else:
-                    if op.is_fgt:
-                        self._fgt_bwd(op,rec=rec,last=last)
-                    else:
-                        self._run_bwd(op,rec=rec,last=last)
+                        if op.is_fgt:
+                            self._fgt_bwd(op,rec=rec,last=last)
+                        else:
+                            self._run_bwd(op,rec=rec,last=last)
+                except:break
         self.bwd_code = self.code
 
 #        self.done.append(op.name) 
@@ -452,15 +475,15 @@ class Executor():#to execute Op
         if rec:
             rec_list = []
             if sub_list is None:#TODO: future work to allow recompute grad separately
-                for sub_n in n.used_by:
+                for sub_n in n.used_by_global:
                     smt = sub_n.main_target
                     if "Bwd "+op.main_var not in self.live[f"{smt}.grad"]:
                         self.live[f"{smt}.grad"].append("Bwd "+op.main_var)
                         rec_list += sub_n.tensor_targets
             inputs = ",".join(rec_list)
-            code=f"_{mt}.backward({mt}.grad, inputs=[{inputs}], retain_graph=True)"
+            code=f"_{mt}.backward({mt}.grad, inputs=[{inputs}], retain_graph={not last})"
         else:
-            code=f"_{mt}.backward({mt}.grad, retain_graph=True)"
+            code=f"_{mt}.backward({mt}.grad, retain_graph={not last})"
         if len(self.live[f"{mt}.data"])==0:
             bwd_code = (
                 f"_{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
@@ -470,7 +493,7 @@ class Executor():#to execute Op
                 f"{mt}.data = torch.zeros(0,device=device)\n")
         else:
             bwd_code = code
-        for sub_n in n.used_by:
+        for sub_n in n.used_by_global:
             # if sub_n.main_target == n.main_target:
             #     continue
             if sub_n.info.requires_grad:
@@ -572,7 +595,7 @@ class Executor():#to execute Op
             self.code.append("")
             return None
         code_list = []
-        for sub_n in n.used_by:
+        for sub_n in n.used_by_global:
             if "loss" in sub_n.name:continue
             if sub_n.info.requires_grad:
                 smt = sub_n.main_target
