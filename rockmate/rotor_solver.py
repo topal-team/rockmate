@@ -299,6 +299,37 @@ def seq_builder(chain : RK_Chain, memory_limit):
 
 
 class Executor():#to execute Op 
+    def _resort_aggressive(self):
+        # resort self.bwd_op_list
+        inp_done = dict() # inp str -> op which *really* fgt inp.grad
+        new_op_list = []
+        # FIRST : extract the wrong op
+        for op in self.bwd_op_list:
+            if ( op.is_fgt
+              and not op.n.is_fwd
+              and len(op.n.used_by) == 0
+              and len(op.n.used_by_global) == 1):
+                inp = next(iter(op.n.used_by_global)).main_target
+                if inp not in inp_done:
+                    dict[inp] = op
+                    continue
+            new_op_list.append(op)
+
+        # THEN : reinsert them
+        for (inp,op_to_insert) in dict.items():
+            nb_rest = len(new_op_list)
+            for i in range(nb_rest-1,-1,-1):
+                op = new_op_list[i]
+                if (op.n.main_target == inp
+                  and not op.is_fwd
+                  and not op.is_fgt):
+                    new_op_list.insert(i+1,op_to_insert)
+                    break
+        self.bwd_op_list = new_op_list
+
+
+
+
     def __init__(self,storage, fwd_seq, bwd_seq):
         self.storage = storage
         self.live = {}#variables -> CodeAtom
