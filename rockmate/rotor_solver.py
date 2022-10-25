@@ -320,7 +320,9 @@ class Executor():#to execute Op
                                          sa.op.is_fgt, sa.op.n.is_fwd))
                 self.bwd_op_list.append(sa.op)
         #self._resort_safe()
+        print(len(self.bwd_op_list))
         self._resort_aggressive()
+        print(len(self.bwd_op_list))
         self.op_list = self.fwd_op_list+self.bwd_op_list
 
     def _resort_aggressive(self):
@@ -342,6 +344,8 @@ class Executor():#to execute Op
                     continue
             new_op_list.append(op)
             new_op_info.append(op_info)
+        new_op_list = new_op_list[::-1]
+        new_op_info = new_op_info[::-1]
 
         # THEN : reinsert them
         for (inp,(op_to_insert,op_ins_info)) in inp_done.items():
@@ -360,7 +364,7 @@ class Executor():#to execute Op
     def _resort_safe(self):
         def insert_l(l,i,j):
             x = l[i]
-            l.insert(j, x)
+            l.insert(j+1, x)
             l.pop(i)
         l = len(self.bwd_op_list)
         for i in range(l):
@@ -376,7 +380,9 @@ class Executor():#to execute Op
                 if (sub_n.main_target,False,False) in self.op_info[i+fwd_len:]:
                     j = max(j, self.op_info[fwd_len:].index(
                                         (sub_n.main_target,False,False),i+1))
-            if j: insert_l(self.bwd_op_list, i,j)
+            if j:
+                insert_l(self.bwd_op_list, i,j)
+                insert_l(self.op_info, i+fwd_len,j+fwd_len)
 
 
     def translate(self,bwd=True):
@@ -406,7 +412,10 @@ class Executor():#to execute Op
                             self._fgt_bwd(op,rec=rec,last=last)
                         else:
                             self._run_bwd(op,rec=rec,last=last)
-                except:break
+                except Exception as e:
+                    self.code.append("")
+                    print(e)
+                    break
         self.bwd_code = self.code
 
 #        self.done.append(op.name) 
