@@ -32,7 +32,9 @@ class K_node():
         self.main_code = main_code
         self.body_code = body_code
         self.req = req
-        self.used_by = set()
+        self.used_by = set() # Done later
+        self.used_by_global = set() # Done later
+        self.req_global = set() # Done later
         self.info = info
         self.abar = None
         self.inspector = None
@@ -49,7 +51,9 @@ class K_node():
         mkstr = lambda nl : [rn.main_target for rn in sort_targets(nl)]
         b = (b
             and (mkstr(n1.req) == mkstr (n2.req))
+            and (mkstr(n1.req_global) == mkstr (n2.req_global))
             and (mkstr(n1.used_by) == mkstr (n2.used_by))
+            and (mkstr(n1.used_by_global) == mkstr (n2.used_by_global))
             and (n1.get_code() == n2.get_code()))
         # TIME AND MEMORY : if not equal then raise Exception
         if not b: return False#raise Exception("not equal on req,used_by or code")
@@ -103,6 +107,10 @@ class K_graph():
         for n in self.dict_nodes.values():
             for req_n in n.req:
                 req_n.used_by.add(n)
+    def init_req_and_used_by_global(self):
+        for n in self.dict_nodes.values():
+            n.req_global     = set(n.req)
+            n.used_by_global = set(n.used_by)
     def __eq__(self,g2):
         if ast_to_str(self.init_code) != ast_to_str(g2.init_code):
             raise Exception("diff init_code")
@@ -363,7 +371,7 @@ def aux_init_S_to_K(model,verbose,d):
 
 
 # the function that does it all
-def aux_build_S_to_K(sg : S_graph,model):
+def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
     # -- init --
     dict_Kbwd = dict() # dict : target -> K_node(bwd)
     dict_Kfwd = dict() # dict : target -> K_node(fwd)
@@ -506,18 +514,49 @@ def aux_build_S_to_K(sg : S_graph,model):
     dict_nodes["fwd_loss"] = loss_node
     # ------------
 
+    # build used_by
     kg.make_used_by()
+
+    # build req_global and used_by_global
+    kg.init_req_and_used_by_global()
+    if prev_kg:
+        # from previous block
+        ln_prev = prev_kg.loss_node
+        req_prev = ln_prev.req
+        used_by_prev = ln_prev.used_by
+
+        # in current block
+        inp_sn = sg.init_node.used_by
+        inp_name = [n.main_target for n in inp_sn]
+        inp_Kfwd = [dict_nodes[f"fwd_{t}"] for t in inp_name]
+        inp_Kbwd = [dict_nodes[f"bwd_{t}"] for t in inp_name]
+
+        for n_prev in req_prev:
+            for n_curr in inp_Kfwd:
+                n_prev.used_by_global.add(n_curr)
+                n_curr.req_global.add(n_prev)
+        for n_prev in used_by_prev:
+            for n_curr in inp_Kbwd:
+                n_curr.used_by_global.add(n_prev)
+                n_prev.req_global.add(n_curr)
+
     return kg
 
 
 def S_to_K(sg : S_graph,model,verbose=None,device=None):
     aux_init_S_to_K(model,verbose,device)
-    return aux_build_S_to_K(sg,model)
+    return aux_build_S_to_K(sg,model,prev_kg = None)
 
 
 def S_list_to_K_list(list_sg,model,verbose=None,device=None):
     aux_init_S_to_K(model,verbose,device)
-    return [aux_build_S_to_K(sg,model) for sg in list_sg]
+    list_kg = []
+    prev_kg = None
+    for sg in list_sg:
+        kg = aux_build_S_to_K(sg,model,prev_kg)
+        prev_kg = kg
+        list_kg.append(kg)
+    return list_kg
 
 # ==========================
 
