@@ -42,7 +42,7 @@ class CheckpointedModule(torch.nn.Module):
         mem_unit = self.mem_limit//self.mem_slots
         print_debug("mem_unit", mem_unit)
         print_debug("mem_limit", self.mem_limit)
-        self.rk_chain = RK_Chain(self.list_kg,20,5, mem_unit=mem_unit)
+        self.rk_chain = RK_Chain(self.list_kg,10,3, mem_unit=mem_unit)
         #print("rkchain",torch.cuda.memory_allocated())
 
         # -- solve the chain like rotor --
@@ -113,6 +113,7 @@ class CheckpointedModule(torch.nn.Module):
         # Peak mem based on the measured memory/overhead of each operation
         mem = 0;l=[mem]
         for op in self.executor.op_list:
+            if "loss" in op.name: l.append(mem);continue
             mem += op.mem
             l.append(mem)
             if not save: l[-1]+= op.overhead
