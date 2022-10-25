@@ -327,20 +327,24 @@ class Executor():#to execute Op
         # resort self.bwd_op_list
         inp_done = dict() # inp str -> op which *really* fgt inp.grad
         new_op_list = []
+        new_op_info = []
+        nb_fwd_ops = len(self.fwd_op_list)
         # FIRST : extract the wrong op
-        for op in self.bwd_op_list[::-1]:
+        it = zip(self.bwd_op_list[::-1],self.op_info[nb_fwd_ops:][::-1])
+        for (op,op_info) in it:
             if ( op.is_fgt
               and not op.n.is_fwd
               and len(op.n.used_by) == 0
               and len(op.n.used_by_global) == 1):
                 inp = next(iter(op.n.used_by_global)).main_target
                 if inp not in inp_done:
-                    inp_done[inp] = op
+                    inp_done[inp] = (op,op_info)
                     continue
             new_op_list.append(op)
+            new_op_info.append(op_info)
 
         # THEN : reinsert them
-        for (inp,op_to_insert) in inp_done.items():
+        for (inp,(op_to_insert,op_ins_info)) in inp_done.items():
             nb_rest = len(new_op_list)
             for i in range(nb_rest-1,-1,-1):
                 op = new_op_list[i]
@@ -348,8 +352,10 @@ class Executor():#to execute Op
                   and not op.n.is_fwd
                   and not op.is_fgt):
                     new_op_list.insert(i+1,op_to_insert)
+                    new_op_info.insert(i+1,op_ins_info)
                     break
         self.bwd_op_list = new_op_list
+        self.op_info = self.op_info[:nb_fwd_ops] + new_op_info
 
     def _resort_safe(self):
         def insert_l(l,i,j):
