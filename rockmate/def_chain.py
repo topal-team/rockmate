@@ -37,7 +37,9 @@ class RK_Block_Solution():
 
             self.size_a_bar = self.op_block_fwd.save
             self.overhead_fwd = self.op_block_fwd.overhead 
-            self.overhead_bwd = self.op_block_bwd.overhead 
+            #self.overhead_bwd = self.op_block_bwd.overhead 
+            #quick fix:
+            self.overhead_bwd = self.op_block_bwd.overhead+self.op_block_bwd.save#-self.size_a_bar
 
 
 # RK_Block :
@@ -93,8 +95,10 @@ class RK_Block():
 
         # == build fast_forward code ==
         fwd_nodes = sort_based_on_req(kg.loss_node)[:-1] # from pgb/utils
+        #fwd_nodes should contains only the nodes from the current Kgraph
         code_ff = []
-        op_list_ff = []
+        op_list_fc = []
+        op_list_fn = []
         nodes_done = set()
         current_mem = 0 ; mem_timeline = []
         def fwd_n(n):
@@ -105,23 +109,26 @@ class RK_Block():
             #    code=n.get_code(),
             #    is_fgt=False,
             #    n=n))
-            op_list_ff.append(Op(is_fgt=False,n=n))
+            op_list_fc.append(Op(is_fgt=False,n=n))
+            op_list_fn.append(Op(is_fgt=False,n=n))
             nodes_done.add(n)
-            for req_n in n.req: try_del(req_n)
+            for req_n in n.req_global: try_del(req_n)
         def try_del(n):
             is_fwd = lambda un : un.is_fwd and not un is kg.loss_node
             b = True
-            for un in n.used_by:
-                if is_fwd(un) and not un in nodes_done:
+            for un in n.used_by_global:
+                if is_fwd(un) and not un in nodes_done and un in fwd_nodes:
                     b = False
             if b:
-                op_list_ff.append(Op(is_fgt=True,n=n))
+                op_list_fn.append(Op(is_fgt=True,n=n))
+                if n in fwd_nodes:
+                    op_list_fc.append(Op(is_fgt=True,n=n))
         for n in fwd_nodes: fwd_n(n)
 
         # = build .code_fc =
         #self.code_fc = CodeBlock(code_ff)
-        self.op_block_fc = OpBlock(op_list_ff)
-        self.op_block_fn = OpBlock(op_list_ff+[])#TODO:add fgt outputs node from the previous 
+        self.op_block_fc = OpBlock(op_list_fc)
+        self.op_block_fn = OpBlock(op_list_fn)#TODO:add fgt outputs node from the previous 
         # = build .overhead_ff =
         #self.overhead_ff = max(mem_timeline) - self.mem_out
         self.overhead_ff = self.op_block_fc.overhead 

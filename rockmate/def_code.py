@@ -38,6 +38,7 @@ class Op:
         self.is_fgt = is_fgt
         self.n = n
         self.overhead = n.overhead.v
+        if self.overhead is None: self.overhead = 0
         self.main_var = n.main_target
         self.lvars    = n.all_targets
         self.run_mem = n.run_mem.v#for debugging
@@ -63,9 +64,9 @@ class OpBlock:
             if "loss" in o.name:continue
             save_mem.append(o.mem)
             tmp_mem.append(o.overhead)
-        self.save_timeline = np.cumsum(np.array(save_mem))
+        self.save_timeline = np.cumsum(np.array([0]+save_mem))
         #self.overhead_timeline = np.cumsum(np.array(tmp_mem))
-        self.overhead_timeline = np.array(tmp_mem)
+        self.overhead_timeline = np.array(tmp_mem+[0])
 
         self.save = self.save_timeline[-1]
         self.overhead = max(self.save_timeline+self.overhead_timeline) - self.save

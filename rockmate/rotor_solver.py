@@ -55,7 +55,7 @@ def solve_dp_functionnal(chain : RK_Chain, mmax):
         possibilities = []
         for k in range(nb_sol[i]):
             limit = max(cbw[i+1][k] + fwd_tmp[i][k],
-                        cbw[i+1][k] + bwd_tmp[i][k])
+                        cw[i+1]+ cbw[i+1][k] + bwd_tmp[i][k])
             if m >= limit:
                 possibilities.append((k,fw[i][k] + bw[i][k]))
         if possibilities == []:
@@ -79,7 +79,7 @@ def solve_dp_functionnal(chain : RK_Chain, mmax):
             mmin = cw[b+1] + cw[a+1] + ff_fwd_tmp[a]
             if b > a+1:
                 mmin = max(mmin,
-                    cw[b+1] + max(cw[j+1]+ff_fwd_tmp[j]
+                    cw[b+1] + max(cw[j]+cw[j+1]+ff_fwd_tmp[j]
                     for j in range(a+1, b)))
             if m < mmin:
                 opt_add(m,a,b,float("inf"))
@@ -101,7 +101,7 @@ def solve_dp_functionnal(chain : RK_Chain, mmax):
                 sols_now = []
                 for k in range(nb_sol[a]):
                     mem_f = cbw[a+1][k] + fwd_tmp[a][k]
-                    mem_b = cbw[a+1][k]+bwd_tmp[a][k]
+                    mem_b = cw[a+1] + cbw[a+1][k] + bwd_tmp[a][k]
                     limit = max(mem_f,mem_b)
                     if m >= limit:
                         time = fw[a][k] + bw[a][k]
@@ -319,10 +319,12 @@ class Executor():#to execute Op
                 self.op_info.append((sa.op.n.main_target, 
                                          sa.op.is_fgt, sa.op.n.is_fwd))
                 self.bwd_op_list.append(sa.op)
-        #self._resort_safe()
-        print(len(self.bwd_op_list))
+        self._resort_safe()
+        #print(len(self.bwd_op_list))
+        self.op_list_origin = self.fwd_op_list+self.bwd_op_list
         self._resort_aggressive()
-        print(len(self.bwd_op_list))
+
+        #print(len(self.bwd_op_list))
         self.op_list = self.fwd_op_list+self.bwd_op_list
 
     def _resort_aggressive(self):
@@ -501,8 +503,10 @@ class Executor():#to execute Op
             code=f"_{mt}.backward({mt}.grad, retain_graph={not last})"
         if len(self.live[f"{mt}.data"])==0:
             bwd_code = (
-                f"_{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
-                f"{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
+                #f"_{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
+                #f"{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
+                f"_{mt}.data = {mt}.grad\n"\
+                f"{mt}.data = {mt}.grad\n"\
                 f"{code}\n"\
                 f"_{mt}.data = torch.zeros(0,device=device);"\
                 f"{mt}.data = torch.zeros(0,device=device)\n")
