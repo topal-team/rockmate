@@ -598,9 +598,9 @@ def aux_print_graph(dot,g,uniq_num):
         f"OUTPUTS : inputs' grad\n{str_out}",
         color="green",style="dashed")
     for n in nodes:
-        if n.req == set(): # src nodes
+        if n.req_global != n.req:
             edge("input_ph",n.name)
-        if n.used_by == set(): # leaves
+        if n.used_by_global != n.used_by:
             edge(n.name,"output_ph")
 
 
