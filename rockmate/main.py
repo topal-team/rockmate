@@ -114,9 +114,9 @@ class CheckpointedModule(torch.nn.Module):
         mem = 0;l=[mem]
         for op in self.executor.op_list:
             if "loss" in op.name: l.append(mem);continue
+            if not save: l[-1]+= op.overhead
             mem += op.mem
             l.append(mem)
-            if not save: l[-1]+= op.overhead
         return l
     def reinit(self):
         self.original_mod.zero_grad()
