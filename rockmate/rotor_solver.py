@@ -54,8 +54,8 @@ def solve_dp_functionnal(chain : RK_Chain, mmax):
     def case_d_0(m,i):
         possibilities = []
         for k in range(nb_sol[i]):
-            limit = max(cbw[i+1][k] + fwd_tmp[i][k],
-                        cw[i+1]+ cbw[i+1][k] + bwd_tmp[i][k])
+            limit = max(cw[i]+cbw[i+1][k] + fwd_tmp[i][k],
+                        cw[i]+cw[i+1]+ cbw[i+1][k] + bwd_tmp[i][k])
             if m >= limit:
                 possibilities.append((k,fw[i][k] + bw[i][k]))
         if possibilities == []:
@@ -100,8 +100,8 @@ def solve_dp_functionnal(chain : RK_Chain, mmax):
                 # -> now depend on the F_e chosen. 
                 sols_now = []
                 for k in range(nb_sol[a]):
-                    mem_f = cbw[a+1][k] + fwd_tmp[a][k]
-                    mem_b = cw[a+1] + cbw[a+1][k] + bwd_tmp[a][k]
+                    mem_f = cw[a+1]+cbw[a+1][k] + fwd_tmp[a][k]
+                    mem_b = cw[a]+cw[a+1] + cbw[a+1][k] + bwd_tmp[a][k]
                     limit = max(mem_f,mem_b)
                     if m >= limit:
                         time = fw[a][k] + bw[a][k]
@@ -319,9 +319,9 @@ class Executor():#to execute Op
                 self.op_info.append((sa.op.n.main_target, 
                                          sa.op.is_fgt, sa.op.n.is_fwd))
                 self.bwd_op_list.append(sa.op)
+        self.op_list_origin = self.fwd_op_list+self.bwd_op_list
         self._resort_safe()
         #print(len(self.bwd_op_list))
-        self.op_list_origin = self.fwd_op_list+self.bwd_op_list
         self._resort_aggressive()
 
         #print(len(self.bwd_op_list))
@@ -334,7 +334,7 @@ class Executor():#to execute Op
         new_op_info = []
         nb_fwd_ops = len(self.fwd_op_list)
         # FIRST : extract the wrong op
-        it = zip(self.bwd_op_list[::-1],self.op_info[nb_fwd_ops:][::-1])
+        it = zip(self.bwd_op_list,self.op_info[nb_fwd_ops:])
         for (op,op_info) in it:
             if ( op.is_fgt
               and not op.n.is_fwd
@@ -346,8 +346,6 @@ class Executor():#to execute Op
                     continue
             new_op_list.append(op)
             new_op_info.append(op_info)
-        new_op_list = new_op_list[::-1]
-        new_op_info = new_op_info[::-1]
 
         # THEN : reinsert them
         for (inp,(op_to_insert,op_ins_info)) in inp_done.items():
@@ -357,6 +355,7 @@ class Executor():#to execute Op
                 if (op.n.main_target == inp
                   and not op.n.is_fwd
                   and not op.is_fgt):
+                    #print(i, op_ins_info)
                     new_op_list.insert(i+1,op_to_insert)
                     new_op_info.insert(i+1,op_ins_info)
                     break
