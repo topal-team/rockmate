@@ -320,7 +320,7 @@ class Executor():#to execute Op
                                          sa.op.is_fgt, sa.op.n.is_fwd))
                 self.bwd_op_list.append(sa.op)
         self.op_list_origin = self.fwd_op_list+self.bwd_op_list
-        self._resort_safe()
+        #self._resort_safe()
         #print(len(self.bwd_op_list))
         self._resort_aggressive()
 
@@ -358,6 +358,7 @@ class Executor():#to execute Op
                     #print(i, op_ins_info)
                     new_op_list.insert(i+1,op_to_insert)
                     new_op_info.insert(i+1,op_ins_info)
+                    setattr(op_to_insert,"sp", True)
                     break
         self.bwd_op_list = new_op_list
         self.op_info = self.op_info[:nb_fwd_ops] + new_op_info
@@ -606,7 +607,7 @@ class Executor():#to execute Op
             self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
         self.code.append(code)
 
-    def _fgt_bwd(self, op, rec=False, last=False):
+    def _fgt_bwd(self, op, rec=False, last=False, sp=False):
         n = op.n
         #assert(n.name in self.live)
         if "loss" in n.name:
@@ -620,6 +621,11 @@ class Executor():#to execute Op
 
                 self.live[f"{smt}.grad"].remove("Bwd "+op.main_var)
                 if len(self.live[f"{smt}.grad"])==0:
+                    if hasattr(op, "sp"):
+                        delattr(op, "sp")
+                    else:
+                        if (last and sub_n not in n.used_by):
+                            continue
                     code_list.append(f"{smt}.grad = None")
                     for t in sub_n.tensor_targets:
                         code = f"{t}.grad = None"
