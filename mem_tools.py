@@ -9,6 +9,7 @@ import rockmate as rk
 import numpy as np
 import random
 from rotor import timing
+import gc
 #from rockmate.defs import RK_block_solution
 #from rotor.inspection import tensorMsize
 if torch.cuda.is_available():
@@ -21,10 +22,11 @@ from transformers import GPT2Tokenizer
 def mod(mem=None):
     random.seed(0)
     torch.random.manual_seed(0)
-    model2 = GPT2(nlayers=8,dropout=1e-10, vcb_sz=600)
-    for p in model2.parameters():
-        p.grad = torch.zeros_like(p)
-    context1 = torch.randint(0,600, [200,20])
+    model2 = GPT2(nlayers=4,dropout=1e-10, vcb_sz=600).to(device)
+    #for p in model2.parameters():
+    #    p.grad = torch.zeros_like(p)
+    model2.zero_grad()
+    context1 = torch.randint(0,600, [200,20]).to(device)
     d = {"src":context1}
     src = context1
     import warnings ; warnings.filterwarnings("ignore")
@@ -47,24 +49,50 @@ def run(newmod, context, bwd=False,
     newmod.storage.add_val("src",context1)
     exec(newmod.init_code,newmod.storage.gd,newmod.storage.ld)
     mem_before  = torch.cuda.memory_allocated()
+    torch.cuda.reset_peak_memory_stats()
+    max_before = torch.cuda.max_memory_allocated()
     doc = []
     for i,c in enumerate(newmod.fwd_code[:stop]):
         op = newmod.executor.op_list[i]#op.n.get_code()
+        #max_before = torch.cuda.max_memory_allocated()
+        torch.cuda.reset_peak_memory_stats()
+        max_before = torch.cuda.max_memory_allocated()
         try:
             exec(c, newmod.storage.gd,newmod.storage.ld)
         except:print(f'failed to execte {c}')
-        doc.append((i,c, torch.cuda.memory_allocated()-mem_before))
+        #doc.append((i,c, torch.cuda.memory_allocated()-mem_before,
+        #            torch.cuda.max_memory_allocated()-max_before))
+        #gc.collect()
+        d = {}
+        d["id"] = i
+        d["code"] = c
+        d["mem_a"] = torch.cuda.memory_allocated()-mem_before
+        d["mem_o"] = torch.cuda.max_memory_allocated() - max_before 
+        doc.append(d)
+
         mem_before = torch.cuda.memory_allocated()
     torch.random.manual_seed(0)
+    doc.append(doc[-1])
     if bwd:
         newmod.storage.ld[newmod.output].grad = torch.ones_like(newmod.storage.ld[newmod.output])
         for i,c in enumerate(newmod.bwd_code):
             op = newmod.executor.op_list[i+len(newmod.fwd_code)]#op.n.get_code()
+            torch.cuda.reset_peak_memory_stats()
+            #max_before = torch.cuda.max_memory_allocated()
             try:
                 exec(c, newmod.storage.gd,newmod.storage.ld)
             except:print(f'failed to execte {c}')
-            doc.append((i+len(newmod.fwd_code),c, torch.cuda.memory_allocated()-mem_before))
+            #gc.collect()
+            d = {}
+            d["id"] = i+len(newmod.fwd_code)
+            d["code"] = c
+            d["mem_a"] = torch.cuda.memory_allocated()-mem_before
+            d["mem_o"] = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
+            doc.append(d)
+            #doc.append((i,c, torch.cuda.memory_allocated()-mem_before,
+            #            torch.cuda.max_memory_allocated()-max_before))
             mem_before = torch.cuda.memory_allocated()
+    gc.collect()
 
     return doc
 
@@ -78,30 +106,39 @@ def measure(n, g, newmod):
     print(inspection(n, g=g, our_global=newmod.storage.gd))
 
 def find_code(var, code_list):
-    for c in code_list:
+    for i,c in enumerate(code_list):
         if var in c:
-            print(c)
+            print(i, c, "\n")
 
-def compare(doc, newmod,print_code=True):
-    for i,c,m in doc:
+def compare(doc, newmod,print_=True):
+    res = []
+    for d in doc:
+        i = d["id"]
+        c = d["code"]
+        m = d["mem_a"]
+        m_s = d["mem_o"]
         op = newmod.executor.op_list[i]
-        if op.is_fgt:
-            if op.n.is_fwd:
-                if abs(m) != abs(op.n.del_mem.v):
-                    print(i,'real:',m,'theory:',-op.n.del_mem.v)
-                    if print_code: print(c)
-                    print('\n')
-            else:
-                if abs(m) != abs(op.n.fgt_mem.v):
-                    print(i,'real:',m,'theory:',-op.n.fgt_mem.v)
-                    if print_code: print(c)
-                    print('\n')
-
+        if "loss" in op.name:
+            res.append((i,c,m,m_s,0))
         else:
-            if abs(m) !=abs(op.n.run_mem.v):
-                print(i,'real:',m,'theory:',op.n.run_mem.v)
-                if print_code: print(c)
-                print('\n')
+            res.append((i,c,m,m_s,op.mem))
+        #if op.is_fgt:
+            #if op.n.is_fwd:
+            #    if abs(m) != abs(op.n.del_mem.v):
+            #        print(i,'real:',m,'theory:',-op.n.del_mem.v)
+            #        if print_code: print(c)
+            #else:
+            #    if abs(m) != abs(op.n.fgt_mem.v):
+            #        print(i,'real:',m,'theory:',-op.n.fgt_mem.v)
+            #        if print_code: print(c)
+        #else:
+        #    if abs(m) !=abs(op.n.run_mem.v):
+        #        print(i,'real:',m,'theory:',op.n.run_mem.v)
+        #        if print_code: print(c)
+        if print_:
+            print(res[-1])
+            print('\n')
+    return res
 
 def plot_mem(mem_real, mem_theory):
     import matplotlib.pyplot as plt
