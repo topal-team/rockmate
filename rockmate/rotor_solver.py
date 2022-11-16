@@ -326,6 +326,11 @@ class Executor():#to execute Op
 
         #print(len(self.bwd_op_list))
         self.op_list = self.fwd_op_list+self.bwd_op_list
+        self.mt2mem = {}
+        for op in self.op_list:
+            if not op.is_fgt: self.mt2mem[op.n.main_target] = op.mem
+        self.mem_timeline = []
+        self.overhead_timeline = []
 
     def _resort_aggressive(self):
         # resort self.bwd_op_list
@@ -386,6 +391,12 @@ class Executor():#to execute Op
                 insert_l(self.bwd_op_list, i,j)
                 insert_l(self.op_info, i+fwd_len,j+fwd_len)
 
+    def _estimate_memory(self):
+        mem = 0
+        for k,v in self.live.items():
+            mt, data = k.split(".")
+            if v: mem += self.mt2mem[mt]
+        return mem
 
     def translate(self,bwd=True):
         for i,op in enumerate(self.fwd_op_list):
@@ -396,6 +407,8 @@ class Executor():#to execute Op
                 self._fgt_fwd(op,rec=rec,last=last)
             else:
                 self._run_fwd(op,rec=rec,last=last)
+            self.mem_timeline.append(self._estimate_memory())
+            self.overhead_timeline.append(self._estimate_memory()+op.overhead)
         self.fwd_code = self.code
         self.code = []
         if bwd:
@@ -418,6 +431,8 @@ class Executor():#to execute Op
                     self.code.append("")
                     print(e)
                     break
+                self.mem_timeline.append(self._estimate_memory())
+                self.overhead_timeline.append(self._estimate_memory()+op.overhead)
         self.bwd_code = self.code
 
 #        self.done.append(op.name) 
@@ -495,7 +510,7 @@ class Executor():#to execute Op
                 for sub_n in n.used_by_global:
                     smt = sub_n.main_target
                     if "Bwd "+op.main_var not in self.live[f"{smt}.grad"]:
-                        self.live[f"{smt}.grad"].append("Bwd "+op.main_var)
+                        #self.live[f"{smt}.grad"].append("Bwd "+op.main_var)
                         rec_list += sub_n.tensor_targets
             inputs = ",".join(rec_list)
             code=f"_{mt}.backward({mt}.grad, inputs=[{inputs}], retain_graph={not last})"
