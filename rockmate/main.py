@@ -46,10 +46,10 @@ class CheckpointedModule(torch.nn.Module):
         #print("rkchain",torch.cuda.memory_allocated())
 
         # -- solve the chain like rotor --
-        seq = seq_builder(self.rk_chain, self.mem_limit//mem_unit)
+        self.seq = seq_builder(self.rk_chain, self.mem_limit//mem_unit)
         #print("seqbuilder",torch.cuda.memory_allocated())
         
-        self.fwd_seq,self.bwd_seq = seq.cut_fwd_bwd()
+        self.fwd_seq,self.bwd_seq = self.seq.cut_fwd_bwd()
         self.original_mod = original_mod
         self.storage =  RK_Storage(self.device,self.original_mod)
         self.executor = Executor(self.storage,self.fwd_seq,self.bwd_seq)

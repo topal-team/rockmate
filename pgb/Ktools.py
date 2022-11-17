@@ -483,6 +483,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                 if info.requires_grad:
                     Kbwd.abar = True
                     Kbwd.req.add(Kfwd)
+                    Kbwd.run_mem.v += (Kfwd.run_mem.v - Kfwd.fgt_mem.v)
             else: Kfwd.del_mem = Kfwd.fgt_mem
         k_list = list(ins.tmp_local.keys())
         for k in k_list: del ins.tmp_local[k]
