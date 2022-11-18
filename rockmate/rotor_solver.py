@@ -320,6 +320,7 @@ class Executor():#to execute Op
                                          sa.op.is_fgt, sa.op.n.is_fwd))
                 self.bwd_op_list.append(sa.op)
         self.op_list_origin = self.fwd_op_list+self.bwd_op_list
+        self.output = list(self.fwd_op_list[-1].n.req)[0].main_target
         #self._resort_safe()
         #print(len(self.bwd_op_list))
         self._resort_aggressive()
@@ -596,7 +597,14 @@ class Executor():#to execute Op
         """
         n = op.n
         if "loss" in n.name:
-            self.code.append("")
+            isOutput = False
+            for sub_n in n.req_global:
+                if self.output in sub_n.name:
+                    isOutput = True
+                    break
+            if isOutput:self.code.append(f"{self.output}.grad = None")
+            else:
+                self.code.append("")
             return None
         #assert(f"{mt}.data" in self.live)
         if n.is_artefact: code = ""
