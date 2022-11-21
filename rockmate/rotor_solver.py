@@ -446,7 +446,7 @@ class Executor():#to execute Op
                         isOutput = True
                         break
                 if isOutput:
-                    self.bwd_code[-i] += f"{self.output}.grad = None"
+                    self.bwd_code[-i-1] += f"{self.output}.grad = None"
                     break
 
 
