@@ -399,6 +399,7 @@ class Executor():#to execute Op
             if v: mem += self.mt2mem[mt]
         return mem
 
+
     def translate(self,bwd=True):
         for i,op in enumerate(self.fwd_op_list):
             rec = self.op_info[i] in self.op_info[:i]
@@ -435,6 +436,19 @@ class Executor():#to execute Op
                 self.mem_timeline.append(self._estimate_memory())
                 self.overhead_timeline.append(self._estimate_memory()+op.overhead)
         self.bwd_code = self.code
+        # del output.grad
+        for i, op in enumerate(self.bwd_op_list[::-1]):
+            n = op.n
+            if "loss" in op.name and op.is_fgt:
+                isOutput = False
+                for sub_n in n.req_global:
+                    if self.output in sub_n.name:
+                        isOutput = True
+                        break
+                if isOutput:
+                    self.bwd_code[-i] += f"{self.output}.grad = None"
+                    break
+
 
 #        self.done.append(op.name) 
 
@@ -597,14 +611,7 @@ class Executor():#to execute Op
         """
         n = op.n
         if "loss" in n.name:
-            isOutput = False
-            for sub_n in n.req_global:
-                if self.output in sub_n.name:
-                    isOutput = True
-                    break
-            if isOutput:self.code.append(f"{self.output}.grad = None")
-            else:
-                self.code.append("")
+            self.code.append("")
             return None
         #assert(f"{mt}.data" in self.live)
         if n.is_artefact: code = ""
