@@ -56,6 +56,7 @@ class ILPSolverGurobi:
 
         T = self.g.size
         self.ram_gcd = self.g.ram_gcd(self.budget)
+        self.ram_gcd = 1e5
         if self.integral:
             self.R = self.m.addVars(T, T, name="R", vtype=GRB.BINARY)
             self.S = self.m.addVars(T, T, name="S", vtype=GRB.BINARY)
@@ -241,7 +242,7 @@ def solve_ilp_gurobi(
     write_log_file: Optional[PathLike] = None,
     print_to_console=True,
     write_model_file: Optional[PathLike] = None,
-    eps_noise=0.01,
+    eps_noise=0.0,
     solver_cores=os.cpu_count(),
 ):
     """
