@@ -15,6 +15,9 @@ import astunparse
 import torch
 import numpy as np
 from torch import tensor
+#from .Btools import B_node 
+#from .Stools import S_node 
+#from .Ktools import K_node 
 import graphviz
 
 # == rotor == -> for inspection in Ktools.py
@@ -233,7 +236,10 @@ def sort_based_on_req(n): # used on B, S and K
     def visit(n):
         if n not in dict_done:
             dict_done[n]=False
-            for sub_n in sort_targets(n.req):
+            try:
+                req_set = n.req_real
+            except: req_set = n.req
+            for sub_n in sort_targets(req_set):
                 visit(sub_n)
             dict_done[n]=True
             nodes.append(n)

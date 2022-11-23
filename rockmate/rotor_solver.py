@@ -320,7 +320,7 @@ class Executor():#to execute Op
                                          sa.op.is_fgt, sa.op.n.is_fwd))
                 self.bwd_op_list.append(sa.op)
         self.op_list_origin = self.fwd_op_list+self.bwd_op_list
-        self.output = list(self.fwd_op_list[-1].n.req)[0].main_target
+        self.output = list(self.fwd_op_list[-1].n.req_real)[0].main_target
         #self._resort_safe()
         #print(len(self.bwd_op_list))
         self._resort_aggressive()
@@ -333,6 +333,8 @@ class Executor():#to execute Op
         self.mem_timeline = []
         self.overhead_timeline = []
 
+        
+
     def _resort_aggressive(self):
         # resort self.bwd_op_list
         inp_done = dict() # inp str -> op which *really* fgt inp.grad
@@ -344,7 +346,7 @@ class Executor():#to execute Op
         for (op,op_info) in it:
             if ( op.is_fgt
               and not op.n.is_fwd
-              and len(op.n.used_by) == 0
+              and len(op.n.used_by_real) == 0
               and len(op.n.used_by_global) == 1):
                 inp = next(iter(op.n.used_by_global)).main_target
                 if inp not in inp_done:
@@ -401,6 +403,13 @@ class Executor():#to execute Op
 
 
     def translate(self,bwd=True):
+        self.cached_set = set([op for op in self.fwd_op_list 
+                               if (op.n.cached and op.n.main_target != self.output)])
+        insert_pos = {}
+        for op in self.cached_set:
+            is_reqed_list = [(op.n in every_op.n.req_real) for every_op in self.fwd_op_list]
+            insert_pos[len(is_reqed_list) - is_reqed_list[::-1].index(True)] = op
+
         for i,op in enumerate(self.fwd_op_list):
             rec = self.op_info[i] in self.op_info[:i]
             last = self.op_info[i] not in self.op_info[i+1:]
@@ -411,6 +420,9 @@ class Executor():#to execute Op
                 self._run_fwd(op,rec=rec,last=last)
             self.mem_timeline.append(self._estimate_memory())
             self.overhead_timeline.append(self._estimate_memory()+op.overhead)
+            if i in insert_pos.keys():self.code[-1] += ";"+self._fgt_fwd(insert_pos[i],return_code=True,only_data=True)
+
+
         self.fwd_code = self.code
         self.code = []
         if bwd:
@@ -450,14 +462,11 @@ class Executor():#to execute Op
                     break
 
 
-#        self.done.append(op.name) 
-
-
     def exec(self):
         for code in self.code:
             exec(code, self.storage.gd, self.storage.ld)
 
-    def _run_fwd(self, op, rec=False, last=False):
+    def _run_fwd(self, op, rec=False, last=False, return_code=False):
         #rec = op.name in self.done
         n = op.n
         if "loss" in n.name:
@@ -509,9 +518,10 @@ class Executor():#to execute Op
         #if True:
         #    code += f"{mt}.requires_grad_()"
         self.live[f"{mt}.data"] = [op.name]#we assume .data can only from one op
+        if return_code:return code
         self.code.append(code+'\n'+body_code)
 
-    def _run_bwd(self, op, rec=False, last=False, sub_list=None):
+    def _run_bwd(self, op, rec=False, last=False, sub_list=None, return_code=False):
         n = op.n
         if "loss" in n.name:
             self.code.append("")
@@ -531,23 +541,27 @@ class Executor():#to execute Op
             code=f"_{mt}.backward({mt}.grad, inputs=[{inputs}], retain_graph={not last})"
         else:
             code=f"_{mt}.backward({mt}.grad, retain_graph={not last})"
-        if len(self.live[f"{mt}.data"])==0:
-            bwd_code = (
-                #f"_{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
-                #f"{mt}.data = torch.zeros_like({mt}.grad,device=device)\n"\
-                f"_{mt}.data = {mt}.grad\n"\
-                f"{mt}.data = {mt}.grad\n"\
-                f"{code}\n"\
-                f"_{mt}.data = torch.zeros(0,device=device);"\
-                f"{mt}.data = torch.zeros(0,device=device)\n")
-        else:
-            bwd_code = code
+
+        pre_code = ""
+        after_code = ""
+        for req_n in list(n.req_fake)+[n]:
+            req_shape = req_n.info.tsize
+            if len(self.live[f"{req_n.main_target}.data"])==0 and req_n.info.requires_grad:
+                pre_code += f"_{req_n.main_target}.data = {req_n.main_target}.data = torch.zeros({req_shape},device=device);"
+                after_code += f"{req_n.main_target}.data = torch.zeros(0,device=device);"
+                after_code += f"_{req_n.main_target}.data = torch.zeros(0,device=device);"
+
+        bwd_code = (
+            f"{pre_code}"\
+            f"{code}\n"\
+            f"{after_code}")
         for sub_n in n.used_by_global:
             # if sub_n.main_target == n.main_target:
             #     continue
             if sub_n.info.requires_grad:
                 smt = sub_n.main_target
                 self.live[f"{smt}.grad"].append("Bwd "+op.main_var)
+        if return_code:return code
         self.code.append(bwd_code)
 
     def _del_fwd(self, op):
@@ -566,7 +580,7 @@ class Executor():#to execute Op
                 code += (f"del {v}; ")
             self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
 
-    def _fgt_fwd(self, op, rec=False, last=False):
+    def _fgt_fwd(self, op, rec=False, last=False, return_code=False, only_data=False):
         """
         n = op.n
         if "loss" in n.name:
@@ -620,10 +634,13 @@ class Executor():#to execute Op
             #code = f"{mt}.data = torch.zeros(0,device=device); "
             code =""
             if op.n.info and op.n.info.requires_grad:
-                code += f"del _{mt};"
+                if not only_data:code += f"del _{mt};"
+                else: code += f"_{mt}.data = torch.zeros(0,device=device); "
             for v in n.tensor_targets:
                 code += (f"{v}.data = torch.zeros(0,device=device); ")
-            self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
+            try:
+                self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
+            except: pass
         #if n.abar:code = f"del _{mt};" 
                 
         else:
@@ -634,10 +651,13 @@ class Executor():#to execute Op
             #code = f"{mt}.data = torch.zeros(0,device=device); "
             for v in n.tensor_targets:
                 code += (f"{v}.data = torch.zeros(0,device=device); ")
-            self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
+            try:
+                self.live[f"{mt}.data"].remove("Fwd "+op.main_var)
+            except: pass
+        if return_code:return code
         self.code.append(code)
 
-    def _fgt_bwd(self, op, rec=False, last=False, sp=False):
+    def _fgt_bwd(self, op, rec=False, last=False, sp=False, return_code=False):
         n = op.n
         #assert(n.name in self.live)
         if "loss" in n.name:
@@ -654,10 +674,11 @@ class Executor():#to execute Op
                     if hasattr(op, "sp"):
                         delattr(op, "sp")
                     else:
-                        if (last and sub_n not in n.used_by):
+                        if (last and sub_n not in n.used_by_real):
                             continue
                     code_list.append(f"{smt}.grad = None")
                     for t in sub_n.tensor_targets:
                         code = f"{t}.grad = None"
                         code_list.append(code)
+        if return_code:return code
         self.code.append(";".join(code_list))

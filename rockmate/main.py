@@ -31,6 +31,7 @@ class CheckpointedModule(torch.nn.Module):
            verbose=verbose,
            bool_kg = False) # we don't need the whole K_graph
         self.list_kg = self.pgb_res.K_graph_list
+        print("Mem after pgb", torch.cuda.memory_allocated())
         #print("kgraph",torch.cuda.memory_allocated())
         self.init_code = ast_to_str(self.list_kg[0].init_code)
 
@@ -43,10 +44,12 @@ class CheckpointedModule(torch.nn.Module):
         print_debug("mem_unit", mem_unit)
         print_debug("mem_limit", self.mem_limit)
         self.rk_chain = RK_Chain(self.list_kg,10,3, mem_unit=mem_unit)
+        print("Mem after RKchain", torch.cuda.memory_allocated())
         #print("rkchain",torch.cuda.memory_allocated())
 
         # -- solve the chain like rotor --
         self.seq = seq_builder(self.rk_chain, self.mem_limit//mem_unit)
+        print("Mem after seq builder", torch.cuda.memory_allocated())
         #print("seqbuilder",torch.cuda.memory_allocated())
         
         self.fwd_seq,self.bwd_seq = self.seq.cut_fwd_bwd()
@@ -55,6 +58,7 @@ class CheckpointedModule(torch.nn.Module):
         self.executor = Executor(self.storage,self.fwd_seq,self.bwd_seq)
         #print("executor",torch.cuda.memory_allocated())
         self.executor.translate(bwd=True)
+        print("Mem after translator", torch.cuda.memory_allocated())
         self.fwd_code = self.executor.fwd_code
         self.bwd_code = self.executor.bwd_code
 
@@ -95,11 +99,13 @@ class CheckpointedModule(torch.nn.Module):
         return self.storage.get_val(self.output)
 
     def backward(self,record_mem=False):
-        for code in self.bwd_code:
+        for i,code in enumerate(self.bwd_code):
             try:
                 exec(code,self.storage.gd,self.storage.ld)
-            except:
-                print(f"Failed to execute code:\n {code}")
+            except Exception as err:
+                print(f"Failed to execute {i}-th code:\n {code}")
+                print(f"Unexpected {err=}, {type(err)=}")
+                raise
                 break
             if record_mem:
                 self.max_mem.append(torch.cuda.max_memory_allocated())
