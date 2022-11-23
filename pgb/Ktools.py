@@ -26,10 +26,10 @@ class K_node():
         if is_fwd: self.name = "fwd_"+target
         else:      self.name = "bwd_"+target
 
-        # ** informative : info/artefact/fwd/cache/code **
+        # ** informative : info/artefact/fwd/cached/code **
         self.is_artefact = is_artefact
         self.is_fwd = is_fwd
-        self.cache = False
+        self.cached = False
         self.info = info
         self.main_code = main_code
         self.body_code = body_code
@@ -37,10 +37,10 @@ class K_node():
         # ** req/used_by **
         self.req_real = req_real if req_real else set()
         self.req_fake = req_fake if req_fake else set()
-        self.req_glob = set ()
+        self.req_global = set ()
         self.used_by_real = set ()
         self.used_by_fake = set ()
-        self.used_by_glob = set ()
+        self.used_by_global = set ()
 
         # ** inspection **
         self.run_mem  = None
@@ -57,7 +57,7 @@ class K_node():
         # ** Easy to check attrs **
         b = check_attr(n1,n2,[
             "name","main_target","all_targets","tensor_targets",
-            "is_fwd","is_artefact","cache","info",
+            "is_fwd","is_artefact","cached","info",
             "abar","run_mem","fgt_mem","del_mem","overhead"],
             raise_exception=False)
         b = b and n1.get_code() == n2.get_code()
@@ -65,8 +65,8 @@ class K_node():
         # ** req/used_by **
         mkstr = lambda nl : [rn.main_target for rn in sort_targets(nl)]
         for attr in [
-            "req_real","req_fake","req_glob",
-            "used_by_real","used_by_fake","used_by_glob"]:
+            "req_real","req_fake","req_global",
+            "used_by_real","used_by_fake","used_by_global"]:
             b = (b and
                 mk_str(getattr(n1,attr)) == mk_str(getattr(n2,attr)))
 
@@ -110,19 +110,19 @@ class K_graph():
         for n in self.dict_nodes.values():
             for req_n in n.req_real: req_n.used_by_real.add(n)
             for req_n in n.req_fake: req_n.used_by_fake.add(n)
-    def init_req_and_used_by_glob(self):
+    def init_req_and_used_by_global(self):
         for n in self.dict_nodes.values():
-            n.req_glob     = n.req_real.union(n.req_fake)
-            n.used_by_glob = n.used_by_real.union(n.used_by_fake)
+            n.req_global     = n.req_real.union(n.req_fake)
+            n.used_by_global = n.used_by_real.union(n.used_by_fake)
 
-    def make_cache_attr(self):
+    def make_cached_attr(self):
         for kn in self.dict_nodes.values():
             if kn.is_fwd and kn.abar:
-                kn.cache = True
-                for sub_kn in kn.used_by_real.union(kn.used_by_glob):
+                kn.cached = True
+                for sub_kn in kn.used_by_real.union(kn.used_by_global):
                     if (not sub_kn.is_fwd and
                         sub_kn.main_target != kn.main_target):
-                        kn.cache = False
+                        kn.cached = False
                         break
 
     def __eq__(self,g2): # aggressive
@@ -471,7 +471,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                 if info.requires_grad:
                     Kbwd.abar = True
                     Kbwd.run_mem.v += (Kfwd.run_mem.v - Kfwd.fgt_mem.v)
-                    assert(exist_phantoms)
+                    #assert(exist_phantoms)
             else: Kfwd.del_mem = Kfwd.fgt_mem
         k_list = list(ins.tmp_local.keys())
         for k in k_list: del ins.tmp_local[k]
@@ -505,8 +505,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
     # build used_by
     kg.make_used_by()
 
-    # build req_glob and used_by_glob
-    kg.init_req_and_used_by_glob()
+    # build req_global and used_by_global
+    kg.init_req_and_used_by_global()
     if prev_kg:
         # from previous block
         ln_prev = prev_kg.loss_node
@@ -521,12 +521,12 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
 
         for n_prev in req_prev:
             for n_curr in inp_Kfwd:
-                n_prev.used_by_glob.add(n_curr)
-                n_curr.req_glob.add(n_prev)
+                n_prev.used_by_global.add(n_curr)
+                n_curr.req_global.add(n_prev)
         for n_prev in used_by_prev:
             for n_curr in inp_Kbwd:
-                n_curr.used_by_glob.add(n_prev)
-                n_prev.req_glob.add(n_curr)
+                n_curr.used_by_global.add(n_prev)
+                n_prev.req_global.add(n_curr)
     return kg
 
 
@@ -544,7 +544,7 @@ def S_list_to_K_list(list_sg,model,verbose=None,device=None):
         prev_kg = kg
         list_kg.append(kg)
     for kg in list_kg:
-        kg.make_cache_attr()
+        kg.make_cached_attr()
     return list_kg
 
 # ==========================
@@ -585,9 +585,9 @@ def aux_print_graph(dot,g,uniq_num):
         f"OUTPUTS : inputs' grad\n{str_out}",
         color="green",style="dashed")
     for n in nodes:
-        if n.req_glob != n.req:
+        if n.req_global != n.req:
             edge("input_ph",n.name)
-        if n.used_by_glob != n.used_by:
+        if n.used_by_global != n.used_by:
             edge(n.name,"output_ph")
 
 
