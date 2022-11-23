@@ -119,7 +119,7 @@ class K_graph():
         for kn in self.dict_nodes.values():
             if kn.is_fwd and kn.abar:
                 kn.cached = True
-                for sub_kn in kn.used_by_real.union(kn.used_by_global):
+                for sub_kn in kn.used_by_global - kn.used_by_fake:
                     if (not sub_kn.is_fwd and
                         sub_kn.main_target != kn.main_target):
                         kn.cached = False
