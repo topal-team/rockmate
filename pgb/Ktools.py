@@ -421,8 +421,6 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             req_real_K = set(dict_Kfwd[mt] for mt in req_real_str_mt)
             req_real_K = req_real_K.intersection(Kreq_fwd)
             req_fake_K = Kreq_fwd - req_real_K
-            if exist_phantoms: req_real_K.add(Kfwd)
-            else: req_fake_K.add(Kfwd)
 
             # ** create Kbwd **
             Kbwd = K_node(
@@ -471,8 +469,11 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                 if info.requires_grad:
                     Kbwd.abar = True
                     Kbwd.run_mem.v += (Kfwd.run_mem.v - Kfwd.fgt_mem.v)
-                    #assert(exist_phantoms)
             else: Kfwd.del_mem = Kfwd.fgt_mem
+            if info.requires_grad:
+                if Kfwd.abar or exist_phantoms:
+                    Kbwd.req_real.add(Kfwd)
+                else: Kbwd.req_fake.add(Kfwd)
         k_list = list(ins.tmp_local.keys())
         for k in k_list: del ins.tmp_local[k]
     # ------------
