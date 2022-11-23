@@ -117,7 +117,9 @@ class K_graph():
 
     def make_cached_attr(self):
         for kn in self.dict_nodes.values():
-            if kn.is_fwd and kn.abar:
+            if (kn.is_fwd and kn.abar
+            and (kn.used_by_global
+            == kn.used_by_real.union(kn.used_by_fake))):
                 kn.cached = True
                 for sub_kn in kn.used_by_global - kn.used_by_fake:
                     if (not sub_kn.is_fwd and
@@ -187,6 +189,13 @@ def generate_tmp_local(sn,sg : S_graph,our_global):
     """
     return tmp_local
 
+def generate_deep_tmp_local(sn,sg,our_global):
+    tmp_local = dict()
+    for req_sn in sn.req:
+        tmp_local.update(generate_tmp_local(req_sn,sg,our_global))
+        exec(req_sn.get_code(), our_global, tmp_local)
+    return tmp_local
+
 # ==========================
 
 
@@ -201,7 +210,7 @@ def get_useful_vars(sn : S_node,sg : S_graph,our_global):
     params = dict(our_global['self'].named_parameters())
     print_debug(f"Try to open {sn.main_target}'s grad_fn")
     # == INIT ==
-    tmp_local = generate_tmp_local(sn,sg,our_global)
+    tmp_local = generate_deep_tmp_local(sn,sg,our_global)
     exec(sn.get_code(), our_global, tmp_local)
     mt = sn.main_target
     fn = tmp_local[mt].grad_fn
