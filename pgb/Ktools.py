@@ -32,7 +32,7 @@ class K_node():
         self.cached = False
         self.info = info
         self.main_code = main_code
-        self.body_code = body_code
+        self.body_code = body_code if body_code else []
 
         # ** req/used_by **
         self.req_real = req_real if req_real else set()
@@ -559,22 +559,25 @@ def S_list_to_K_list(list_sg,model,verbose=None,device=None):
 def aux_print_graph(dot,g,uniq_num):
     def uni(tar): return f"_{uniq_num}_{tar}"
     def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
-    def edge(i1,i2): dot.edge(uni(i1),uni(i2))
+    def edge(i1,i2,**kwargs): dot.edge(uni(i1),uni(i2),**kwargs)
     def print_node(n):
         if n.main_target == "loss":
             node(n.name,
                 f"LOSS\ncode: {n.get_code()}",
                 color="green")
         elif n.is_fwd:
-            node(n.name,n.get_code(),color="blue")
+            c = "orange" if n.cached else "blue"
+            node(n.name,n.get_code(),color=c)
         else:
             node(n.name,f"backward of {n.main_target}",color="red")
     nodes = g.dict_nodes.values()
     for n in nodes:
         print_node(n)
     for n in nodes:
-        for sub_n in n.req:
-            edge(sub_n.name,n.name)
+        for sub_n in n.req_real:
+            edge(sub_n.name,n.name,color="forestgreen")
+        for sub_n in n.req_fake:
+            edge(sub_n.name,n.name,color="darkmagenta")
 
     # -- io --
     str_inp = "\n".join(g.direct_inputs)
@@ -586,9 +589,9 @@ def aux_print_graph(dot,g,uniq_num):
         f"OUTPUTS : inputs' grad\n{str_out}",
         color="green",style="dashed")
     for n in nodes:
-        if n.req_global != n.req:
+        if n.req_global != n.req_real.union(n.req_fake):
             edge("input_ph",n.name)
-        if n.used_by_global != n.used_by:
+        if n.used_by_global != n.used_by_real.union(n.used_by_fake):
             edge(n.name,"output_ph")
 
 
