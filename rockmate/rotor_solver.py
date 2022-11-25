@@ -327,9 +327,9 @@ class Executor():#to execute Op
 
         #print(len(self.bwd_op_list))
         self.op_list = self.fwd_op_list+self.bwd_op_list
-        self.mt2mem = {}
+        self.mt2op = {}
         for op in self.op_list:
-            if not op.is_fgt: self.mt2mem[op.n.main_target] = op.mem
+            if not op.is_fgt: self.mt2op[op.n.main_target] = op
         self.mem_timeline = []
         self.overhead_timeline = []
 
@@ -398,17 +398,18 @@ class Executor():#to execute Op
         mem = 0
         for k,v in self.live.items():
             mt, data = k.split(".")
-            if v: mem += self.mt2mem[mt]
+            if v: mem += self.mt2op[mt].mem
         return mem
 
 
     def translate(self,bwd=True):
         self.cached_set = set([op for op in self.fwd_op_list 
-                               if (op.n.cached and op.n.main_target != self.output)])
-        insert_pos = {}
+                               if (op.n.cached and not op.is_fgt and op.n.main_target != self.output)])
+        self.insert_pos = {}
         for op in self.cached_set:
-            is_reqed_list = [(op.n in every_op.n.req_real) for every_op in self.fwd_op_list]
-            insert_pos[len(is_reqed_list) - is_reqed_list[::-1].index(True)] = op
+            is_reqed_list = [(op.n in every_op.n.req_real and not every_op.is_fgt and every_op.n.is_fwd)
+                             for every_op in self.op_list] 
+            self.insert_pos[len(is_reqed_list) - is_reqed_list[::-1].index(True)-1] = op
 
         for i,op in enumerate(self.fwd_op_list):
             rec = self.op_info[i] in self.op_info[:i]
@@ -420,7 +421,9 @@ class Executor():#to execute Op
                 self._run_fwd(op,rec=rec,last=last)
             self.mem_timeline.append(self._estimate_memory())
             self.overhead_timeline.append(self._estimate_memory()+op.overhead)
-            if i in insert_pos.keys():self.code[-1] += ";"+self._fgt_fwd(insert_pos[i],return_code=True,only_data=True)
+            if i in self.insert_pos.keys():
+                #print("cached mem will be removed",insert_pos[i].name)
+                self.code[i] += "\n"+self._fgt_fwd(self.insert_pos[i],return_code=True,only_data=True)
 
 
         self.fwd_code = self.code
@@ -443,10 +446,13 @@ class Executor():#to execute Op
                             self._run_bwd(op,rec=rec,last=last)
                 except Exception as e:
                     self.code.append("")
-                    print(e)
+                    #print(e)
                     break
                 self.mem_timeline.append(self._estimate_memory())
                 self.overhead_timeline.append(self._estimate_memory()+op.overhead)
+                if j in self.insert_pos.keys():
+                    #print("cached mem will be removed",insert_pos[i].name)
+                    self.code[-1] += "\n"+self._fgt_fwd(self.insert_pos[j],return_code=True,only_data=True)
         self.bwd_code = self.code
         # del output.grad
         for i, op in enumerate(self.bwd_op_list[::-1]):
@@ -546,10 +552,23 @@ class Executor():#to execute Op
         after_code = ""
         for req_n in list(n.req_fake)+[n]:
             req_shape = req_n.info.tsize
+            target_tensor = None
+            for k,v in self.live.items():
+                if not v: continue
+                if (np.prod(self.mt2op[k[:-5]].n.info.tsize) ==
+                   np.prod(req_shape)):
+                   target_tensor = k
+            #target_tensor = None
+            if not target_tensor:
+                #print("Need to create something", op.name)
+                target_tensor = f"torch.zeros({req_shape},device=device)"
+
             if len(self.live[f"{req_n.main_target}.data"])==0 and req_n.info.requires_grad:
-                pre_code += f"_{req_n.main_target}.data = {req_n.main_target}.data = torch.zeros({req_shape},device=device);"
+                pre_code += f"{req_n.main_target}.data = {target_tensor}.reshape({req_shape});"
                 after_code += f"{req_n.main_target}.data = torch.zeros(0,device=device);"
-                after_code += f"_{req_n.main_target}.data = torch.zeros(0,device=device);"
+                if req_n.main_target == n.main_target:
+                    pre_code += f"_{req_n.main_target}.data = {target_tensor}.reshape({req_shape});"
+                    after_code += f"_{req_n.main_target}.data = torch.zeros(0,device=device);"
 
         bwd_code = (
             f"{pre_code}"\

@@ -480,7 +480,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                     Kbwd.run_mem.v += (Kfwd.run_mem.v - Kfwd.fgt_mem.v)
             else: Kfwd.del_mem = Kfwd.fgt_mem
             if info.requires_grad:
-                if Kfwd.abar or exist_phantoms:
+                if Kfwd.abar:# or exist_phantoms:
                     Kbwd.req_real.add(Kfwd)
                 else: Kbwd.req_fake.add(Kfwd)
         k_list = list(ins.tmp_local.keys())
