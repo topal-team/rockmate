@@ -63,7 +63,7 @@ class K_node():
         b = b and n1.get_code() == n2.get_code()
 
         # ** req/used_by **
-        mkstr = lambda nl : [rn.main_target for rn in sort_targets(nl)]
+        mkstr = lambda nl : [rn.main_target for rn in nl]
         for attr in [
             "req_real","req_fake","req_global",
             "used_by_real","used_by_fake","used_by_global"]:

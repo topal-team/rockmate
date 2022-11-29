@@ -14,7 +14,7 @@ class D_node(B_node):
     def __eq__(self,n2):
         n1 = self
         b = check_attr(n1,n2,["protected","target","fct","is_rand"])
-        mkstr = lambda nl : [rn.target for rn in sort_targets(nl)]
+        mkstr = lambda nl : [rn.target for rn in nl]
         b = (b
             and (mkstr(n1.req) == mkstr (n2.req))
             and (mkstr(n1.used_by) == mkstr (n2.used_by))

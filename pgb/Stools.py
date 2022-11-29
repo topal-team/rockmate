@@ -23,7 +23,7 @@ class S_node():
             "is_artefact","main_fct",
             "main_target","all_targets",
             "tensor_targets","protected"])
-        mkstr = lambda nl : [rn.main_target for rn in sort_targets(nl)]
+        mkstr = lambda nl : [rn.main_target for rn in nl]
         b = (b
             and (mkstr(n1.req) == mkstr (n2.req))
             and (mkstr(n1.used_by) == mkstr (n2.used_by))
@@ -337,7 +337,6 @@ def simplify_cheap(g : S_graph):
 def size_children(g,n):
     # give the list of child nodes of n which are size
     ret = []
-    #for sub_n in sort_targets(n.used_by):
     for sub_n in n.used_by:
         if g.dict_info[sub_n.main_target].ttype == torch.Size:
             ret.append(sub_n)
