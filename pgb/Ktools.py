@@ -105,6 +105,9 @@ class K_graph():
         self.dict_rand = sg.dict_rand
         self.loss_node = None
         self.sg = sg
+        # for first K_graph :
+        self.used_by_of_imaginary_input_node = set()
+        self.req_of_imaginary_output_node = set()
 
     def make_used_by(self):
         for n in self.dict_nodes.values():
@@ -133,7 +136,9 @@ class K_graph():
         return check_attr(self,g2,["sg",
             "direct_inputs","hidden_inputs",
             "direct_outputs","hidden_output",
-            "dict_info","dict_nodes","loss_node"],raise_exception=True)
+            "dict_info","dict_nodes","loss_node",
+            "used_by_of_imaginary_input_node",
+            "req_of_imaginary_output_node"],raise_exception=True)
     def __hash__(self):
         return id(self)
 
@@ -537,6 +542,15 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             for n_curr in inp_Kbwd:
                 n_curr.used_by_global.add(n_prev)
                 n_prev.req_global.add(n_curr)
+    else:
+        # Just for printing purpose
+        using_src_sn = sg.init_node.used_by
+        using_src_name = [n.main_target for n in using_src_sn]
+        kg.used_by_of_imaginary_input_node = set(
+            dict_nodes[f"fwd_{t}"] for t in using_src_name)
+        kg.req_of_imaginary_output_node = set(
+            dict_nodes[f"bwd_{t}"] for t in using_src_name if f"bwd_{t}" in dict_nodes)
+
     return kg
 
 
@@ -598,10 +612,26 @@ def aux_print_graph(dot,g,uniq_num):
         f"OUTPUTS : inputs' grad\n{str_out}",
         color="green",style="dashed")
     for n in nodes:
-        if n.req_global != n.req_real.union(n.req_fake):
+        bool_req_input  = False
+        bool_req_output = False
+        req_spe = n.req_global - n.req_real.union(n.req_fake)
+        used_by_spe = n.used_by_global - n.used_by_real.union(n.used_by_fake)
+        for req_spe_n in req_spe:
+            if get_num(req_spe_n) <= get_num(n):
+                bool_req_input = True
+        for used_by_spe_n in used_by_spe:
+            if get_num(used_by_spe_n) <= get_num(n):
+                bool_req_output = True
+        if bool_req_input:
             edge("input_ph",n.name)
-        if n.used_by_global != n.used_by_real.union(n.used_by_fake):
+        if bool_req_output:
             edge(n.name,"output_ph")
+
+    # -- io for the first K_graph --
+    for req_init_kn in g.used_by_of_imaginary_input_node:
+        edge("input_ph",req_init_kn.name)
+    for output_kn in g.req_of_imaginary_output_node:
+        edge(output_kn.name,"output_ph")
 
 
 def print_K_graph(g : K_graph,name=None,open=True):

@@ -222,12 +222,23 @@ def is_constant(v):
 # ==== TOPO SORT GRAPHS ====
 # ==========================
 
+def get_tar_attr(n):
+    return "target" if hasattr(n,"target") else "main_target"
+
+def get_num(n): # can be used on B, D, S or K
+    mt = getattr(n,get_tar_attr(n))
+    try:
+        return int(mt.split('_')[2])
+    except:
+        print(f"Exception pour mt : {mt}")
+        return (-1)
+
 def sort_based_on_req(origin_node): # used on B, S and K
     # /!\ origin_node is the root of .req relation 
     # /!\ => the last node to be computed !!
 
     # To be compatible with different names for attributes
-    tar = "target" if hasattr(origin_node,"target") else "main_target"
+    tar = get_tar_attr(origin_node)
     req = "req" if hasattr(origin_node,"req") else "req_real"
 
     # Compute incomming degree
@@ -247,7 +258,7 @@ def sort_based_on_req(origin_node): # used on B, S and K
     sorted_list = []
     to_explore = set([origin_node])
     while to_explore: # not empty
-        n = max(to_explore,key=lambda n : getattr(n,tar))
+        n = max(to_explore,key=lambda n : get_num(n))
         to_explore.discard(n)
         sorted_list.append(n)
         for sub_n in getattr(n,req):
