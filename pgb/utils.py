@@ -230,7 +230,6 @@ def get_num(n): # can be used on B, D, S or K
     try:
         return int(mt.split('_')[2])
     except:
-        print(f"Exception pour mt : {mt}")
         return (-1)
 
 def sort_based_on_req(origin_node): # used on B, S and K
