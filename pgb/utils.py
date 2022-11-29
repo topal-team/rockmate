@@ -222,32 +222,45 @@ def is_constant(v):
 # ==== TOPO SORT GRAPHS ====
 # ==========================
 
-def sort_targets(l):
-    if len(l)==0: return list(l)
-    tar = "target" if hasattr(next(iter(l)),"target") else "main_target"
-    return sorted(l,key = lambda n : getattr(n,tar))
+def sort_based_on_req(origin_node): # used on B, S and K
+    # /!\ origin_node is the root of .req relation 
+    # /!\ => the last node to be computed !!
 
-def sort_based_on_req(n): # used on B, S and K
-    # n can be any type of node (B, D, S, K)
-    # we just need attribut req
-    tar = "target" if hasattr(n,"target") else "main_target"
-    dict_done = {}
-    nodes = []
-    def visit(n):
-        if n not in dict_done:
-            dict_done[n]=False
-            try:
-                req_set = n.req_real
-            except: req_set = n.req
-            for sub_n in sort_targets(req_set):
-                visit(sub_n)
-            dict_done[n]=True
-            nodes.append(n)
-        elif not dict_done[n]:
-            raise Exception(
-                "Cycle in the graph. How could this happened ??")
-    visit(n)
-    return nodes
+    # To be compatible with different names for attributes
+    tar = "target" if hasattr(origin_node,"target") else "main_target"
+    req = "req" if hasattr(origin_node,"req") else "req_real"
+
+    # Compute incomming degree
+    degree = {}
+    def count_edges(n):
+        for sub_n in getattr(n,req):
+            if sub_n not in degree:
+                d = 0
+                count_edges(sub_n)
+            else:
+                d = degree[sub_n]
+            degree[sub_n] = d+1
+    count_edges(origin_node)
+
+    # Explore nodes by increasing lexi-order of their n.target
+    # BUT a node is explored iff all its used_by are explored => toposort
+    sorted_list = []
+    to_explore = set([origin_node])
+    while to_explore: # not empty
+        n = max(to_explore,key=lambda n : getattr(n,tar))
+        to_explore.discard(n)
+        sorted_list.append(n)
+        for sub_n in getattr(n,req):
+            if sub_n in sorted_list:
+                raise Exception("Cycle in the graph => no toposort")
+            d = degree[sub_n]
+            if d == 1:
+                to_explore.add(sub_n)
+            else:
+                degree[sub_n] = d-1
+
+    # return from first to last
+    return sorted_list[::-1]
 
 # ==========================
 
