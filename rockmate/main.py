@@ -15,16 +15,13 @@ def print_memsizes(list_kg):
     print_debug("\n")
 
 class CheckpointedModule(torch.nn.Module):
-    def __init__(self,original_mod,dict_inputs,verbose=False, 
-                 mem_limit=None, mem_slots=5000):
+    def __init__(self,original_mod,dict_inputs,mem_limit=None,mem_unit=None,verbose=False,
+                 get_chain=True,get_sequence=True,get_code=True): 
         super(CheckpointedModule,self).__init__()
-        if mem_limit:
-            self.mem_limit = mem_limit
-        else:
-            self.mem_limit = torch.cuda.get_device_properties(0).total_memory*0.9
-        self.mem_slots = mem_slots
         ref_verbose[0] = verbose
         self.device = get_device()
+        self.original_mod = original_mod
+        self.mem_unit = mem_unit if mem_unit else 1024**2
         # -- use pytorch graph builder to get the list of K_graphs --
         self.pgb_res = pgb.make_all_graphs(
            original_mod,dict_inputs,
@@ -38,27 +35,32 @@ class CheckpointedModule(torch.nn.Module):
         self.output = self.list_kg[-1].direct_outputs[-1]
 
         print_memsizes(self.list_kg) # to debug
+        if get_chain:self.get_chain()
+        if get_sequence:self.get_sequence(mem_limit)
+        if get_code:self.get_code()
 
+    def get_chain(self,nb_budget_abar=10,nb_budget_all=5):
         # -- use checkmate to solve all the blocks --
-        mem_unit = self.mem_limit//self.mem_slots
-        print_debug("mem_unit", mem_unit)
-        print_debug("mem_limit", self.mem_limit)
-        self.rk_chain = RK_Chain(self.list_kg,10,3, mem_unit=mem_unit)
-        print("Mem after RKchain", torch.cuda.memory_allocated())
-        #print("rkchain",torch.cuda.memory_allocated())
+        #print_debug("mem_unit", mem_unit)
+        self.rk_chain = RK_Chain(self.list_kg,nb_budget_abar,nb_budget_all, mem_unit=self.mem_unit)
+        #print("Mem after RKchain", torch.cuda.memory_allocated())
 
+    def get_sequence(self,mem_limit):
+        if mem_limit:
+            self.mem_limit = mem_limit
+        else:
+            self.mem_limit = torch.cuda.get_device_properties(0).total_memory*0.9
+        print_debug("mem_limit", self.mem_limit)
         # -- solve the chain like rotor --
-        self.seq = seq_builder(self.rk_chain, self.mem_limit//mem_unit)
-        print("Mem after seq builder", torch.cuda.memory_allocated())
-        #print("seqbuilder",torch.cuda.memory_allocated())
-        
+        self.seq = seq_builder(self.rk_chain, self.mem_limit//self.mem_unit)
         self.fwd_seq,self.bwd_seq = self.seq.cut_fwd_bwd()
-        self.original_mod = original_mod
+        #print("Mem after seq builder", torch.cuda.memory_allocated())
+        
+    def get_code(self):
         self.storage =  RK_Storage(self.device,self.original_mod)
         self.executor = Executor(self.storage,self.fwd_seq,self.bwd_seq)
-        #print("executor",torch.cuda.memory_allocated())
         self.executor.translate(bwd=True)
-        print("Mem after translator", torch.cuda.memory_allocated())
+        #print("Mem after translator", torch.cuda.memory_allocated())
         self.fwd_code = self.executor.fwd_code
         self.bwd_code = self.executor.bwd_code
 

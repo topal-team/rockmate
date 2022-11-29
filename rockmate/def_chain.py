@@ -18,17 +18,20 @@ import math
 # -> Methods    : __init__
 class RK_Block_Solution():
     def __init__(self,kg,budget_abar,budget_all):
+        self.budget_abar = budget_abar
+        self.budget_all = budget_all
+
         kg.loss_node.run_mem = MemSize(budget_all - budget_abar)
-        sched_result, op_list, chk_g = make_sched(kg, budget_all)
-        is_f = self.is_feasible = sched_result.feasible
+        self.sched_result, self.op_list, self.chk_g = make_sched(kg, budget_all)
+        is_f = self.is_feasible = self.sched_result.feasible
         if is_f:
             #TODO: find a better way to split
-            for i,op in enumerate(op_list):
+            for i,op in enumerate(self.op_list):
                 if "loss" in op.n.name:
                     loss_i = i
                     break
-            self.op_block_fwd = OpBlock(op_list[:loss_i+1])
-            self.op_block_bwd = OpBlock(op_list[loss_i+1:])
+            self.op_block_fwd = OpBlock(self.op_list[:loss_i+1])
+            self.op_block_bwd = OpBlock(self.op_list[loss_i+1:])
             self.time_fwd = self.op_block_fwd.time
             self.time_bwd = self.op_block_bwd.time
 
@@ -59,7 +62,7 @@ class RK_Block():
 
         # == budgets to test ==
         nodes_size = [n.run_mem.v for n in kg.dict_nodes.values()]
-        max_bdg = sum(nodes_size)
+        max_bdg = sum(nodes_size)+max(nodes_size)
         min_bdg = max(nodes_size)
         #l_bd_abar = np.linspace(min_bdg,max_bdg,nb_bdg_abar)
         l_bd_abar = np.linspace(0,max_bdg,nb_bdg_abar)
@@ -157,8 +160,9 @@ class RK_Block():
 # ==========================
 
 class RK_Chain():
-    def __init__(self,list_kg, nb_budget_abar=10,nb_budget_all=3, mem_unit=1024**2):
-        self.mem_unit = mem_unit
+    def __init__(self,list_kg, nb_budget_abar=10,nb_budget_all=3, mem_unit=None):
+        if mem_unit:self.mem_unit = mem_unit
+        else: self.mem_unit = 1024**2
         l = self.body = []
         for g in list_kg:
             l.append(RK_Block(g,nb_budget_abar,nb_budget_all))
