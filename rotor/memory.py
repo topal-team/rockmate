@@ -48,6 +48,11 @@ class MemSize:
     def __int__(self):
         return self.v
 
+    def __eq__(self,m):
+        return self.v == m.v
+    def __hash__(self):
+        return id(self)
+
 class MeasureMemory:
     def __init__(self, device):
         self.device = device

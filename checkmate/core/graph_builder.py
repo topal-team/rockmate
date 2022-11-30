@@ -78,7 +78,8 @@ class GraphBuilder:
         """
         # step 1 -- toposort graph and allocate node positions as a dict({0, ..., n} -> UUID)
         edge_list = [(source, dest) for dest, sources in self.arguments.items() for source in sources]
-        topo_order = list(reversed([x for st in toposort(edge_to_adj_list(edge_list)) for x in st]))
+        edge_list_name = [(self._uuid_to_name(s), self._uuid_to_name(d)) for (s,d) in edge_list]
+        topo_order = list(reversed([self._name_to_uuid(x) for st in toposort(edge_to_adj_list(edge_list_name)) for x in st]))
         topo_order = [v for v in set(self.nodes.values()) - set(topo_order)] + topo_order  # add isolated nodes
         uuid2topo = {uuid: topo_idx for topo_idx, uuid in enumerate(topo_order)}
 

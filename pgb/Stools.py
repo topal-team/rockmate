@@ -17,6 +17,21 @@ class S_node():
         self.req = set()
         self.used_by = set()
         self.protected = protected
+    def __eq__(self,n2):
+        n1 = self
+        b = check_attr(n1,n2,[
+            "is_artefact","main_fct",
+            "main_target","all_targets",
+            "tensor_targets","protected"])
+        mkstr = lambda nl : [rn.main_target for rn in nl]
+        b = (b
+            and (mkstr(n1.req) == mkstr (n2.req))
+            and (mkstr(n1.used_by) == mkstr (n2.used_by))
+            and (n1.get_code() == n2.get_code()))
+        return b
+    def __hash__(self):
+        return self.main_target.__hash__()
+        #return id(self) # __eq__ => need __hash__
 
     def full_code(self):
         if self.main_code is None: mc = []
@@ -111,6 +126,13 @@ class S_graph():
             self.direct_outputs = [dg.output]
             self.dict_info      = dg.dict_info
             self.dict_rand      = dg.dict_rand
+    def __eq__(self,g2):
+        return check_attr(self,g2,[
+            "direct_inputs","hidden_inputs",
+            "direct_outputs","hidden_output",
+            "dict_info","nodes"])
+    def __hash__(self):
+        return id(self)
 
     def make_io(self):
         # assert : hidden_inputs & direct_outputs exist
@@ -566,3 +588,4 @@ def print_S_graph_list(list_g,name=None,open=True):
     graph_render(dot,open,"S") # from utils.py
 
 # ==========================
+

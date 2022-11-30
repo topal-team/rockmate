@@ -11,6 +11,18 @@ class D_node(B_node):
         super().__init__(target,code,fct)
         self.used_by = set()
         self.protected = False
+    def __eq__(self,n2):
+        n1 = self
+        b = check_attr(n1,n2,["protected","target","fct","is_rand"])
+        mkstr = lambda nl : [rn.target for rn in nl]
+        b = (b
+            and (mkstr(n1.req) == mkstr (n2.req))
+            and (mkstr(n1.used_by) == mkstr (n2.used_by))
+            and (n1.get_code() == n2.get_code()))
+        return b # missing req_rand equality
+    def __hash__(self):
+        return self.target.__hash__()
+        #return id(self) # __eq__ => need __hash__
 
 class D_graph():
     def __init__(self):
@@ -20,6 +32,11 @@ class D_graph():
         self.output_node = None # D_node
         self.dict_rand = {}
         self.dict_info = {} # target -> FWD_info
+    def __eq__(self,g2):
+        return check_attr(self,g2,
+            ["inputs","output","dict_info","nodes"])
+    def __hash__(self):
+        return id(self)
 
     def prepare_cut(self):
         # in case, after simplifications, we will cut / sequentialize
@@ -89,16 +106,10 @@ def generate_tmp_local(g,dict_info,n):
 
 # ===== Main function ======
 
-def B_to_D(bg : B_graph,nn_mod,dict_inputs,D_device=None):
-    # -> D_graph:
-    # -- device --
-    global device
-    if D_device is None: device = get_device()
-    else: device = K_device
-    nn_mod.to(device)
-    for (k,x) in dict_inputs.items():
-        dict_inputs[k] = x.to(device)
-    # --
+def B_to_D(bg : B_graph,model,dict_inputs,device=None):
+    if not device:
+        device = get_device_and_check_all_same_device(model,dict_inputs)
+    globals()["device"] = device
 
     # --- init and sort ---
     dg = D_graph()
@@ -116,7 +127,7 @@ def B_to_D(bg : B_graph,nn_mod,dict_inputs,D_device=None):
     # 2) exec the code to generate the node value
     # 3) extract the info for this node, and forget the tensors
     our_global = globals().copy()
-    our_global["self"] = nn_mod
+    our_global["self"] = model
     our_global["device"] = device
 
     for n in b_nodes:
@@ -214,9 +225,9 @@ def print_D_graph(g : D_graph,name=None,open=True):
 # === test forward code ====
 # ==========================
 
-def test_fw_code(g : D_graph,nn_mod,dict_inputs : dict):
+def test_fw_code(g : D_graph,model,dict_inputs : dict):
     loc_dict = {}
-    loc_dict["self"] = nn_mod
+    loc_dict["self"] = model
     for inp in g.inputs:
         loc_dict[inp] = dict_inputs[inp]
     for v in g.dict_rand:
@@ -230,3 +241,4 @@ def test_fw_code(g : D_graph,nn_mod,dict_inputs : dict):
     return loc_dict[g.output]
 
 # ==========================
+

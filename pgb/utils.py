@@ -13,7 +13,11 @@
 import ast
 import astunparse
 import torch
+import numpy as np
 from torch import tensor
+#from .Btools import B_node 
+#from .Stools import S_node 
+#from .Ktools import K_node 
 import graphviz
 
 # == rotor == -> for inspection in Ktools.py
@@ -21,7 +25,6 @@ import rotor.timing # -> use .make_timer
 import rotor.memory # -> use .MeasureMemory
 from rotor.memory import MemSize
 from rotor.inspection import tensorMsize
-min_duration = 0
 minus_mem = lambda m : MemSize(- m.v)
 
 # for main.py -> get inputs
@@ -40,18 +43,60 @@ py_version = svi.major + svi.minor/10
 # ====== GLOBAL VARS =======
 # ==========================
 
+time_min_duration = 0
+time_min_repeat = 5
+
 # -> print debug messages
 ref_verbose = [False]
 def print_debug(*args, **kwargs):
     if ref_verbose[0]:
         print(*args, **kwargs)
 
+# -> to raise exceptions with lambda functions
+def raise_(s):
+    raise Exception(s)
+
 # -> device
 def get_device():
-    if torch.cuda.is_available():
-        return torch.device('cuda')
-    else:
-        return torch.device('cpu')
+    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+def get_device_and_check_all_same_device(
+        model,dict_inputs,without_inp=False):
+    d = None
+    k = None
+    print_err = lambda k1,d1,k2,d2 : raise_(
+      f"Carelessness ! All inputs and parameters of the model\n"\
+      f"must share the same device. Here {k1}'s device is {d1}\n"\
+      f"and {k2}'s device is {d2}.")
+
+    if not isinstance(dict_inputs,dict):
+        dict_inputs = dict(enumerate(dict_inputs))
+
+    for (key,inp) in dict_inputs.items():
+        if isinstance(inp,torch.Tensor):
+            if d is None: d = inp.device ; k = f"input {key}"
+            else:
+                if d != inp.device:
+                    print_err(f"input {key}",inp.device,k,d)
+    i = -1
+    for p in model.parameters():
+        i += 1
+        if d is None: d = p.device ; k = f"{i}-th parameter"
+        else:
+            if d != p.device:
+                print_err(f"{i}-th parameter",p.device,k,d)
+    if d: return d
+    elif without_inp: return get_device()
+    else: raise Exception(
+        "Sorry, at least one input or one parameter should be a tensor.")
+
+
+
+# -> acceptance rate for two time measures to be declared equal
+ref_reasonable_rate = [0.4]
+def change_reasonable_rate(x):
+    assert(0<=x)
+    ref_reasonable_rate[0] = x
 
 # ==========================
 
@@ -99,6 +144,22 @@ list_view_fct = [
     ]
 # list imported from https://pytorch.org/docs/stable/tensor_view.html
 
+# ==========================
+
+
+
+# ==========================
+# === SMALL USEFULL FCT ====
+# ==========================
+def check_attr(o1,o2,list_attr,raise_exception=False):
+    for s in list_attr:
+        if getattr(o1,s) != getattr(o2,s):
+            if raise_exception:
+                raise Exception(f"attr diff {s}")
+            return False
+    return True
+def vdir(c):
+    return [s for s in dir(c) if not s.startswith("__")]
 # ==========================
 
 
@@ -161,23 +222,55 @@ def is_constant(v):
 # ==== TOPO SORT GRAPHS ====
 # ==========================
 
-def sort_based_on_req(n): # used on B, S and K
-    # n can be any type of node (B, D, S, K)
-    # we just need attribut req
-    dict_done = {}
-    nodes = []
-    def visit(n):
-        if n not in dict_done:
-            dict_done[n]=False
-            for sub_n in n.req:
-                visit(sub_n)
-            dict_done[n]=True
-            nodes.append(n)
-        elif not dict_done[n]:
-            raise Exception(
-                "Cycle in the graph. How could this happened ??")
-    visit(n)
-    return nodes
+def get_tar_attr(n):
+    return "target" if hasattr(n,"target") else "main_target"
+
+def get_num(n): # can be used on B, D, S or K
+    mt = getattr(n,get_tar_attr(n))
+    try:
+        return int(mt.split('_')[2])
+    except:
+        return (-1)
+
+def sort_based_on_req(origin_node): # used on B, S and K
+    # /!\ origin_node is the root of .req relation 
+    # /!\ => the last node to be computed !!
+
+    # To be compatible with different names for attributes
+    tar = get_tar_attr(origin_node)
+    req = "req" if hasattr(origin_node,"req") else "req_real"
+
+    # Compute incomming degree
+    degree = {}
+    def count_edges(n):
+        for sub_n in getattr(n,req):
+            if sub_n not in degree:
+                d = 0
+                count_edges(sub_n)
+            else:
+                d = degree[sub_n]
+            degree[sub_n] = d+1
+    count_edges(origin_node)
+
+    # Explore nodes by increasing lexi-order of their n.target
+    # BUT a node is explored iff all its used_by are explored => toposort
+    sorted_list = []
+    to_explore = set([origin_node])
+    while to_explore: # not empty
+        n = max(to_explore,key=lambda n : get_num(n))
+        to_explore.discard(n)
+        sorted_list.append(n)
+        for sub_n in getattr(n,req):
+            if sub_n in sorted_list:
+                raise Exception("Cycle in the graph => no toposort")
+            d = degree[sub_n]
+            if d == 1:
+                to_explore.add(sub_n)
+            else:
+                degree[sub_n] = d-1
+
+    # return from first to last
+    return sorted_list[::-1]
 
 # ==========================
 
@@ -222,6 +315,12 @@ class FWD_info(): # everything needed to randomly regenerate a var
         self.sub_info = None # if ttype = list or tuple
         self.requires_grad = None # if Tensor or Size
         self.memsize = None # done much later
+    def __eq__(self,i2):
+        d = vdir(self)
+        for s in d:
+            if getattr(self,s) != getattr(i2,s): return False
+        return True
+
 
 def generate_val(info,device):
     tt = info.ttype

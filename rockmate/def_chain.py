@@ -5,9 +5,9 @@
 # ==========================
 
 from .utils import *
-from .use_chk import make_sched, Sched_to_ops
-from .def_code import CodeAtom, CodeBlock
-
+from .use_chk import make_sched
+from .def_code import Op, OpBlock
+import math
 # ==========================
 # ======== RK Block ========
 # ==========================
@@ -18,29 +18,36 @@ from .def_code import CodeAtom, CodeBlock
 # -> Methods    : __init__
 class RK_Block_Solution():
     def __init__(self,kg,budget_abar,budget_all):
-        kg.loss_node.fgt_mem = MemSize(budget_all - budget_abar)
-        sched_result, chk_g = make_sched(kg, budget_all)
-        is_f = self.is_feasible = sched_result.feasible
+        self.budget_abar = budget_abar
+        self.budget_all = budget_all
+
+        kg.loss_node.run_mem = MemSize(budget_all - budget_abar)
+        self.sched_result, self.op_list, self.chk_g = make_sched(kg, budget_all)
+        is_f = self.is_feasible = self.sched_result.feasible
         if is_f:
-            Translator = Sched_to_ops(chk_g,kg)
-            code_fwd,code_bwd = Translator.generate_sched_ops(sched_result)
+            #TODO: find a better way to split
+            for i,op in enumerate(self.op_list):
+                if "loss" in op.n.name:
+                    loss_i = i
+                    break
+            self.op_block_fwd = OpBlock(self.op_list[:loss_i+1])
+            self.op_block_bwd = OpBlock(self.op_list[loss_i+1:])
+            self.time_fwd = self.op_block_fwd.time
+            self.time_bwd = self.op_block_bwd.time
 
-            fwd_overhead,fwd_save = code_fwd.mem_timeline()
-            bwd_overhead,bwd_save = code_bwd.mem_timeline()
+            #fwd_overhead,fwd_save = op_block_fwd.mem_timeline()
+            #bwd_overhead,bwd_save = op_block_bwd.mem_timeline()
 
-            self.code_fwd = code_fwd
-            self.code_bwd = code_bwd
-            self.time_fwd = sum([op.time for op in code_fwd.body])
-            self.time_bwd = sum([op.time for op in code_bwd.body])
-            self.size_a_bar = fwd_save[-1]
-            self.overhead_fwd = max(fwd_overhead+fwd_save) - fwd_save[-1]
-            self.overhead_bwd = max(bwd_overhead+bwd_save) - bwd_save[-1]
+            self.size_a_bar = self.op_block_fwd.save
+            self.overhead_fwd = self.op_block_fwd.overhead 
+            #self.overhead_bwd = self.op_block_bwd.overhead 
+            #quick fix:
+            self.overhead_bwd = self.op_block_bwd.overhead+self.op_block_bwd.save#-self.size_a_bar
 
 
 # RK_Block :
 # -> Attributes : .block_name               -> str
 #                 .sols                     -> RK_Block_Solution list
-#                 .code_fn ; .code_fc       -> CodeBlock
 #                 .overhead_ff ; .time_ff   -> int
 #                 .mem_inp ; .mem_out       -> int
 #                 .overhead_fwd ; .overhead_bwd ; .size_a_bar -> int
@@ -54,10 +61,11 @@ class RK_Block():
             f"Block[{kg.hidden_inputs}->{kg.direct_outputs}]")
 
         # == budgets to test ==
-        nodes_size = [n.fgt_mem.v for n in kg.dict_nodes.values()]
-        max_bdg = sum(nodes_size)
+        nodes_size = [n.run_mem.v for n in kg.dict_nodes.values()]
+        max_bdg = sum(nodes_size)+max(nodes_size)
         min_bdg = max(nodes_size)
-        l_bd_abar = np.linspace(min_bdg,max_bdg,nb_bdg_abar)
+        #l_bd_abar = np.linspace(min_bdg,max_bdg,nb_bdg_abar)
+        l_bd_abar = np.linspace(0,max_bdg,nb_bdg_abar)
         l_bd_all  = np.linspace(min_bdg,max_bdg,nb_bdg_all+2)[2:]
         print_debug(
             f"=*=*=*=\nStart {self.block_name}, total cost : "\
@@ -81,7 +89,7 @@ class RK_Block():
                         if not (t in uniq_sols):
                             uniq_sols.add(t)
                             sols.append(sol)
-        kg.loss_node.fgt_mem = MemSize(0)
+        kg.loss_node.run_mem = MemSize(0)
 
         # == build .mem_inp/out ==
         memsize = lambda inp : kg.dict_info[inp].memsize.v
@@ -90,54 +98,46 @@ class RK_Block():
 
         # == build fast_forward code ==
         fwd_nodes = sort_based_on_req(kg.loss_node)[:-1] # from pgb/utils
+        #fwd_nodes should contains only the nodes from the current Kgraph
         code_ff = []
+        op_list_fc = []
+        op_list_fn = []
         nodes_done = set()
         current_mem = 0 ; mem_timeline = []
         def fwd_n(n):
             nonlocal current_mem, mem_timeline
             current_mem += memsize(n.main_target)
             mem_timeline.append(current_mem)
-            code_ff.append(CodeAtom(
-                code=n.get_code(),
-                is_fgt=False,
-                n=n))
+            #code_ff.append(CodeAtom(
+            #    code=n.get_code(),
+            #    is_fgt=False,
+            #    n=n))
+            op_list_fc.append(Op(is_fgt=False,n=n))
+            op_list_fn.append(Op(is_fgt=False,n=n))
             nodes_done.add(n)
-            for req_n in n.req: try_del(req_n)
+            for req_n in n.req_global: try_del(req_n)
         def try_del(n):
             is_fwd = lambda un : un.is_fwd and not un is kg.loss_node
             b = True
-            for un in n.used_by:
-                if is_fwd(un) and not un in nodes_done:
+            for un in n.used_by_global:
+                if is_fwd(un) and not un in nodes_done and un in fwd_nodes:
                     b = False
             if b:
-                nonlocal current_mem, mem_timeline
-                current_mem -= memsize(n.main_target)
-                mem_timeline.append(current_mem)
-                s = ", ".join(n.all_targets)
-                code_ff.append(CodeAtom(
-                    code=f"del {s}",
-                    is_fgt=None,
-                    n=n))
+                op_list_fn.append(Op(is_fgt=True,n=n))
+                if n in fwd_nodes:
+                    op_list_fc.append(Op(is_fgt=True,n=n))
         for n in fwd_nodes: fwd_n(n)
 
         # = build .code_fc =
-        self.code_fc = CodeBlock(code_ff)
-        # = build .code_fn =
-        s = ", ".join(kg.direct_inputs)
-        code_fgt_inp = CodeAtom(
-            code=f"del {s}",
-            is_fgt=None,
-            main_var=kg.direct_inputs[0],
-            lvars=kg.direct_inputs,
-            is_fwd=True,
-            time=0,
-            mem=self.mem_inp)
-        self.code_fn = CodeBlock(code_ff+[code_fgt_inp])
-
+        #self.code_fc = CodeBlock(code_ff)
+        self.op_block_fc = OpBlock(op_list_fc)
+        self.op_block_fn = OpBlock(op_list_fn)#TODO:add fgt outputs node from the previous 
         # = build .overhead_ff =
-        self.overhead_ff = max(mem_timeline) - self.mem_out
+        #self.overhead_ff = max(mem_timeline) - self.mem_out
+        self.overhead_ff = self.op_block_fc.overhead 
         # = build .time_ff ==
-        self.time_ff = sum([n.time for n in fwd_nodes])
+        #self.time_ff = sum([n.time for n in fwd_nodes])
+        self.time_ff = self.op_block_fc.time
     # =====================================
 
     def __str__(self):
@@ -160,16 +160,19 @@ class RK_Block():
 # ==========================
 
 class RK_Chain():
-    def __init__(self,list_kg,nb_budget_abar=10,nb_budget_all=3):
+    def __init__(self,list_kg, nb_budget_abar=10,nb_budget_all=3, mem_unit=None):
+        if mem_unit:self.mem_unit = mem_unit
+        else: self.mem_unit = 1024**2
         l = self.body = []
         for g in list_kg:
             l.append(RK_Block(g,nb_budget_abar,nb_budget_all))
             print_debug(l[-1])
-
-    def build_rotor_chain(self):
         # organizes the information for rotor_solver.py as in Rotor
         # -> fw/bw/cw/cbw/fwd_tmp/bwd_tmp
         # -> in those list, one dummy block is added at the end for Loss
+        # fw/bw: runtime of fwd/bwd
+        # cbw: saved memory in each solution
+        # cw: saved memory for each checkpoint solution (only the input)
 
         # -- init variables --
         ln = len(self.body)
@@ -211,13 +214,16 @@ class RK_Chain():
         self.ln     = ln
         self.fw     = fw
         self.bw     = bw
-        self.cw     = cw
-        self.cbw    = cbw
-        self.fwd_tmp    = fwd_tmp
-        self.bwd_tmp    = bwd_tmp
-        self.ff_fwd_tmp = ff_fwd_tmp
+        self.cw     = self.discretize(cw)
+        self.cbw    = [self.discretize(x) for x in cbw]
+        self.fwd_tmp    = [self.discretize(x) for x in fwd_tmp]
+        self.bwd_tmp    = [self.discretize(x) for x in bwd_tmp]
+        self.ff_fwd_tmp = self.discretize(ff_fwd_tmp)
         self.ff_fw  = ff_fw
         self.nb_sol = nb_sol
+
+    def discretize(self, values):
+        return [math.ceil(value/self.mem_unit) for value in values]
 
 # ==========================
 
