@@ -3,7 +3,7 @@
 # we exec it and how we store things
 # -> to replace rotor/Checkpointable.functions
 # ==========================
-
+from typing import NamedTuple, Optional
 from .utils import *
 
 # ==========================
@@ -53,16 +53,43 @@ class Op:
             if n.is_fwd: self.op_type = "Fwd"
             else: self.op_type = "Bwd"
         self.name = self.op_type+" "+self.main_var
-        
+
+class RunOp():
+    def __init__(self, kn, keep_kn=True):
+        self.op_name = kn.name
+        self.time = kn.time
+        self.save_mem = kn.run_mem.v
+        self.overhead = kn.overhead.v
+        self.code = kn.get_code()
+        self.requires_grad = kn.info.requires_grad
+        if keep_kn: self.kn = kn
+        self.is_fgt = False
+
+class DelOp():
+    def __init__(self, ti):
+        self.op_name = ti.name
+        self.time = 0
+        self.save_mem = ti.mem
+        # self.code = kn.get_code()
+        self.requires_grad = ti.requires_grad
+        self.tensor_info = ti
+        self.is_fgt = True
+
+    op_name: str# e.g. "Del {main_target} grad"
+    time: int
+    save_mem: int
+    all_targets: Optional[List[str]]
+    kn: Optional[pgb.Ktools.K_node]
+    is_fgt = True
 
 class OpBlock:
-    def __init__(self, op_list):
-        self.body = op_list
+    def __init__(self, op_sched):
+        self.op_sched = op_sched
         save_mem = []
         tmp_mem = []
-        for o in self.body:
+        for o in self.op_sched:
             if "loss" in o.name:continue
-            save_mem.append(o.mem)
+            save_mem.append(o.save_mem)
             tmp_mem.append(o.overhead)
         self.save_timeline = np.cumsum(np.array([0]+save_mem))
         #self.overhead_timeline = np.cumsum(np.array(tmp_mem))
@@ -70,11 +97,7 @@ class OpBlock:
 
         self.save = self.save_timeline[-1]
         self.overhead = max(self.save_timeline+self.overhead_timeline) - self.save
-        self.time = sum([op.time for op in self.body])
-
-
-
-class CodeBlock: pass
+        self.time = sum([op.time for op in self.op_sched])
 
 class RK_Function:
     def __init__(self,code_fe,code_fn,code_fc,code_bwd):

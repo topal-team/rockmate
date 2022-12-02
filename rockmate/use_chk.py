@@ -6,11 +6,26 @@
 
 from .utils import *
 from .def_code import Op, OpBlock
+from ILP.graph_builder import CD_graph
 
 # ==========================
 # === make the schedule ====
 # ==========================
 # -> interface with checkmate
+
+def make_sched(kg : pgb.Ktools.K_graph,budget,
+        plot_sched=False,solver='SCIPY',
+        verbose=None,use_gurobi=True,
+        only_sched=True):
+    # == verbose ==
+    if verbose is None: verbose = ref_verbose[0]
+    else: ref_verbose[0]=verbose
+
+    cdgraph = graph_builder.build()#TODO
+    solver = ModelGurobi(g=cdgraph, budget=budget, gcd=1e5)
+    solver.solve()
+    op_sched = solver.schedule()if solver.feasible else None
+    if only_sched: return op_sched
 
 def make_sched(kg : pgb.Ktools.K_graph,budget,
         plot_sched=False,solver='SCIPY',

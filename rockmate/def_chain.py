@@ -22,16 +22,17 @@ class RK_Block_Solution():
         self.budget_all = budget_all
 
         kg.loss_node.run_mem = MemSize(budget_all - budget_abar)
-        self.sched_result, self.op_list, self.chk_g = make_sched(kg, budget_all)
-        is_f = self.is_feasible = self.sched_result.feasible
-        if is_f:
+        #self.sched_result, self.op_sched, self.chk_g = make_sched(kg, budget_all)
+        self.op_sched = make_sched(kg, budget_all)
+        #is_f = self.is_feasible = self.sched_result.feasible
+        if self.op_sched:
             #TODO: find a better way to split
-            for i,op in enumerate(self.op_list):
+            for i,op in enumerate(self.op_sched):
                 if "loss" in op.n.name:
                     loss_i = i
                     break
-            self.op_block_fwd = OpBlock(self.op_list[:loss_i+1])
-            self.op_block_bwd = OpBlock(self.op_list[loss_i+1:])
+            self.op_block_fwd = OpBlock(self.op_sched[:loss_i+1])
+            self.op_block_bwd = OpBlock(self.op_sched[loss_i+1:])
             self.time_fwd = self.op_block_fwd.time
             self.time_bwd = self.op_block_bwd.time
 

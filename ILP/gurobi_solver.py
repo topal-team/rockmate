@@ -5,10 +5,11 @@ from typing import Dict, Any, Optional
 
 import numpy as np
 from gurobipy import GRB, Model, quicksum
+from rockmate.def_code import RunOp, DelOp
 
 class ModelGurobi:
     def __init__(self,
-        g: CDGraph,
+        g: CD_graph,
         budget: int,
         gurobi_params: Dict[str,Any] = None,
         gcd = None
@@ -29,9 +30,11 @@ class ModelGurobi:
         J = len(self.g.DataInputComp)
         I = len(self.g.TensorToData)
 
-        self.CreateList = [(k,i) for k in range(T) for i in self.g.CompOutputTensors[k]]
+        self.CreateList = [(k,i) for k in range(T) 
+                           for i in self.g.CompOutputTensors[k]]
         self.DeleteList = [(k,i) for k in range(T) for i in 
-                           self.g.CompInputTensors[k]+self.g.CompOutputTensors[k]]
+                           self.g.CompInputTensors[k] + 
+                           self.g.CompOutputTensors[k]]
 
         Cr = len(self.CreateSet)
         De = len(self.DeleteSet)
@@ -64,16 +67,22 @@ class ModelGurobi:
 
                 # define objective function
                 self.m.setObjective(quicksum(self.R[t, i] * self.g.time[i]
-                                             for t in range(T) for i in range(T)), GRB.MINIMIZE)
+                                             for t in range(T) 
+                                             for i in range(T)),
+                                             GRB.MINIMIZE)
 
             with Timer("Variable initialization", 
                        extra_data={"T": str(T), "budget": str(budget)}):
                 if self.imposed_schedule == ImposedSchedule.FULL_SCHEDULE:
                     self.m.addLConstr(quicksum(self.R[t, i] for t in range(T) 
-                                               for i in range(t+1, T)), GRB.EQUAL, 0)
-                    self.m.addLConstr(quicksum(self.S[t, j] for j in range(J) for t 
-                                               in range(self.g.DataInputComp(j), T), GRB.EQUAL, 0) 
-                    self.m.addLConstr(quicksum(self.R[t, t] for t in range(T)), GRB.EQUAL, T)
+                                               for i in range(t+1, T)), 
+                                      GRB.EQUAL, 0)
+                    self.m.addLConstr(quicksum(self.S[t, j] for j in range(J) 
+                                               for t in range(
+                                                   self.g.DataInputComp(j), T),
+                                      GRB.EQUAL, 0) 
+                    self.m.addLConstr(quicksum(self.R[t, t] for t in range(T)), 
+                                      GRB.EQUAL, T)
                 #elif self.imposed_schedule == ImposedSchedule.COVER_ALL_NODES:
                 #    self.m.addLConstr(quicksum(self.S[0, i] for i in range(T)), GRB.EQUAL, 0)
                 #    for i in range(T):
@@ -86,47 +95,65 @@ class ModelGurobi:
                 #    self.m.addLConstr(quicksum(self.R[t, T - 1] for t in range(T)), 
                 #                               GRB.GREATER_EQUAL, 1)
 
-            with Timer("Correctness constraints", extra_data={"T": str(T), "budget": str(budget)}):
+            with Timer("Correctness constraints", 
+                       extra_data={"T": str(T), "budget": str(budget)}):
                 # ensure all checkpoints are in memory
                 for t in range(T - 1):
                     for i in range(T):
                         self.m.addLConstr(self.S[t+1, i], GRB.LESS_EQUAL, 
-                                          self.S[t, i] + self.R[t, self.g.DataInputComp(j)])
+                                          self.S[t, i] + self.R[t, 
+                                          self.g.DataInputComp(j)])
                 # ensure all computations are possible
                 for i in range(T):
                     for t in range(T):
                         for j in self.g.CompInputData(i):
                             self.m.addLConstr(self.R[t, i], GRB.LESS_EQUAL, 
-                                              self.R[t, self.g.DataInputComp(j)] + self.S[t, j])
+                                              self.R[t, self.g.DataInputComp(j)]
+                                            + self.S[t, j])
                             
             # define memory constraints
-            with Timer("Presence constraints", extra_data={"T": str(T), "budget": str(budget)}):
+            with Timer("Presence constraints", extra_data={"T": str(T), 
+                       "budget": str(budget)}):
                 # ensure all checkpoints are in memory
                 alive = {}
                 for t in range(T):
                     for eidx, (k, i) in enumerate(self.DeleteList):
                         alive[(t,k,i)] = self.P[t,i]
-                        alive[(t,k,i)] += quicksum(self.create[t,eidx_c] for eidx_c, (k_, i_) 
-                                                   in enumerate(self.CreateList) if i_==i and k_<=k)
-                        alive[(t,k,i)] -= quicksum(self.delete[t,eidx_c] for eidx_c, (k_, i_) 
-                                                   in enumerate(self.DeleteList) if i_==i and k_<=k)
+                        alive[(t,k,i)] += quicksum(self.create[t,eidx_c] 
+                                                   for eidx_c, (k_, i_) 
+                                                   in enumerate(self.CreateList) 
+                                                   if i_==i and k_<=k)
+                        alive[(t,k,i)] -= quicksum(self.delete[t,eidx_c] 
+                                                   for eidx_c, (k_, i_) 
+                                                   in enumerate(self.DeleteList) 
+                                                   if i_==i and k_<=k)
                         self.m.addLConstr(alive[(t,k,i)], GRB.GREATER_EQUAL, 0)
                         self.m.addLConstr(alive[(t,k,i)], GRB.LESS_EQUAL, 1)
                         if (k,i) in self.CreateList:
-                            self.m.addLConstr(alive[(t,k,i)]+self.delete[t, self.DeleteList.index((k,i))], GRB.GREATER_EQUAL, self.R[t, k])
+                            didx = self.DeleteList.index((k,i))
+                            self.m.addLConstr(alive[(t,k,i)] +
+                                              self.delete[t, didx], 
+                                              GRB.GREATER_EQUAL, self.R[t, k])
 
                     for eidx, (k, i) in enumerate(self.CreateList):
-                            self.m.addLConstr(self.create[t,eidx], GRB.LESS_EQUAL, self.R[t, k])
+                            self.m.addLConstr(self.create[t,eidx], 
+                                              GRB.LESS_EQUAL, 
+                                              self.R[t, k])
 
             def _num_hazards(t, i, k):
                 if t + 1 < T:
                     return 1 - self.R[t, k] + self.P[t + 1, i] + 
-                           quicksum(self.R[t, j] for j in self.g.TensorInputComp[i] if j > k)
+                           quicksum(self.R[t, j] for j in 
+                                    self.g.TensorInputComp[i] 
+                                    if j > k)
                 return 1 - self.R[t, k] + 
-                       quicksum(self.R[t, j] for j in self.g.TensorInputComp(i) if j > k)
+                       quicksum(self.R[t, j] for j in 
+                                self.g.TensorInputComp(i) 
+                                if j > k)
 
             def _max_num_hazards(t, i, k):
-                num_uses_after_k = sum(1 for j in self.g.TensorInputComp[i] if j > k)
+                num_uses_after_k = sum(1 for j in self.g.TensorInputComp[i] 
+                                       if j > k)
                 if t + 1 < T:
                     return 2 + num_uses_after_k
                 return 1 + num_uses_after_k
@@ -136,18 +163,20 @@ class ModelGurobi:
                 for t in range(T):
                     for eidx, (k, i) in enumerate(self.DeleteList):
                         self.m.addLConstr(1 - self.delete[t, eidx], 
-                                          GRB.LESS_EQUAL, _num_hazards(t, i, k))
+                                          GRB.LESS_EQUAL, 
+                                          _num_hazards(t, i, k))
             with Timer("Constraint: lower bound for 1 - delete", 
                        extra_data={"T": str(T), "budget": str(budget)}):
                 for t in range(T):
                     for eidx, (k, i) in enumerate(self.DeleteList):
                         self.m.addLConstr(
-                            _max_num_hazards(t, i, k) * (1 - self.delete[t, eidx]), 
+                            _max_num_hazards(t, i, k) * 
+                            (1 - self.delete[t, eidx]), 
                             GRB.GREATER_EQUAL, _num_hazards(t, i, k)
                         )
 
             with Timer(
-                "Constraint: initialize memory usage (includes spurious checkpoints)",
+                "Constraint: initialize memory usage",
                 extra_data={"T": str(T), "budget": str(budget)},
                 ):
                 for t in range(T):
@@ -156,9 +185,11 @@ class ModelGurobi:
                         GRB.EQUAL,
                         quicksum(self.P[t, i] * self.mem[i] for i in range(I)) +
                         quicksum(self.create[t, edix]*self.mem[i] 
-                                 for eidx, (k_,i) in enumerate(self.CreateList) if k_==0)
+                                 for eidx, (k_,i) in 
+                                 enumerate(self.CreateList) if k_==0)
                         quicksum(self.delete[t, edix]*self.mem[i] 
-                                 for eidx, (k_,i) in enumerate(self.DeleteList) if k_==0)
+                                 for eidx, (k_,i) in 
+                                 enumerate(self.DeleteList) if k_==0)
                     )
             with Timer("Constraint: memory recurrence", 
                        extra_data={"T": str(T), "budget": str(budget)}):
@@ -167,14 +198,17 @@ class ModelGurobi:
                         self.m.addLConstr(
                             self.U[t, k], GRB.EQUAL, self.U[t, k-1] + 
                             quicksum(self.create[t, edix]*self.mem[i] 
-                                     for eidx, (k_,i) in enumerate(self.CreateList) if k_==k) -
+                                     for eidx, (k_,i) in 
+                                     enumerate(self.CreateList) if k_==k) -
                             quicksum(self.delete[t, edix]*self.mem[i] 
-                                     for eidx, (k_,i) in enumerate(self.DeleteList) if k_==k)
+                                     for eidx, (k_,i) in 
+                                     enumerate(self.DeleteList) if k_==k)
                         )
     
     def solve(self):
         T = len(self.g.CompInputData)
-        with Timer("Gurobi model optimization", extra_data={"T": str(T), "budget": str(self.budget)}):
+        with Timer("Gurobi model optimization", 
+                   extra_data={"T": str(T), "budget": str(self.budget)}):
             # if self.seed_s is not None:
             #     self.m.Params.TimeLimit = self.GRB_CONSTRAINED_PRESOLVE_TIME_LIMIT
             #     self.m.optimize()
@@ -194,13 +228,21 @@ class ModelGurobi:
             # raise ValueError("Infeasible model, check constraints carefully. Insufficient memory?")
         else:
             if self.m.solCount < 1:
-                raise ValueError("Model status is {} (not infeasible), but solCount is {}".format(self.m.status, self.m.solCount))
+                raise ValueError("Model status is {}, but solCount is {}".format(
+                                 self.m.status, self.m.solCount))
             self.feasible = True
 
-    # def schedule(self):
-    #     assert self.feasible, f"Cannot schedule an infeasible model!"
-    #     sched = []
-    #     T = len(self.g.CompInputData)
-    #     for t in range(T):
-    #         for k in range(T):
-    #             if self.m.R[t, k].X: sched.append()
+    def schedule(self):
+        assert self.feasible, f"Cannot schedule an infeasible model!"
+        op_sched = []
+        T = len(self.g.CompInputData)
+        for t in range(T):
+            for k in range(T):
+                if self.m.R[t, k].X: 
+                    kn = self.g.k_nodes[k]
+                    op_sched.append(RunOp(kn))
+                for eidx, (k, i) in enumerate(self.DeleteList):
+                    if self.delete[t, eidx]:
+                        kn = self.g.k_nodes[k]
+                        op_sched.append(DelOp(self.g.tensor_info[i]))
+        return op_sched
