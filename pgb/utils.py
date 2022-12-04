@@ -149,7 +149,7 @@ list_view_fct = [
 
 
 # ==========================
-# === SMALL USEFULL FCT ====
+# === SMALL USEFUL FCTS ====
 # ==========================
 def check_attr(o1,o2,list_attr,raise_exception=False):
     for s in list_attr:
@@ -214,6 +214,42 @@ def is_constant(v):
                 setattr(v,"value",v.s)
         return rep
 
+# ==========================
+
+
+
+# ==========================
+# ===== OP OVER EDGES ======
+# ==========================
+
+# /!\ None of the following operations are inplace
+# dict_edges are (S_node -> str set) dict, e.g. S_nodes.req/used_by
+
+def dict_edges_merge(de1,de2):
+    keys = set(de1.keys()).union(set(de2.keys()))
+    d = dict()
+    for k in keys:
+        s1 = de1[k] if k in de1 else set()
+        s2 = de1[k] if k in de2 else set()
+        d[k] = s1.union(s2)
+    return d
+
+def dict_edges_discard(de,sn):
+    return dict((n,s) for (n,s) in de.items() if n != sn)
+
+def dict_edges_eq(de1,de2):
+    ds1 = dict((n.main_target) for (n,s) in de1.items())
+    ds2 = dict((n.main_target) for (n,s) in de2.items())
+    return ds1 == ds2
+    # since this function is an auxilary function for S_node.__eq__ method
+    # we cannot check s_nodes equalities, we just check .main_target
+
+def dict_edges_discard_sn_from_req_of_its_users(sn):
+    for sub_sn in sn.used_by.keys():
+        sub_sn.req = dict_edges_discard(sub_sn.req,sn)
+def dict_edges_discard_sn_from_used_by_of_its_req(sn):
+    for sub_sn in sn.req.keys():
+        sub_sn.used_by = dict_edges_discard(sub_sn.used_by,sn)
 # ==========================
 
 

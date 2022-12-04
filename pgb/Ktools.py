@@ -6,6 +6,34 @@ import gc
 # ====== K structure =======
 # ==========================
 
+class K_data():
+    def __init__(self,data_type,affected_var,affected_node):
+        """
+        data_type : "data" ; "grad" ; "phantoms" ; "size"
+        affected_var  : e.g "__2_x" -> __2_x.data/.grad/.<phantoms>
+        affected_node : e.g if __2_x is a view of __1_y then __1_y's node
+        """
+        self.data_type      = data_type
+        self.affected_var   = affected_var
+        self.affected_node  = affected_node
+        self.input_K_nodes  = set()
+        self.output_K_nodes = set()
+    def __str__(self):
+        av = self.affected_var
+        match self.data_type:
+            case "data":
+                return f"{av}.data"
+            case "grad":
+                return f"{av}.grad"
+            case "phantoms":
+                return f"{av}'s phantoms"
+            case "size":
+                return f"{av} shape"
+            case default:
+                raise Exception(
+                    "Not implemented data type: {self.data_type}"
+                )
+
 class K_node():
     def __init__(self,
             target="/!\\ No target /!\\",
