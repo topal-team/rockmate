@@ -222,20 +222,32 @@ def is_constant(v):
 # ===== OP OVER EDGES ======
 # ==========================
 
-# /!\ None of the following operations are inplace
+# /!\ By default the following operations are NOT inplace
+# inplace op end up with "_inplace". 
 # dict_edges are (S_node -> str set) dict, e.g. S_nodes.req/used_by
 
+def dict_edges_merge_inplace(de_main,de_sub):
+    for k in de_sub.keys():
+        s = de_main[k] if k in de_main else set()
+        de_main[k] = s.union(de_sub[k])
 def dict_edges_merge(de1,de2):
-    keys = set(de1.keys()).union(set(de2.keys()))
-    d = dict()
-    for k in keys:
-        s1 = de1[k] if k in de1 else set()
-        s2 = de1[k] if k in de2 else set()
-        d[k] = s1.union(s2)
+    d = dict(de1)
+    dict_edges_merge_inplace(d,de2)
     return d
 
 def dict_edges_discard(de,sn):
     return dict((n,s) for (n,s) in de.items() if n != sn)
+def dict_edges_discard_inplace(de,sn):
+    del de[sn]
+
+
+def dict_edges_add_inplace(de,sn,str_set):
+    s = de[sn] if sn in de else set()
+    de[sn] = s.union(str_set)
+def dict_edges_add(de,sn,str_set):
+    d = dict(de) # not inplace
+    dict_edges_add_inplace(d,sn,str_set)
+    return d
 
 def dict_edges_eq(de1,de2):
     ds1 = dict((n.main_target) for (n,s) in de1.items())
@@ -250,6 +262,24 @@ def dict_edges_discard_sn_from_req_of_its_users(sn):
 def dict_edges_discard_sn_from_used_by_of_its_req(sn):
     for sub_sn in sn.req.keys():
         sub_sn.used_by = dict_edges_discard(sub_sn.used_by,sn)
+
+def dict_edges_make_used_by_using_req(sn):
+    for (req_sn,str_set) in sn.req:
+        req_sn.used_by[sn] = set(str_set)
+def dict_edges_make_req_using_used_by(sn):
+    for (sub_sn,str_set) in sn.used_by:
+        sub_sn.req[sn] = set(str_set)
+
+def dict_edges_discard_edge(used_sn,user_sn):
+    used_sn.used_by = dict_edges_discard(used_sn.used_by,user_sn)
+    user_sn.req = dict_edges_discard(user_sn.req,used_sn)
+
+def dict_edges_is_subset(de1,de2):
+    for (sn1,str_set1) in de1:
+        if sn1 not in de2: return False
+        if str_set1 > de2[sn1] return False
+    return True
+
 # ==========================
 
 

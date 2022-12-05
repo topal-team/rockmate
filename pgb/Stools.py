@@ -67,18 +67,18 @@ class S_node():
         # in any case cut as many edges as possible
 
         merged_req = dict_edges_merge(self.req,aux_n.req)
-        merged_req = dict_edges_discard(merged_req,self)
+        dict_edges_discard_inplace(merged_req,self)
 
         # -- disconnect aux_n with its children (if possible) --
         if strong: # e.g. for "view"
             dict_edges_discard_sn_from_req_of_its_users(aux_n)
             merged_used_by = dict_edges_merge(self.used_by,aux_n.used_by)
-            merged_used_by = dict_edges_discard(merged_used_by,aux_n)
+            dict_edges_discard_inplace(merged_used_by,aux_n)
             aux_n.used_by = dict()
         else: # e.g. for "size"
-            for sub_n in self.used_by.keys():
-                sub_n.req    = dict_edges_discard(sub_n.req,aux_n)
-                aux_n.used_by= dict_edges_discard(aux_n.used_by,sub_n)
+            for user_n in self.used_by.keys():
+                dict_edges_discard_inplace(user_n.req,aux_n)
+                dict_edges_discard_inplace(aux_n.used_by,user_n)
             merged_used_by = self.used_by
         # -- if aux_n is deleted, remove it from parents' used_by --
         if len(aux_n.used_by) == 0:
@@ -96,10 +96,8 @@ class S_node():
         self.all_targets.extend(aux_n.all_targets)
         self.req = merged_req
         self.used_by = merged_used_by
-        for req_n in merged_req: # TODO TODO TODO
-            req_n.used_by.add(self)
-        for sub_aux_n in merged_used_by:
-            sub_aux_n.req.add(self)
+        dict_edges_make_used_by_using_req(self)
+        dict_edges_make_req_using_used_by(self)
 
         # -- special case if aux_n is the output --
         if aux_n is g.output_node:
@@ -107,26 +105,24 @@ class S_node():
 
     def clear_children_artefact(self):
         # clean useless artefact children of self
-        children = set(self.used_by)
-        for sub_n in children:
-            if sub_n.is_artefact:
-                if sub_n.req != {self}:
+        children = dict(self.used_by)
+        for user_n in children.keys():
+            if user_n.is_artefact:
+                if set(user_n.req.keys()) != {self}:
                     s = ",".join(
-                        [aux_n.main_target for aux_n in sub_n.req])
+                        [aux_n.main_target for aux_n in user_n.req])
                     raise Exception(
                       f"{self.main_target} should be the only parent of "\
-                      f"{sub_n.main_target} : {len(sub_n.req)}\n{s}")
+                      f"{user_n.main_target} : {len(user_n.req)}\n{s}")
                 for aux_n in self.used_by:
-                    sub_n.used_by.discard(aux_n)
-                    aux_n.req.discard(sub_n)
-                if sub_n.used_by == set():
-                    for aux_n in sub_n.req:
-                        aux_n.used_by.remove(sub_n)
-                    sub_n.req = set()
+                    dict_edges_discard_edge(user_n,aux_n)
+                if user_n.used_by == set():
+                    dict_edges_discard_sn_from_used_by_of_its_req(user_n)
+                    user_n.req = dict()
 
     def clear_siblings_artefact(self):
         real_req = set()
-        for req_n in self.req:
+        for req_n in self.req.keys():
             if not req_n.is_artefact:
                 real_req.add(req_n)
         for req_n in real_req:
@@ -172,24 +168,24 @@ class S_graph():
                 if len(n.req)!=1:
                     raise Exception(
                       f"{n.main_target} is_artefact, but with "\
-                      f"len(req)={len(n.req)}")
-                req_n = list(n.req)[0]
-                if n.used_by <= (req_n.used_by | set([n])):
+                      f"len(req)={len(n.req) (should be 1)}")
+                req_n = list(n.req.keys())[0]
+                if dict_edges_is_subset(n.used_by,req_n.used_by):
+                    # if n.used_by <= (req_n.used_by | set([n])): TO REMOVE
                     print(f"{n.main_target} is a useless "\
                           f"artefact of {req_n.main_target}")
 
     def check_relations(self):
-        # n1 in n2.used_by iff n2 in n1.req
         for n in self.nodes:
-            for req_n in n.req:
-                if not (n in req_n.used_by):
+            for (req_n,str_set) in n.req:
+                if (n not in req_n.used_by) or str_set != req_n.used_by[n]:
                     raise Exception(
                       f"{req_n.main_target} in {n.main_target}.req "\
                       f"but one sided relation...")
-            for sub_n in n.used_by:
-                if not (n in sub_n.req):
+            for user_n in n.used_by:
+                if (n not in user_n.req) or str_set != user_n.req[n]:
                     raise Exception(
-                      f"{sub_n.main_target} in {n.main_target}.used_by "\
+                      f"{user_n.main_target} in {n.main_target}.used_by "\
                       f"but one sided relation...")
 
     def clear(self):
@@ -231,6 +227,7 @@ class S_graph():
                   f"\"size\" should be \"artefacts\", but "\
                   f"{n.main_target} isn't an artefact")
 
+
 # ==========================
 
 
@@ -245,17 +242,17 @@ def D_to_S_init(dg : D_graph,keep_sequential=False) -> S_graph:
     init_node.all_targets=[]
     s_nodes = sg.nodes
     dict_s_nodes = {} # to translate D to S
-    for n in dg.nodes:
-        sn = S_node(code=n.ast_code,
-                protected=n.protected,
-                fct=n.fct,
-                target=n.target)
+    for dn in dg.nodes:
+        sn = S_node(code=dn.ast_code,
+                protected=dn.protected,
+                fct=dn.fct,
+                target=dn.target)
         s_nodes.append(sn)
-        dict_s_nodes[n.target] = sn
-        for req_n in n.req:
-            sreq_n = dict_s_nodes[req_n.target]
-            sn.req.add(sreq_n)
-            sreq_n.used_by.add(sn)
+        dict_s_nodes[dn.target] = sn
+        for req_dn in dn.req:
+            req_sn = dict_s_nodes[req_dn.target]
+            sn.req[req_sn] = set((req_dn.target))
+            req_sn.used_by[sn] = set((req_dn.target))
     # -- merge all the inputs in the special "init_node" --
     for inp in dg.inputs:
         init_node.insert(dict_s_nodes[inp],strong=True,g=sg)
@@ -319,28 +316,29 @@ def insert_ast_code(main_n,mc,target : str,sc):
             f"unknown type of code where we should "\
             f"insert things: {type(mc.value)}")
 
-def simplify_node(n):
+def simplify_node(sn):
     # aux fct, insert n.ast_code in children's code, and unplug it
-    for sub_n in n.used_by:
-        # -- unplug n --
-        sub_n.req.update(n.req)
-        sub_n.req.discard(n)
-        req = set(n.req)
-        for req_n in req:
-            req_n.used_by.add(sub_n)
-            req_n.used_by.discard(n)
+    for user_sn in sn.used_by:
+        # -- plug user_sn directly to req of sn --
+        dict_edges_merge_inplace(user_sn.req,sn.req)
+        dict_edges_discard_inplace(user_sn.req,sn)
+        for (req_sn,str_set) in sn.req:
+            dict_edges_discard_inplace(req_sn.used_by,sn)
+            dict_edges_add_inplace(req_sn.used_by,user_sn,str_set)
         # -- insert the code --
-        insert_ast_code(sub_n,sub_n.main_code,n.main_target,n.main_code)
-    n.req     = set()
-    n.used_by = set()
+        insert_ast_code(
+            user_sn,user_sn.main_code,
+            sn.main_target,sn.main_code)
+    sn.req     = dict()
+    sn.used_by = dict()
 
-def simplify_cheap(g : S_graph):
+def simplify_cheap(sg : S_graph):
     # from root to leaves
-    for n in g.nodes:
-        if ( (not n is g.output_node)
-         and n.main_fct in list_cheap_fct
-         and (not ref_keep_seq or not n.protected)):
-            simplify_node(n)
+    for sn in sg.nodes:
+        if ( not (sn is g.output_node)
+         and sn.main_fct in list_cheap_fct
+         and (not ref_keep_seq or not sn.protected)):
+            simplify_node(sn)
     g.clear()
 
 # ==========================
@@ -359,9 +357,9 @@ def simplify_cheap(g : S_graph):
 def size_children(g,n):
     # give the list of child nodes of n which are size
     ret = []
-    for sub_n in n.used_by:
-        if g.dict_info[sub_n.main_target].ttype == torch.Size:
-            ret.append(sub_n)
+    for user_n in n.used_by.keys():
+        if g.dict_info[user_n.main_target].ttype == torch.Size:
+            ret.append(user_n)
     return ret
 
 
@@ -400,7 +398,7 @@ def simplify_view(g):
          if n.main_fct in list_view_fct or n.main_fct == "getattr":
             # /!\ ASSERTION remaining getattr are related to views !! 
             real_req = []
-            for req_n in n.req:
+            for req_n in n.req.keys():
                 if not req_n.is_artefact:
                     real_req.append(req_n)
             if len(real_req)==1:
@@ -424,19 +422,22 @@ def simplify_view(g):
                     f" a real parent, and several artifact dependancies",
                     file = sys.stderr)
                 else:
-                    art_req = list(n.req)[0]
-                    assert(len(art_req.req)==1)
-                    real_req = list(art_req.req)[0]
+                    art_req = list(n.req.keys())[0]
+                    assert(len(art_req.req)==1) # as an artefact
+                    real_req = list(art_req.req.keys())[0]
+                    # - Insert n's code both in art_req and real_req -
                     for aux_n in [art_req,real_req]:
                         aux_n.body_code.append(n.main_code)
                         aux_n.body_code.extend(n.body_code)
-                    art_req.used_by.update(n.used_by)
-                    for sub_n in n.used_by:
-                        sub_n.req.add(art_req)
-                        sub_n.req.remove(n)
-                    art_req.used_by.remove(n)
-                    n.req = set()
-                    n.used_by = set()
+                    # - plug art_req to n's users -
+                    dict_edges_merge_inplace(art_req.used_by,n.used_by)
+                    for (user_n,str_set) in n.used_by:
+                        dict_edges_add_inplace(user_n.req,art_req,str_set)
+                    # - unplug n -
+                    dict_edges_discard_inplace(art_req.used_by,n)
+                    dict_edges_discard_sn_from_req_of_its_users(n)
+                    n.req = dict()
+                    n.used_by = dict()
                     real_req.clear_children_artefact()
 
     g.clear()
@@ -477,8 +478,8 @@ def copy_node(n : S_node): # aux for copy_graph
     new_n.main_target    = n.main_target
     new_n.all_targets    = list(n.all_targets)
     new_n.tensor_targets = list(n.tensor_targets)
-    new_n.req            = set() # /!\
-    new_n.used_by        = set() # /!\
+    new_n.req            = dict() # /!\
+    new_n.used_by        = dict() # /!\
     new_n.protected      = n.protected
     return new_n
 
@@ -499,10 +500,10 @@ def copy_graph(g : S_graph):
         new_n = copy_node(n)
         new_nodes.append(new_n)
         dict_nodes[n.main_target] = new_n
-        for req_n in n.req:
+        for (req_n,set_str) in n.req:
             new_req = dict_nodes[req_n.main_target]
-            new_req.used_by.add(new_n)
-            new_n.req.add(new_req)
+            dict_edges_add_inplace(new_req.used_by,new_n,set_str)
+            dict_edges_add_inplace(new_n.req,new_req,set_str)
     new_g.init_node     = new_init
     new_g.output_node   = dict_nodes[g.hidden_output]
     new_g.nodes         = new_nodes
@@ -537,11 +538,11 @@ def cut(g : S_graph): # -> list of S_graph
             new_g.hidden_inputs = [inp_node.main_target]
             new_g.direct_inputs = inp_node.all_targets
             new_g.init_node = ino
-            for sub_n in inp_node.used_by:
-                sub_n.req.remove(inp_node)
-                sub_n.req.add(ino)
-                ino.used_by.add(sub_n)
-            inp_node.used_by = set() # previous bloc's output node
+            for (user_n,str_set) in inp_node.used_by:
+                dict_edges_discard_inplace(user_n.req,inp_node)
+                dict_edges_add_inplace(user_n.req,ino,str_set)
+                dict_edges_add_inplace(ino.used_by,user_n,str_set)
+            inp_node.used_by = dict() # previous bloc's output node
         # -- output --
         new_g.output_node    = out_node
         new_g.hidden_output  = out_node.main_target
