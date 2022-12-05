@@ -7,6 +7,27 @@ from .Dtools import D_node,D_graph
 
 class S_node():
     def __init__(self,code=None,protected=False,fct="",target="No target"):
+        """
+        A S_node is composed by one "real" computation, defining the
+        "main_target", and followed by size / view operations over it.
+        Attributes :
+        .main_target : str
+        .all_targets : str list
+            -> names of all the vars defined
+            -> (including .main_target)
+        .tensor_targets : str list
+            -> all_targets which are tensors
+            -> (done by s_graph.make_tensor_targets)
+        .main_code  : AST  : code to compute and assign .main_target
+        .body_code  : AST  : code to assign all_targets except main_target
+        .main_fct   : str  : fct used in .main_code
+        .protected  : bool : see Doc
+        .is_artefact: bool : see Doc
+        .req        : (S_node,str set) dict = dict_edges
+            -> required nodes with the vars needed per node.
+        .used_by    : dict_edges : reciprocal of .req
+        <TODO> : is_rand and req_rand ?
+        """
         self.is_artefact = False
         self.main_code = code
         self.main_fct = fct
@@ -14,8 +35,8 @@ class S_node():
         self.main_target = target # str
         self.all_targets = [target]
         self.tensor_targets = [] # later
-        self.req = set()
-        self.used_by = set()
+        self.req = dict()
+        self.used_by = dict()
         self.protected = protected
     def __eq__(self,n2):
         n1 = self
@@ -23,15 +44,15 @@ class S_node():
             "is_artefact","main_fct",
             "main_target","all_targets",
             "tensor_targets","protected"])
-        mkstr = lambda nl : [rn.main_target for rn in nl]
         b = (b
-            and (mkstr(n1.req) == mkstr (n2.req))
-            and (mkstr(n1.used_by) == mkstr (n2.used_by))
+            and dict_edges_eq(n1.req,n2.req)
+            and dict_edges_eq(n1.used_by,n2.used_by)
             and (n1.get_code() == n2.get_code()))
         return b
     def __hash__(self):
         return self.main_target.__hash__()
-        #return id(self) # __eq__ => need __hash__
+        # we use the assomption that a node is uniquely
+        # defined by its .main_target within a graph
 
     def full_code(self):
         if self.main_code is None: mc = []
@@ -40,47 +61,48 @@ class S_node():
     def get_code(self):
         return ast_to_str(self.full_code())
 
-    def insert(self,sub_n,strong,g):
-        # this is the fct to merge nodes : we insert "sub_n" in "self"
-        # if strong: delete sub_n else: sub_node <- artefact
+    def insert(self,aux_n,strong,g):
+        # this is the fct to merge nodes : we insert "aux_n" in "self"
+        # if strong: delete aux_n else aux_node becomes an artefact
         # in any case cut as many edges as possible
 
-        merged_req = (self.req | sub_n.req) - {self}
+        merged_req = dict_edges_merge(self.req,aux_n.req)
+        merged_req = dict_edges_discard(merged_req,self)
 
-        # -- disconnect sub_n with its children (if possible) --
+        # -- disconnect aux_n with its children (if possible) --
         if strong: # e.g. for "view"
-            for sub_sub_n in sub_n.used_by:
-                sub_sub_n.req.discard(sub_n)
-            merged_used_by = (self.used_by | sub_n.used_by) - {sub_n}
-            sub_n.used_by = set()
+            dict_edges_discard_sn_from_req_of_its_users(aux_n)
+            merged_used_by = dict_edges_merge(self.used_by,aux_n.used_by)
+            merged_used_by = dict_edges_discard(merged_used_by,aux_n)
+            aux_n.used_by = dict()
         else: # e.g. for "size"
-            for sub_sub_n in self.used_by:
-                sub_sub_n.req.discard(sub_n)
-                sub_n.used_by.discard(sub_sub_n)
+            for sub_n in self.used_by.keys():
+                sub_n.req    = dict_edges_discard(sub_n.req,aux_n)
+                aux_n.used_by= dict_edges_discard(aux_n.used_by,sub_n)
             merged_used_by = self.used_by
-        # -- if sub_n is deleted, remove it from parents' used_by --
-        if sub_n.used_by == set():
-            for req_n in sub_n.req:
-                req_n.used_by.discard(sub_n)
-            sub_n.req = set()
-            # -> sub_n has been fully unpluged
+        # -- if aux_n is deleted, remove it from parents' used_by --
+        if len(aux_n.used_by) == 0:
+            dict_edges_discard_sn_from_used_by_of_its_req(aux_n)
+            aux_n.req = dict()
+            # -> aux_n has been fully unpluged
         else:
-            sub_n.is_artefact = True
+            aux_n.is_artefact = True
             # -> artefact
-        # -- insert sub_n code --
-        assert(sub_n.main_code is not None)
-        self.body_code.append(sub_n.main_code)
-        self.body_code.extend(sub_n.body_code)
-        self.all_targets.extend(sub_n.all_targets)
+
+        # -- insert aux_n code --
+        assert(aux_n.main_code is not None)
+        self.body_code.append(aux_n.main_code)
+        self.body_code.extend(aux_n.body_code)
+        self.all_targets.extend(aux_n.all_targets)
         self.req = merged_req
         self.used_by = merged_used_by
-        for req_n in merged_req:
+        for req_n in merged_req: # TODO TODO TODO
             req_n.used_by.add(self)
-        for sub_sub_n in merged_used_by:
-            sub_sub_n.req.add(self)
+        for sub_aux_n in merged_used_by:
+            sub_aux_n.req.add(self)
 
-        # -- special case if sub_n is the output --
-        if sub_n is g.output_node:
+        # -- special case if aux_n is the output --
+        if aux_n is g.output_node:
             g.output_node = self
 
     def clear_children_artefact(self):
