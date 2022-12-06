@@ -6,33 +6,72 @@ import gc
 # ====== K structure =======
 # ==========================
 
-class K_data():
-    def __init__(self,data_type,affected_var,affected_node):
-        """
-        data_type : "data" ; "grad" ; "phantoms" ; "size"
-        affected_var  : e.g "__2_x" -> __2_x.data/.grad/.<phantoms>
-        affected_node : e.g if __2_x is a view of __1_y then __1_y's node
-        """
-        self.data_type      = data_type
-        self.affected_var   = affected_var
-        self.affected_node  = affected_node
-        self.input_K_nodes  = set()
-        self.output_K_nodes = set()
-    def __str__(self):
-        av = self.affected_var
-        match self.data_type:
-            case "data":
-                return f"{av}.data"
-            case "grad":
-                return f"{av}.grad"
-            case "phantoms":
-                return f"{av}'s phantoms"
-            case "size":
-                return f"{av} shape"
-            case default:
-                raise Exception(
-                    "Not implemented data type: {self.data_type}"
-                )
+
+class K_C_node():
+    def __init__(self,):
+        self.main_target = mt =
+        self.main_code
+        self.body_code
+
+        self.time
+        self.overhead
+
+        self.is_fwd
+        self.name = f"fwd_{mt}"
+
+        self.has_phantoms # ?
+
+        self.inspector # TO REMOVE
+
+        self.deps_real : KDN set
+        self.deps_fake
+        self.deps_global
+        self.users_real : KDN set
+        self.users_fake
+        self.users_global
+
+class K_D_node():
+    def __init__(self,):
+        self.component # data/grad/phantoms/size
+
+        self.main_target
+        self.all_targets
+        self.name = f"{self.main_target} {self.component}"
+
+        self.mem
+
+        self.deps : KCN set
+        self.users : KCN set
+
+class K_graph():
+    def __init__(self,sg : S_graph):
+        self.dict_kn = dict() # KCN.name or KDN.name
+        self.list_kcn : K_C_node list # TOPOSORTED
+        self.list_kdn : K_D_node list # TOPOSORTED
+
+        self.input_kdn # from the previous : KDN _116.data
+        self.loss_kcn
+        self.output_kdn # from the previous : KDN _116.grad
+
+        self.init_code = make_ast_module(sg.init_node.body_code)
+        self.dict_info = sg.dict_info
+        self.dict_rand = sg.dict_rand # TODO
+        self.sg = sg # TO REMOVE
+        # for first K_graph :
+        self.users_of_imaginary_input_node = set()
+        self.deps_of_imaginary_output_node = set()
+
+
+###################
+###################
+###################
+###################
+###################
+###################
+###################
+###################
+###################
+###################
 
 class K_node():
     def __init__(self,

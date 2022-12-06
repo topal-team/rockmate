@@ -298,6 +298,10 @@ def get_num(n): # can be used on B, D, S or K
     except:
         return (-1)
 
+def get_req_nodes(n):
+    # To be compatible with different type/name of attribute "req"
+    if isinstance( TODO TODO TODO
+
 def sort_based_on_req(origin_node): # used on B, S and K
     # /!\ origin_node is the root of .req relation 
     # /!\ => the last node to be computed !!
