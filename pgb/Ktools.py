@@ -26,9 +26,9 @@ class K_C_node():
         self.deps_real : KDN set
         self.deps_fake
         self.deps_global
-        self.users_real : KDN set
-        self.users_fake
-        self.users_global
+        self.users : KDN set
+
+        self.users_of_size_artefacts : KCN set # just for the toposort
 
 class K_D_node():
     def __init__(self,):
@@ -41,7 +41,9 @@ class K_D_node():
         self.mem
 
         self.deps : KCN set
-        self.users : KCN set
+        self.users_real : KCN set
+        self.users_fake
+        self.users_global
 
 class K_graph():
     def __init__(self,sg : S_graph):
@@ -57,7 +59,7 @@ class K_graph():
         self.dict_info = sg.dict_info
         self.dict_rand = sg.dict_rand # TODO
         self.sg = sg # TO REMOVE
-        # for first K_graph :
+        # for first K_graph - for printing purpose
         self.users_of_imaginary_input_node = set()
         self.deps_of_imaginary_output_node = set()
 
