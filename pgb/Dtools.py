@@ -14,23 +14,23 @@ class D_node(B_node):
         .fct       : str  : the function used in .code
         .is_input  : bool : input vars are represented by nodes with dummy code
         .is_rand   : bool : whether .fct involves randomness
-        .req       : D_node set : required nodes to run .ast_code
-        .req_rand  : D_node set : requires random nodes
-        .used_by   : D_node set : all nodes requiring self
-        .protected : bool : see Doc
+        .deps      : D_node set : required nodes to run .ast_code
+        .deps_rand : D_node set : required random nodes
+        .users     : D_node set : reciprocal of .deps
+        .protected : bool : whether self is a 1-separator of the graph
         """
         super().__init__(target,code,fct)
-        self.used_by = set()
+        self.users = set()
         self.protected = False
-    def __eq__(self,n2):
-        n1 = self
-        b = check_attr(n1,n2,["protected","target","fct","is_rand"])
+    def __eq__(self,dn2):
+        dn1 = self
+        b = check_attr(dn1,dn2,["protected","target","fct","is_rand"])
         mkstr = lambda nl : [rn.target for rn in nl]
         b = (b
-            and (mkstr(n1.req) == mkstr (n2.req))
-            and (mkstr(n1.used_by) == mkstr (n2.used_by))
-            and (n1.get_code() == n2.get_code()))
-        return b # missing req_rand equality
+            and (mkstr(dn1.deps) == mkstr (dn2.deps))
+            and (mkstr(dn1.users) == mkstr (dn2.users))
+            and (dn1.get_code() == dn2.get_code()))
+        return b # missing deps_rand equality
     def __hash__(self):
         return self.target.__hash__()
         #return id(self) # __eq__ => need __hash__
@@ -55,11 +55,11 @@ class D_graph():
         # but in case of chain of separators, we only protect
         # the last one (we will keep a good structure, while reducing
         # the number of blocs)
-        all_sep = cut_based_on_req(self) # utils.py : sep from inp to output
+        all_sep = cut_based_on_deps(self) # utils.py : sep from inp to output
         important_sep = []
         for i in range(len(all_sep)-1):
             sep = all_sep[i]
-            if sep.used_by != set([all_sep[i+1]]):
+            if sep.users != set([all_sep[i+1]]):
                 important_sep.append(sep)
         important_sep.append(all_sep[-1])
         print_debug([sep.target for sep in important_sep])
@@ -77,7 +77,7 @@ def sort_nodes(g : B_graph): # -> B_node list
     # /!\ never trust B_graph.nodes
     o_var = g.output
     if not o_var.has_node: return []
-    else: return sort_based_on_req(o_var.node)
+    else: return sort_based_on_deps(o_var.node)
 
 
 def get_info(x) -> FWD_info:
@@ -102,15 +102,15 @@ def get_info(x) -> FWD_info:
         raise Exception(f"The type {tt} is unknown")
     return info
 
-def generate_tmp_local(g,dict_info,n):
+def generate_tmp_local(g,dict_info,dn):
     tmp_local = {}
-    for sub_n in n.req:
-        sub_info = dict_info[sub_n.target]
-        sub_x = generate_val(sub_info,device) # from utils.py
-        tmp_local[sub_n.target] = sub_x
-    if n.is_rand:
-        for sub_r in n.req_rand:
-            exec(g.dict_rand[sub_r],our_global,tmp_local)
+    for req_dn in dn.deps:
+        req_dn_info = dict_info[req_dn.target]
+        req_x = generate_val(req_dn_info,device) # from utils.py
+        tmp_local[req_dn.target] = req_x
+    if dn.is_rand:
+        for req_rd in dn.deps_rand:
+            exec(g.dict_rand[req_rd],our_global,tmp_local)
     return tmp_local
 
 # ==========================
@@ -141,25 +141,25 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None):
     our_global["self"] = model
     our_global["device"] = device
 
-    for n in b_nodes:
+    for bn in b_nodes:
         # -- translate B node to D --
-        dn = D_node(n.target,n.ast_code,n.fct)
-        if n.is_input:
-            inputs.append(n.target)
+        dn = D_node(bn.target,bn.ast_code,bn.fct)
+        if bn.is_input:
+            inputs.append(bn.target)
             dn.is_input = True
-            dict_info[n.target] = get_info(dict_inputs[n.target])
-        for sub_n in n.req:
-            sub_dn = dict_nodes[sub_n]
-            dn.req.add(sub_dn)
-            sub_dn.used_by.add(dn)
-        dict_nodes[n] = dn
+            dict_info[bn.target] = get_info(dict_inputs[bn.target])
+        for req_bn in bn.deps:
+            req_dn = dict_nodes[req_bn]
+            dn.deps.add(req_dn)
+            req_dn.users.add(dn)
+        dict_nodes[bn] = dn
         d_nodes.append(dn)
 
         # -- compute the forward to get info --
-        if not n.is_input:
-            tmp_local = generate_tmp_local(dg,dict_info,n)
-            exec(n.get_code(), our_global, tmp_local)
-            dict_info[n.target] = get_info(tmp_local[n.target])
+        if not bn.is_input:
+            tmp_local = generate_tmp_local(dg,dict_info,bn)
+            exec(bn.get_code(), our_global, tmp_local)
+            dict_info[bn.target] = get_info(tmp_local[bn.target])
             del tmp_local
 
     # --- translate output ---
@@ -204,28 +204,28 @@ def print_all_fw_nodes(g,print_ast=True):
             print(f"{tar} info :")
             print_info(info)
 
-def print_fw_code(g : D_graph):
-    print(g.dict_rand)
-    str_input = ','.join(g.inputs)
+def print_fw_code(dg : D_graph):
+    print(dg.dict_rand)
+    str_input = ','.join(dg.inputs)
     print(f"def main({str_input}):")
-    for n in g.nodes:
-        if not n.is_input: print(f"\t{n.get_code()}")
-    print(f"\treturn {g.output}")
+    for dn in dg.nodes:
+        if not dn.is_input: print(f"\t{dn.get_code()}")
+    print(f"\treturn {dg.output}")
 
-def print_D_graph(g : D_graph,name=None,open=True):
-    print(len(g.nodes))
+def print_D_graph(dg : D_graph,name=None,open=True):
+    print(len(dg.nodes))
     if name is None:
         name = "forward D-graph"
     dot = graphviz.Digraph(name,comment="D_graph = forward graph")
-    for n in g.nodes:
-        if n.is_input:
-            dot.node(n.target,n.get_code(),color="blue")
-        elif n.target == g.output:
-            dot.node(n.target,n.get_code(),color="red")
-        else: dot.node(n.target,n.get_code())
-    for n in g.nodes:
-        for sub_n in n.req:
-            dot.edge(sub_n.target,n.target)
+    for dn in dg.nodes:
+        if dn.is_input:
+            dot.node(dn.target,dn.get_code(),color="blue")
+        elif dn.target == dg.output:
+            dot.node(dn.target,dn.get_code(),color="red")
+        else: dot.node(dn.target,dn.get_code())
+    for dn in g.nodes:
+        for req_dn in n.deps:
+            dot.edge(req_dn.target,dn.target)
     graph_render(dot,open,"D") # from utils.py
 
 # ==========================
@@ -236,20 +236,20 @@ def print_D_graph(g : D_graph,name=None,open=True):
 # === test forward code ====
 # ==========================
 
-def test_fw_code(g : D_graph,model,dict_inputs : dict):
+def test_fw_code(dg : D_graph,model,dict_inputs : dict):
     loc_dict = {}
     loc_dict["self"] = model
-    for inp in g.inputs:
+    for inp in dg.inputs:
         loc_dict[inp] = dict_inputs[inp]
-    for v in g.dict_rand:
-        exec(g.dict_rand[v], globals(), loc_dict)
-    for n in g.nodes:
-        if n.is_rand:
-            for sub_t in n.req_rand:
-                exec(g.dict_rand[sub_t])
-        if not n.is_input:
-            exec(n.get_code(), globals(), loc_dict)
-    return loc_dict[g.output]
+    for v in dg.dict_rand:
+        exec(dg.dict_rand[v], globals(), loc_dict)
+    for dn in dg.nodes:
+        if dn.is_rand:
+            for req_rd in dn.deps_rand:
+                exec(dg.dict_rand[req_rd])
+        if not dn.is_input:
+            exec(dn.get_code(), globals(), loc_dict)
+    return loc_dict[dg.output]
 
 # ==========================
 

@@ -16,7 +16,7 @@ from .utils import *
 # ==========================
 
 class B_node():
-    def __init__(self,target="",code=None,fct="",req=None,is_input=False):
+    def __init__(self,target="",code=None,fct="",deps=None,is_input=False):
         """ attributes :
         .target   : str  : the name of the only var defined in the node
         .code     : AST  : right part of the assigning code
@@ -24,19 +24,19 @@ class B_node():
         .fct      : str  : the function used in .code
         .is_input : bool : input vars are represented by nodes with dummy code
         .is_rand  : bool : whether .fct involves randomness
-        .req      : B_node set : required nodes to run .ast_code
-        .req_rand : B_node set : requires random nodes
+        .deps      : B_node set : required nodes to run .ast_code
+        .deps_rand : B_node set : requires random nodes
         """
         self.target = target
         if code is None:
             code = make_ast_constant("/!\\ not defined /!\\")
         self.make_code(code)
         self.fct = fct
-        if req is None:  self.req = set()
-        else: self.req = req
+        if deps is None:  self.deps = set()
+        else: self.deps = deps
         self.is_input = is_input
         self.is_rand = None # unknown for the moment
-        self.req_rand = set()
+        self.deps_rand = set()
         global all_nodes
         all_nodes.append(self)
     def make_code(self,code):
@@ -59,7 +59,7 @@ class B_var():
         self.has_node = False # by default, e.g. has_node = False for const
         self.is_rand = False # by default
         if node is not None:
-            if node.req==set() and not node.is_input:
+            if node.deps==set() and not node.is_input:
                 if node.fct in list_rand_fct:
                     dict_rand[node.target] = node.get_code()
                     self.is_rand = True
@@ -73,9 +73,9 @@ class B_var():
     def get_value(self,calling_node):
         if self.is_rand:
             calling_node.is_rand = True
-            calling_node.req_rand.add(self.val)
+            calling_node.deps_rand.add(self.val)
         elif self.has_node:
-            calling_node.req.add(self.node)
+            calling_node.deps.add(self.node)
         return self.val
 
     def inherits(self,parent,l_attr): # for a getattr
@@ -134,7 +134,7 @@ def open_sub_module(sub_mod,sub_mod_str,sub_fct,inputs_vars,is_main=False):
                 target=inputs[i],
                 code=make_ast_constant("INPUT"),
                 fct="INPUT",
-                req=set(),
+                deps=set(),
                 is_input=True)
             dict_vars[inputs[i]]=B_var(ast.Name(inputs[i]),node=i_node)
     else:

@@ -224,8 +224,7 @@ def is_constant(v):
 
 # /!\ By default the following operations are NOT inplace
 # inplace op end up with "_inplace". 
-# dict_edges are (S_node -> str set) dict, e.g. S_nodes.req/used_by
-
+# dict_edges are (S_node -> str set) dict, e.g. S_nodes.deps/users
 def dict_edges_merge_inplace(de_main,de_sub):
     for k in de_sub.keys():
         s = de_main[k] if k in de_main else set()
@@ -238,7 +237,7 @@ def dict_edges_merge(de1,de2):
 def dict_edges_discard(de,sn):
     return dict((n,s) for (n,s) in de.items() if n != sn)
 def dict_edges_discard_inplace(de,sn):
-    del de[sn]
+    if sn in de: del de[sn]
 
 
 def dict_edges_add_inplace(de,sn,str_set):
@@ -256,28 +255,32 @@ def dict_edges_eq(de1,de2):
     # since this function is an auxilary function for S_node.__eq__ method
     # we cannot check s_nodes equalities, we just check .main_target
 
-def dict_edges_discard_sn_from_req_of_its_users(sn):
-    for sub_sn in sn.used_by.keys():
-        sub_sn.req = dict_edges_discard(sub_sn.req,sn)
-def dict_edges_discard_sn_from_used_by_of_its_req(sn):
-    for sub_sn in sn.req.keys():
-        sub_sn.used_by = dict_edges_discard(sub_sn.used_by,sn)
+def dict_edges_discard_sn_from_deps_of_its_users(sn):
+    for user_sn in sn.users.keys():
+        dict_edges_discard_inplace(user_sn.deps,sn)
+def dict_edges_discard_sn_from_users_of_its_deps(sn):
+    for req_sn in sn.deps.keys():
+        dict_edges_discard_inplace(req_sn.users,sn)
 
-def dict_edges_make_used_by_using_req(sn):
-    for (req_sn,str_set) in sn.req:
-        req_sn.used_by[sn] = set(str_set)
-def dict_edges_make_req_using_used_by(sn):
-    for (sub_sn,str_set) in sn.used_by:
-        sub_sn.req[sn] = set(str_set)
+def dict_edges_make_users_using_deps(sn):
+    for (req_sn,str_set) in sn.deps.items():
+        req_sn.users[sn] = set(str_set)
+def dict_edges_make_deps_using_users(sn):
+    for (user_sn,str_set) in sn.users.items():
+        user_sn.deps[sn] = set(str_set)
 
-def dict_edges_discard_edge(used_sn,user_sn):
-    used_sn.used_by = dict_edges_discard(used_sn.used_by,user_sn)
-    user_sn.req = dict_edges_discard(user_sn.req,used_sn)
+def dict_edges_discard_edge_inplace(req_sn,user_sn):
+    dict_edges_discard_inplace(req_sn.users,user_sn)
+    dict_edges_discard_inplace(user_sn.deps,req_sn)
+
+def dict_edges_add_edge_inplace(req_sn,user_sn,str_set):
+    dict_edges_add_inplace(req_sn.users,user_sn,str_set)
+    dict_edges_add_inplace(user_sn.deps,req_sn,str_set)
 
 def dict_edges_is_subset(de1,de2):
-    for (sn1,str_set1) in de1:
+    for (sn1,str_set1) in de1.items():
         if sn1 not in de2: return False
-        if str_set1 > de2[sn1] return False
+        if str_set1 > de2[sn1]: return False
     return True
 
 # ==========================
@@ -288,32 +291,37 @@ def dict_edges_is_subset(de1,de2):
 # ==== TOPO SORT GRAPHS ====
 # ==========================
 
-def get_tar_attr(n):
-    return "target" if hasattr(n,"target") else "main_target"
+def get_target(n):
+    try: return n.target
+    except: return n.main_target
 
 def get_num(n): # can be used on B, D, S or K
-    mt = getattr(n,get_tar_attr(n))
-    try:
-        return int(mt.split('_')[2])
-    except:
-        return (-1)
+    tar = get_target(n)
+    try:    return int(tar.split('_')[2])
+    except: return (-1)
 
-def get_req_nodes(n):
-    # To be compatible with different type/name of attribute "req"
-    if isinstance( TODO TODO TODO
+def get_deps(n):
+    # To be compatible with different type/name of attribute "deps"
+    t = str(type(n))
+    if   "B_node" in t:  return n.deps
+    elif "D_node" in t:  return n.deps
+    elif "S_node" in t:  return set(n.deps.keys())
+    elif "K_C_node" in t:
+        return set().union(*[kdn.deps for kdn in n.deps_real])
+    elif "K_D_node" in t:
+        return set().union(*[kcn.deps_real for kcn in n.deps])
+    else: raise Exception(f"Unrecognize node type : {t}")
 
-def sort_based_on_req(origin_node): # used on B, S and K
-    # /!\ origin_node is the root of .req relation 
-    # /!\ => the last node to be computed !!
 
-    # To be compatible with different names for attributes
-    tar = get_tar_attr(origin_node)
-    req = "req" if hasattr(origin_node,"req") else "req_real"
+# Perfect TOPOSORT :
+def sort_based_on_deps(origin_node): # used on B, S and K
+    # /!\ origin_node is the root of .deps relation 
+    # /!\ => e.g. the output node of the graph
 
     # Compute incomming degree
     degree = {}
     def count_edges(n):
-        for sub_n in getattr(n,req):
+        for sub_n in get_deps(n):
             if sub_n not in degree:
                 d = 0
                 count_edges(sub_n)
@@ -323,21 +331,21 @@ def sort_based_on_req(origin_node): # used on B, S and K
     count_edges(origin_node)
 
     # Explore nodes by increasing lexi-order of their n.target
-    # BUT a node is explored iff all its used_by are explored => toposort
+    # BUT a node is explored iff all its users are explored => toposort
     sorted_list = []
     to_explore = set([origin_node])
     while to_explore: # not empty
         n = max(to_explore,key=lambda n : get_num(n))
         to_explore.discard(n)
         sorted_list.append(n)
-        for sub_n in getattr(n,req):
-            if sub_n in sorted_list:
+        for req_n in get_deps(n):
+            if req_n in sorted_list:
                 raise Exception("Cycle in the graph => no toposort")
-            d = degree[sub_n]
+            d = degree[req_n]
             if d == 1:
-                to_explore.add(sub_n)
+                to_explore.add(req_n)
             else:
-                degree[sub_n] = d-1
+                degree[req_n] = d-1
 
     # return from first to last
     return sorted_list[::-1]
@@ -350,18 +358,18 @@ def sort_based_on_req(origin_node): # used on B, S and K
 # ======= CUT GRAPHS =======
 # ==========================
 
-def cut_based_on_req(g): # used on D and S
+def cut_based_on_deps(g): # used on D and S
     # returns the list of all 1-separator of the graph.
     to_be_visited = [g.output_node]
     seen = set([g.output_node])
-    dict_nb_usages = dict([(m , len(m.used_by)) for m in g.nodes])
+    dict_nb_usages = dict([(m , len(m.users)) for m in g.nodes])
     separators = []
     while to_be_visited!=[]:
         n = to_be_visited.pop()
         seen.remove(n)
         if seen==set():
             separators.append(n)
-        for req_n in n.req:
+        for req_n in get_deps(n):
             seen.add(req_n)
             dict_nb_usages[req_n]-=1
             if dict_nb_usages[req_n]==0:
