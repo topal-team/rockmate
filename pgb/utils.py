@@ -303,13 +303,14 @@ def get_num(n): # can be used on B, D, S or K
 def get_deps(n):
     # To be compatible with different type/name of attribute "deps"
     t = str(type(n))
-    if   "B_node" in t:  return n.deps
-    elif "D_node" in t:  return n.deps
-    elif "S_node" in t:  return set(n.deps.keys())
-    elif "K_C_node" in t:
-        return set().union(*[kdn.deps for kdn in n.deps_real])
-    elif "K_D_node" in t:
-        return set().union(*[kcn.deps_real for kcn in n.deps])
+    if   "B_node" in t:   return n.deps
+    elif "D_node" in t:   return n.deps
+    elif "S_node" in t:   return set(n.deps.keys())
+    elif "K_C_node" in t: return set().union(
+        *[kdn.deps for kdn in n.deps_real],
+        n.deps_through_size_artefacts)
+    elif "K_D_node" in t: return set().union(
+        *[kcn.deps_real for kcn in n.deps])
     else: raise Exception(f"Unrecognize node type : {t}")
 
 

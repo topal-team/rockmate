@@ -6,146 +6,61 @@ import gc
 # ====== K structure =======
 # ==========================
 
+# ************
+# * K_C_node *
+# ************
 
 class K_C_node():
-    def __init__(self,):
-        self.main_target = mt =
-        self.main_code
-        self.body_code
-
-        self.time
-        self.overhead
-
-        self.is_fwd
-        self.name = f"fwd_{mt}"
-
-        self.has_phantoms # ?
-
-        self.inspector # TO REMOVE
-
-        self.deps_real : KDN set
-        self.deps_fake
-        self.deps_global
-        self.users : KDN set
-
-        self.users_of_size_artefacts : KCN set # just for the toposort
-
-class K_D_node():
-    def __init__(self,):
-        self.component # data/grad/phantoms/size
-
-        self.main_target
-        self.all_targets
-        self.name = f"{self.main_target} {self.component}"
-
-        self.mem
-
-        self.deps : KCN set
-        self.users_real : KCN set
-        self.users_fake
-        self.users_global
-
-class K_graph():
-    def __init__(self,sg : S_graph):
-        self.dict_kn = dict() # KCN.name or KDN.name
-        self.list_kcn : K_C_node list # TOPOSORTED
-        self.list_kdn : K_D_node list # TOPOSORTED
-
-        self.input_kdn # from the previous : KDN _116.data
-        self.loss_kcn
-        self.output_kdn # from the previous : KDN _116.grad
-
-        self.init_code = make_ast_module(sg.init_node.body_code)
-        self.dict_info = sg.dict_info
-        self.dict_rand = sg.dict_rand # TODO
-        self.sg = sg # TO REMOVE
-        # for first K_graph - for printing purpose
-        self.users_of_imaginary_input_node = set()
-        self.deps_of_imaginary_output_node = set()
-
-
-###################
-###################
-###################
-###################
-###################
-###################
-###################
-###################
-###################
-###################
-
-class K_node():
     def __init__(self,
             target="/!\\ No target /!\\",
-            all_targets=None,tensor_targets=None,
+            is_fwd=True,
+            main_code=None,body_code=None,
+            deps_real=None,deps_fake=None):
+        # ** informative **
+        self.main_target = mt = target
+        self.name        = f"fwd_{mt}"
+        self.is_fwd      = is_fwd
+        self.main_code   = main_code # AST
+        self.body_code   = body_code if body_code else [] # AST list
 
-            is_artefact=False, is_fwd=True,
-            main_code=None, body_code=None,
-            info=None,
-
-            req_real=None,req_fake=None):
-
-        # ** name and targets **
-        self.main_target = target
-        if all_targets is None: all_targets = [target]
-        if tensor_targets is None: tensor_targets = [target]
-        self.tensor_targets = tensor_targets
-        self.all_targets = all_targets
-        if is_fwd: self.name = "fwd_"+target
-        else:      self.name = "bwd_"+target
-
-        # ** informative : info/artefact/fwd/cached/code **
-        self.is_artefact = is_artefact
-        self.is_fwd = is_fwd
-        self.cached = False
-        self.info = info
-        self.main_code = main_code
-        self.body_code = body_code if body_code else []
-
-        # ** req/used_by **
-        self.req_real = req_real if req_real else set()
-        self.req_fake = req_fake if req_fake else set()
-        self.req_global = set ()
-        self.used_by_real = set ()
-        self.used_by_fake = set ()
-        self.used_by_global = set ()
+        # ** deps/used_by **
+        self.deps_real   = deps_real if deps_real else set() # KDN set
+        self.deps_fake   = deps_fake if deps_fake else set() # KDN set
+        self.deps_global = set () # KDN set
+        self.users       = set () # KDN set
+        self.deps_through_size_artefacts = set () # KCN set
+        # -> just for the toposort, we don't even need the reciprocal
 
         # ** inspection **
-        self.run_mem  = None
-        self.fgt_mem  = None
-        self.del_mem  = MemSize(0)
-        self.overhead = None
-        self.time = None
-        self.abar = None
-        self.inspector = None
+        self.time         = None
+        self.overhead     = None
+        self.inspector    = None # TO REMOVE
+        self.has_phantoms = None # TO REMOVE ?
 
-
-    def __eq__(self,n2):
-        n1 = self
-        # ** Easy to check attrs **
-        b = check_attr(n1,n2,[
-            "name","main_target","all_targets","tensor_targets",
-            "is_fwd","is_artefact","cached","info",
-            "abar","run_mem","fgt_mem","del_mem","overhead"],
+    def __eq__(self,kcn2):
+        kcn1 = self
+        b = (
+        check_attr(kcn1,kcn2,
+            ["name","main_target","is_fwd",
+             "overhead","has_phantoms"],
             raise_exception=False)
-        b = b and n1.get_code() == n2.get_code()
+        and kcn1.get_code() == kcn2.get_code())
 
-        # ** req/used_by **
-        mkstr = lambda nl : [rn.main_target for rn in nl]
+        # ** deps/users **
+        get_mt = lambda nl : [rn.main_target for rn in nl]
         for attr in [
-            "req_real","req_fake","req_global",
-            "used_by_real","used_by_fake","used_by_global"]:
-            b = (b and
-                mk_str(getattr(n1,attr)) == mk_str(getattr(n2,attr)))
+            "deps_real","deps_fake","deps_global",
+            "users","deps_through_size_artefacts"]:
+            b *= get_mt(getattr(kcn1,attr)) == mk_str(getattr(kcn2,attr)))
 
-        # ** inspection **
-        t1 = n1.time ; t2 = n2.time ; r = ref_reasonable_rate[0]
+        # ** time **
+        t1 = kcn1.time
+        t2 = kcn2.time
+        r = ref_reasonable_rate[0]
         if not (((t1 == t2)
             or (isinstance(t1,float) and isinstance(t2,float)
             and (abs(t1 - t2) < (r * max(t1,t2)))))):return False
-        return b
-
+        return bool(b)
     def __hash__(self):
         return self.main_target.__hash__()
 
@@ -161,53 +76,92 @@ class K_node():
         return ast_to_str(self.full_code())
 
 
+# ************
+# * K_D_node *
+# ************
+
+class K_D_node():
+    def __init__(self,
+            kdn_type = "/!\\ No kdn_type/!\\",
+            target   = "/!\\ No target /!\\",
+            all_targets = None,
+            users_real  = None,
+            users_fake  = None):
+        # ** informative **
+        self.kdn_type    = kdn_type # data, grad or phantoms
+        self.main_target = mt = target
+        self.name        = f"{mt} {self.kdn_type}"
+        self.all_targets = all_targets if all_targets else [target]
+        self.mem         = None
+
+        # ** deps/used_by **
+        self.users_real   = users_real if users_real else set() # KCN set
+        self.users_fake   = users_fake if users_fake else set() # KCN set
+        self.users_global = set () # KCN set
+        self.deps         = set () # KCN set
+
+    def __eq__(self,kdn2):
+        kdn1 = self
+        b = check_attr(kdn1,kdn2,
+            ["name","mem","kdn_type",
+             "main_target","all_targets"],
+            raise_exception=False)
+        # ** deps/users **
+        get_mt = lambda nl : [rn.main_target for rn in nl]
+        for attr in ["users_real","users_fake","users_global","deps"]:
+            b *= get_mt(getattr(kdn1,attr)) == mk_str(getattr(kdn2,attr)))
+        return bool(b)
+    def __hash__(self):
+        return self.main_target.__hash__()
+
+
+# ***********
+# * K_graph *
+# ***********
 
 class K_graph():
     def __init__(self,sg : S_graph):
-        self.dict_nodes = dict()
-        self.hidden_inputs  = sg.hidden_inputs
-        self.direct_inputs  = sg.direct_inputs
-        self.hidden_output  = sg.hidden_output
-        self.direct_outputs = sg.direct_outputs
+        self.dict_kn  = dict() # KDN/KCN.name -> KDN/KCN
+        self.list_kcn = []     # KCN list : Toposorted
+        self.list_kdn = []     # KDN list : Arbitrary order
+
+        self.input_kdn  = None # from the previous kg, e.g. KDN _116.data
+        self.loss_kcn   = None
+        self.output_kdn = None # from the previous kg, e.g. KDN _116.grad
+        # -> for the first K_graph, input/output_kdn are fresh nodes
+
         self.init_code = make_ast_module(sg.init_node.body_code)
         self.dict_info = sg.dict_info
         self.dict_rand = sg.dict_rand
-        self.loss_node = None
-        self.sg = sg
-        # for first K_graph :
-        self.used_by_of_imaginary_input_node = set()
-        self.req_of_imaginary_output_node = set()
+        self.sg = sg # TO REMOVE
 
-    def make_used_by(self):
-        for n in self.dict_nodes.values():
-            for req_n in n.req_real: req_n.used_by_real.add(n)
-            for req_n in n.req_fake: req_n.used_by_fake.add(n)
-    def init_req_and_used_by_global(self):
-        for n in self.dict_nodes.values():
-            n.req_global     = n.req_real.union(n.req_fake)
-            n.used_by_global = n.used_by_real.union(n.used_by_fake)
+    def make_users(self):
+        for kcn in self.list_kcn:
+            for req_kdn in kcn.deps_real: req_kdn.users_real.add(kcn)
+            for req_kdn in kcn.deps_fake: req_kdn.users_fake.add(kcn)
+        for kdn in self.list_kdn:
+            for req_kcn in kdn.deps: req_kcn.users.add(kdn)
+    def init_deps_and_users_global(self):
+        for kcn in self.list_kcn:
+            kcn.deps_global = kcn.deps_real.union(kcn.deps_fake)
+        for kdn in self.list_kdn:
+            kdn.users_global = kdn.users_real.union(kdn.users_fake)
 
-    def make_cached_attr(self):
-        for kn in self.dict_nodes.values():
-            if (kn.is_fwd and kn.abar
-            and (kn.used_by_global
-            == kn.used_by_real.union(kn.used_by_fake))):
-                kn.cached = True
-                for sub_kn in kn.used_by_global - kn.used_by_fake:
-                    if (not sub_kn.is_fwd and
-                        sub_kn.main_target != kn.main_target):
-                        kn.cached = False
-                        break
+    def sort_list_kcn(self):
+        # we want to use sort_based_on_deps over list_kcn
+        # but to do so we need an origin_node, ie a root of
+        # the "deps" relation between KCN.
+        root_kcn = K_C_Node(deps_real=set([self.output_kdn]))
+        self.list_kcn = l = sort_based_on_deps(root_kcn)
+        l.remove(root_kcn)
 
     def __eq__(self,g2): # aggressive
         if ast_to_str(self.init_code) != ast_to_str(g2.init_code):
             raise Exception("diff init_code")
         return check_attr(self,g2,["sg",
-            "direct_inputs","hidden_inputs",
-            "direct_outputs","hidden_output",
-            "dict_info","dict_nodes","loss_node",
-            "used_by_of_imaginary_input_node",
-            "req_of_imaginary_output_node"],raise_exception=True)
+            "dict_kn","list_kcn","list_kdn",
+            "input_kdn","loss_kcn","output_kdn",
+            "dict_info","dict_rand",raise_exception=True)
     def __hash__(self):
         return id(self)
 
@@ -236,36 +190,31 @@ def generate_our_global(sg,model,device):
 def generate_tmp_local(sn,sg : S_graph,our_global):
     tmp_local = {}
     exec(sg.init_node.get_code(),our_global,tmp_local)
-    for req_sn in sn.req:
+    for req_sn in sn.deps.keys():
         if not (req_sn is sg.init_node):
             # we create the main_target value, and we run the body_code
             # but the body_code may requires some artefacts
-            req_tar = req_sn.main_target
-            main_info = sg.dict_info[req_tar]
-            tmp_local[req_tar] = generate_val(main_info,device)
-            for req_req_sn in req_sn.req:
+            req_sn_mt = req_sn.main_target
+            main_info = sg.dict_info[req_sn_mt]
+            tmp_local[req_sn_mt] = generate_val(main_info,device)
+            for req_req_sn in req_sn.deps.keys():
                 if not (req_req_sn is sg.init_node):
                     for req_req_tar in req_req_sn.all_targets:
                         req_req_info = sg.dict_info[req_req_tar]
                         tmp_local[req_req_tar] = (
                             generate_val(req_req_info,device))
             for c in req_sn.body_code:
-                try:
-                    exec(ast_to_str(c),our_global,tmp_local)
-                except:
-                    raise Exception(
-                      f"pb to generate {req_tar} for {n.main_target} "\
-                      f"\n {ast_to_str(c)} impossible to exec")
+                exec(ast_to_str(c),our_global,tmp_local)
     """ TODO
-    if n.is_rand:
-        for sub_r in n.req_rand:
-            exec(g.dict_rand[sub_r],our_global,tmp_local)
+    if sn.is_rand:
+        for req_rd in sn.deps_rand:
+            exec(sg.dict_rand[req_rd],our_global,tmp_local)
     """
     return tmp_local
 
 def generate_deep_tmp_local(sn,sg,our_global):
     tmp_local = dict()
-    for req_sn in sn.req:
+    for req_sn in sn.deps.keys():
         tmp_local.update(generate_tmp_local(req_sn,sg,our_global))
         exec(req_sn.get_code(), our_global, tmp_local)
     return tmp_local
@@ -279,6 +228,17 @@ def generate_deep_tmp_local(sn,sg,our_global):
 # trace grad_fn to know what
 #   is needed to backward
 # ==========================
+
+###################
+###################
+###################
+###################
+###################
+###################
+###################
+###################
+###################
+###################
 
 def get_useful_vars(sn : S_node,sg : S_graph,our_global):
     params = dict(our_global['self'].named_parameters())
