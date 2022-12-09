@@ -15,7 +15,8 @@ class K_C_node():
             target="/!\\ No target /!\\",
             is_fwd=True,
             main_code=None,body_code=None,
-            deps_real=None,deps_fake=None):
+            deps_real=None,deps_fake=None,
+            deps_through_size_artefacts=None):
         # ** informative **
         self.main_target = mt = target
         self.name        = f"fwd_{mt}"
@@ -28,8 +29,9 @@ class K_C_node():
         self.deps_fake   = deps_fake if deps_fake else set() # KDN set
         self.deps_global = set () # KDN set
         self.users       = set () # KDN set
-        self.deps_through_size_artefacts = set () # KCN set
-        # -> just for the toposort, we don't even need the reciprocal
+        da = deps_through_size_artefacts
+        self.deps_through_size_artefacts = da if da else set() # KCN set
+        # -> just for the toposort, we don't need the reciprocal users_..
 
         # ** inspection **
         self.time         = None
@@ -85,8 +87,7 @@ class K_D_node():
             kdn_type = "/!\\ No kdn_type/!\\",
             target   = "/!\\ No target /!\\",
             all_targets = None,
-            users_real  = None,
-            users_fake  = None):
+            deps        = None):
         # ** informative **
         self.kdn_type    = kdn_type # data, grad or phantoms
         self.main_target = mt = target
@@ -95,10 +96,10 @@ class K_D_node():
         self.mem         = None
 
         # ** deps/used_by **
-        self.users_real   = users_real if users_real else set() # KCN set
-        self.users_fake   = users_fake if users_fake else set() # KCN set
-        self.users_global = set () # KCN set
-        self.deps         = set () # KCN set
+        self.users_real   = set() # KCN set
+        self.users_fake   = set() # KCN set
+        self.users_global = set() # KCN set
+        self.deps         = deps if deps else set() # KCN set
 
     def __eq__(self,kdn2):
         kdn1 = self
@@ -406,16 +407,6 @@ class inspector():
             self.ret["mem_fgt_bwd"]  = minus_mem(mem_fgt_bwd)
             self.ret["time_run_bwd"] = time_run_bwd
     # # ===============
-
-# aux function to handle verbose and device
-def aux_init_S_to_K(model,verbose,d):
-    global device
-    device = d if d else (
-        get_device_and_check_all_same_device(model,dict(),True))
-    if not (verbose is None): ref_verbose[0] = verbose
-
-
-
 # ==========================
 
 
@@ -424,36 +415,83 @@ def aux_init_S_to_K(model,verbose,d):
 # = Move from S to K graph =
 # ==========================
 
+# aux function to handle verbose and device
+def aux_init_S_to_K(model,verbose,d):
+    global device
+    device = d if d else (
+        get_device_and_check_all_same_device(model,dict(),True))
+    if not (verbose is None): ref_verbose[0] = verbose
+
 # the function that does it all
 def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
     # -- init --
-    dict_Kbwd = dict() # dict : target -> K_node(bwd)
-    dict_Kfwd = dict() # dict : target -> K_node(fwd)
+    dict_KCN_fwd  = dict() # mt -> KCN(fwd)
+    dict_KCN_bwd  = dict() # mt -> KCN(bwd)
+    dict_KDN_data = dict() # mt -> KDN(data)
+    dict_KDN_grad = dict() # ...
+    dict_KDN_phantoms = dict()
     kg = K_graph(sg)
 
     # ====== 
     def handle_node(sn : S_node):
         mt = sn.main_target
-        print_debug(mt)
-        # -- build Kfwd --
-        sn_req = set(sn.req)
-        sn_req.discard(sg.init_node)
-        sn_req_str = [sub_sn.main_target for sub_sn in sn_req]
-        Kreq_fwd = set(dict_Kfwd[sub_sn_mt] for sub_sn_mt in sn_req_str)
-        info = sg.dict_info[mt]
-        Kfwd = K_node(
-                target          = mt,
-                all_targets     = sn.all_targets,
-                tensor_targets  = sn.tensor_targets,
-                is_artefact     = sn.is_artefact,
-                is_fwd          = True,
-                main_code       = sn.main_code,
-                body_code       = sn.body_code,
-                info            = info,
-                req_real        = Kreq_fwd)
-        dict_Kfwd[mt] = Kfwd
+        print_debug(f"start to handle {mt}'s S_node in S_to_K")
         our_global = generate_our_global(sg,model,device)
 
+        # For artefact nodes :
+        #   -> if KCN2 only need KCN1.size, it means in sg there is
+        #   -> an artefact node for KCN1.size to avoid useless dep
+        #   -> between KCN2 and KCN1. We decided to do NOT have KDN(size)
+        #   -> in fact we just need KCN1 to be ordered before KCN2 in
+        #   -> the toposort. To do so we create a tmp special dep:
+        #   -> "deps_through_size_artefacts" when we find artft in sn.deps
+        if sn.is_artefact: return ()
+
+        # *** build KCN(fwd) ***
+        sn_deps = set(sn.deps.keys())
+        sn_deps.discard(sg.init_node)
+
+        # -> handle artefact deps :
+        kcn_deps_art_kcn = set()
+        for req_sn in sn_deps:
+            if req_sn.is_artefact:
+                sn_deps.discard(req_sn)
+                req_real_sn = list(req_sn.deps.keys())[0] # art's parent
+                kcn_deps_art_kcn.add(dict_KCN_fwd[req_real_sn.main_target])
+
+        # -> get kdn_data deps
+        sn_deps_mt = [req_sn.main_target for req_sn in sn_deps]
+        kcn_fwd_deps_kdn_data = set(
+            dict_KDN_data[req_sn_mt] for req_sn_mt in sn_deps_mt)
+
+        # -> KCN(fwd)
+        kcn_fwd = K_C_node(
+                target    = mt,
+                is_fwd    = True,
+                main_code = sn.main_code,
+                body_code = sn.body_code,
+                deps_real = kwn_fwd_deps_kdn_data,
+                deps_through_size_artefacts = kcn_deps_art_kcn)
+        dict_KCN_fwd[mt] = kcn_fwd
+
+        # -> KDN(data)
+        kdn_data = K_D_node(
+                kdn_type    = "data",
+                target      = mt,
+                all_targets = sn.tensor_targets,
+                deps        = set(kcn_fwd))
+        dict_KDN_data[mt] = kdn_data
+
+###################
+###################
+###################
+###################
+###################
+###################
+###################
+###################
+###################
+###################
         # -- build Kbwd --
         info = sg.dict_info[mt]
         if info.requires_grad:
