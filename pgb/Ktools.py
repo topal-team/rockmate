@@ -230,16 +230,9 @@ def generate_deep_tmp_local(sn,sg,our_global):
 #   is needed to backward
 # ==========================
 
-###################
-###################
-###################
-###################
-###################
-###################
-###################
-###################
-###################
-###################
+# TODO : TO TEST "exist_phantoms"
+# -> I don't want to use inspection to detect phantoms
+# -> Ktools shouldn't requires a GPU to produce a correct graph
 
 def get_useful_vars(sn : S_node,sg : S_graph,our_global):
     params = dict(our_global['self'].named_parameters())
@@ -249,20 +242,20 @@ def get_useful_vars(sn : S_node,sg : S_graph,our_global):
     exec(sn.get_code(), our_global, tmp_local)
     mt = sn.main_target
     fn = tmp_local[mt].grad_fn
-    explicit_vars = set() # set of torch.Tensor
-    phantom_vars  = set()  # set of "path" from fn
+    explicit_vars = set() # set of Tensors
+    phantom_vars  = set() # set of Tensors
 
     # == SEARCH THROUGH GRAD_FN == 
-    def trace_gradfn(f,path): # path useless
+    def trace_gradfn(f,path): # path useless, just testing TO REMOVE
         if hasattr(f,"variable"):
             explicit_vars.add(f.variable)
         for attr in dir(f):
             x = getattr(f,attr)
-            if (isinstance(x,torch.Tensor) and attr != "variable"):
+            if (attr != "variable" and isinstance(x,torch.Tensor)):
                 is_para = False ; is_input = False
-                for k,p in params.items():
+                for p in params.values():
                     if p is x: is_para  = True
-                for k,t in our_global.items():
+                for t in our_global.values():
                     if t is x: is_input = True
                 if not is_para and not is_input:
                     phantom_vars.add(x)
@@ -305,14 +298,13 @@ def get_useful_vars(sn : S_node,sg : S_graph,our_global):
 # ==========================
 
 class inspector():
-    def __init__(self, sn : S_node , kn : K_node,sg : S_graph,our_global):
-        self.kn = kn
-        self.mt = kn.main_target
+    def __init__(self, sn : S_node, sg : S_graph,our_global):
+        self.sn = sn
+        self.mt = sn.main_target
         self.info = sg.dict_info[self.mt]
         self.timer = rotor.timing.make_timer(device)
         self.memUsage = rotor.memory.MeasureMemory(device)
         self.our_global = our_global
-        #with torch.no_grad():
         self.tmp_local = generate_tmp_local(sn,sg,our_global)
         self.ret = {}
     
@@ -335,16 +327,16 @@ class inspector():
     # -- measure forward --
     def measure_fwd(self,only_run=False):
         def fct_run_fwd():
-            self.code_run_fwd = self.kn.get_code()
+            self.code_run_fwd = self.sn.get_code()
             exec(self.code_run_fwd, self.our_global, self.tmp_local)
 
         def fct_fgt_fwd():
-            for tar in self.kn.tensor_targets:
+            for tar in self.sn.tensor_targets:
                 self.tmp_local[tar].data = torch.zeros(0,device=device)
             
         def fct_del_fwd():
             code = ""
-            for tar in self.kn.tensor_targets:
+            for tar in self.sn.tensor_targets:
                 code += f"del {tar};"
             self.code_del_fwd = code#Only include the phantom part 
             exec(self.code_del_fwd, self.our_global, self.tmp_local)
@@ -372,14 +364,14 @@ class inspector():
         exec(self.code_run_bwd, self.our_global, self.tmp_local)
 
     def fct_fgt_bwd(self):
-        for req_kn in self.kn.req_real:
-            if not req_kn.is_artefact:
-                for tar in req_kn.tensor_targets:
+        for req_sn in self.sn.deps.keys():
+            if not req_sn.is_artefact:
+                for tar in req_sn.tensor_targets:
                     self.tmp_local[tar].grad = None
     def fct_prepare_bwd(self):
-        self.code_run_fwd = self.kn.get_code()
+        self.code_run_fwd = self.sn.get_code()
         exec(self.code_run_fwd, self.our_global, self.tmp_local)
-        self.tmp_local[self.kn.main_target].grad = generate_val(self.info,device)
+        self.tmp_local[self.sn.main_target].grad = generate_val(self.info,device)
 
     # measure
     def measure_bwd(self):
@@ -447,7 +439,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
         #   -> "deps_through_size_artefacts" when we find artft in sn.deps
         if sn.is_artefact: return ()
 
-        # *** build KCN(fwd) ***
+        # *** build the fwd part ***
         sn_deps = set(sn.deps.keys())
         sn_deps.discard(sg.init_node)
 
@@ -459,102 +451,111 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                 req_real_sn = list(req_sn.deps.keys())[0] # art's parent
                 kcn_deps_art_kcn.add(dict_KCN_fwd[req_real_sn.main_target])
 
-        # -> get kdn_data deps
+        # -> get kdn_data deps for fwd
         sn_deps_mt = [req_sn.main_target for req_sn in sn_deps]
         kcn_fwd_deps_kdn_data = set(
-            dict_KDN_data[req_sn_mt] for req_sn_mt in sn_deps_mt)
+            dict_KDN_data[mt] for mt in sn_deps_mt)
 
         # -> KCN(fwd)
         kcn_fwd = K_C_node(
-                target    = mt,
-                is_fwd    = True,
-                main_code = sn.main_code,
-                body_code = sn.body_code,
-                deps_real = kwn_fwd_deps_kdn_data,
-                deps_through_size_artefacts = kcn_deps_art_kcn)
+            target    = mt,
+            is_fwd    = True,
+            main_code = sn.main_code,
+            body_code = sn.body_code,
+            deps_real = kcn_fwd_deps_kdn_data,
+            deps_through_size_artefacts = kcn_deps_art_kcn)
         dict_KCN_fwd[mt] = kcn_fwd
 
         # -> KDN(data)
         kdn_data = K_D_node(
-                kdn_type    = "data",
-                target      = mt,
-                all_targets = sn.tensor_targets,
-                deps        = set(kcn_fwd))
+            kdn_type    = "data",
+            target      = mt,
+            all_targets = sn.tensor_targets,
+            deps        = set(kcn_fwd))
         dict_KDN_data[mt] = kdn_data
 
-###################
-###################
-###################
-###################
-###################
-###################
-###################
-###################
-###################
-###################
-        # -- build Kbwd --
+        # *** build the bwd part ***
         info = sg.dict_info[mt]
         if info.requires_grad:
-            print_debug(f"start to build {mt} bwd node")
-            # ** make req real/fake **
-            req_real_str,exist_phantoms = get_useful_vars(sn,sg,our_global)
-            req_real_str_mt = set(req_real_str).intersection(set(sn_req_str))
-            req_real_K = set(dict_Kfwd[mt] for mt in req_real_str_mt)
-            req_real_K = req_real_K.intersection(Kreq_fwd)
-            req_fake_K = Kreq_fwd - req_real_K
+            # -> get kdn_data and phantoms deps for bwd
+            deps_real_name,exist_phantoms = (
+                get_useful_vars(sn,sg,our_global))
+            bwd_deps_real_mt = (
+                set(deps_real_name).intersection(set(sn_deps_mt)))
+            kcn_bwd_deps_real_kdn_data = set(
+                dict_KDN_data[mt] for mt in bwd_deps_real_mt)
+            kcn_bwd_deps_fake_kdn_data = (
+                kcn_fwd_deps_kdn_data - kcn_bwd_deps_real_kdn_data)
+            kcn_bwd_deps_fake_kdn_data.add(kdn_data)
 
-            # ** create Kbwd **
-            Kbwd = K_node(
-                target          = mt,
-                all_targets     = sn.all_targets,
-                tensor_targets  = sn.tensor_targets,
-                is_fwd          = False,
-                info            = info,
-                req_real        = req_real_K,
-                req_fake        = req_fake_K)
-            dict_Kbwd[mt] = Kbwd
-            for sub_sn in sn.req:
-                sub_tar = sub_sn.main_target
-                if sub_tar in dict_Kbwd: # requires_grad
-                    dict_Kbwd[sub_tar].req_real.add(Kbwd)
+            # -> KCN(bwd)
+            kcn_bwd = K_C_node(
+                target    = mt,
+                is_fwd    = False,
+                deps_real = kcn_bwd_deps_real_kdn_data,
+                deps_fake = kcn_bwd_deps_fake_kdn_data)
+            dict_KCN_bwd[mt] = kcn_bwd
+
+            # -> KDN(phantoms)
+            if exist_phantoms:
+                kdn_phantoms = K_D_node(
+                    kdn_type    = "phantoms",
+                    target      = mt,
+                    deps        = set(kcn_fwd))
+                dict_KDN_phantoms[mt] = kdn_phantoms
+                kcn_bwd.deps_real.add(kdn_phantoms)
+
+            # -> KDN(grad)
+            kdn_grad = K_D_node(
+                kdn_type    = "grad",
+                target      = mt)
+            dict_KDN_grad[mt] = kdn_grad
+            kcn_bwd.deps_real.add(kdn_grad)
+
+            # -> KDN(grad).deps of fwd_deps
+            for req_sn_mt in sn_deps_mt:
+                if req_sn_mt in dict_KCN_grad: #i.e. requires_grad
+                    dict_KDN_grad[req_sn_mt].deps_real.add(kcn_bwd)
+
+###################
+###################
+###################
+###################
+###################
+###################
+###################
+###################
+###################
+###################
+        # *** inspection ***
+        ins = inspector(sn,sg,our_global)
+        ins.measure_fwd()
+        ins.measure_bwd()
+        res = ins.ret
+        Kfwd.run_mem  = res["mem_run_fwd"]
+        Kfwd.fgt_mem  = res["mem_fgt_fwd"]
+        Kfwd.del_mem  = res["mem_del_fwd"]
+        Kfwd.inspector = ins
+        Kfwd.overhead = res["overhead_fwd"]
+        Kfwd.time     = res["time_run_fwd"]
+        info.memsize  = res["mem_fgt_fwd"]
+        if info.requires_grad:
+            Kbwd.run_mem  = res["mem_run_bwd"]
+            Kbwd.fgt_mem  = res["mem_fgt_bwd"]
+            Kbwd.overhead = res["overhead_bwd"]
+            Kbwd.time     = res["time_run_bwd"]
+            Kbwd.inspector = ins
             
-        
-        # -- inspection --
-        if info.ttype == torch.Size:
-            Kfwd.run_mem  = MemSize(0)
-            Kfwd.fgt_mem  = MemSize(0)
-            Kfwd.del_mem  = MemSize(0)
-            Kfwd.overhead = MemSize(0)
-            Kfwd.time     = 0
-        else:
-            ins = inspector(sn,Kfwd,sg,our_global)
-            ins.measure_fwd()
-            ins.measure_bwd()
-            res = ins.ret
-            Kfwd.run_mem  = res["mem_run_fwd"]
-            Kfwd.fgt_mem  = res["mem_fgt_fwd"]
-            Kfwd.del_mem  = res["mem_del_fwd"]
-            Kfwd.inspector = ins
-            Kfwd.overhead = res["overhead_fwd"]
-            Kfwd.time     = res["time_run_fwd"]
-            info.memsize  = res["mem_fgt_fwd"]
+        if Kfwd.run_mem.v != Kfwd.fgt_mem.v:#a_bar case
+            Kfwd.abar = True
             if info.requires_grad:
-                Kbwd.run_mem  = res["mem_run_bwd"]
-                Kbwd.fgt_mem  = res["mem_fgt_bwd"]
-                Kbwd.overhead = res["overhead_bwd"]
-                Kbwd.time     = res["time_run_bwd"]
-                Kbwd.inspector = ins
-                
-            if Kfwd.run_mem.v != Kfwd.fgt_mem.v:#a_bar case
-                Kfwd.abar = True
-                if info.requires_grad:
-                    Kbwd.abar = True
-                    Kbwd.run_mem.v += (Kfwd.run_mem.v - Kfwd.fgt_mem.v)
-            else: Kfwd.del_mem = Kfwd.fgt_mem
-            if info.requires_grad:
-                if Kfwd.abar:# or exist_phantoms:
-                    Kbwd.req_real.add(Kfwd)
-                else: Kbwd.req_fake.add(Kfwd)
+                Kbwd.abar = True
+                Kbwd.run_mem.v += (Kfwd.run_mem.v - Kfwd.fgt_mem.v)
+        else: Kfwd.del_mem = Kfwd.fgt_mem
+        if info.requires_grad:
+            if Kfwd.abar:# or exist_phantoms:
+                Kbwd.req_real.add(Kfwd)
+            else: Kbwd.req_fake.add(Kfwd)
         k_list = list(ins.tmp_local.keys())
         for k in k_list: del ins.tmp_local[k]
     # ------------
