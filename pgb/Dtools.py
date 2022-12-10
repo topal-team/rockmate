@@ -223,8 +223,8 @@ def print_D_graph(dg : D_graph,name=None,open=True):
         elif dn.target == dg.output:
             dot.node(dn.target,dn.get_code(),color="red")
         else: dot.node(dn.target,dn.get_code())
-    for dn in g.nodes:
-        for req_dn in n.deps:
+    for dn in dg.nodes:
+        for req_dn in dn.deps:
             dot.edge(req_dn.target,dn.target)
     graph_render(dot,open,"D") # from utils.py
 
