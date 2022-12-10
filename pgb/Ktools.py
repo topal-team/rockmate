@@ -19,16 +19,17 @@ class K_C_node():
             deps_through_size_artefacts=None):
         # ** informative **
         self.main_target = mt = target
-        self.name        = f"fwd_{mt}"
+        self.name        = f"fwd_{mt}" if is_fwd else f"bwd_{mt}"
         self.is_fwd      = is_fwd
         self.main_code   = main_code # AST
         self.body_code   = body_code if body_code else [] # AST list
 
         # ** deps/used_by **
-        self.deps_real   = deps_real if deps_real else set() # KDN set
-        self.deps_fake   = deps_fake if deps_fake else set() # KDN set
-        self.deps_global = set () # KDN set
-        self.users       = set () # KDN set
+        self.deps_real    = deps_real if deps_real else set() # KDN set
+        self.deps_fake    = deps_fake if deps_fake else set() # KDN set
+        self.deps_global  = set() # KDN set
+        self.users_global = set() # KDN set
+        self.users        = set() # KDN set
         da = deps_through_size_artefacts
         self.deps_through_size_artefacts = da if da else set() # KCN set
         # -> just for the toposort, we don't need the reciprocal users_..
@@ -52,7 +53,8 @@ class K_C_node():
         get_mt = lambda nl : [rn.main_target for rn in nl]
         for attr in [
             "deps_real","deps_fake","deps_global",
-            "users","deps_through_size_artefacts"]:
+            "users","users_global",
+            "deps_through_size_artefacts"]:
             b *= get_mt(getattr(kcn1,attr)) == mk_str(getattr(kcn2,attr)))
 
         # ** time **
@@ -64,7 +66,7 @@ class K_C_node():
             and (abs(t1 - t2) < (r * max(t1,t2)))))):return False
         return bool(b)
     def __hash__(self):
-        return self.main_target.__hash__()
+        return self.name.__hash__()
 
     def full_code(self):
         if self.main_code is None: mc = []
@@ -99,6 +101,7 @@ class K_D_node():
         self.users_real   = set() # KCN set
         self.users_fake   = set() # KCN set
         self.users_global = set() # KCN set
+        self.deps_global  = set() # KCN set
         self.deps         = deps if deps else set() # KCN set
 
     def __eq__(self,kdn2):
@@ -109,11 +112,13 @@ class K_D_node():
             raise_exception=False)
         # ** deps/users **
         get_mt = lambda nl : [rn.main_target for rn in nl]
-        for attr in ["users_real","users_fake","users_global","deps"]:
+        for attr in [
+            "users_real","users_fake","deps",
+            "users_global","deps_global"]:
             b *= get_mt(getattr(kdn1,attr)) == mk_str(getattr(kdn2,attr)))
         return bool(b)
     def __hash__(self):
-        return self.main_target.__hash__()
+        return self.name.__hash__()
 
 
 # ***********
@@ -126,10 +131,14 @@ class K_graph():
         self.list_kcn = []     # KCN list : Toposorted
         self.list_kdn = []     # KDN list : Arbitrary order
 
-        self.input_kdn  = None # from the previous kg, e.g. KDN _116.data
-        self.loss_kcn   = None
-        self.output_kdn = None # from the previous kg, e.g. KDN _116.grad
-        # -> for the first K_graph, input/output_kdn are fresh nodes
+        self.input_kdn_data  = None # e.g. KDN _13.data
+        self.output_kdn_data = None # e.g. KDN _116.data
+        self.loss_kcn        = None
+        self.output_kdn_grad = None # e.g. KDN _116.grad
+        self.input_kdn_grad  = None # e.g. KDN _13.grad
+        # -> for the first K_graph, input_kdn_data/grad are fresh nodes
+        # -> otherwise they are shared with the previous k_graph
+        # -> output_kdn_data/grad are shared with the next one
 
         self.init_code = make_ast_module(sg.init_node.body_code)
         self.dict_info = sg.dict_info
@@ -145,14 +154,16 @@ class K_graph():
     def init_deps_and_users_global(self):
         for kcn in self.list_kcn:
             kcn.deps_global = kcn.deps_real.union(kcn.deps_fake)
+            kcn.users_global = set(kcn.users)
         for kdn in self.list_kdn:
+            kdn.deps_global = set(kdn.deps)
             kdn.users_global = kdn.users_real.union(kdn.users_fake)
 
     def sort_list_kcn(self):
         # we want to use sort_based_on_deps over list_kcn
         # but to do so we need an origin_node, ie a root of
         # the "deps" relation between KCN.
-        root_kcn = K_C_Node(deps_real=set([self.output_kdn]))
+        root_kcn = K_C_Node(deps_real=set([self.input_kdn_data]))
         self.list_kcn = l = sort_based_on_deps(root_kcn)
         l.remove(root_kcn)
 
@@ -161,7 +172,8 @@ class K_graph():
             raise Exception("diff init_code")
         return check_attr(self,g2,["sg",
             "dict_kn","list_kcn","list_kdn",
-            "input_kdn","loss_kcn","output_kdn",
+            "input_kdn_data","output_kdn_data","loss_kcn",
+            "input_kdn_grad","output_kdn_grad",
             "dict_info","dict_rand",raise_exception=True)
     def __hash__(self):
         return id(self)
@@ -297,6 +309,8 @@ def get_useful_vars(sn : S_node,sg : S_graph,our_global):
 # ======= INSPECTION =======
 # ==========================
 
+# TODO : rewrite + clean this section
+
 class inspector():
     def __init__(self, sn : S_node, sg : S_graph,our_global):
         self.sn = sn
@@ -424,7 +438,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
     dict_KDN_phantoms = dict()
     kg = K_graph(sg)
 
-    # ====== 
+    # ============  
     def handle_node(sn : S_node):
         mt = sn.main_target
         print_debug(f"start to handle {mt}'s S_node in S_to_K")
@@ -453,7 +467,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
 
         # -> get kdn_data deps for fwd
         sn_deps_mt = [req_sn.main_target for req_sn in sn_deps]
-        kcn_fwd_deps_kdn_data = set(
+        kcn_fwd_deps = set(
             dict_KDN_data[mt] for mt in sn_deps_mt)
 
         # -> KCN(fwd)
@@ -462,7 +476,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             is_fwd    = True,
             main_code = sn.main_code,
             body_code = sn.body_code,
-            deps_real = kcn_fwd_deps_kdn_data,
+            deps_real = kcn_fwd_deps,
             deps_through_size_artefacts = kcn_deps_art_kcn)
         dict_KCN_fwd[mt] = kcn_fwd
 
@@ -474,6 +488,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             deps        = set(kcn_fwd))
         dict_KDN_data[mt] = kdn_data
 
+
         # *** build the bwd part ***
         info = sg.dict_info[mt]
         if info.requires_grad:
@@ -482,18 +497,18 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                 get_useful_vars(sn,sg,our_global))
             bwd_deps_real_mt = (
                 set(deps_real_name).intersection(set(sn_deps_mt)))
-            kcn_bwd_deps_real_kdn_data = set(
+            kcn_bwd_deps_real = set(
                 dict_KDN_data[mt] for mt in bwd_deps_real_mt)
-            kcn_bwd_deps_fake_kdn_data = (
-                kcn_fwd_deps_kdn_data - kcn_bwd_deps_real_kdn_data)
-            kcn_bwd_deps_fake_kdn_data.add(kdn_data)
+            kcn_bwd_deps_fake = (
+                kcn_fwd_deps - kcn_bwd_deps_real)
+            kcn_bwd_deps_fake.add(kdn_data)
 
             # -> KCN(bwd)
             kcn_bwd = K_C_node(
                 target    = mt,
                 is_fwd    = False,
-                deps_real = kcn_bwd_deps_real_kdn_data,
-                deps_fake = kcn_bwd_deps_fake_kdn_data)
+                deps_real = kcn_bwd_deps_real,
+                deps_fake = kcn_bwd_deps_fake)
             dict_KCN_bwd[mt] = kcn_bwd
 
             # -> KDN(phantoms)
@@ -504,6 +519,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                     deps        = set(kcn_fwd))
                 dict_KDN_phantoms[mt] = kdn_phantoms
                 kcn_bwd.deps_real.add(kdn_phantoms)
+                kcn_fwd.has_phantoms = True
+            else: kcn_fwd.has_phantoms = False
 
             # -> KDN(grad)
             kdn_grad = K_D_node(
@@ -517,107 +534,99 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                 if req_sn_mt in dict_KCN_grad: #i.e. requires_grad
                     dict_KDN_grad[req_sn_mt].deps_real.add(kcn_bwd)
 
-###################
-###################
-###################
-###################
-###################
-###################
-###################
-###################
-###################
-###################
+
         # *** inspection ***
         ins = inspector(sn,sg,our_global)
         ins.measure_fwd()
         ins.measure_bwd()
         res = ins.ret
-        Kfwd.run_mem  = res["mem_run_fwd"]
-        Kfwd.fgt_mem  = res["mem_fgt_fwd"]
-        Kfwd.del_mem  = res["mem_del_fwd"]
-        Kfwd.inspector = ins
-        Kfwd.overhead = res["overhead_fwd"]
-        Kfwd.time     = res["time_run_fwd"]
-        info.memsize  = res["mem_fgt_fwd"]
+
+        # -> fwd ins
+        kcn_fwd.ins = ins
+        kcn_fwd.overhead = res["overhead_fwd"]
+        kcn_fwd.time     = res["time_run_fwd"]
+        kdn_data.mem     = res["mem_fgt_fwd"]
+        info.memsize     = res["mem_fgt_fwd"]
+
+        # -> bwd ins
         if info.requires_grad:
-            Kbwd.run_mem  = res["mem_run_bwd"]
-            Kbwd.fgt_mem  = res["mem_fgt_bwd"]
-            Kbwd.overhead = res["overhead_bwd"]
-            Kbwd.time     = res["time_run_bwd"]
-            Kbwd.inspector = ins
-            
-        if Kfwd.run_mem.v != Kfwd.fgt_mem.v:#a_bar case
-            Kfwd.abar = True
-            if info.requires_grad:
-                Kbwd.abar = True
-                Kbwd.run_mem.v += (Kfwd.run_mem.v - Kfwd.fgt_mem.v)
-        else: Kfwd.del_mem = Kfwd.fgt_mem
-        if info.requires_grad:
-            if Kfwd.abar:# or exist_phantoms:
-                Kbwd.req_real.add(Kfwd)
-            else: Kbwd.req_fake.add(Kfwd)
-        k_list = list(ins.tmp_local.keys())
-        for k in k_list: del ins.tmp_local[k]
-    # ------------
+            kcn_bwd.ins = ins
+            kcn_bwd.overhead = res["overhead_bwd"]
+            kcn_bwd.time     = res["time_run_bwd"]
+            kdn_grad.mem     = res["mem_fgt_bwd"] # assert : = mem_fgt_fwd
+
+            # -> phantoms ins
+            if exist_phantoms:
+                kdn_phantoms.mem = MemSize(
+                    res["mem_run_fwd"].v - res["mem_fgt_fwd"].v)
+
+        ins.tmp_local.clear()
+    # ============ 
+
 
     for sn in sg.nodes:
         handle_node(sn)
 
-    dict_nodes = kg.dict_nodes
-    for Kfwd in dict_Kfwd.values():
-        dict_nodes[Kfwd.name]=Kfwd
-    for Kbwd in dict_Kbwd.values():
-        dict_nodes[Kbwd.name]=Kbwd
+    # -> loss_node
+    kg.output_kdn_data=output_kdn_data = dict_KDN_data[sg.hidden_output]
+    kg.output_kdn_grad=output_kdn_grad = dict_KDN_grad[sg.hidden_output]
+    kg.loss_kcn=loss_kcn = K_C_node(
+        target    = "loss",
+        is_fwd    = True,
+        main_code = make_ast_constant("LOSS"),
+        deps_real = set([output_kdn_data])
+    loss_kcn.time     = 0
+    loss_kcn.overhead = MemSize(0)
+    dict_KCN_fwd[loss_kcn.main_target] = loss_kcn
+    output_kdn_grad.deps.add(loss_kcn)
 
-    # -- loss node --
-    loss_node = K_node(
-        target      = "loss",
-        is_fwd      = True,
-        main_code   = make_ast_constant("LOSS"),
-        req_real    = {(dict_Kfwd[sg.hidden_output])})
-    loss_node.run_mem  = MemSize(0)
-    loss_node.fgt_mem  = MemSize(0)
-    loss_node.del_mem  = MemSize(0)
-    loss_node.overhead = MemSize(0)
-    loss_node.time     = 0
-    kg.loss_node = loss_node
-    dict_Kbwd[sg.hidden_output].req_real.add(loss_node)
-    dict_nodes["fwd_loss"] = loss_node
-    # ------------
+    # -> store the nodes
+    kg.list_kcn = (
+        list(dict_KCN_fwd.values()) +
+        list(dict_KCN_bwd.values())
+    kg.list_kdn = (
+        list(dict_KDN_data.values()) +
+        list(dict_KDN_grad.values()) +
+        list(dict_KDN_phantoms.values())
+    for kn in kg.list_kcn+kg.list_kdn: kg.dict_kn[kn.name]=kn
 
-    # build used_by
-    kg.make_used_by()
+    # -> build "users" attributes as reciprocal of "deps"
+    kg.make_users()
 
-    # build req_global and used_by_global
-    kg.init_req_and_used_by_global()
+
+    # *** global relations ***
+    kg.init_deps_and_users_global()
+    # -> get input_kdn_data/grad from prev_kg
     if prev_kg:
-        # from previous block
-        ln_prev = prev_kg.loss_node
-        req_prev = ln_prev.req_real
-        used_by_prev = ln_prev.used_by_real
-
-        # in current block
-        inp_sn = sg.init_node.used_by
-        inp_name = [n.main_target for n in inp_sn]
-        inp_Kfwd = [dict_nodes[f"fwd_{t}"] for t in inp_name]
-        inp_Kbwd = [dict_nodes[f"bwd_{t}"] for t in inp_name]
-
-        for n_prev in req_prev:
-            for n_curr in inp_Kfwd:
-                n_prev.used_by_global.add(n_curr)
-                n_curr.req_global.add(n_prev)
-        for n_prev in used_by_prev:
-            for n_curr in inp_Kbwd:
-                n_curr.used_by_global.add(n_prev)
-                n_prev.req_global.add(n_curr)
+        kg.input_kdn_data=input_kdn_data = prev_kg.output_kdn_data
+        kg.input_kdn_grad=input_kdn_grad = prev_kg.output_kdn_grad
+    # -> or create fresh vars in case kg is the first K_graph
     else:
-        # Just for printing purpose
-        using_src_sn = sg.init_node.used_by
-        using_src_name = [n.main_target for n in using_src_sn]
-        kg.used_by_of_imaginary_input_node = set(
-            dict_nodes[f"fwd_{t}"] for t in using_src_name)
-        kg.req_of_imaginary_output_node = set(
-            dict_nodes[f"bwd_{t}"] for t in using_src_name if f"bwd_{t}" in dict_nodes)
+        kg.input_kdn_data=input_kdn_data = K_D_node(
+            kdn_type = "data", target = "source",
+            all_targets = sg.direct_inputs)
+        kg.input_kdn_grad=input_kdn_grad = K_D_node(
+            kdn_type = "grad", target = "source",
+            all_targets = sg.direct_inputs)
+
+    # -> users of inp_data and deps of inp_grad
+    input_sn_users_mt = [
+        sn.main_target for sn in sg.init_node.users.keys()]
+    input_kdn_data_users = set(
+        dict_KCN_fwd[mt] for mt in input_sn_users_mt)
+    input_kdn_grad_deps  = set(
+        dict_KCN_bwd[mt] for mt in input_sn_users_mt)
+
+    # -> make deps/users_global
+    input_kdn_data.users_global.update(input_kdn_data_users)
+    for user_kcn in input_kdn_data_users:
+        user_kcn.deps_global.add(input_kdn_data)
+    input_kdn_grad.deps_global.update(input_kdn_grad_deps)
+    for user_kcn in input_kdn_grad_deps:
+        user_kcn.users_global.add(input_kdn_grad)
+
+    # -> TOPOSORT list_kcn
+    kg.sort_list_kcn()
 
     return kg
 
@@ -632,11 +641,8 @@ def S_list_to_K_list(list_sg,model,verbose=None,device=None):
     list_kg = []
     prev_kg = None
     for sg in list_sg:
-        kg = aux_build_S_to_K(sg,model,prev_kg)
-        prev_kg = kg
+        prev_kg = kg = aux_build_S_to_K(sg,model,prev_kg)
         list_kg.append(kg)
-    for kg in list_kg:
-        kg.make_cached_attr()
     return list_kg
 
 # ==========================
@@ -647,81 +653,93 @@ def S_list_to_K_list(list_sg,model,verbose=None,device=None):
 # === printing functions ===
 # ==========================
 
-def aux_print_graph(dot,g,uniq_num):
+color_kcn_fwd  = "blue"
+color_kcn_bwd  = "blueviolet"
+color_special  = "green"
+color_kdn      = "chocolat1"
+
+def get_color(kn):
+    if isinstance(kn,K_D_node): return color_kdn
+    if kn.is_fwd: return color_kcn_fwd
+    return color_kcn_bwd
+
+def aux_print_graph(dot,kg,uniq_num):
     def uni(tar): return f"_{uniq_num}_{tar}"
     def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
     def edge(i1,i2,**kwargs): dot.edge(uni(i1),uni(i2),**kwargs)
-    def print_node(n):
-        if n.main_target == "loss":
-            node(n.name,
-                f"LOSS\ncode: {n.get_code()}",
-                color="green")
-        elif n.is_fwd:
-            c = "orange" if n.cached else "blue"
-            node(n.name,n.get_code(),color=c)
+
+    # *** nodes ***
+    def print_kcn(kcn):
+        mt = kcn.main_target
+        if mt == "loss":
+            node(kcn.name,"LOSS KCN",color=color_special)
         else:
-            node(n.name,f"backward of {n.main_target}",color="red")
-    nodes = g.dict_nodes.values()
-    for n in nodes:
-        print_node(n)
-    for n in nodes:
-        for sub_n in n.req_real:
-            edge(sub_n.name,n.name,color="forestgreen")
-        for sub_n in n.req_fake:
-            edge(sub_n.name,n.name,color="darkmagenta")
+            lbl = kcn.get_code() if kcn.is_fwd else f"backward of {mt}"
+            node(kcn.name,lbl,color=get_color(kcn),tooltip = (
+                f"Time : {kcn.time}\n"\
+                f"Mem overhead : {kcn.overhead}"))
+    def print_kdn(kdn):
+        node(kdn.name,kdn.name,color=get_color(kdn),
+            tooltip = f"Mem {kdn.mem}")
 
-    # -- io --
-    str_inp = "\n".join(g.direct_inputs)
-    node("input_ph",
-        f"INPUTS : {str_inp}",
-        color="green",style="dashed")
-    str_out = "\n".join(g.hidden_inputs)
-    node("output_ph",
-        f"OUTPUTS : inputs' grad\n{str_out}",
-        color="green",style="dashed")
-    for n in nodes:
-        bool_req_input  = False
-        bool_req_output = False
-        req_spe = n.req_global - n.req_real.union(n.req_fake)
-        used_by_spe = n.used_by_global - n.used_by_real.union(n.used_by_fake)
-        for req_spe_n in req_spe:
-            if get_num(req_spe_n) <= get_num(n):
-                bool_req_input = True
-        for used_by_spe_n in used_by_spe:
-            if get_num(used_by_spe_n) <= get_num(n):
-                bool_req_output = True
-        if bool_req_input:
-            edge("input_ph",n.name)
-        if bool_req_output:
-            edge(n.name,"output_ph")
+    for kcn in kg.list_kcn: print_kcn(kcn)
+    for kdn in kg.list_kdn: print_kdn(kdn)
 
-    # -- io for the first K_graph --
-    for req_init_kn in g.used_by_of_imaginary_input_node:
-        edge("input_ph",req_init_kn.name)
-    for output_kn in g.req_of_imaginary_output_node:
-        edge(output_kn.name,"output_ph")
+    # *** edges ***
+    for kcn in kg.list_kcn:
+        c = get_color(req_kdn)
+        for req_kdn in kcn.deps_real:
+            edge(req_kdn.name,kcn.name,color=c)
+        for req_kdn in kcn.deps_fake:
+            edge(req_kdn.name,kcn.name,color=c,style="dashed")
+    for kdn in kg.list_kdn:
+        for req_kcn in kcn.deps:
+            edge(req_kcn.name,kdn.name,color=get_color(req_kcn))
+
+    # *** io - global relations ***
+    inp_data = kg.input_kdn_data
+    inp_grad = kg.input_kdn_grad
+    kwargs = {"color":color_special , "style":"dashed"}
+    node(inp_data.name,inp_data.name,**kwargs)
+    node(inp_grad.name,inp_grad.name,**kwargs)
+    inp_data_users_only_global = (
+        inp_data.users_global -
+        inp_data.users_real.union(inp_data.users_fake))
+    inp_grad_deps_only_global = (
+        inp_grad.deps_global - inp_grad.deps)
+    for user_inp_data in inp_data_users_only_global:
+        edge(inp_data.name,user_inp_data.name,**kwargs)
+    for req_inp_grad in inp_grad_deps_only_global:
+        edge(req_inp_data.name,inp_data.name,**kwargs)
 
 
-def print_K_graph(g : K_graph,name=None,open=True):
-    print(f"Forward + Backward graph : {len(g.dict_nodes)} nodes")
-    if name is None: name = "backward_K-graph"
+def print_K_graph(kg : K_graph,name="complete K-graph",open=True):
+    print(
+        f"Forward + Backward graph with Computation and "\
+        f"Data nodes: {len(kg.list_kcn)} + {len(kg.list_kdn)}")
     dot = graphviz.Digraph(name,
-        comment="K_graph = Forward + Backward graph")
-    aux_print_graph(dot,g,0)
+        comment="K_graph = Forward + Backward with Comp and Data nodes")
+    aux_print_graph(dot,kg,0)
     graph_render(dot,open,"K") # from utils.py
 
 
-def print_K_graph_list(list_g,name=None,open=True):
-    s = "+".join([str(len(g.dict_nodes)) for g in list_g])
+def print_K_graph_list(list_kg,name="seq K-graphs",open=True):
+    list_nb_kcn = [len(kg.list_kcn) for kg in list_kg]
+    list_nb_kdn = [len(kg.list_kdn) for kg in list_kg]
+    tot_nb_kcn = sum(list_nb_kcn)
+    tot_nb_kdn = sum(list_nb_kdn)
+    str_list_nb_kcn = "+".join(str(i) for i in list_nb_kcn)
+    str_list_nb_kdn = "+".join(str(i) for i in list_nb_kdn)
     print(
-        f"{len(list_g)} blocs of K_graph, with {s} = "\
-        f"{sum([len(g.dict_nodes) for g in list_g])} nodes")
-    if name is None: name = "all_K-graphs"
+        f"{len(list_kg)} K_graphs in seq, with :\n"\
+        f"{str_list_nb_kcn} = {tot_nb_kcn} Comp nodes\n"\
+        f"{str_list_nb_kdn} = {tot_nb_kdn} Data nodes\n"\
+        f"=> total of {tot_nb_kcn + tot_nb_kdn} nodes")
     dot = graphviz.Digraph(
         name,
-        comment="K_graph list : cut forward+backward graph")
-    for i in range(len(list_g)):
-        aux_print_graph(dot,list_g[i],i)
+        comment="K_graph list : cut fwd+bwd with Comp and Data nodes")
+    for i in range(len(list_kg)):
+        aux_print_graph(dot,list_kg[i],i)
     graph_render(dot,open,"K") # from utils.py
 
 # ==========================
