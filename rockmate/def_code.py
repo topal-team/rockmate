@@ -32,55 +32,49 @@ class RK_Storage:
 # give it a K_node or all the attributes needed
 class CodeAtom: pass
 
-class Op:
-    def __init__(self,is_fgt,
-            n:pgb.Ktools.K_node):
-        self.is_fgt = is_fgt
-        self.n = n
-        self.overhead = n.overhead.v
-        if self.overhead is None: self.overhead = 0
-        self.main_var = n.main_target
-        self.lvars    = n.all_targets
-        self.run_mem = n.run_mem.v#for debugging
-        if is_fgt: # Fgt
-            self.time = 0#Fgt could happen in ILP solution even Infinity mem
-            self.mem  = - n.run_mem.v
-            if n.is_fwd: self.op_type = "FgtFwd"
-            else: self.op_type = "FgtBwd"
-        else:
-            self.time = n.time
-            self.mem  = n.run_mem.v
-            if n.is_fwd: self.op_type = "Fwd"
-            else: self.op_type = "Bwd"
-        self.name = self.op_type+" "+self.main_var
+# class Op:
+#     def __init__(self,is_fgt,
+#             n:pgb.Ktools.K_node):
+#         self.is_fgt = is_fgt
+#         self.n = n
+#         self.overhead = n.overhead.v
+#         if self.overhead is None: self.overhead = 0
+#         self.main_var = n.main_target
+#         self.lvars    = n.all_targets
+#         self.run_mem = n.run_mem.v#for debugging
+#         if is_fgt: # Fgt
+#             self.time = 0#Fgt could happen in ILP solution even Infinity mem
+#             self.mem  = - n.run_mem.v
+#             if n.is_fwd: self.op_type = "FgtFwd"
+#             else: self.op_type = "FgtBwd"
+#         else:
+#             self.time = n.time
+#             self.mem  = n.run_mem.v
+#             if n.is_fwd: self.op_type = "Fwd"
+#             else: self.op_type = "Bwd"
+#         self.name = self.op_type+" "+self.main_var
 
 class RunOp():
-    def __init__(self, kn, keep_kn=True):
-        self.op_name = kn.name
-        self.time = kn.time
-        self.save_mem = kn.run_mem.v
-        self.overhead = kn.overhead.v
-        self.code = kn.get_code()
-        self.requires_grad = kn.info.requires_grad
-        if keep_kn: self.kn = kn
+    def __init__(self, cn, keep_cn=True):
+        self.op_name = cn.name
+        self.time = cn.time
+        self.overhead = cn.overhead.v
+        self.code = cn.get_code()
+        if keep_cn: self.cn = cn
         self.is_fgt = False
 
 class DelOp():
-    def __init__(self, ti):
-        self.op_name = ti.name
+    def __init__(self, dn):
+        self.op_name = dn.name
+        self.kdn_type = dn.kdn_type
         self.time = 0
-        self.save_mem = ti.mem
+        self.save_mem = dn.mem.v
+        self.main_target = dn.main_target
+        self.all_targets = dn.all_targets
         # self.code = kn.get_code()
-        self.requires_grad = ti.requires_grad
-        self.tensor_info = ti
+        # self.requires_grad = dn.info.requires_grad
+        # self.tensor_info = dn.info
         self.is_fgt = True
-
-    op_name: str# e.g. "Del {main_target} grad"
-    time: int
-    save_mem: int
-    all_targets: Optional[List[str]]
-    kn: Optional[pgb.Ktools.K_node]
-    is_fgt = True
 
 class OpBlock:
     def __init__(self, op_sched):
