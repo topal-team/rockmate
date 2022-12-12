@@ -32,9 +32,9 @@ class CheckpointedModule(torch.nn.Module):
         #print("kgraph",torch.cuda.memory_allocated())
         self.init_code = ast_to_str(self.list_kg[0].init_code)
 
-        self.output = self.list_kg[-1].direct_outputs[-1]
+        self.output = self.list_kg[-1].output_kdn_data#direct_outputs[-1]
 
-        print_memsizes(self.list_kg) # to debug
+        # print_memsizes(self.list_kg) # to debug
         if get_chain:self.get_chain()
         if get_sequence:self.get_sequence(mem_limit)
         if get_code:self.get_code()

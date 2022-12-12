@@ -5,8 +5,8 @@
 # ==========================
 
 from .utils import *
-from .use_chk import make_sched
-from .def_code import Op, OpBlock
+# from .use_chk import make_sched
+from .def_code import RunOp, DelOp, OpSchedule
 import math
 # ==========================
 # ======== RK Block ========
@@ -21,29 +21,44 @@ class RK_Block_Solution():
         self.budget_abar = budget_abar
         self.budget_all = budget_all
 
-        kg.loss_node.run_mem = MemSize(budget_all - budget_abar)
+        # kg.loss_kcn.run_mem = MemSize(budget_all - budget_abar)
         #self.sched_result, self.op_sched, self.chk_g = make_sched(kg, budget_all)
-        self.op_sched = make_sched(kg, budget_all)
+        # self.op_sched = make_sched(kg, budget_all)
+        param_dict = {
+        "LogToConsole": 0,}
+        gurobi_md = ModelGurobi(kg, budget_all, budget_abar, gcd=1000,
+                                gurobi_params=param_dict)
+        gurobi_md.solve()
+        self.is_feasible = gurobi_md.feasible
+        if gurobi_md.feasible: 
+            self.fwd_sched, self.bwd_sched = gurobi_md.schedule() 
+            self.time_fwd = self.fwd_sched.time
+            self.time_bwd = self.bwd_sched.time
+            self.size_a_bar = self.fwd_sched.save[-1]
+            self.overhead_fwd = self.fwd_sched.overhead
+            self.overhead_bwd = self.bwd_sched.overhead+self.bwd_sched.save[-1]#-self.size_a_bar
+            # self.op_sched, self.alive_list = gurobi_md.schedule()
+
         #is_f = self.is_feasible = self.sched_result.feasible
-        if self.op_sched:
-            #TODO: find a better way to split
-            for i,op in enumerate(self.op_sched):
-                if "loss" in op.n.name:
-                    loss_i = i
-                    break
-            self.op_block_fwd = OpBlock(self.op_sched[:loss_i+1])
-            self.op_block_bwd = OpBlock(self.op_sched[loss_i+1:])
-            self.time_fwd = self.op_block_fwd.time
-            self.time_bwd = self.op_block_bwd.time
+        # if self.op_sched:
+        #     #TODO: find a better way to split
+        #     for i,op in enumerate(self.op_sched):
+        #         if "loss" in op.name:
+        #             loss_i = i
+        #             break
+        #     self.op_block_fwd = OpBlock(self.op_sched[:loss_i+1], self.alive_list[:loss_i+1])
+        #     self.op_block_bwd = OpBlock(self.op_sched[loss_i+1:], self.alive_list[loss_i+1:])
+        #     self.time_fwd = self.op_block_fwd.time
+        #     self.time_bwd = self.op_block_bwd.time
 
-            #fwd_overhead,fwd_save = op_block_fwd.mem_timeline()
-            #bwd_overhead,bwd_save = op_block_bwd.mem_timeline()
+        #     #fwd_overhead,fwd_save = op_block_fwd.mem_timeline()
+        #     #bwd_overhead,bwd_save = op_block_bwd.mem_timeline()
 
-            self.size_a_bar = self.op_block_fwd.save
-            self.overhead_fwd = self.op_block_fwd.overhead 
-            #self.overhead_bwd = self.op_block_bwd.overhead 
-            #quick fix:
-            self.overhead_bwd = self.op_block_bwd.overhead+self.op_block_bwd.save#-self.size_a_bar
+        #     self.size_a_bar = self.op_block_fwd.save
+        #     self.overhead_fwd = self.op_block_fwd.overhead 
+        #     #self.overhead_bwd = self.op_block_bwd.overhead 
+        #     #quick fix:
+        #     self.overhead_bwd = self.op_block_bwd.overhead+self.op_block_bwd.save#-self.size_a_bar
 
 
 # RK_Block :
@@ -59,10 +74,10 @@ class RK_Block_Solution():
 class RK_Block():
     def __init__(self,kg,nb_bdg_abar,nb_bdg_all):
         self.block_name = (
-            f"Block[{kg.hidden_inputs}->{kg.direct_outputs}]")
+            f"Block[{kg.input_kdn_data}->{kg.output_kdn_data}]")
 
         # == budgets to test ==
-        nodes_size = [n.run_mem.v for n in kg.dict_nodes.values()]
+        nodes_size = [n.mem.v for n in kg.list_kdn]
         max_bdg = sum(nodes_size)+max(nodes_size)
         min_bdg = max(nodes_size)
         #l_bd_abar = np.linspace(min_bdg,max_bdg,nb_bdg_abar)
@@ -90,55 +105,86 @@ class RK_Block():
                         if not (t in uniq_sols):
                             uniq_sols.add(t)
                             sols.append(sol)
-        kg.loss_node.run_mem = MemSize(0)
+        # kg.loss_kcn.run_mem = MemSize(0)
+        
+        # == build Fc/Fn schedule
+        def _fast_fwd_sched(Fn = False):
+            def _can_del(i,kdn):
+                for kcn in kdn.deps:
+                    if kg.list_kcn.index(kcn)>i:return False
+                return True
+
+            op_list = []
+            alive_list = []
+            alive_status = np.zeros(len(kg.list_kdn), dtype=bool)
+            for i, kcn in enumerate(kg.list_kcn):
+                op_list.append(RunOp(kcn))
+                for kdn in kcn.users:
+                    alive_status[kg.list_kdn.index(kdn)] = 1
+                alive_list.append(alive_status.copy())
+                for j, kdn in enumerate(kg.list_kdn):
+                    if not Fn and kdn == kg.input_kdn_data:continue
+                    if alive_status[j] and _can_del(i,kdn): 
+                        op_list.append(DelOp(kdn))
+                        alive_status[j] = 0
+                        alive_list.append(alive_status.copy())
+            return op_list, alive_list
+        self.Fc_sched = OpSchedule(*_fast_fwd_sched(), 
+                                   [kdn.mem.v for kdn in kg.list_kdn], 
+                                   no_grad = True)
+        self.Fn_sched = OpSchedule(*_fast_fwd_sched(Fn=True),
+                                   [kdn.mem.v for kdn in kg.list_kdn],
+                                   no_grad = True)
+        self.overhead_fast_fwd = self.Fc_sched.overhead
+        self.time_fast_fwd = self.Fc_sched.time
 
         # == build .mem_inp/out ==
-        memsize = lambda inp : kg.dict_info[inp].memsize.v
-        self.mem_inp = sum([memsize(inp) for inp in kg.hidden_inputs])
-        self.mem_out = memsize(kg.hidden_output)
+        # memsize = lambda inp : kg.dict_info[inp].memsize.v
+        self.mem_inp = kg.input_kdn_data.mem.v if kg.input_kdn_data.mem else 0
+        self.mem_out = kg.output_kdn_data.mem.v if kg.output_kdn_data.mem else 0
 
         # == build fast_forward code ==
-        fwd_nodes = sort_based_on_req(kg.loss_node)[:-1] # from pgb/utils
-        #fwd_nodes should contains only the nodes from the current Kgraph
-        code_ff = []
-        op_list_fc = []
-        op_list_fn = []
-        nodes_done = set()
-        current_mem = 0 ; mem_timeline = []
-        def fwd_n(n):
-            nonlocal current_mem, mem_timeline
-            current_mem += memsize(n.main_target)
-            mem_timeline.append(current_mem)
-            #code_ff.append(CodeAtom(
-            #    code=n.get_code(),
-            #    is_fgt=False,
-            #    n=n))
-            op_list_fc.append(Op(is_fgt=False,n=n))
-            op_list_fn.append(Op(is_fgt=False,n=n))
-            nodes_done.add(n)
-            for req_n in n.req_global: try_del(req_n)
-        def try_del(n):
-            is_fwd = lambda un : un.is_fwd and not un is kg.loss_node
-            b = True
-            for un in n.used_by_global:
-                if is_fwd(un) and not un in nodes_done and un in fwd_nodes:
-                    b = False
-            if b:
-                op_list_fn.append(Op(is_fgt=True,n=n))
-                if n in fwd_nodes:
-                    op_list_fc.append(Op(is_fgt=True,n=n))
-        for n in fwd_nodes: fwd_n(n)
+        # fwd_nodes = sort_based_on_req(kg.loss_kcn)[:-1] # from pgb/utils
+        # #fwd_nodes should contains only the nodes from the current Kgraph
+        # code_ff = []
+        # op_list_fc = []
+        # op_list_fn = []
+        # nodes_done = set()
+        # current_mem = 0 ; mem_timeline = []
+        # def fwd_n(n):
+        #     nonlocal current_mem, mem_timeline
+        #     current_mem += memsize(n.main_target)
+        #     mem_timeline.append(current_mem)
+        #     #code_ff.append(CodeAtom(
+        #     #    code=n.get_code(),
+        #     #    is_fgt=False,
+        #     #    n=n))
+        #     op_list_fc.append(Op(is_fgt=False,n=n))
+        #     op_list_fn.append(Op(is_fgt=False,n=n))
+        #     nodes_done.add(n)
+        #     for req_n in n.req_global: try_del(req_n)
+        # def try_del(n):
+        #     is_fwd = lambda un : un.is_fwd and not un is kg.loss_kcn
+        #     b = True
+        #     for un in n.used_by_global:
+        #         if is_fwd(un) and not un in nodes_done and un in fwd_nodes:
+        #             b = False
+        #     if b:
+        #         op_list_fn.append(Op(is_fgt=True,n=n))
+        #         if n in fwd_nodes:
+        #             op_list_fc.append(Op(is_fgt=True,n=n))
+        # for n in fwd_nodes: fwd_n(n)
 
-        # = build .code_fc =
-        #self.code_fc = CodeBlock(code_ff)
-        self.op_block_fc = OpBlock(op_list_fc)
-        self.op_block_fn = OpBlock(op_list_fn)#TODO:add fgt outputs node from the previous 
-        # = build .overhead_ff =
-        #self.overhead_ff = max(mem_timeline) - self.mem_out
-        self.overhead_ff = self.op_block_fc.overhead 
-        # = build .time_ff ==
-        #self.time_ff = sum([n.time for n in fwd_nodes])
-        self.time_ff = self.op_block_fc.time
+        # # = build .code_fc =
+        # #self.code_fc = CodeBlock(code_ff)
+        # self.op_block_fc = OpBlock(op_list_fc)
+        # self.op_block_fn = OpBlock(op_list_fn)#TODO:add fgt outputs node from the previous 
+        # # = build .overhead_ff =
+        # #self.overhead_ff = max(mem_timeline) - self.mem_out
+        # self.overhead_ff = self.op_block_fc.overhead 
+        # # = build .time_ff ==
+        # #self.time_ff = sum([n.time for n in fwd_nodes])
+        # self.time_ff = self.op_block_fc.time
     # =====================================
 
     def __str__(self):
@@ -199,8 +245,8 @@ class RK_Chain():
                 fwd_tmp[i].append(sol.overhead_fwd)
                 bwd_tmp[i].append(sol.overhead_bwd)
             cw[i] = b.mem_inp
-            ff_fwd_tmp[i] = b.overhead_ff
-            ff_fw[i] = b.time_ff
+            ff_fwd_tmp[i] = b.overhead_fast_fwd
+            ff_fw[i] = b.time_fast_fwd
         cw[ln]=self.body[-1].mem_out # the final output
 
         # for the Loss block :

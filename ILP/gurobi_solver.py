@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional
 
 import numpy as np
 from gurobipy import GRB, Model, quicksum
-from .utils import RunOp, DelOp
+from rockmate.def_code import RunOp, DelOp, OpSchedule
 
 class ModelGurobi:
     """
@@ -30,7 +30,9 @@ class ModelGurobi:
         self.feasible = None
         self.solve_time = None
 
-        self.protected_indices = []#self.kg.list_kdn.index(self.kg.output_kdn_data)]
+        self.protected_indices = [self.kg.list_kdn.index(n) for n in 
+                                    [self.kg.output_kdn_grad, 
+                                     self.kg.output_kdn_data]]
         T = len(self.kg.list_kcn)
         I = len(self.kg.list_kdn)
 
@@ -47,8 +49,11 @@ class ModelGurobi:
             return [self.kg.list_kdn.index(kdn)
                     for kdn in self.kg.list_kcn[i].deps_real]
         def _users_d(i):
+            # TODO: there's user in the next graph?
+            # return [self.kg.list_kcn.index(kcn)
+            #         for kcn in self.kg.list_kdn[i].users_real]
             return [self.kg.list_kcn.index(kcn)
-                    for kcn in self.kg.list_kdn[i].users_real]
+                    for kcn in self.kg.list_kdn[i].users_real if kcn in self.kg.list_kcn]
         def _users_c(i):
             return [self.kg.list_kdn.index(kdn)
                     for kdn in self.kg.list_kcn[i].users]
@@ -296,21 +301,36 @@ class ModelGurobi:
 
     def schedule(self):
         assert self.feasible, "Cannot schedule an infeasible model!"
-        op_sched = []
-        alive_list = []
         T = len(self.kg.list_kcn)
         I = len(self.kg.list_kdn)
+
+        op_list = []
+        alive_list = []
+        alive_status = np.zeros(I, dtype=bool)
         for t in range(T):
             for k in range(T):
                 if self.R[t, k].X:
                     kcn = self.kg.list_kcn[k]
-                    op_sched.append(RunOp(kcn))
-                    # alive_list.append(np.zeros(I))
+                    for eidx, (k_, i) in enumerate(self.create_list):
+                        if k==k_ and self.create[t, eidx].X:
+                            alive_status[i] = 1
+                    op_list.append(RunOp(kcn))
+                    alive_list.append(alive_status.copy())
                     # for i in range(I):
                     #     if self.alive[(t,k,i)].getValue(): 
                     #         alive_list[-1][i] = 1
                 for eidx, (k_, i) in enumerate(self.delete_list):
                     if k==k_ and self.delete[t, eidx].X:
                         kdn = self.kg.list_kdn[i]
-                        op_sched.append(DelOp(kdn))
-        return op_sched, alive_list
+                        alive_status[i] = 0
+                        op_list.append(DelOp(kdn))
+                        alive_list.append(alive_status.copy())
+        for i,op in enumerate(op_list):
+            if "loss" in op.name:
+                loss_i = i
+                break
+        fwd_sched = OpSchedule(op_list[:loss_i+1], alive_list[:loss_i+1],
+                               [kdn.mem.v for kdn in self.kg.list_kdn])
+        bwd_sched = OpSchedule(op_list[loss_i+1:], alive_list[loss_i+1:],
+                               [kdn.mem.v for kdn in self.kg.list_kdn])
+        return fwd_sched, bwd_sched

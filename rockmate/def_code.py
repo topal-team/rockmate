@@ -5,7 +5,7 @@
 # ==========================
 from typing import NamedTuple, Optional
 from .utils import *
-
+import numpy as np
 # ==========================
 # ===== CODE EXECUTOR ======
 # ==========================
@@ -56,16 +56,17 @@ class CodeAtom: pass
 
 class RunOp():
     def __init__(self, cn, keep_cn=True):
-        self.op_name = cn.name
+        self.name = cn.name
         self.time = cn.time
         self.overhead = cn.overhead.v
+        # self.save_mem = cn.mem.v
         self.code = cn.get_code()
         if keep_cn: self.cn = cn
         self.is_fgt = False
 
 class DelOp():
     def __init__(self, dn):
-        self.op_name = dn.name
+        self.name = dn.name
         self.kdn_type = dn.kdn_type
         self.time = 0
         self.save_mem = dn.mem.v
@@ -76,14 +77,30 @@ class DelOp():
         # self.tensor_info = dn.info
         self.is_fgt = True
 
+class OpSchedule:
+    def __init__(self, op_list, alive_list, mem_size, no_grad=False):
+        self.no_grad = no_grad
+        self.op_list = op_list
+        self.alive_list = alive_list
+        L = len(op_list)
+        self.save = np.zeros(L)
+        tmp = np.zeros(L)
+        for i,op in enumerate(op_list):
+            if isinstance(op, RunOp): tmp[i] = op.overhead
+            self.save[i] = alive_list[i].dot(np.array(mem_size)) 
+        self.overhead = max(self.save+tmp) - self.save[-1]
+        self.time = sum([op.time for op in self.op_list])
+        
+
 class OpBlock:
-    def __init__(self, op_sched):
+    def __init__(self, op_sched, alive_list):
         self.op_sched = op_sched
+        self.alive_list = alive_list
         save_mem = []
         tmp_mem = []
-        for o in self.op_sched:
-            if "loss" in o.name:continue
-            save_mem.append(o.save_mem)
+        for op, alive_status in zip(self.op_sched, self.alive_list):
+            if "loss" in op.name:continue
+            if isinstance(op, RunOp): save_mem.append(o.save_mem)
             tmp_mem.append(o.overhead)
         self.save_timeline = np.cumsum(np.array([0]+save_mem))
         #self.overhead_timeline = np.cumsum(np.array(tmp_mem))
