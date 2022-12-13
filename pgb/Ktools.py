@@ -89,6 +89,7 @@ class K_D_node():
             kdn_type = "/!\\ No kdn_type/!\\",
             target   = "/!\\ No target /!\\",
             all_targets = None,
+            info        = {},
             deps        = None):
         # ** informative **
         self.kdn_type    = kdn_type # data, grad or phantoms
@@ -96,6 +97,7 @@ class K_D_node():
         self.name        = f"{mt} {self.kdn_type}"
         self.all_targets = all_targets if all_targets else [target]
         self.mem         = MemSize(0)
+        self.info        = info
 
         # ** deps/used_by **
         self.users_real   = set() # KCN set
@@ -490,6 +492,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             kdn_type    = "data",
             target      = mt,
             all_targets = sn.tensor_targets,
+            info        = sg.dict_info[mt],
             deps        = set([kcn_fwd]))
         dict_KDN_data[mt] = kdn_data
 
