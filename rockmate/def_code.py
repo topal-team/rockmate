@@ -63,6 +63,7 @@ class RunOp():
         self.code = cn.get_code()
         if keep_cn: self.cn = cn
         self.is_fgt = False
+        self.op_type = "Run"
 
 class DelOp():
     def __init__(self, dn):
@@ -76,6 +77,7 @@ class DelOp():
         # self.requires_grad = dn.info.requires_grad
         # self.tensor_info = dn.info
         self.is_fgt = True
+        self.op_type = "Del"
 
 class OpSchedule:
     def __init__(self, op_list, alive_list, mem_size, no_grad=False):

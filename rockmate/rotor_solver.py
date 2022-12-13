@@ -275,17 +275,17 @@ def seq_builder(chain : RK_Chain, memory_limit):
         if w[0]:
             k = w[1]
             sol = chain.body[lmin].sols[k]
-            seq.insert(SeqBlockFe(lmin,sol.op_block_fwd))
+            seq.insert(SeqBlockFe(lmin,sol.fwd_sched))
             seq.insert_seq(
                 seq_builder_rec(lmin+1,lmax,cmem-chain.cbw[lmin+1][k]))
-            seq.insert(SeqBlockBwd(lmin,sol.op_block_bwd))
+            seq.insert(SeqBlockBwd(lmin,sol.bwd_sched))
 
         # -- Solution 1 --
         else:
             j = w[1]
-            seq.insert(SeqBlockFc(lmin,chain.body[lmin].op_block_fc))
+            seq.insert(SeqBlockFc(lmin,chain.body[lmin].Fc_sched))
             for k in range(lmin+1,j):
-                seq.insert(SeqBlockFn(k,chain.body[k].op_block_fn))
+                seq.insert(SeqBlockFn(k,chain.body[k].Fn_sched))
             seq.insert_seq(seq_builder_rec(j,lmax,cmem-chain.cw[j]))
             seq.insert_seq(seq_builder_rec(lmin,j-1,cmem))
         return seq
