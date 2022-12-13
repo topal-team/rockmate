@@ -2,6 +2,7 @@ from .utils import *
 from .def_code import RK_Storage
 from .def_chain import RK_Chain
 from .rotor_solver import seq_builder, Executor
+from .translator import Translator
 
 def print_memsizes(list_kg):
     di = list_kg[-1].dict_info
@@ -58,11 +59,18 @@ class CheckpointedModule(torch.nn.Module):
         
     def get_code(self):
         self.storage =  RK_Storage(self.device,self.original_mod)
-        self.executor = Executor(self.storage,self.fwd_seq,self.bwd_seq)
-        self.executor.translate(bwd=True)
-        #print("Mem after translator", torch.cuda.memory_allocated())
-        self.fwd_code = self.executor.fwd_code
-        self.bwd_code = self.executor.bwd_code
+        self.translator = Translator(self.storage,self.fwd_seq,self.bwd_seq)
+        fwd_code = []
+        for seq_block in self.fwd_seq.seq:
+            fwd_code.append(self.translator.translate(seq_block.op_sched))
+        bwd_code = []
+        for seq_block in self.bwd_seq.seq:
+            bwd_code.append(self.translator.translate(seq_block.op_sched))
+        # self.translator.translate()
+        # self.executor.translate(bwd=True)
+        # #print("Mem after translator", torch.cuda.memory_allocated())
+        self.fwd_code = "\n".join(fwd_code)
+        self.bwd_code = "\n".join(bwd_code)
 
         """
         for sb in self.fwd_seq.seq:

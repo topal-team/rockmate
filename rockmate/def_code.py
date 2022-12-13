@@ -55,62 +55,81 @@ class CodeAtom: pass
 #         self.name = self.op_type+" "+self.main_var
 
 class RunOp():
-    def __init__(self, cn, keep_cn=True):
-        self.name = cn.name
-        self.time = cn.time
-        self.overhead = cn.overhead.v
+    def __init__(self, kcn, keep_kcn=True):
+        self.name = kcn.name
+        self.time = kcn.time
+        self.overhead = kcn.overhead.v
+        self.main_target = kcn.main_target
         # self.save_mem = cn.mem.v
-        self.code = cn.get_code()
-        if keep_cn: self.cn = cn
+        self.main_code = kcn.main_code
+        self.body_code = kcn.body_code
+        self.deps_fake = kcn.deps_fake
+        if keep_kcn: self.kcn = kcn
         self.is_fgt = False
         self.op_type = "Run"
+        self.proxy = False
+        for kdn in kcn.users:
+            if kdn.kdn_type != "data":continue
+            self.proxy = kdn.info.requires_grad
 
 class DelOp():
-    def __init__(self, dn):
-        self.name = dn.name
-        self.kdn_type = dn.kdn_type
+    def __init__(self, kdn):
+        self.name = kdn.name
+        self.kdn_type = kdn.kdn_type
         self.time = 0
-        self.save_mem = dn.mem.v
-        self.main_target = dn.main_target
-        self.all_targets = dn.all_targets
+        self.save_mem = kdn.mem.v
+        self.main_target = kdn.main_target
+        self.all_targets = kdn.all_targets
         # self.code = kn.get_code()
-        # self.requires_grad = dn.info.requires_grad
-        # self.tensor_info = dn.info
+        # self.requires_grad = kdn.info.requires_grad
+        self.info = kdn.info
         self.is_fgt = True
         self.op_type = "Del"
 
 class OpSchedule:
-    def __init__(self, op_list, alive_list, mem_size, no_grad=False):
+    def __init__(self, op_list, alive_list, list_kdn, no_grad=False):
         self.no_grad = no_grad
+        self.mem_sizes = [kdn.mem.v for kdn in list_kdn]
+        self.kdn_names = [kdn.name for kdn in list_kdn]
         self.op_list = op_list
         self.alive_list = alive_list
         L = len(op_list)
         self.save = np.zeros(L)
-        tmp = np.zeros(L)
+        self.tmp = np.zeros(L)
         for i,op in enumerate(op_list):
-            if isinstance(op, RunOp): tmp[i] = op.overhead
-            self.save[i] = alive_list[i].dot(np.array(mem_size)) 
-        self.overhead = max(self.save+tmp) - self.save[-1]
+            if isinstance(op, RunOp): self.tmp[i] = op.overhead
+            self.save[i] = alive_list[i].dot(np.array(self.mem_sizes))
+        self.overhead = max(self.save+self.tmp) - self.save[-1]
         self.time = sum([op.time for op in self.op_list])
+        self.del_input_idx = -1
+
+    def del_input(self, kg):
+        input_kdn = kg.input_kdn_data
+        self.del_input_op = DelOp(input_kdn)
+        self.del_input_idx = max(kg.list_kcn.index(kcn) 
+                            for kcn in input_kdn.users_global
+                            if kcn in kg.list_kcn)
+        self.save[self.del_input_idx+1:] -= input_kdn.mem.v
+        self.overhead = max(self.save+self.tmp) - self.save[-1]
         
 
-class OpBlock:
-    def __init__(self, op_sched, alive_list):
-        self.op_sched = op_sched
-        self.alive_list = alive_list
-        save_mem = []
-        tmp_mem = []
-        for op, alive_status in zip(self.op_sched, self.alive_list):
-            if "loss" in op.name:continue
-            if isinstance(op, RunOp): save_mem.append(o.save_mem)
-            tmp_mem.append(o.overhead)
-        self.save_timeline = np.cumsum(np.array([0]+save_mem))
-        #self.overhead_timeline = np.cumsum(np.array(tmp_mem))
-        self.overhead_timeline = np.array(tmp_mem+[0])
+# class OpBlock:
+#     def __init__(self, op_sched, alive_list):
+#         self.op_sched = op_sched
+#         self.alive_list = alive_list
+#         save_mem = []
+#         tmp_mem = []
+#         for op, alive_status in zip(self.op_sched, self.alive_list):
+#             if "loss" in op.name:continue
+#             if isinstance(op, RunOp): save_mem.append(o.save_mem)
+#             tmp_mem.append(o.overhead)
+#         self.save_timeline = np.cumsum(np.array([0]+save_mem))
+#         #self.overhead_timeline = np.cumsum(np.array(tmp_mem))
+#         self.overhead_timeline = np.array(tmp_mem+[0])
 
-        self.save = self.save_timeline[-1]
-        self.overhead = max(self.save_timeline+self.overhead_timeline) - self.save
-        self.time = sum([op.time for op in self.op_sched])
+#         self.save = self.save_timeline[-1]
+#         self.overhead = max(self.save_timeline+self.overhead_timeline) - self.save
+#         self.time = sum([op.time for op in self.op_sched])
 
 class RK_Function:
     def __init__(self,code_fe,code_fn,code_fc,code_bwd):

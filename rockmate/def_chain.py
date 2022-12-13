@@ -108,7 +108,7 @@ class RK_Block():
         # kg.loss_kcn.run_mem = MemSize(0)
         
         # == build Fc/Fn schedule
-        def _fast_fwd_sched(Fn = False):
+        def _fast_fwd_sched():
             def _can_del(i,kdn):
                 for kcn in kdn.deps:
                     if kg.list_kcn.index(kcn)>i:return False
@@ -123,18 +123,18 @@ class RK_Block():
                     alive_status[kg.list_kdn.index(kdn)] = 1
                 alive_list.append(alive_status.copy())
                 for j, kdn in enumerate(kg.list_kdn):
-                    if not Fn and kdn == kg.input_kdn_data:continue
+                    # if not Fn and kdn == kg.input_kdn_data:continue
                     if alive_status[j] and _can_del(i,kdn): 
                         op_list.append(DelOp(kdn))
                         alive_status[j] = 0
                         alive_list.append(alive_status.copy())
             return op_list, alive_list
+        
         self.Fc_sched = OpSchedule(*_fast_fwd_sched(), 
-                                   [kdn.mem.v for kdn in kg.list_kdn], 
-                                   no_grad = True)
-        self.Fn_sched = OpSchedule(*_fast_fwd_sched(Fn=True),
-                                   [kdn.mem.v for kdn in kg.list_kdn],
-                                   no_grad = True)
+                                   kg.list_kdn, no_grad = True)
+        self.Fn_sched = OpSchedule(*_fast_fwd_sched(),
+                                   kg.list_kdn, no_grad = True)
+        self.Fn_sched.del_input(kg)
         self.overhead_fast_fwd = self.Fc_sched.overhead
         self.time_fast_fwd = self.Fc_sched.time
 

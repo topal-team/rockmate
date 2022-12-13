@@ -129,10 +129,9 @@ class ModelGurobi:
                 self.md.addLConstr(self.S[t,j], GRB.LESS_EQUAL,
                                      self.P[t, self.create_list[j][1]])
         for t in range(T - 1):
-            for i in range(T):
+            for i in range(Cr):
                 self.md.addLConstr(self.S[t+1, i], GRB.LESS_EQUAL,
-                                   self.S[t, i] + self.R[t,
-                                   self.create_list[i][0]])
+                                   self.S[t, i] + self.R[t,self.create_list[i][0]])
         # ensure all computations are possible
         for i in range(T):
             for t in range(T):
@@ -330,7 +329,7 @@ class ModelGurobi:
                 loss_i = i
                 break
         fwd_sched = OpSchedule(op_list[:loss_i+1], alive_list[:loss_i+1],
-                               [kdn.mem.v for kdn in self.kg.list_kdn])
+                               self.kg.list_kdn)
         bwd_sched = OpSchedule(op_list[loss_i+1:], alive_list[loss_i+1:],
-                               [kdn.mem.v for kdn in self.kg.list_kdn])
+                               self.kg.list_kdn)
         return fwd_sched, bwd_sched
