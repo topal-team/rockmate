@@ -163,9 +163,11 @@ class K_graph():
         # we want to use sort_based_on_deps over list_kcn
         # but to do so we need an origin_node, ie a root of
         # the "deps" relation between KCN.
-        inp_data = self.input_kdn_grad
-        last_kcn = inp_data.deps_global - inp_data.deps
-        root_kdn = K_D_node(deps = last_kcn)
+        leaves_kcn = set()
+        for kcn in self.list_kcn:
+            if not kcn.is_fwd and len(kcn.users) == 0:
+                leaves_kcn.add(kcn)
+        root_kdn = K_D_node(deps = leaves_kcn)
         root_kcn = K_C_node(deps_real=set([root_kdn]))
         self.list_kcn = l = sort_based_on_deps(root_kcn)
         l.remove(root_kcn)
