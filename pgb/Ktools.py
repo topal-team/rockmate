@@ -561,6 +561,10 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             kdn_grad.mem     = res["mem_fgt_bwd"] # assert : = mem_fgt_fwd
 
             # -> phantoms ins
+            if ref_test_phantoms_detection[0]:
+                assert(exist_phantoms == (
+                    res["mem_run_fwd"].v - res["mem_fgt_fwd"].v > 0))
+
             if exist_phantoms:
                 kdn_phantoms.mem = MemSize(
                     res["mem_run_fwd"].v - res["mem_fgt_fwd"].v)
