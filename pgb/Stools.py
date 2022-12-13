@@ -387,7 +387,8 @@ def simplify_size(sg : S_graph):
                 for other_sn in list_size[1:]:
                     size_sn.insert(other_sn,strong=True,sg=sg)
                 # -- insert their code --
-                if sn is sg.init_node:
+                if (sn is sg.init_node
+                or sg.dict_info[sn.main_target].ttype == torch.Size):
                     sn.insert(size_sn,strong=True,sg=sg)
                 else: sn.insert(size_sn,strong=False,sg=sg)
     sg.clear()
@@ -401,6 +402,25 @@ def simplify_size(sg : S_graph):
 # === remove view nodes ====
 # ==========================
 
+def get_all_real_deps(sn):
+    candidates = set(sn.deps.keys())
+    deps = set()
+    while len(candidates) != 0:
+        req_sn = candidates.pop()
+        if req_sn not in deps:
+            if not req_sn.is_artefact:
+                deps.add(req_sn)
+            else:
+                candidates.update(req_sn.deps.keys())
+    return deps
+
+def get_direct_real_deps(sn):
+    deps = get_all_real_deps(sn)
+    for req_sn in deps:
+        if get_all_real_deps(req_sn) ==  deps-set([req_sn]):
+            return set([req_sn])
+    return deps
+
 def simplify_view(sg):
     # from root to leaves
     sg.init_node.is_artefact = True
@@ -409,14 +429,16 @@ def simplify_view(sg):
         #    and (not ref_keep_seq or not sn.protected)
          if sn.main_fct in list_view_fct or sn.main_fct == "getattr":
             # /!\ ASSERTION remaining getattr are related to views !! 
-            real_deps = []
-            for req_sn in sn.deps.keys():
-                if not req_sn.is_artefact:
-                    real_deps.append(req_sn)
+            real_deps = get_direct_real_deps(sn)
             if len(real_deps)==1:
-                req_sn = real_deps[0]
+                req_sn = real_deps.pop()
                 req_sn.insert(sn,strong=True,sg=sg)
                 req_sn.clear_siblings_artefact()
+            elif len(real_deps) > 1: print(
+                f"Warning : {sn.main_target} is a view op, with "\
+                f"several tensor deps, thus it's impossible to "\
+                f"to simplify it, very dangerous...",
+                file = sys.stderr)
             elif len(real_deps)==0 and len(sn.deps)>0:
                 # experimental : I assume that views which don't 
                 # require any real tensor are views over parameters
@@ -424,14 +446,14 @@ def simplify_view(sg):
                 # in their parents even if they are artefacts.
                 # But artefact nodes aren't safe, they might disappear
                 # if self.users sub set of self.parent.users
-                # so I must share the code with artifacts' parents
-                # I can insert the code in many different nodes
-                # because views operations are cheap.
+                # so I must share the code with artifacts' parent
+                # It's not a problem to insert the code in different 
+                # nodes because view operations are cheap.
                 # But I must avoid creating cycle dependancies, so
                 # for the moment I assert len(sn.deps)==1
                 if len(sn.deps)>1: print(
-                    f"Warning : {sn.main_target} is a view op, but without"\
-                    f" a real parent, and several artifact dependancies",
+                    f"Warning : {sn.main_target} is a view op, without "\
+                    f"a real parent, and with several artifact deps",
                     file = sys.stderr)
                 else:
                     art_req = list(sn.deps.keys())[0]

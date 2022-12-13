@@ -95,7 +95,7 @@ class K_D_node():
         self.main_target = mt = target
         self.name        = f"{mt} {self.kdn_type}"
         self.all_targets = all_targets if all_targets else [target]
-        self.mem         = None
+        self.mem         = MemSize(0)
 
         # ** deps/used_by **
         self.users_real   = set() # KCN set

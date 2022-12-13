@@ -109,7 +109,11 @@ def change_reasonable_rate(x):
 list_rand_fct = ["torch.randn"]
 # TODO : complete this list
 
-list_cheap_fct = ["torch.add","torch.sub","torch.mul","torch.div"]
+list_cheap_fct = [
+    "torch.add","torch.sub",
+    "torch.mul","torch.div",
+    "torch.floor_devide"]
+
 # TODO : complete this list
 list_cheap_fct.extend(["list constructor","tuple constructor"])
 # because I treat them in the same way
@@ -325,6 +329,7 @@ def sort_based_on_deps(origin_node): # used on B, S and K
         for sub_n in get_deps(n):
             if sub_n not in degree:
                 d = 0
+                degree[sub_n] = 0
                 count_edges(sub_n)
             else:
                 d = degree[sub_n]
