@@ -6,7 +6,8 @@ from typing import Dict, Any, Optional
 import numpy as np
 from gurobipy import GRB, Model, quicksum
 from rockmate.def_code import RunOp, DelOp, OpSchedule
-
+from rotor import timing#for debug
+import torch
 class ModelGurobi:
     """
     The Gurobi model will build the ILP model by given Kgraph and budget.
@@ -42,26 +43,39 @@ class ModelGurobi:
                 setattr(self.md.Params, k, v)
 
         ## useful functions
-        def _deps_d(i):
-            return [self.kg.list_kcn.index(kcn)
-                    for kcn in self.kg.list_kdn[i].deps]
-        def _deps_c(i):
-            return [self.kg.list_kdn.index(kdn)
-                    for kdn in self.kg.list_kcn[i].deps_real]
-        def _users_d(i):
+        # def _deps_d(i):
+        #     return [self.kg.list_kcn.index(kcn)
+        #             for kcn in self.kg.list_kdn[i].deps]
+        # def _deps_c(i):
+        #     return [self.kg.list_kdn.index(kdn)
+        #             for kdn in self.kg.list_kcn[i].deps_real]
+        # def _users_d(i):
+        #     # TODO: there's user in the next graph?
+        #     # return [self.kg.list_kcn.index(kcn)
+        #     #         for kcn in self.kg.list_kdn[i].users_real]
+        #     return [self.kg.list_kcn.index(kcn)
+        #             for kcn in self.kg.list_kdn[i].users_real if kcn in self.kg.list_kcn]
+        # def _users_c(i):
+        #     return [self.kg.list_kdn.index(kdn)
+        #             for kdn in self.kg.list_kcn[i].users]
+
+        _deps_d = [[self.kg.list_kcn.index(kcn)
+                    for kcn in self.kg.list_kdn[i].deps] for i in range(I)]
+        _deps_c = [[self.kg.list_kdn.index(kdn)
+                    for kdn in self.kg.list_kcn[i].deps_real] for i in range(T)]
+        _users_d = [[self.kg.list_kcn.index(kcn)
+                    for kcn in self.kg.list_kdn[i].users_real 
+                    if kcn in self.kg.list_kcn] for i in range(I)]
             # TODO: there's user in the next graph?
             # return [self.kg.list_kcn.index(kcn)
             #         for kcn in self.kg.list_kdn[i].users_real]
-            return [self.kg.list_kcn.index(kcn)
-                    for kcn in self.kg.list_kdn[i].users_real if kcn in self.kg.list_kcn]
-        def _users_c(i):
-            return [self.kg.list_kdn.index(kdn)
-                    for kdn in self.kg.list_kcn[i].users]
+        _users_c = [[self.kg.list_kdn.index(kdn)
+                    for kdn in self.kg.list_kcn[i].users] for i in range(T)]
 
         self.create_list = [(k,i) for k,kcn in enumerate(self.kg.list_kcn)
-                           for i in _users_c(k)]
+                           for i in _users_c[k]]
         self.delete_list = [(k,i) for i,kdn in enumerate(self.kg.list_kdn)
-                           for k in _deps_d(i) + _users_d(i)]
+                           for k in _deps_d[i] + _users_d[i]]
 
         Cr = len(self.create_list)
         De = len(self.delete_list)
@@ -91,6 +105,8 @@ class ModelGurobi:
                                         for t in range(T)
                                         for i in range(T)),
                                         GRB.MINIMIZE)
+        # timer = timing.make_timer(torch.device("cpu"))
+        # timer.start()
 
             # with Timer("Variable initialization",
             #            extra_data={"T": str(T), "budget": str(budget)}):
@@ -105,7 +121,7 @@ class ModelGurobi:
                                     for t in range(self.create_list[j][0] + 1)),
                             GRB.EQUAL, 0)
         self.md.addLConstr(quicksum(self.P[t, i] for i in range(I)
-                                    for t in range(min(_deps_d(i)) + 1)),
+                                    for t in range(min(_deps_d[i]) + 1)),
                             GRB.EQUAL, 0)
         self.md.addLConstr(quicksum(self.R[t, t] for t in range(T)),
                             GRB.EQUAL, T)
@@ -133,18 +149,26 @@ class ModelGurobi:
                 self.md.addLConstr(self.S[t+1, i], GRB.LESS_EQUAL,
                                    self.S[t, i] + self.R[t,self.create_list[i][0]])
         # ensure all computations are possible
-        for i in range(T):
-            for t in range(T):
-                for j in range(Cr):
-                    if self.create_list[j][1] in _deps_c(i):
-                        self.md.addLConstr(self.R[t, i], GRB.LESS_EQUAL,
-                                            self.R[t, self.create_list[j][0]]
-                                            + self.S[t, j])
-
+        for t in range(T):
+            for j,(k,i) in enumerate(self.create_list):
+                for k_ in _users_d[i]:
+                    self.md.addLConstr(self.R[t, k_], GRB.LESS_EQUAL,
+                                        self.R[t, k] + self.S[t, j])
+        # for i in range(T):
+        #     for t in range(T):
+        #         for j in range(Cr):
+        #             if self.create_list[j][1] in _deps_c[i]:
+        #                 self.md.addLConstr(self.R[t, i], GRB.LESS_EQUAL,
+        #                                     self.R[t, self.create_list[j][0]]
+        #                                     + self.S[t, j])
+        # timer.end()
+        # print("Correctness constraints: %.4f"%timer.elapsed())
             # define memory constraints
             # with Timer("Presence constraints", extra_data={"T": str(T),
             #            "budget": str(budget)}):
                 # ensure all checkpoints are in memory
+        # timer.reset()
+        # timer.start()
         self.alive = {}
         for t in range(T):
             for eidx, (k, i) in enumerate(self.delete_list):
@@ -171,18 +195,22 @@ class ModelGurobi:
             if t + 1 < T:
                 for i in range(I):
                     self.md.addLConstr(self.P[t+1,i], GRB.EQUAL,
-                        self.alive[(t, max(_deps_d(i) + _users_d(i)), i)])
+                        self.alive[(t, max(_deps_d[i] + _users_d[i]), i)])
+        # timer.end()
+        # print("Tensor state constraints: %.4f"%timer.elapsed())
 
+        # timer.reset()
+        # timer.start()
         def _num_hazards(t, i, k):
             if i in self.protected_indices: return _max_num_hazards(t, i, k)
             if t + 1 < T:
                 return (1 - self.R[t, k] + self.P[t + 1, i] +
-                        quicksum(self.R[t, j] for j in _users_d(i) if j > k))
+                        quicksum(self.R[t, j] for j in _users_d[i] if j > k))
             return (1 - self.R[t, k] +
-                    quicksum(self.R[t, j] for j in _users_d(i) if j > k))
+                    quicksum(self.R[t, j] for j in _users_d[i] if j > k))
 
         def _max_num_hazards(t, i, k):
-            num_uses_after_k = sum(1 for j in _users_d(i) if j > k)
+            num_uses_after_k = sum(1 for j in _users_d[i] if j > k)
             if t + 1 < T:
                 return 2 + num_uses_after_k
             return 1 + num_uses_after_k
@@ -274,6 +302,8 @@ class ModelGurobi:
                          if k==k_), GRB.LESS_EQUAL, self.budget)
                 if t == T//2 and self.save_budget:
                     self.md.addLConstr(self.U[(t, k)], GRB.LESS_EQUAL, self.save_budget)
+        # timer.end()
+        # print("Memory constraints: %.4f"%timer.elapsed())
 
     def solve(self):
         # with Timer("Gurobi model optimization",
