@@ -216,10 +216,10 @@ def make_ast_list_assign(lc,prefix="",suffix=""):
     return make_ast_module(la)
 def make_str_assign(c,prefix="",suffix=""):
     if c is None or c[1] is None: return ""
-    return ast_to_str(make_ast_assign(c,prefix,suffix))+"\n"
+    return ast_to_str(make_ast_assign(c,prefix,suffix))
 def make_str_list_assign(lc,prefix="",suffix=""):
     ls = [make_str_assign(c,prefix="",suffix="") for c in lc]
-    return "".join(ls)
+    return "\n".join(ls)
 
 def is_constant(v):
     if py_version >= 3.8:

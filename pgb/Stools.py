@@ -59,6 +59,7 @@ class S_node():
 
     def get_code(self):
         mc = make_str_assign(self.main_code)
+        mc = "" if mc == "" else mc+"\n"
         bc = make_str_list_assign(self.body_code)
         return mc+bc
 
