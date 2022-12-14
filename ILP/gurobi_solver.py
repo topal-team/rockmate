@@ -168,6 +168,10 @@ class ModelGurobi:
             for eidx, (k, i) in enumerate(self.create_list):
                 self.md.addLConstr(self.create[t,eidx],
                                     GRB.LESS_EQUAL, self.R[t, k])
+            if t + 1 < T:
+                for i in range(I):
+                    self.md.addLConstr(self.P[t+1,i], GRB.EQUAL,
+                        self.alive[(t, max(_deps_d(i) + _users_d(i)), i)])
 
         def _num_hazards(t, i, k):
             if i in self.protected_indices: return _max_num_hazards(t, i, k)
