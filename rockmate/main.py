@@ -69,8 +69,8 @@ class CheckpointedModule(torch.nn.Module):
         # self.translator.translate()
         # self.executor.translate(bwd=True)
         # #print("Mem after translator", torch.cuda.memory_allocated())
-        self.fwd_code = "\n".join(fwd_code)
-        self.bwd_code = "\n".join(bwd_code)
+        self.fwd_code = fwd_code#"\n".join(fwd_code)
+        self.bwd_code = bwd_code#"\n".join(bwd_code)
 
         """
         for sb in self.fwd_seq.seq:
@@ -106,7 +106,7 @@ class CheckpointedModule(torch.nn.Module):
             if record_mem:
                 self.max_mem.append(torch.cuda.max_memory_allocated())
                 self.allo_mem.append(torch.cuda.memory_allocated())
-        return self.storage.get_val(self.output)
+        return self.storage.get_val(self.output.main_target)
 
     def backward(self,record_mem=False):
         for i,code in enumerate(self.bwd_code):

@@ -110,7 +110,7 @@ class RK_Block():
         # == build Fc/Fn schedule
         def _fast_fwd_sched():
             def _can_del(i,kdn):
-                for kcn in kdn.deps:
+                for kcn in kdn.users_real:
                     if kg.list_kcn.index(kcn)>i:return False
                 return True
 

@@ -63,6 +63,9 @@ class RunOp():
         # self.save_mem = cn.mem.v
         self.main_code = kcn.main_code
         self.body_code = kcn.body_code
+        # self.deps_fake = [kdn.name for kdn in kcn.deps_fake]
+        # self.deps_global = [kdn.name for kdn in kcn.deps_global]
+        self.deps_global = kcn.deps_global
         self.deps_fake = kcn.deps_fake
         if keep_kcn: self.kcn = kcn
         self.is_fgt = False
@@ -106,9 +109,12 @@ class OpSchedule:
     def del_input(self, kg):
         input_kdn = kg.input_kdn_data
         self.del_input_op = DelOp(input_kdn)
-        self.del_input_idx = max(kg.list_kcn.index(kcn) 
-                            for kcn in input_kdn.users_global
-                            if kcn in kg.list_kcn)
+        for i,op in enumerate(self.op_list):
+            if isinstance(op, RunOp) and input_kdn in op.deps_global:
+                self.del_input_idx = i+1
+        # self.del_input_idx = max(self.op_list.index(kcn) 
+        #                     for kcn in input_kdn.users_global
+        #                     if kcn in self.op_list)
         self.save[self.del_input_idx+1:] -= input_kdn.mem.v
         self.overhead = max(self.save+self.tmp) - self.save[-1]
         

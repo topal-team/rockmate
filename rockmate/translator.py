@@ -49,6 +49,8 @@ class Translator():#to execute Op
                     if "loss" in op.main_target: code_list.append("")
                     else:
                         code = ast_to_str(make_ast_module([op.main_code]))
+                        code += "\n"+ast_to_str(make_ast_module(op.body_code))
+                        code = "\t".join(code.splitlines(True))
                         code_list.append(f"\t{code}")
                 elif op.kdn_type == "data": 
                     for target in op.all_targets:
@@ -58,9 +60,9 @@ class Translator():#to execute Op
                         code_list.append(f"\tdel {target}") 
             return "\n".join(code_list)
 
-        def _is_alive(kdn, i):
-            if kdn.name in op_sched.kdn_names:
-                return op_sched.alive_list[i][op_sched.kdn_names.index(kdn.name)]
+        def _is_alive(kdn_name, i):
+            if kdn_name in op_sched.kdn_names:
+                return op_sched.alive_list[i][op_sched.kdn_names.index(kdn_name)]
             else:
                 return True
         
@@ -102,7 +104,7 @@ class Translator():#to execute Op
                 prep_code = ""
                 after_code = ""
                 for kdn in op.deps_fake:
-                    if not _is_alive(kdn, i):
+                    if not _is_alive(kdn.name, i):
                         fake_code = _generate_fake_tensor(kdn, kdn.info.requires_grad)
                         prep_code += fake_code[0]
                         after_code += fake_code[1]
@@ -118,7 +120,8 @@ class Translator():#to execute Op
         def _del_op(op, i):
             code = ""
             if op.kdn_type == "data":
-                if op.info.requires_grad:
+                if (op.info.requires_grad and 
+                    _is_alive(op.name.replace("grad", "phantoms"), i)):
                     code += f"_{op.main_target}.data = torch.zeros(0,device=device);"
                 for v in op.all_targets:
                     code += (f"{v}.data = torch.zeros(0,device=device); ")
