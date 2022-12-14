@@ -58,7 +58,7 @@ class Translator():#to execute Op
                         code_list.append(f"\tdel {target}")
                 if op_sched.del_input_idx == i: 
                     for target in op_sched.del_input_op.all_targets:
-                        code_list.append(f"\tdel {target}") 
+                        code_list.append(f"\t{target}.data = torch.zeros(0,device=device)") 
             code_list.append(f"{op_sched.output.main_target}.requires_grad_()")
             return ["\n".join(code_list)]#Fc/Fn needs indent so run as one command
 
