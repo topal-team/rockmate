@@ -19,10 +19,11 @@ class K_C_node():
             deps_through_size_artefacts=None):
         # ** informative **
         self.main_target = mt = target
+        self.all_targets = None ; self.tensor_targets = None
         self.name        = f"fwd_{mt}" if is_fwd else f"bwd_{mt}"
         self.is_fwd      = is_fwd
-        self.main_code   = main_code # AST
-        self.body_code   = body_code if body_code else [] # AST list
+        self.main_code   = main_code # target * AST
+        self.body_code   = body_code if body_code else [] # (str*AST) list
 
         # ** deps/used_by **
         self.deps_real    = deps_real if deps_real else set() # KDN set
@@ -68,16 +69,12 @@ class K_C_node():
     def __hash__(self):
         return self.name.__hash__()
 
-    def full_code(self):
-        if self.main_code is None: mc = []
-        else: mc = [self.main_code]
-        return make_ast_module(mc + self.body_code)
     def get_main_code(self):
-        if self.main_code is None: mc = []
-        else: mc = [self.main_code]
-        return ast_to_str(make_ast_module(mc))
+        return make_str_assign(self.main_code)
     def get_code(self):
-        return ast_to_str(self.full_code())
+        mc = make_str_assign(self.main_code)
+        bc = make_str_list_assign(self.body_code)
+        return mc+bc
 
 
 # ************
@@ -142,7 +139,7 @@ class K_graph():
         # -> otherwise they are shared with the previous k_graph
         # -> output_kdn_data/grad are shared with the next one
 
-        self.init_code = make_ast_module(sg.init_node.body_code)
+        self.init_code = make_ast_list_assign(sg.init_node.body_code)
         self.dict_info = sg.dict_info
         self.dict_rand = sg.dict_rand
         self.sg = sg # TO REMOVE
@@ -223,8 +220,8 @@ def generate_tmp_local(sn,sg : S_graph,our_global):
                         req_req_info = sg.dict_info[req_req_tar]
                         tmp_local[req_req_tar] = (
                             generate_val(req_req_info,device))
-            for c in req_sn.body_code:
-                exec(ast_to_str(c),our_global,tmp_local)
+            exec(make_str_list_assign(req_sn.body_code),
+                our_global,tmp_local)
     """ TODO
     if sn.is_rand:
         for req_rd in sn.deps_rand:
@@ -486,6 +483,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             body_code = sn.body_code,
             deps_real = kcn_fwd_deps,
             deps_through_size_artefacts = kcn_deps_art_kcn)
+        kcn_fwd.all_targets = sn.all_targets
+        kcn_fwd.tensor_targets = sn.tensor_targets
         dict_KCN_fwd[mt] = kcn_fwd
 
         # -> KDN(data)
@@ -589,7 +588,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
     kg.loss_kcn=loss_kcn = K_C_node(
         target    = "loss",
         is_fwd    = True,
-        main_code = make_ast_constant("LOSS"),
+        main_code = ("loss",make_ast_constant("LOSS")),
         deps_real = set([output_kdn_data]))
     loss_kcn.time     = 0
     loss_kcn.overhead = MemSize(0)

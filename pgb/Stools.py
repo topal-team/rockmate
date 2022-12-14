@@ -18,8 +18,11 @@ class S_node():
         .tensor_targets : str list
             -> all_targets which are tensors
             -> (done by s_graph.make_tensor_targets)
-        .main_code  : AST  : code to compute and assign .main_target
-        .body_code  : AST  : code to assign all_targets except main_target
+        .main_code  : tar*AST :
+            -> .main_target * AST right part of the assigning code of it
+        .body_code  : tar*AST list
+            -> for every tar except main_target:
+            -> target name * AST value of the assign
         .main_fct   : str  : fct used in .main_code
         .protected  : bool : see Doc (1-separator of the graph)
         .is_artefact: bool : see Doc (useful size node)
@@ -29,9 +32,9 @@ class S_node():
         <TODO> : is_rand and deps_rand ?
         """
         self.is_artefact = False
-        self.main_code = code
+        self.main_code = (target,code)
         self.main_fct = fct
-        self.body_code = [] # list of ast.Assign
+        self.body_code = [] # list of tar * AST
         self.main_target = target # str
         self.all_targets = [target]
         self.tensor_targets = [] # later
@@ -54,12 +57,10 @@ class S_node():
         # we use the assomption that a node is uniquely
         # defined by its .main_target within a graph
 
-    def full_code(self):
-        if self.main_code is None: mc = []
-        else: mc = [self.main_code]
-        return make_ast_module(mc + self.body_code)
     def get_code(self):
-        return ast_to_str(self.full_code())
+        mc = make_str_assign(self.main_code)
+        bc = make_str_list_assign(self.body_code)
+        return mc+bc
 
     def insert(self,aux_sn,strong,sg):
         # this is the fct to merge nodes : we insert "aux_sn" in "self"
@@ -283,44 +284,37 @@ def D_to_S_init(dg : D_graph,keep_sequential=False) -> S_graph:
 # === remove cheap nodes ===
 # ==========================
 
-def insert_ast_code(main_sn,mc,target : str,sc):
-    # mc : main_code , sc : sub_code
-    assert(isinstance(mc,ast.Assign))
-    assert(isinstance(sc,ast.Assign))
-    assert(sc.targets[0].id == target)
-    # if not ast.Assign -> simplifications haven't been done in
-    # the right order ! (cheap -> size > view)
-    # assert main_code is a one layer Call (no sub calls)
-    scv = sc.value
-    mcv = mc.value
-    if isinstance(mcv,ast.Call):
+def insert_ast_code(main_sn,mc,st : str,sc):
+    # st : sub target, sc : sub code
+    # mc : main_sn.main_code
+    # assert main_code is has depth=1 (no sub calls)
+    if isinstance(mc,ast.Call):
         args = []
         kwds = []
-        for s in mcv.args:
-            if isinstance(s,ast.Name) and s.id == target:
-                args.append(scv)
+        for s in mc.args:
+            if isinstance(s,ast.Name) and s.id == st:
+                args.append(sc)
             else: args.append(s)
-        for k in mcv.keywords:
-            if isinstance(s,ast.Name) and s.id == target:
-                kwds.append(scv)
+        for k in mc.keywords:
+            if isinstance(s,ast.Name) and s.id == st:
+                kwds.append(sc)
             else: kwds.append(s)
-        ret = ast.Call(mcv.func,args,kwds)
-        main_sn.main_code = ast.Assign(mc.targets,ret)
-    elif (isinstance(mcv,ast.Tuple)
-        or isinstance(mcv,ast.List)):
+        ret = ast.Call(mc.func,args,kwds)
+        main_sn.main_code = (main_sn.main_target,ret)
+    elif (isinstance(mc,ast.Tuple)
+        or isinstance(mc,ast.List)):
         l = []
-        for s in mcv.elts:
-            if isinstance(s,ast.Name) and s.id == target:
-                l.append(scv)
+        for s in mc.elts:
+            if isinstance(s,ast.Name) and s.id == st:
+                l.append(sc)
             else: l.append(s)
-        ret = type(mcv)(l)
-        main_sn.main_code = ast.Assign(mc.targets,ret)
-    elif isinstance(mcv,ast.Subscript):
-        assert(isinstance(scv,ast.List)
-            or isinstance(scv,ast.Tuple))
-        assert(len(mc.targets)==1)
-        # mcv = scv.elts[mcv.slice.value]
-        main_sn.main_code = ast.Assign(mc.targets,scv.elts[mcv.slice.value])
+        ret = type(mc)(l) # ast.Tuple/List(...)
+        main_sn.main_code = (main_sn.main_target,ret)
+    elif isinstance(mc,ast.Subscript):
+        assert(isinstance(sc,ast.List)
+            or isinstance(sc,ast.Tuple))
+        ret = sc.elts[mc.slice.value]
+        main_sn.main_code = (main_sn.main_target,ret)
         simplify_node(main_sn)
     else:
         print(ast.dump(mc,indent=4))
@@ -339,9 +333,9 @@ def simplify_node(sn):
             dict_edges_add_inplace(req_sn.users,user_sn,str_set)
         # -- insert the code --
         insert_ast_code(
-            user_sn,user_sn.main_code,
-            sn.main_target,sn.main_code)
-    sn.deps     = dict()
+            user_sn,user_sn.main_code[1],
+            sn.main_target,sn.main_code[1])
+    sn.deps  = dict()
     sn.users = dict()
 
 def simplify_cheap(sg : S_graph):
@@ -506,9 +500,9 @@ def D_to_S(dg,keep_sequential=False):
 def copy_node(sn : S_node): # aux for copy_graph
     new_sn = S_node()
     new_sn.is_artefact    = sn.is_artefact
-    new_sn.main_code      = sn.main_code
+    new_sn.main_code      = tuple(sn.main_code)
     new_sn.main_fct       = sn.main_fct
-    new_sn.body_code      = list(sn.body_code)
+    new_sn.body_code      = list([tuple(c) for c in sn.body_code])
     new_sn.main_target    = sn.main_target
     new_sn.all_targets    = list(sn.all_targets)
     new_sn.tensor_targets = list(sn.tensor_targets)

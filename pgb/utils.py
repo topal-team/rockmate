@@ -207,6 +207,20 @@ def make_ast_module(l):
     try:    return ast.Module(l,[])
     except: return ast.Module(l)
 
+def make_ast_assign(c,prefix="",suffix=""):
+    tar,right_part = c
+    a = ast.Assign([ast.Name(prefix+tar+suffix)],right_part)
+    return a
+def make_ast_list_assign(lc,prefix="",suffix=""):
+    la = [make_ast_assign(c,prefix="",suffix="") for c in lc]
+    return make_ast_module(la)
+def make_str_assign(c,prefix="",suffix=""):
+    if c is None or c[1] is None: return ""
+    return ast_to_str(make_ast_assign(c,prefix,suffix))+"\n"
+def make_str_list_assign(lc,prefix="",suffix=""):
+    ls = [make_str_assign(c,prefix="",suffix="") for c in lc]
+    return "".join(ls)
+
 def is_constant(v):
     if py_version >= 3.8:
         return isinstance(v,ast.Constant)
