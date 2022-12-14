@@ -62,10 +62,10 @@ class CheckpointedModule(torch.nn.Module):
         self.translator = Translator(self.storage,self.fwd_seq,self.bwd_seq)
         fwd_code = []
         for seq_block in self.fwd_seq.seq:
-            fwd_code.append(self.translator.translate(seq_block.op_sched))
+            fwd_code += self.translator.translate(seq_block.op_sched,True)
         bwd_code = []
         for seq_block in self.bwd_seq.seq:
-            bwd_code.append(self.translator.translate(seq_block.op_sched))
+            bwd_code += self.translator.translate(seq_block.op_sched,False)
         # self.translator.translate()
         # self.executor.translate(bwd=True)
         # #print("Mem after translator", torch.cuda.memory_allocated())

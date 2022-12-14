@@ -363,7 +363,7 @@ class ModelGurobi:
                 loss_i = i
                 break
         fwd_sched = OpSchedule(op_list[:loss_i+1], alive_list[:loss_i+1],
-                               self.kg.list_kdn)
+                               self.kg.list_kdn, output=self.kg.output_kdn_data)
         bwd_sched = OpSchedule(op_list[loss_i+1:], alive_list[loss_i+1:],
-                               self.kg.list_kdn)
+                               self.kg.list_kdn, output=self.kg.output_kdn_grad)
         return fwd_sched, bwd_sched

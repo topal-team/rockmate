@@ -132,10 +132,12 @@ class RK_Block():
                         alive_list.append(alive_status.copy())
             return op_list, alive_list
         
-        self.Fc_sched = OpSchedule(*_fast_fwd_sched(), 
-                                   kg.list_kdn, no_grad = True)
-        self.Fn_sched = OpSchedule(*_fast_fwd_sched(),
-                                   kg.list_kdn, no_grad = True)
+        self.Fc_sched = OpSchedule(*_fast_fwd_sched(), kg.list_kdn,
+                                    output=kg.output_kdn_data, 
+                                    no_grad = True)
+        self.Fn_sched = OpSchedule(*_fast_fwd_sched(), kg.list_kdn, 
+                                   output=kg.output_kdn_data,
+                                   no_grad = True)
         self.Fn_sched.del_input(kg)
         self.overhead_fast_fwd = self.Fc_sched.overhead
         self.time_fast_fwd = self.Fc_sched.time

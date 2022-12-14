@@ -40,7 +40,7 @@ class Translator():#to execute Op
         return mem
 
 
-    def translate(self, op_sched):
+    def translate(self, op_sched, during_fwd=True):
         # Fc/Fn cases
         if op_sched.no_grad:
             code_list = ["with torch.no_grad():"]
@@ -48,8 +48,9 @@ class Translator():#to execute Op
                 if op.op_type == "Run": 
                     if "loss" in op.main_target: code_list.append("")
                     else:
-                        code = ast_to_str(make_ast_module([op.main_code]))
-                        code += "\n"+ast_to_str(make_ast_module(op.body_code))
+                        # code = ast_to_str(make_ast_module([op.main_code]))
+                        # code += "\n"+ast_to_str(make_ast_module(op.body_code))
+                        code = op.code
                         code = "\t".join(code.splitlines(True))
                         code_list.append(f"\t{code}")
                 elif op.kdn_type == "data": 
@@ -58,7 +59,8 @@ class Translator():#to execute Op
                 if op_sched.del_input_idx == i: 
                     for target in op_sched.del_input_op.all_targets:
                         code_list.append(f"\tdel {target}") 
-            return "\n".join(code_list)
+            code_list.append(f"{op_sched.output.main_target}.requires_grad_()")
+            return ["\n".join(code_list)]#Fc/Fn needs indent so run as one command
 
         def _is_alive(kdn_name, i):
             if kdn_name in op_sched.kdn_names:
@@ -73,6 +75,7 @@ class Translator():#to execute Op
             if True: # aggressive way to save memory
                 req_shape = kdn.info.tsize
                 target_tensor = None
+                mt = kdn.main_target
                 # TODO: go through all the live tensors
                 # for k,v in self.live.items():
                 #     if not v: continue
@@ -81,26 +84,61 @@ class Translator():#to execute Op
                 #        target_tensor = k
                 if not target_tensor:# No available live tensor to use
                     target_tensor = f"torch.zeros({req_shape},device=device)"
-                prep_code += f"{kdn.main_target}.data = {target_tensor}.reshape({req_shape});"
-                after_code += f"{kdn.main_target}.data = torch.zeros(0,device=device);"
+                prep_code += f"{mt}.data = {target_tensor}.reshape({req_shape});"
+                after_code += f"{mt}.data = torch.zeros(0,device=device);"
                 if proxy:
-                    prep_code += f"_{kdn.main_target}.data = {target_tensor}.reshape({req_shape});"
-                    after_code += f"_{kdn.main_target}.data = torch.zeros(0,device=device);"
+                    prep_code += f"_{mt}.data = {target_tensor}.reshape({req_shape});"
+                    after_code += f"_{mt}.data = torch.zeros(0,device=device);"
             return prep_code, after_code
         
         def _run_op(op, i):
-            code = ""
+            # code = ""
             if "fwd" in op.name:
-                code = ast_to_str(make_ast_module([op.main_code]))
+                rec = ((i>op_sched.op_list.index(op)) or 
+                        (not op_sched.is_fwd)) 
                 if op.proxy:
-                    code = code.replace(op.main_target,f"_{op.main_target}")
+                    if ((not during_fwd) and (not op_sched.no_grad) and#Fe in bwd
+                        (op.main_target == op_sched.output.main_target)):
+                        rec = True
+                    proxy_code = make_str_assign(op.main_code, prefix="_")
                     code = (
-                        f"{code} ; "\
-                        f"{op.main_target} = _{op.main_target}.detach(); "\
+                        f"{proxy_code};"\
+                        f"{op.main_target} = _{op.main_target}.detach();"\
                         f"{op.main_target}.requires_grad_()")
-                code += "\n"+ast_to_str(make_ast_module(op.body_code))
+                    if rec:
+                        code = (
+                            f"{proxy_code};"\
+                            f"{op.main_target}.data = _{op.main_target}.data;")
+                else:
+                    code = make_str_assign(op.main_code)
+                for bc in op.body_code:
+                    suffix = ""
+                    if (rec and (bc[0] in op.tensor_targets)):
+                        suffix = ".data"
+                    code += "\n" + make_str_assign(bc, suffix=suffix)
                 return code
+                # code = ast_to_str(make_ast_module([op.main_code]))
+                # if op.proxy:
+                #     code = code.replace(op.main_target,f"_{op.main_target}")
+                #     code = (
+                #         f"{code}; "\
+                #         f"{op.main_target} = _{op.main_target}.detach(); "\
+                #         f"{op.main_target}.requires_grad_()")
+                # if i>op_sched.op_list.index(op) or (not op_sched.is_fwd):
+                #     code = code.replace(op.main_target,f"_{op.main_target}")
+                #     code = (
+                #         f"{code}; "\
+                #         f"{op.main_target}.data = _{op.main_target}.data; "\
+                #         f"{op.main_target}.requires_grad_()")
+                #     body_code = ast_to_str(make_ast_module(op.body_code))
+                #     for target in op.all_targets:
+                #         body_code.replace(target, f"{target}.data")
+
+                # return code + "\n"+ast_to_str(make_ast_module(op.body_code))
             elif "bwd" in op.name:
+                mt = op.main_target
+                rec = op in op_sched.op_list[:i]
+                last = not (op in op_sched.op_list[i+1:])
                 prep_code = ""
                 after_code = ""
                 for kdn in op.deps_fake:
@@ -108,12 +146,19 @@ class Translator():#to execute Op
                         fake_code = _generate_fake_tensor(kdn, kdn.info.requires_grad)
                         prep_code += fake_code[0]
                         after_code += fake_code[1]
-                code = f"_{op.main_target}.backward({op.main_target}.grad, retain_graph={False})"
+                if rec:
+                    rec_list = []
+                    for kdn in op.used_by_global:
+                        if not _is_alive(kdn.name, i):
+                            rec_list += kdn.all_targets
+                    inputs = ",".join(rec_list)
+                    code = f"_{mt}.backward({mt}.grad, inputs=[{inputs}], retain_graph={not last})"
+                else:
+                    code=f"_{mt}.backward({mt}.grad, retain_graph={not last})"
                 bwd_code = (
                     f"{prep_code}\n"\
                     f"{code}\n"\
                     f"{after_code}")
-                # TODO: recompute bwd is not supported yet
                 return bwd_code
 
 
@@ -135,4 +180,4 @@ class Translator():#to execute Op
         for i, (op, alive) in enumerate(zip(op_sched.op_list, op_sched.alive_list)):
             if op.op_type == "Run": code_list.append(_run_op(op, i))
             if op.op_type == "Del": code_list.append(_del_op(op, i))
-        return "\n".join(code_list)
+        return code_list

@@ -60,13 +60,16 @@ class RunOp():
         self.time = kcn.time
         self.overhead = kcn.overhead.v
         self.main_target = kcn.main_target
+        self.tensor_targets = kcn.tensor_targets
         # self.save_mem = cn.mem.v
         self.main_code = kcn.main_code
         self.body_code = kcn.body_code
+        self.code = kcn.get_code()
         # self.deps_fake = [kdn.name for kdn in kcn.deps_fake]
         # self.deps_global = [kdn.name for kdn in kcn.deps_global]
         self.deps_global = kcn.deps_global
         self.deps_fake = kcn.deps_fake
+        self.users_global = kcn.users_global
         if keep_kcn: self.kcn = kcn
         self.is_fgt = False
         self.op_type = "Run"
@@ -90,8 +93,10 @@ class DelOp():
         self.op_type = "Del"
 
 class OpSchedule:
-    def __init__(self, op_list, alive_list, list_kdn, no_grad=False):
+    def __init__(self, op_list, alive_list, 
+                 list_kdn, output=None, no_grad=False):
         self.no_grad = no_grad
+        self.output = output
         self.mem_sizes = [kdn.mem.v for kdn in list_kdn]
         self.kdn_names = [kdn.name for kdn in list_kdn]
         self.op_list = op_list
@@ -99,8 +104,11 @@ class OpSchedule:
         L = len(op_list)
         self.save = np.zeros(L)
         self.tmp = np.zeros(L)
+        self.is_fwd = True
         for i,op in enumerate(op_list):
-            if isinstance(op, RunOp): self.tmp[i] = op.overhead
+            if isinstance(op, RunOp):
+                self.tmp[i] = op.overhead
+                if "bwd" in op.name: self.is_fwd=False
             self.save[i] = alive_list[i].dot(np.array(self.mem_sizes))
         self.overhead = max(self.save+self.tmp) - self.save[-1]
         self.time = sum([op.time for op in self.op_list])
