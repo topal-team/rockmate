@@ -89,7 +89,7 @@ class K_D_node():
             kdn_type = "/!\\ No kdn_type/!\\",
             target   = "/!\\ No target /!\\",
             all_targets = None,
-            info        = {},
+            info        = None,
             deps        = None):
         # ** informative **
         self.kdn_type    = kdn_type # data, grad or phantoms
@@ -450,6 +450,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
         mt = sn.main_target
         print_debug(f"start to handle {mt}'s S_node in S_to_K")
         our_global = generate_our_global(sg,model,device)
+        info = sg.dict_info[mt]
 
         # For artefact nodes :
         #   -> if KCN2 only need KCN1.size, it means in sg there is
@@ -492,13 +493,12 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             kdn_type    = "data",
             target      = mt,
             all_targets = sn.tensor_targets,
-            info        = sg.dict_info[mt],
+            info        = info,
             deps        = set([kcn_fwd]))
         dict_KDN_data[mt] = kdn_data
 
 
         # *** build the bwd part ***
-        info = sg.dict_info[mt]
         if info.requires_grad:
             # -> get kdn_data and phantoms deps for bwd
             deps_real_name,exist_phantoms = (
@@ -524,6 +524,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                 kdn_phantoms = K_D_node(
                     kdn_type    = "phantoms",
                     target      = mt,
+                    info        = info,
                     deps        = set([kcn_fwd]))
                 dict_KDN_phantoms[mt] = kdn_phantoms
                 kcn_bwd.deps_real.add(kdn_phantoms)
@@ -533,6 +534,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             # -> KDN(grad)
             kdn_grad = K_D_node(
                 kdn_type    = "grad",
+                info        = info,
                 target      = mt)
             dict_KDN_grad[mt] = kdn_grad
             kcn_bwd.deps_real.add(kdn_grad)
@@ -565,8 +567,10 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
 
             # -> phantoms ins
             if ref_test_phantoms_detection[0]:
-                assert(exist_phantoms == (
-                    res["mem_run_fwd"].v - res["mem_fgt_fwd"].v > 0))
+                exist_diff = res["mem_run_fwd"].v - res["mem_fgt_fwd"].v > 0
+                if exist_diff or exist_phantoms:
+                    print(f"For node {mt}: mem_diff : {exist_diff} "\
+                          f"and detection {exist_phantoms}")
 
             if exist_phantoms:
                 kdn_phantoms.mem = MemSize(
