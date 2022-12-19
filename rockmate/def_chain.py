@@ -36,7 +36,7 @@ class RK_Block_Solution():
             self.time_bwd = self.bwd_sched.time
             self.size_a_bar = self.fwd_sched.save[-1]
             self.overhead_fwd = self.fwd_sched.overhead
-            self.overhead_bwd = self.bwd_sched.overhead+self.bwd_sched.save[-1]#-self.size_a_bar
+            self.overhead_bwd = self.bwd_sched.overhead+self.bwd_sched.save[-1]-self.size_a_bar
             # self.op_sched, self.alive_list = gurobi_md.schedule()
 
         #is_f = self.is_feasible = self.sched_result.feasible
@@ -122,6 +122,7 @@ class RK_Block():
             for i, kcn in enumerate(kg.list_kcn[:loss_idx]):
                 op_list.append(RunOp(kcn))
                 for kdn in kcn.users:
+                    if "data" not in kdn.kdn_type:continue
                     alive_status[kg.list_kdn.index(kdn)] = 1
                 alive_list.append(alive_status.copy())
                 for j, kdn in enumerate(kg.list_kdn):

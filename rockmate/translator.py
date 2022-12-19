@@ -44,24 +44,29 @@ class Translator():#to execute Op
     def translate(self, op_sched, during_fwd=True):
         # Fc/Fn cases
         if op_sched.no_grad:
-            code_list = ["with torch.no_grad():"]
+            code_list = []#["with torch.no_grad():"]
             for i,op in enumerate(op_sched.op_list):
                 if op.op_type == "Run": 
                     if "loss" in op.main_target: code_list.append("")
                     else:
                         # code = ast_to_str(make_ast_module([op.main_code]))
                         # code += "\n"+ast_to_str(make_ast_module(op.body_code))
-                        code = op.code
-                        code = "\t".join(code.splitlines(True))
-                        code_list.append(f"\t{code}")
-                elif op.kdn_type == "data": 
+                        # code = op.code
+                        # code = "\t".join(code.splitlines(True))
+                        code_list.append(f"{op.code}")
+                elif op.kdn_type == "data":
+                    code = "" 
                     for target in op.all_targets:
-                        code_list.append(f"\tdel {target}")
+                        code += f"del {target};"
+                    code_list.append(code)
+                else:code_list.append("")
                 if op_sched.del_input_idx == i: 
-                    for target in op_sched.del_input_op.all_targets:
-                        code_list.append(f"\t{target}.data = torch.zeros(0,device=device)") 
-            code_list.append(f"{op_sched.output.main_target}.requires_grad_()")
-            return ["\n".join(code_list)]#Fc/Fn needs indent so run as one command
+                    code = "\n"
+                    for target in op_sched.del_input_op.tensor_targets:
+                        code += f"{target}.data = torch.zeros(0,device=device);"
+                    code_list[-1] += code
+            code_list[-1] += f"\n{op_sched.output.main_target}.requires_grad_()"
+            return code_list#["\n".join(code_list)]#Fc/Fn needs indent so run as one command
 
         def _is_alive(kdn_name, i):
             if kdn_name in op_sched.kdn_names:
@@ -182,7 +187,7 @@ class Translator():#to execute Op
                 if (op.info.requires_grad and 
                     _is_alive(op.name.replace("data", "phantoms"), i)):
                     code += f"_{op.main_target}.data = torch.zeros(0,device=device);"
-                for v in op.all_targets:
+                for v in op.tensor_targets:
                     code += (f"{v}.data = torch.zeros(0,device=device); ")
             if op.kdn_type == "grad":
                 code += f"{op.main_target}.grad = None"

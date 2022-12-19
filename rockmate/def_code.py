@@ -88,7 +88,8 @@ class DelOp():
         self.time = 0
         self.save_mem = kdn.mem.v
         self.main_target = kdn.main_target
-        self.all_targets = kdn.all_targets
+        self.tensor_targets = kdn.all_targets
+        self.all_targets = list(kdn.deps)[0].all_targets if kdn.deps else []
         # self.code = kn.get_code()
         # self.requires_grad = kdn.info.requires_grad
         self.info = kdn.info
