@@ -69,7 +69,7 @@ class Translator():#to execute Op
             else:
                 return True
         
-        def _generate_fake_tensor(kdn, is_self=False):
+        def _generate_fake_data(kdn, i, is_self=False):
             # return code for generate the target fake tensor (only for data/grad)
             prep_code = ""
             after_code = ""
@@ -77,7 +77,13 @@ class Translator():#to execute Op
                 req_shape = kdn.info.tsize
                 target_tensor = None
                 mt = kdn.main_target
+                if is_self:target_tensor = f"{kdn.main_target}.grad"
                 # TODO: go through all the live tensors
+                for name,info in op_sched.kdn_info.items():
+                    if "data" not in name:continue
+                    if (np.prod(info.tsize)==np.prod(req_shape) 
+                        and _is_alive(name, i)):
+                        target_tensor = name.split(" ")[0]#main_target
                 # for k,v in self.live.items():
                 #     if not v: continue
                 #     if (np.prod(self.op.main_target2op[k[:-5]].n.info.tsize) ==
@@ -86,7 +92,11 @@ class Translator():#to execute Op
                 if not target_tensor:# No available live tensor to use
                     target_tensor = f"torch.zeros({req_shape},device=device)"
                 prep_code += f"{mt}.data = {target_tensor}.reshape({req_shape});"
+                prep_code += ";".join([make_str_assign(bc) for bc in 
+                                        list(kdn.deps)[0].body_code])+"\n"
                 after_code += f"{mt}.data = torch.zeros(0,device=device);"
+                for v in kdn.all_targets:
+                    after_code += (f"{v}.data = torch.zeros(0,device=device); ")
                 if is_self:
                     prep_code += f"_{mt}.data = {target_tensor}.reshape({req_shape});"
                     after_code += f"_{mt}.data = torch.zeros(0,device=device);"
@@ -144,7 +154,7 @@ class Translator():#to execute Op
                 after_code = ""
                 for kdn in op.deps_fake:
                     if not _is_alive(kdn.name, i):
-                        fake_code = _generate_fake_tensor(kdn, 
+                        fake_code = _generate_fake_data(kdn, i, 
                             is_self=(kdn.main_target==op.main_target))
                         prep_code += fake_code[0]
                         after_code += fake_code[1]

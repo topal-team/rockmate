@@ -105,6 +105,7 @@ class OpSchedule:
         self.output = output
         self.mem_sizes = [kdn.mem.v for kdn in list_kdn]
         self.kdn_names = [kdn.name for kdn in list_kdn]
+        self.kdn_info = {kdn.name:kdn.info for kdn in list_kdn}#dict: name->info
         self.op_list = op_list
         self.alive_list = alive_list
         L = len(op_list)

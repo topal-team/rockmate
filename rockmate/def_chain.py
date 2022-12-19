@@ -111,14 +111,15 @@ class RK_Block():
         def _fast_fwd_sched():
             def _can_del(i,kdn):
                 for kcn in kdn.users_real:
+                    if "bwd" in kcn.name:continue
                     if kg.list_kcn.index(kcn)>i:return False
                 return True
 
             op_list = []
             alive_list = []
             alive_status = np.zeros(len(kg.list_kdn), dtype=bool)
-            for i, kcn in enumerate(kg.list_kcn):
-                if not kcn.is_fwd:break
+            loss_idx = kg.list_kcn.index(kg.loss_kcn)
+            for i, kcn in enumerate(kg.list_kcn[:loss_idx]):
                 op_list.append(RunOp(kcn))
                 for kdn in kcn.users:
                     alive_status[kg.list_kdn.index(kdn)] = 1
