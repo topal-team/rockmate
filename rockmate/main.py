@@ -55,6 +55,10 @@ class CheckpointedModule(torch.nn.Module):
         # -- solve the chain like rotor --
         self.seq = seq_builder(self.rk_chain, self.mem_limit//self.mem_unit)
         self.fwd_seq,self.bwd_seq = self.seq.cut_fwd_bwd()
+        self.fwd_op_list = [op for seq in self.fwd_seq.seq 
+                            for op in seq.op_sched.op_list]
+        self.bwd_op_list = [op for seq in self.bwd_seq.seq 
+                            for op in seq.op_sched.op_list]
         #print("Mem after seq builder", torch.cuda.memory_allocated())
         
     def get_code(self):
@@ -62,10 +66,10 @@ class CheckpointedModule(torch.nn.Module):
         self.translator = Translator(self.storage,self.fwd_seq,self.bwd_seq)
         fwd_code = []
         for seq_block in self.fwd_seq.seq:
-            fwd_code += self.translator.translate(seq_block.op_sched,True)
+            fwd_code.append(self.translator.translate(seq_block.op_sched,True))
         bwd_code = []
         for seq_block in self.bwd_seq.seq:
-            bwd_code += self.translator.translate(seq_block.op_sched,False)
+            bwd_code.append(self.translator.translate(seq_block.op_sched,False))
         # self.translator.translate()
         # self.executor.translate(bwd=True)
         # #print("Mem after translator", torch.cuda.memory_allocated())
@@ -90,13 +94,9 @@ class CheckpointedModule(torch.nn.Module):
         self.bwd_code = self.executor.code
         """
 
-    def forward(self,input, record_mem = False):
-        self.storage.add_val("src",input) # hardcoded
-        exec(self.init_code,self.storage.gd,self.storage.ld)
-        torch.cuda.reset_peak_memory_stats()
-        self.max_mem = [torch.cuda.max_memory_allocated()]
-        self.allo_mem = [torch.cuda.memory_allocated()]
-        for code in self.fwd_code:
+    def _exec(self, code_list, record_mem=False):
+        for code in code_list:
+            mem_before = torch.cuda.memory_allocated()
             try:
                 exec(code,self.storage.gd,self.storage.ld)
             except Exception as e:
@@ -105,22 +105,29 @@ class CheckpointedModule(torch.nn.Module):
                 break
             if record_mem:
                 self.max_mem.append(torch.cuda.max_memory_allocated())
-                self.allo_mem.append(torch.cuda.memory_allocated())
+                self.allo_mem.append(torch.cuda.memory_allocated()-mem_before)
+
+    def forward(self,input, record_mem=False):
+        self.storage.add_val("src",input) # hardcoded
+        exec(self.init_code,self.storage.gd,self.storage.ld)
+        torch.cuda.reset_peak_memory_stats()
+        self.max_mem = []
+        self.allo_mem = []
+        for code_list, seq in zip(self.fwd_code, self.fwd_seq.seq):
+            if seq.op_sched.no_grad:
+                with torch.no_grad():self._exec(code_list, record_mem)
+            else:
+                with torch.enable_grad():self._exec(code_list, record_mem)
+                
         return self.storage.get_val(self.output.main_target)
 
     def backward(self,record_mem=False):
-        for i,code in enumerate(self.bwd_code):
-            try:
-                exec(code,self.storage.gd,self.storage.ld)
-            except Exception as err:
-                print(f"Failed to execute {i}-th code:\n {code}")
-                print(f"Unexpected {err=}, {type(err)=}")
-                raise
-                break
-            if record_mem:
-                self.max_mem.append(torch.cuda.max_memory_allocated())
-                self.allo_mem.append(torch.cuda.memory_allocated())
-
+        for code_list, seq in zip(self.bwd_code, self.bwd_seq.seq):
+            if seq.op_sched.no_grad:
+                with torch.no_grad():self._exec(code_list, record_mem)
+            else:
+                with torch.enable_grad():self._exec(code_list, record_mem)
+        
     def expect_time(self):
         # Sum of the measured time of each operation for one batch
         return self.fwd_seq.compute_time()+self.bwd_seq.compute_time() 
@@ -128,10 +135,10 @@ class CheckpointedModule(torch.nn.Module):
     def expect_mem(self, save=False):
         # Peak mem based on the measured memory/overhead of each operation
         mem = 0;l=[mem]
-        for op in self.executor.op_list:
+        for op in self.fwd_op_list+self.bwd_op_list:
             if "loss" in op.name: l.append(mem);continue
             if not save: l[-1]+= op.overhead
-            mem += op.mem
+            mem += op.save_mem
             l.append(mem)
         return l
     def reinit(self):

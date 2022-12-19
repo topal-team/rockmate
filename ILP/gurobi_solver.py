@@ -31,9 +31,10 @@ class ModelGurobi:
         self.feasible = None
         self.solve_time = None
 
-        self.protected_indices = [self.kg.list_kdn.index(n) for n in 
-                                    [self.kg.output_kdn_grad, 
-                                     self.kg.output_kdn_data]]
+        self.protected_indices = []#self.kg.list_kdn.index(n) for n in 
+                                    # [self.kg.output_kdn_grad]]   
+                                    #  self.kg.output_kdn_data]]
+        self.loss_idx = self.kg.list_kcn.index(self.kg.loss_kcn)
         T = len(self.kg.list_kcn)
         I = len(self.kg.list_kdn)
 
@@ -125,6 +126,8 @@ class ModelGurobi:
                             GRB.EQUAL, 0)
         self.md.addLConstr(quicksum(self.R[t, t] for t in range(T)),
                             GRB.EQUAL, T)
+        self.md.addLConstr(quicksum(self.R[t, self.loss_idx] for t in range(T)),
+                            GRB.EQUAL, 1)#fwd_loss can only run once
                 #elif self.imposed_schedule == ImposedSchedule.COVER_ALL_NODES:
                 #    self.md.addLConstr(quicksum(self.S[0, i] for i in range(T)), GRB.EQUAL, 0)
                 #    for i in range(T):
