@@ -78,6 +78,9 @@ class RunOp():
             if kdn.kdn_type != "data":continue
             self.proxy = kdn.info.requires_grad
 
+    def __eq__(self,op2):
+        return check_attr(self, op2, ["name", "kcn"])
+
 class DelOp():
     def __init__(self, kdn):
         self.name = kdn.name
@@ -91,6 +94,9 @@ class DelOp():
         self.info = kdn.info
         self.is_fgt = True
         self.op_type = "Del"
+    
+    def __eq__(self,op2):
+        return check_attr(self, op2, ["name"])
 
 class OpSchedule:
     def __init__(self, op_list, alive_list, 

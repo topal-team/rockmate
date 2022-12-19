@@ -1,5 +1,6 @@
 from .utils import *
 from .def_sequence import *
+from .def_code import *
 
 class Translator():#to execute Op 
     def __init__(self,storage, fwd_seq, bwd_seq):
@@ -68,7 +69,7 @@ class Translator():#to execute Op
             else:
                 return True
         
-        def _generate_fake_tensor(kdn, proxy=False):
+        def _generate_fake_tensor(kdn, is_self=False):
             # return code for generate the target fake tensor (only for data/grad)
             prep_code = ""
             after_code = ""
@@ -86,7 +87,7 @@ class Translator():#to execute Op
                     target_tensor = f"torch.zeros({req_shape},device=device)"
                 prep_code += f"{mt}.data = {target_tensor}.reshape({req_shape});"
                 after_code += f"{mt}.data = torch.zeros(0,device=device);"
-                if proxy:
+                if is_self:
                     prep_code += f"_{mt}.data = {target_tensor}.reshape({req_shape});"
                     after_code += f"_{mt}.data = torch.zeros(0,device=device);"
             return prep_code, after_code
@@ -143,13 +144,16 @@ class Translator():#to execute Op
                 after_code = ""
                 for kdn in op.deps_fake:
                     if not _is_alive(kdn.name, i):
-                        fake_code = _generate_fake_tensor(kdn, kdn.info.requires_grad)
+                        fake_code = _generate_fake_tensor(kdn, 
+                            is_self=(kdn.main_target==op.main_target))
                         prep_code += fake_code[0]
                         after_code += fake_code[1]
                 if rec:
+                    prev_i = i - op_sched.op_list[:i][::-1].index(op) - 1
                     rec_list = []
-                    for kdn in op.used_by_global:
-                        if not _is_alive(kdn.name, i):
+                    for kdn in op.users_global:
+                        # if not _is_alive(kdn.name, i):
+                        if DelOp(kdn) in op_sched.op_list[prev_i:i]:
                             rec_list += kdn.all_targets
                     inputs = ",".join(rec_list)
                     code = f"_{mt}.backward({mt}.grad, inputs=[{inputs}], retain_graph={not last})"
@@ -166,7 +170,7 @@ class Translator():#to execute Op
             code = ""
             if op.kdn_type == "data":
                 if (op.info.requires_grad and 
-                    _is_alive(op.name.replace("grad", "phantoms"), i)):
+                    _is_alive(op.name.replace("data", "phantoms"), i)):
                     code += f"_{op.main_target}.data = torch.zeros(0,device=device);"
                 for v in op.all_targets:
                     code += (f"{v}.data = torch.zeros(0,device=device); ")
