@@ -82,7 +82,6 @@ class RK_Block():
         max_bdg = sum(kdn_sizes)+max(overheads)
         min_bdg = max(overheads)
         #l_bd_abar = np.linspace(min_bdg,max_bdg,nb_bdg_abar)
-        l_bd_abar = np.linspace(0,max_bdg,nb_bdg_abar)
         l_bd_all  = np.linspace(min_bdg,max_bdg,nb_bdg_all)
         print_debug(
             f"=*=*=*=\nStart {self.block_name}, total cost : "\
@@ -92,8 +91,9 @@ class RK_Block():
         # == build .sols ==
         sols = self.sols = []
         uniq_sols = set()
-        for bd_abar in l_bd_abar:
-            for bd_all in l_bd_all:
+        for bd_all in l_bd_all:
+            l_bd_abar = np.linspace(0,bd_all,nb_bdg_abar)
+            for bd_abar in l_bd_abar:
                 if bd_all >= bd_abar:
                     print_debug(
                         f"ask {self.block_name} with : bd_abar = "\
