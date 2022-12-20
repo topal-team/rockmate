@@ -31,9 +31,10 @@ class ModelGurobi:
         self.feasible = None
         self.solve_time = None
 
-        self.protected_indices = []#self.kg.list_kdn.index(n) for n in 
-                                    # [self.kg.output_kdn_grad]]   
+        self.output_indices = [self.kg.list_kdn.index(n) for n in 
+                                    [self.kg.output_kdn_grad]]   
                                     #  self.kg.output_kdn_data]]
+        self.protected_indices = []
         self.loss_idx = self.kg.list_kcn.index(self.kg.loss_kcn)
         T = len(self.kg.list_kcn)
         I = len(self.kg.list_kdn)
@@ -195,10 +196,14 @@ class ModelGurobi:
             for eidx, (k, i) in enumerate(self.create_list):
                 self.md.addLConstr(self.create[t,eidx],
                                     GRB.LESS_EQUAL, self.R[t, k])
-            if t + 1 < T:
-                for i in range(I):
+            for i in range(I):
+                if t + 1 < T:
                     self.md.addLConstr(self.P[t+1,i], GRB.EQUAL,
                         self.alive[(t, max(_deps_d[i] + _users_d[i]), i)])
+                elif i not in self.output_indices:
+                    # in the end of bwd, del everything except output grad
+                    self.md.addLConstr(self.alive[(t, 
+                        max(_deps_d[i] + _users_d[i]), i)], GRB.EQUAL, 0)
         # timer.end()
         # print("Tensor state constraints: %.4f"%timer.elapsed())
 

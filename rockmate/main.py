@@ -17,7 +17,7 @@ def print_memsizes(list_kg):
 
 class CheckpointedModule(torch.nn.Module):
     def __init__(self,original_mod,dict_inputs,mem_limit=None,mem_unit=None,verbose=False,
-                 get_chain=True,get_sequence=True,get_code=True): 
+                 get_chain=False,get_sequence=False,get_code=False): 
         super(CheckpointedModule,self).__init__()
         ref_verbose[0] = verbose
         self.device = get_device()
