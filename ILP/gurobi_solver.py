@@ -200,7 +200,7 @@ class ModelGurobi:
                 if t + 1 < T:
                     self.md.addLConstr(self.P[t+1,i], GRB.EQUAL,
                         self.alive[(t, max(_deps_d[i] + _users_d[i]), i)])
-                elif i not in self.output_indices:
+                else:#if i not in self.output_indices:
                     # in the end of bwd, del everything except output grad
                     self.md.addLConstr(self.alive[(t, 
                         max(_deps_d[i] + _users_d[i]), i)], GRB.EQUAL, 0)

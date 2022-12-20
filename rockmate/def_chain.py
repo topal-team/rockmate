@@ -77,12 +77,13 @@ class RK_Block():
             f"Block[{kg.input_kdn_data}->{kg.output_kdn_data}]")
 
         # == budgets to test ==
-        nodes_size = [n.mem.v for n in kg.list_kdn]
-        max_bdg = sum(nodes_size)+max(nodes_size)
-        min_bdg = max(nodes_size)
+        kdn_sizes = [kdn.mem.v for kdn in kg.list_kdn]
+        overheads = [kcn.overhead.v for kcn in kg.list_kcn]
+        max_bdg = sum(kdn_sizes)+max(overheads)
+        min_bdg = max(overheads)
         #l_bd_abar = np.linspace(min_bdg,max_bdg,nb_bdg_abar)
         l_bd_abar = np.linspace(0,max_bdg,nb_bdg_abar)
-        l_bd_all  = np.linspace(min_bdg,max_bdg,nb_bdg_all+2)[2:]
+        l_bd_all  = np.linspace(min_bdg,max_bdg,nb_bdg_all)
         print_debug(
             f"=*=*=*=\nStart {self.block_name}, total cost : "\
             f"{max_bdg} and min_bdg : {min_bdg}\n=*=*=*="
