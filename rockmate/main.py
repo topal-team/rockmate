@@ -96,7 +96,9 @@ class CheckpointedModule(torch.nn.Module):
 
     def _exec(self, code_list, record_mem=False):
         for code in code_list:
-            mem_before = torch.cuda.memory_allocated()
+            torch.cuda.reset_peak_memory_stats()
+            self.mem_before = torch.cuda.memory_allocated()
+            self.max_before = torch.cuda.max_memory_allocated()
             try:
                 exec(code,self.storage.gd,self.storage.ld)
             except Exception as e:
@@ -104,13 +106,13 @@ class CheckpointedModule(torch.nn.Module):
                 print(e)
                 break
             if record_mem:
-                self.max_mem.append(torch.cuda.max_memory_allocated())
-                self.allo_mem.append(torch.cuda.memory_allocated()-mem_before)
+                self.max_mem.append(torch.cuda.max_memory_allocated()-self.max_before)
+                self.allo_mem.append(torch.cuda.memory_allocated()-self.mem_before)
 
     def forward(self,input, record_mem=False):
         self.storage.add_val("src",input) # hardcoded
         exec(self.init_code,self.storage.gd,self.storage.ld)
-        torch.cuda.reset_peak_memory_stats()
+        
         self.max_mem = []
         self.allo_mem = []
         for code_list, seq in zip(self.fwd_code, self.fwd_seq.seq):
@@ -132,15 +134,18 @@ class CheckpointedModule(torch.nn.Module):
         # Sum of the measured time of each operation for one batch
         return self.fwd_seq.compute_time()+self.bwd_seq.compute_time() 
 
-    def expect_mem(self, save=False):
+    def expect_mem(self, overhead=False):
         # Peak mem based on the measured memory/overhead of each operation
-        mem = 0;l=[mem]
-        for op in self.fwd_op_list+self.bwd_op_list:
-            if "loss" in op.name: l.append(mem);continue
-            if not save: l[-1]+= op.overhead
-            mem += op.save_mem
-            l.append(mem)
-        return l
+        pred_mem = []; acc_mem = np.zeros(len(self.fwd_seq.seq))
+        for i, seq in enumerate(self.fwd_seq.seq+self.bwd_seq.seq):
+            op_sched = seq.op_sched
+            mem_sizes = np.array([op_sched.kdn_info[k].memsize.v 
+                                    for k in op_sched.kdn_names])
+            for s, op in zip(op_sched.save, op_sched.op_list):
+                acc_mem[seq.index] = s
+                pred_mem.append(sum(acc_mem))
+                if overhead and op.op_type == "Run":pred_mem[-1] += op.overhead
+        return pred_mem
     def reinit(self):
         self.original_mod.zero_grad()
         self.storage.ld = {}

@@ -30,7 +30,7 @@ class RK_Block_Solution():
                                 gurobi_params=param_dict)
         gurobi_md.solve()
         self.is_feasible = gurobi_md.feasible
-        if gurobi_md.feasible: 
+        if gurobi_md.feasible:
             self.fwd_sched, self.bwd_sched = gurobi_md.schedule() 
             self.time_fwd = self.fwd_sched.time
             self.time_bwd = self.bwd_sched.time
