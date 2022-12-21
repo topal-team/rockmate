@@ -47,6 +47,7 @@ def experiments(input_shape=[500,20], nlayers=8,iterate=False,
 
         torch.random.manual_seed(0)
         loss.backward()
+        del y
         model1.zero_grad()
         max_before = torch.cuda.max_memory_allocated()
         allo_before = torch.cuda.memory_allocated()
@@ -80,6 +81,7 @@ def experiments(input_shape=[500,20], nlayers=8,iterate=False,
         newmod.get_code()
         for _ in range(1+iterate):
             newmod.reinit()
+            context1 = context1.to(device)
             result = {}
             torch.cuda.reset_peak_memory_stats()
             max_before = torch.cuda.max_memory_allocated()
@@ -87,7 +89,7 @@ def experiments(input_shape=[500,20], nlayers=8,iterate=False,
             timer = timing.make_timer(device)
 
             timer.start()
-            context1 = context1.to(device)
+            
             torch.random.manual_seed(0)
             y1 = newmod.forward(context1)
 
@@ -138,12 +140,10 @@ def experiments(input_shape=[500,20], nlayers=8,iterate=False,
         with open(file,'wb') as f:pickle.dump(results, f)
     return results
 
-# res = []
-# for m in np.arange(0,20):
-#     mem = 1.0e9 + m*4.0e8
-#     for _ in range(5):
-#         res.append(experiment(mem,iterate=2, input_shape=[600,20],print_res=True))
-budgets = np.arange(0,30)*2e8 + 1e9
-experiments(input_shape=[500,20], nlayers=8,iterate=2,
+budgets = np.arange(0,50)*1e8 + 6e8
+
+experiments(input_shape=[500,20], nlayers=8,iterate=5,
                origin=True, check_valid=True, print_res=True,
-               nb = (10,5), budgets=budgets, file="results.pkl")
+               nb = (20,10), budgets=budgets, file="results.pkl")
+
+

@@ -26,7 +26,7 @@ class RK_Block_Solution():
         # self.op_sched = make_sched(kg, budget_all)
         param_dict = {
         "LogToConsole": 0,}
-        gurobi_md = ModelGurobi(kg, budget_all, budget_abar, gcd=1000,
+        gurobi_md = ModelGurobi(kg, budget_all, budget_abar, gcd=100000,
                                 gurobi_params=param_dict)
         gurobi_md.solve()
         self.is_feasible = gurobi_md.feasible
@@ -74,40 +74,7 @@ class RK_Block_Solution():
 class RK_Block():
     def __init__(self,kg,nb_bdg_abar,nb_bdg_all):
         self.block_name = (
-            f"Block[{kg.input_kdn_data}->{kg.output_kdn_data}]")
-
-        # == budgets to test ==
-        kdn_sizes = [kdn.mem.v for kdn in kg.list_kdn]
-        overheads = [kcn.overhead.v for kcn in kg.list_kcn]
-        max_bdg = sum(kdn_sizes)+max(overheads)
-        min_bdg = max(overheads)
-        #l_bd_abar = np.linspace(min_bdg,max_bdg,nb_bdg_abar)
-        l_bd_all  = np.linspace(min_bdg,max_bdg,nb_bdg_all)
-        print_debug(
-            f"=*=*=*=\nStart {self.block_name}, total cost : "\
-            f"{max_bdg} and min_bdg : {min_bdg}\n=*=*=*="
-            )
-
-        # == build .sols ==
-        sols = self.sols = []
-        uniq_sols = set()
-        for bd_all in l_bd_all:
-            l_bd_abar = np.linspace(0,bd_all,nb_bdg_abar)
-            for bd_abar in l_bd_abar:
-                if bd_all >= bd_abar:
-                    print_debug(
-                        f"ask {self.block_name} with : bd_abar = "\
-                        f"{bd_abar} and bd_all = {bd_all}")
-                    sol = RK_Block_Solution(kg,bd_abar,bd_all)
-                    if sol.is_feasible:
-                        t = (sol.size_a_bar,
-                            sol.overhead_fwd,
-                            sol.overhead_bwd)
-                        if not (t in uniq_sols):
-                            uniq_sols.add(t)
-                            sols.append(sol)
-        # kg.loss_kcn.run_mem = MemSize(0)
-        
+            f"Block[{kg.input_kdn_data.name}->{kg.output_kdn_data.name}]")
         # == build Fc/Fn schedule
         def _fast_fwd_sched():
             def _can_del(i,kdn):
@@ -144,6 +111,38 @@ class RK_Block():
         self.Fn_sched.del_input(kg)
         self.overhead_fast_fwd = self.Fc_sched.overhead
         self.time_fast_fwd = self.Fc_sched.time
+
+        # == budgets to test ==
+        kdn_sizes = [kdn.mem.v for kdn in kg.list_kdn]
+        overheads = [kcn.overhead.v for kcn in kg.list_kcn]
+        max_bdg = sum(kdn_sizes)+max(overheads)
+        min_bdg = self.Fc_sched.overhead+self.Fc_sched.save[-1]#max(overheads)
+        #l_bd_abar = np.linspace(min_bdg,max_bdg,nb_bdg_abar)
+        l_bd_all  = np.linspace(min_bdg,max_bdg,nb_bdg_all)
+        print_debug(
+            f"=*=*=*=\nStart {self.block_name}, total cost : "\
+            f"{max_bdg} and min_bdg : {min_bdg}\n=*=*=*="
+            )
+
+        # == build .sols ==
+        sols = self.sols = []
+        uniq_sols = set()
+        for bd_all in l_bd_all:
+            l_bd_abar = np.linspace(0,bd_all,nb_bdg_abar)
+            for bd_abar in l_bd_abar:
+                if bd_all >= bd_abar:
+                    print_debug(
+                        f"ask {self.block_name} with : bd_abar = "\
+                        f"{bd_abar} and bd_all = {bd_all}")
+                    sol = RK_Block_Solution(kg,bd_abar,bd_all)
+                    if sol.is_feasible:
+                        t = (sol.size_a_bar,
+                            sol.overhead_fwd,
+                            sol.overhead_bwd)
+                        if not (t in uniq_sols):
+                            uniq_sols.add(t)
+                            sols.append(sol)
+        # kg.loss_kcn.run_mem = MemSize(0)
 
         # == build .mem_inp/out ==
         # memsize = lambda inp : kg.dict_info[inp].memsize.v

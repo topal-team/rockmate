@@ -24,9 +24,9 @@ class ModelGurobi:
         self.time = [kcn.time for kcn in self.kg.list_kcn]
         self.gcd = gcd if gcd else 1
         self.budget = budget//self.gcd
-        self.save_budget = save_budget//self.gcd
-        self.overhead = [kcn.overhead.v//self.gcd for kcn in self.kg.list_kcn]
-        self.mem = [kdn.mem.v//self.gcd for kdn in self.kg.list_kdn]
+        self.save_budget = save_budget/self.gcd
+        self.overhead = [kcn.overhead.v/self.gcd for kcn in self.kg.list_kcn]
+        self.mem = [kdn.mem.v/self.gcd for kdn in self.kg.list_kdn]
         self.gurobi_params = gurobi_params
         self.feasible = None
         self.solve_time = None
@@ -352,6 +352,11 @@ class ModelGurobi:
             for k in range(T):
                 if self.R[t, k].X:
                     kcn = self.kg.list_kcn[k]
+                    if "loss" in kcn.name:
+                        op_list.append(RunOp(kcn))
+                        alive_list.append(alive_status.copy())
+                        alive_status[self.kg.list_kdn.index(
+                            self.kg.output_kdn_grad)] = 1
                     for eidx, (k_, i) in enumerate(self.create_list):
                         if k==k_ and self.create[t, eidx].X:
                             alive_status[i] = 1

@@ -563,7 +563,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             kcn_bwd.ins = ins
             kcn_bwd.overhead = res["overhead_bwd"]
             kcn_bwd.time     = res["time_run_bwd"]
-            kdn_grad.mem     = res["mem_fgt_bwd"] # assert : = mem_fgt_fwd
+            kdn_grad.mem     = kdn_data.mem#res["mem_fgt_bwd"] # assert : = mem_fgt_fwd
 
             # -> phantoms ins
             if ref_test_phantoms_detection[0]:

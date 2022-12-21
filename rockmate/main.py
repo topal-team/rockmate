@@ -75,7 +75,9 @@ class CheckpointedModule(torch.nn.Module):
         # #print("Mem after translator", torch.cuda.memory_allocated())
         self.fwd_code = fwd_code#"\n".join(fwd_code)
         self.bwd_code = bwd_code#"\n".join(bwd_code)
-
+        self.full_code = []
+        for code_list in fwd_code + bwd_code:
+            self.full_code += code_list
         """
         for sb in self.fwd_seq.seq:
             for sa in sb.body:
@@ -96,9 +98,10 @@ class CheckpointedModule(torch.nn.Module):
 
     def _exec(self, code_list, record_mem=False):
         for code in code_list:
-            torch.cuda.reset_peak_memory_stats()
-            self.mem_before = torch.cuda.memory_allocated()
-            self.max_before = torch.cuda.max_memory_allocated()
+            if record_mem:
+                torch.cuda.reset_peak_memory_stats()
+                self.mem_before = torch.cuda.memory_allocated()
+                self.max_before = torch.cuda.max_memory_allocated()
             try:
                 exec(code,self.storage.gd,self.storage.ld)
             except Exception as e:
@@ -106,8 +109,10 @@ class CheckpointedModule(torch.nn.Module):
                 print(e)
                 break
             if record_mem:
-                self.max_mem.append(torch.cuda.max_memory_allocated()-self.max_before)
-                self.allo_mem.append(torch.cuda.memory_allocated()-self.mem_before)
+                allo_mem = torch.cuda.memory_allocated()-self.mem_before
+                peak_mem = torch.cuda.max_memory_allocated()-self.max_before
+                self.max_mem.append(peak_mem-allo_mem)
+                self.allo_mem.append(allo_mem)
 
     def forward(self,input, record_mem=False):
         self.storage.add_val("src",input) # hardcoded
@@ -124,6 +129,7 @@ class CheckpointedModule(torch.nn.Module):
         return self.storage.get_val(self.output.main_target)
 
     def backward(self,record_mem=False):
+        if record_mem:self.allo_mem[-1] += self.output.info.memsize.v#output grad is generated outside
         for code_list, seq in zip(self.bwd_code, self.bwd_seq.seq):
             if seq.op_sched.no_grad:
                 with torch.no_grad():self._exec(code_list, record_mem)
