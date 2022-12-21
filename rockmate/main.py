@@ -61,9 +61,9 @@ class CheckpointedModule(torch.nn.Module):
                             for op in seq.op_sched.op_list]
         #print("Mem after seq builder", torch.cuda.memory_allocated())
         
-    def get_code(self):
+    def get_code(self, aggressive=True):
         self.storage =  RK_Storage(self.device,self.original_mod)
-        self.translator = Translator(self.storage,self.fwd_seq,self.bwd_seq)
+        self.translator = Translator(self.storage, aggressive=aggressive)
         fwd_code = []
         for seq_block in self.fwd_seq.seq:
             fwd_code.append(self.translator.translate(seq_block.op_sched,True))

@@ -3,7 +3,7 @@ from .def_sequence import *
 from .def_code import *
 
 class Translator():#to execute Op 
-    def __init__(self,storage, fwd_seq, bwd_seq):
+    def __init__(self,storage, aggressive=True):
         self.storage = storage
         self.live = {}#variables -> CodeAtom
         self.fgt = []#variables been fgt
@@ -13,6 +13,10 @@ class Translator():#to execute Op
         self.bwd_op_sched = []
         self.op_info = []
         self.fwd_code = []
+        self.aggressive = aggressive
+        if self.aggressive:
+            self.alive_global = {}
+            self.info_global = {}
         # for sb in fwd_seq.seq:
         #     self.fwd
         #     for sa in sb.body:
@@ -42,6 +46,10 @@ class Translator():#to execute Op
 
 
     def translate(self, op_sched, during_fwd=True):
+        if self.aggressive:
+            for i,kdn_name in enumerate(op_sched.kdn_names):
+                self.alive_global[kdn_name] = op_sched.alive_list[-1][i]
+                self.info_global[kdn_name] = op_sched.kdn_info[kdn_name]
         # Fc/Fn cases
         if op_sched.no_grad:
             code_list = []#["with torch.no_grad():"]
@@ -60,7 +68,7 @@ class Translator():#to execute Op
                         code += f"del {target};"
                     code_list.append(code)
                 else:code_list.append("")
-                if op_sched.del_input_idx == i: 
+                if op_sched.del_input_idx == i:
                     code = "\n"
                     for target in op_sched.del_input_op.tensor_targets:
                         code += f"{target}.data = torch.zeros(0,device=device);"
@@ -71,6 +79,7 @@ class Translator():#to execute Op
         def _is_alive(kdn_name, i):
             if kdn_name in op_sched.kdn_names:
                 return op_sched.alive_list[i][op_sched.kdn_names.index(kdn_name)]
+            elif kdn_name in self.alive_global:return self.alive_global[kdn_name]
             else:
                 return True
         
@@ -78,33 +87,33 @@ class Translator():#to execute Op
             # return code for generate the target fake tensor (only for data/grad)
             prep_code = ""
             after_code = ""
-            if True: # aggressive way to save memory
-                req_shape = kdn.info.tsize
-                target_tensor = None
-                mt = kdn.main_target
-                if is_self:target_tensor = f"{kdn.main_target}.grad"
-                # TODO: go through all the live tensors
-                for name,info in op_sched.kdn_info.items():
-                    if "data" not in name:continue
-                    if (np.prod(info.tsize)==np.prod(req_shape) 
-                        and _is_alive(name, i)):
-                        target_tensor = name.split(" ")[0]#main_target
-                # for k,v in self.live.items():
-                #     if not v: continue
-                #     if (np.prod(self.op.main_target2op[k[:-5]].n.info.tsize) ==
-                #        np.prod(req_shape)):
-                #        target_tensor = k
-                if not target_tensor:# No available live tensor to use
-                    target_tensor = f"torch.zeros({req_shape},device=device)"
-                prep_code += f"{mt}.data = {target_tensor}.reshape({req_shape});"
-                prep_code += ";".join([make_str_assign(bc) for bc in 
-                                        list(kdn.deps)[0].body_code])+"\n"
-                after_code += f"{mt}.data = torch.zeros(0,device=device);"
-                for v in kdn.all_targets:
-                    after_code += (f"{v}.data = torch.zeros(0,device=device); ")
-                if is_self:
-                    prep_code += f"_{mt}.data = {target_tensor}.reshape({req_shape});"
-                    after_code += f"_{mt}.data = torch.zeros(0,device=device);"
+            req_shape = kdn.info.tsize
+            target_tensor = None
+            mt = kdn.main_target
+            if is_self:target_tensor = f"{kdn.main_target}.grad"
+            # TODO: go through all the live tensors
+            dict_info = self.info_global if self.aggressive else op_sched.kdn_info
+            for name,info in dict_info.items():
+                if "data" not in name:continue
+                if (np.prod(info.tsize)==np.prod(req_shape) 
+                    and _is_alive(name, i)):
+                    target_tensor = name.split(" ")[0]#main_target
+            # for k,v in self.live.items():
+            #     if not v: continue
+            #     if (np.prod(self.op.main_target2op[k[:-5]].n.info.tsize) ==
+            #        np.prod(req_shape)):
+            #        target_tensor = k
+            if not target_tensor or not self.aggressive:# No available live tensor to use
+                target_tensor = f"torch.zeros({req_shape},device=device)"
+            prep_code += f"{mt}.data = {target_tensor}.reshape({req_shape});"
+            prep_code += ";".join([make_str_assign(bc) for bc in 
+                                    list(kdn.deps)[0].body_code])+"\n"
+            after_code += f"{mt}.data = torch.zeros(0,device=device);"
+            for v in kdn.all_targets:
+                after_code += (f"{v}.data = torch.zeros(0,device=device); ")
+            if is_self:
+                prep_code += f"_{mt}.data = {target_tensor}.reshape({req_shape});"
+                after_code += f"_{mt}.data = torch.zeros(0,device=device);"
             return prep_code, after_code
         
         def _run_op(op, i):
