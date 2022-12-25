@@ -81,6 +81,9 @@ class RunOp():
     def __eq__(self,op2):
         return check_attr(self, op2, ["name", "kcn"])
 
+    def __str__(self):
+        return f"Run {self.name}"
+
 class DelOp():
     def __init__(self, kdn):
         self.name = kdn.name
@@ -98,6 +101,9 @@ class DelOp():
     
     def __eq__(self,op2):
         return check_attr(self, op2, ["name"])
+
+    def __str__(self):
+        return f"Del {self.name}"
 
 class OpSchedule:
     def __init__(self, op_list, alive_list, 

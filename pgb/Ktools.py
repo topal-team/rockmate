@@ -546,13 +546,15 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
 
 
         # *** inspection ***
-        ins = inspector(sn,sg,our_global)
-        ins.measure_fwd()
-        ins.measure_bwd()
-        res = ins.ret
+        def insp():
+            ins = inspector(sn,sg,our_global)
+            ins.measure_fwd()
+            ins.measure_bwd()
+            return ins.ret
+        res = insp()
 
         # -> fwd ins
-        kcn_fwd.ins = ins
+        # kcn_fwd.ins = ins
         kcn_fwd.overhead = res["overhead_fwd"]
         kcn_fwd.time     = res["time_run_fwd"]
         kdn_data.mem     = res["mem_fgt_fwd"]
@@ -560,7 +562,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
 
         # -> bwd ins
         if info.requires_grad:
-            kcn_bwd.ins = ins
+            # kcn_bwd.ins = ins
             kcn_bwd.overhead = res["overhead_bwd"]
             kcn_bwd.time     = res["time_run_bwd"]
             kdn_grad.mem     = kdn_data.mem#res["mem_fgt_bwd"] # assert : = mem_fgt_fwd
@@ -576,7 +578,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                 kdn_phantoms.mem = MemSize(
                     res["mem_run_fwd"].v - res["mem_fgt_fwd"].v)
 
-        ins.tmp_local.clear()
+        # ins.tmp_local.clear()
     # ============ 
 
 

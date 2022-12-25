@@ -67,7 +67,7 @@ class SeqBlockOp(SeqOp):
     def __str__(self):
         header = f"{self.name} Block {self.index} in {self.time}"
         if ref_print_atoms[0]:
-            sb = "\n|  ".join([o.__str__() for o in self.body])
+            sb = "\n|  ".join([o.__str__() for o in self.op_sched.op_list])
             return f"{header}\n{sb}"
         else:
             return header
