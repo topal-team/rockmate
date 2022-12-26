@@ -215,10 +215,11 @@ class ModelGurobi:
                                  self.md.status, self.md.solCount))
             self.feasible = True
 
-    def schedule(self):
+    def schedule(self, kg=None):
+        kg = kg if kg else self.kg
         assert self.feasible, "Cannot schedule an infeasible model!"
-        T = len(self.kg.list_kcn)
-        I = len(self.kg.list_kdn)
+        T = len(kg.list_kcn)
+        I = len(kg.list_kdn)
 
         op_list = []
         alive_list = []
@@ -226,12 +227,12 @@ class ModelGurobi:
         for t in range(T):
             for k in range(T):
                 if self.R[t, k].X:
-                    kcn = self.kg.list_kcn[k]
+                    kcn = kg.list_kcn[k]
                     if "loss" in kcn.name:
                         op_list.append(RunOp(kcn))
                         alive_list.append(alive_status.copy())
-                        alive_status[self.kg.list_kdn.index(
-                            self.kg.output_kdn_grad)] = 1
+                        alive_status[kg.list_kdn.index(
+                            kg.output_kdn_grad)] = 1
                     for eidx, (k_, i) in enumerate(self.create_list):
                         if k==k_ and self.create[t, eidx].X:
                             alive_status[i] = 1
@@ -242,7 +243,7 @@ class ModelGurobi:
                     #         alive_list[-1][i] = 1
                 for eidx, (k_, i) in enumerate(self.delete_list):
                     if k==k_ and self.delete[t, eidx].X:
-                        kdn = self.kg.list_kdn[i]
+                        kdn = kg.list_kdn[i]
                         alive_status[i] = 0
                         op_list.append(DelOp(kdn))
                         alive_list.append(alive_status.copy())
@@ -251,7 +252,7 @@ class ModelGurobi:
                 loss_i = i
                 break
         fwd_sched = OpSchedule(op_list[:loss_i+1], alive_list[:loss_i+1],
-                               self.kg.list_kdn, output=self.kg.output_kdn_data)
+                               kg.list_kdn, output=kg.output_kdn_data)
         bwd_sched = OpSchedule(op_list[loss_i+1:], alive_list[loss_i+1:],
-                               self.kg.list_kdn, output=self.kg.output_kdn_grad)
+                               kg.list_kdn, output=kg.output_kdn_grad)
         return fwd_sched, bwd_sched
