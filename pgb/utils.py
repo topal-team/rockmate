@@ -270,8 +270,8 @@ def dict_edges_add(de,sn,str_set):
     return d
 
 def dict_edges_eq(de1,de2):
-    ds1 = dict((n.main_target) for (n,s) in de1.items())
-    ds2 = dict((n.main_target) for (n,s) in de2.items())
+    ds1 = dict((n.main_target,s) for (n,s) in de1.items())
+    ds2 = dict((n.main_target,s) for (n,s) in de2.items())
     return ds1 == ds2
     # since this function is an auxilary function for S_node.__eq__ method
     # we cannot check s_nodes equalities, we just check .main_target

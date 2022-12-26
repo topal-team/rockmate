@@ -56,6 +56,8 @@ class S_node():
         return self.main_target.__hash__()
         # we use the assomption that a node is uniquely
         # defined by its .main_target within a graph
+    # -> /!\ /!\ doing set/dict of S_nodes is extremly dangereous /!\ /!\ 
+    # but I'm doing this to fix an order to avoid undeterminism
 
     def get_code(self):
         mc = make_str_assign(self.main_code)
@@ -519,8 +521,8 @@ def copy_graph(sg : S_graph):
     new_sg.direct_inputs  = list(sg.direct_inputs)
     new_sg.hidden_output  = sg.hidden_output
     new_sg.direct_outputs = list(sg.direct_outputs)
-    new_sg.dict_info      = sg.dict_info
-    new_sg.dict_rand      = sg.dict_rand
+    new_sg.dict_info      = dict(sg.dict_info)
+    new_sg.dict_rand      = dict(sg.dict_rand)
     dict_nodes = {}
     new_init = copy_node(sg.init_node)
     new_nodes = []
