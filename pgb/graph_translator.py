@@ -245,7 +245,7 @@ def make_list_kg_eco(list_sg,model,verbose=None,device=None):
         assert(real_inp_data.main_target == fake_inp_data.main_target)
         assert(real_inp_grad.main_target == fake_inp_grad.main_target)
 
-    return list_kg
+    return list_translator,list_kg
 
 
 

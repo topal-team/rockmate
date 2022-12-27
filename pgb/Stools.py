@@ -41,6 +41,7 @@ class S_node():
         self.deps = dict()
         self.users = dict()
         self.protected = protected
+        self.num = get_num(self)
     def __eq__(self,sn2):
         sn1 = self
         b = check_attr(sn1,sn2,[
@@ -53,7 +54,7 @@ class S_node():
             and (sn1.get_code() == sn2.get_code()))
         return b
     def __hash__(self):
-        return self.main_target.__hash__()
+        return self.num
         # we use the assomption that a node is uniquely
         # defined by its .main_target within a graph
     # -> /!\ /!\ doing set/dict of S_nodes is extremly dangereous /!\ /!\ 
@@ -507,10 +508,11 @@ def copy_S_node(sn : S_node): # aux for copy_S_graph
     new_sn.main_fct       = sn.main_fct
     new_sn.body_code      = [tuple(c) for c in sn.body_code]
     new_sn.main_target    = sn.main_target
+    new_sn.num            = sn.num
     new_sn.all_targets    = list(sn.all_targets)
     new_sn.tensor_targets = list(sn.tensor_targets)
-    new_sn.deps            = dict() # /!\
-    new_sn.users        = dict() # /!\
+    new_sn.deps           = dict() # /!\
+    new_sn.users          = dict() # /!\
     new_sn.protected      = sn.protected
     return new_sn
 

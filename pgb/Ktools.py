@@ -45,20 +45,24 @@ class K_C_node():
     def users_only_global(self):
         return self.users_global - self.users
 
-    def __eq__(self,kcn2):
+    def __eq__(self,kcn2,force_order=False,raise_exception=False):
         kcn1 = self
         b = (
         check_attr(kcn1,kcn2,
             ["name","main_target","is_fwd","all_targets",
              "tensor_targets","overhead","has_phantoms"],
-            raise_exception=False)
+            raise_exception=raise_exception)
         and kcn1.get_code() == kcn2.get_code())
 
         # ** deps/users **
-        get_mt = lambda nl : [rn.main_target for rn in nl]
+        mt = lambda nl : [rn.main_target for rn in nl]
+        s = sort_nodes if force_order else (lambda s : s)
         for attr in ["deps_real","deps_fake","deps_global",
             "users","users_global","deps_through_size_artefacts"]:
-            b *= get_mt(getattr(kcn1,attr)) == get_mt(getattr(kcn2,attr))
+            c = mt(s(getattr(kcn1,attr))) == mt(s(getattr(kcn2,attr)))
+            b *= c
+            if not c and raise_exception:
+                raise Exception(f"kcns differ on attr {attr}")
 
         # ** time **
         t1 = kcn1.time
@@ -67,6 +71,8 @@ class K_C_node():
         if not (((t1 == t2)
             or (isinstance(t1,float) and isinstance(t2,float)
             and (abs(t1 - t2) < (r * max(t1,t2)))))):return False
+        if not b and raise_exception:
+            raise Exception("kcns differ on attr .time")
         return bool(b)
     def __hash__(self):
         return self.name.__hash__()
@@ -110,17 +116,21 @@ class K_D_node():
     def users_only_global(self):
         return self.users_global - self.users_real.union(self.users_fake)
 
-    def __eq__(self,kdn2):
+    def __eq__(self,kdn2,force_order=False,raise_exception=False):
         kdn1 = self
         b = check_attr(kdn1,kdn2,
             ["name","mem","kdn_type",
              "main_target","all_targets"],
-            raise_exception=False)
+            raise_exception=raise_exception)
         # ** deps/users **
-        get_mt = lambda nl : [rn.main_target for rn in nl]
+        mt = lambda nl : [rn.main_target for rn in nl]
+        s = sort_nodes if force_order else (lambda s : s)
         for attr in ["users_real","users_fake",
             "deps","users_global","deps_global"]:
-            b *= get_mt(getattr(kdn1,attr)) == get_mt(getattr(kdn2,attr))
+            c = mt(s(getattr(kdn1,attr))) == mt(s(getattr(kdn2,attr)))
+            b *= c
+            if not c and raise_exception:
+                raise Exception(f"kdns differ on attr {attr}")
         return bool(b)
     def __hash__(self):
         return self.name.__hash__()
@@ -177,14 +187,30 @@ class K_graph():
         self.list_kcn = l = sort_based_on_deps(root_kcn)
         l.remove(root_kcn)
 
-    def __eq__(self,g2): # aggressive
-        if ast_to_str(self.init_code) != ast_to_str(g2.init_code):
-            raise Exception("diff init_code")
-        return check_attr(self,g2,[#"sg",
-            "dict_kn","list_kcn","list_kdn",
-            "input_kdn_data","output_kdn_data","loss_kcn",
-            "input_kdn_grad","output_kdn_grad",
-            "dict_info","dict_rand"],raise_exception=True)
+    def __eq__(self,g2,force_order=False,raise_exception=False):
+        g1 = self
+        eq_node = lambda n1,n2 : n1.__eq__(n2,force_order,raise_exception)
+        b = (ast_to_str(self.init_code) == ast_to_str(g2.init_code))
+        if not b and raise_exception:
+            raise Exception("K_graphs diff init_code")
+        for attr in ["input_kdn_grad","output_kdn_grad",
+            "loss_kcn","input_kdn_data","output_kdn_data"]:
+            b *= eq_node(getattr(g1,attr),getattr(g2,attr))
+        for attr in ["list_kcn","list_kdn"]:
+            for kn1,kn2 in zip(getattr(g1,attr),getattr(g2,attr)):
+                b *= eq_node(kn1,kn2)
+        keys1 = list(g1.dict_kn)
+        keys2 = list(g2.dict_kn)
+        if force_order:
+            keys1 = sort_targets(keys1)
+            keys2 = sort_targets(keys2)
+        b *= (keys1 == keys2)
+        if not b and raise_exception:
+            raise Exception("Kgraphs differ on dict_kn's keys (order?)")
+        for k in keys1:
+            b *= eq_node(g1.dict_kn[k],g2.dict_kn[k])
+        b *= check_attr(g1,g2,["dict_info","dict_rand"],raise_exception)
+        return bool(b)
     def __hash__(self):
         return id(self)
 
@@ -320,6 +346,16 @@ def get_useful_vars(sn : S_node,sg : S_graph,our_global):
 # ==========================
 
 # TODO : rewrite + clean this section
+
+def dummy_inspection():
+    d = dict()
+    for attr in ["mem_del_fwd",
+        "overhead_bwd","mem_run_bwd","mem_fgt_bwd",
+        "overhead_fwd","mem_run_fwd","mem_fgt_fwd"]:
+        d[attr] = MemSize(0)
+    d["time_run_fwd"] = 0
+    d["time_run_bwd"] = 0
+    return d
 
 class inspector():
     def __init__(self, sn : S_node, sg : S_graph,our_global):
@@ -554,7 +590,9 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
         ins = inspector(sn,sg,our_global)
         ins.measure_fwd()
         ins.measure_bwd()
-        res = ins.ret
+        if device == torch.device("cpu"):
+            res = dummy_inspection()
+        else: res = ins.ret
 
         # -> fwd ins
         kcn_fwd.overhead = res["overhead_fwd"]
