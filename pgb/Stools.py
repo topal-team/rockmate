@@ -500,12 +500,12 @@ def D_to_S(dg,keep_sequential=False):
 # ==== sequential parts ====
 # ==========================
 
-def copy_node(sn : S_node): # aux for copy_graph
+def copy_S_node(sn : S_node): # aux for copy_S_graph
     new_sn = S_node()
     new_sn.is_artefact    = sn.is_artefact
     new_sn.main_code      = tuple(sn.main_code)
     new_sn.main_fct       = sn.main_fct
-    new_sn.body_code      = list([tuple(c) for c in sn.body_code])
+    new_sn.body_code      = [tuple(c) for c in sn.body_code]
     new_sn.main_target    = sn.main_target
     new_sn.all_targets    = list(sn.all_targets)
     new_sn.tensor_targets = list(sn.tensor_targets)
@@ -514,7 +514,7 @@ def copy_node(sn : S_node): # aux for copy_graph
     new_sn.protected      = sn.protected
     return new_sn
 
-def copy_graph(sg : S_graph):
+def copy_S_graph(sg : S_graph):
     # -> a copy of sg with fresh nodes
     new_sg = S_graph()
     new_sg.hidden_inputs  = list(sg.hidden_inputs)
@@ -524,11 +524,11 @@ def copy_graph(sg : S_graph):
     new_sg.dict_info      = dict(sg.dict_info)
     new_sg.dict_rand      = dict(sg.dict_rand)
     dict_nodes = {}
-    new_init = copy_node(sg.init_node)
+    new_init = copy_S_node(sg.init_node)
     new_nodes = []
     dict_nodes[new_init.main_target] = new_init
     for sn in sg.nodes:
-        new_sn = copy_node(sn)
+        new_sn = copy_S_node(sn)
         new_nodes.append(new_sn)
         dict_nodes[sn.main_target] = new_sn
         for (req_sn,set_str) in sn.deps.items():
@@ -542,7 +542,7 @@ def copy_graph(sg : S_graph):
 
 
 def cut(sg : S_graph): # -> list of S_graph
-    main_sg = copy_graph(sg) # to protect from side effects
+    main_sg = copy_S_graph(sg) # to protect from side effects
     main_sg.nodes.insert(0,main_sg.init_node)
     seps = cut_based_on_deps(main_sg)
     print_debug(f"S separators : {[sep.main_target for sep in seps]}")
