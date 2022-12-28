@@ -161,8 +161,7 @@ list_view_fct = [
 def check_attr(o1,o2,list_attr,raise_exception=False):
     for s in list_attr:
         if getattr(o1,s) != getattr(o2,s):
-            if raise_exception:
-                raise Exception(f"attr diff {s}")
+            if raise_exception: raise Exception(f"attr diff {s}")
             return False
     return True
 def vdir(c):
@@ -270,8 +269,8 @@ def dict_edges_add(de,sn,str_set):
     return d
 
 def dict_edges_eq(de1,de2):
-    ds1 = dict((n.main_target) for (n,s) in de1.items())
-    ds2 = dict((n.main_target) for (n,s) in de2.items())
+    ds1 = dict((n.main_target,s) for (n,s) in de1.items())
+    ds2 = dict((n.main_target,s) for (n,s) in de2.items())
     return ds1 == ds2
     # since this function is an auxilary function for S_node.__eq__ method
     # we cannot check s_nodes equalities, we just check .main_target
@@ -316,10 +315,14 @@ def get_target(n):
     try: return n.target
     except: return n.main_target
 
-def get_num(n): # can be used on B, D, S or K
-    tar = get_target(n)
+def get_num_tar(tar):
     try:    return int(tar.split('_')[2])
     except: return (-1)
+def get_num(n): # can be used on B, D, S or K
+    return get_num_tar(get_target(n))
+
+sort_nodes = lambda s : sorted(s,key=get_num)
+sort_targets = lambda s : sorted(s,key=get_num_tar)
 
 def get_deps(n):
     # To be compatible with different type/name of attribute "deps"

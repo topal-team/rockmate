@@ -11,7 +11,7 @@ class D_node(B_node):
         .target    : str  : the name of the only var defined in the node
         .ast_code  : AST  : right part of the assigning code
         .fct       : str  : the function used in .ast_code
-        .is_input  : bool : input vars are represented by nodes with dummy code
+        .is_input  : bool : inputs are represented by nodes wth dummy code
         .is_rand   : bool : ? .fct involves randomness
         .deps      : D_node set : required nodes to run .ast_code
         .deps_rand : D_node set : required random nodes
@@ -21,6 +21,7 @@ class D_node(B_node):
         super().__init__(target,code,fct)
         self.users = set()
         self.protected = False
+        self.num = get_num(self)
     def __eq__(self,dn2):
         dn1 = self
         b = check_attr(dn1,dn2,["protected","target","fct","is_rand"])
@@ -31,7 +32,7 @@ class D_node(B_node):
             and (dn1.get_code() == dn2.get_code()))
         return b # missing deps_rand equality
     def __hash__(self):
-        return self.target.__hash__()
+        return self.num
         #return id(self) # __eq__ => need __hash__
 
 class D_graph():

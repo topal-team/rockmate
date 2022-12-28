@@ -41,6 +41,7 @@ class S_node():
         self.deps = dict()
         self.users = dict()
         self.protected = protected
+        self.num = get_num(self)
     def __eq__(self,sn2):
         sn1 = self
         b = check_attr(sn1,sn2,[
@@ -53,9 +54,11 @@ class S_node():
             and (sn1.get_code() == sn2.get_code()))
         return b
     def __hash__(self):
-        return self.main_target.__hash__()
+        return self.num
         # we use the assomption that a node is uniquely
         # defined by its .main_target within a graph
+    # -> /!\ /!\ doing set/dict of S_nodes is extremly dangereous /!\ /!\ 
+    # but I'm doing this to fix an order to avoid undeterminism
 
     def get_code(self):
         mc = make_str_assign(self.main_code)
@@ -498,35 +501,36 @@ def D_to_S(dg,keep_sequential=False):
 # ==== sequential parts ====
 # ==========================
 
-def copy_node(sn : S_node): # aux for copy_graph
+def copy_S_node(sn : S_node): # aux for copy_S_graph
     new_sn = S_node()
     new_sn.is_artefact    = sn.is_artefact
     new_sn.main_code      = tuple(sn.main_code)
     new_sn.main_fct       = sn.main_fct
-    new_sn.body_code      = list([tuple(c) for c in sn.body_code])
+    new_sn.body_code      = [tuple(c) for c in sn.body_code]
     new_sn.main_target    = sn.main_target
+    new_sn.num            = sn.num
     new_sn.all_targets    = list(sn.all_targets)
     new_sn.tensor_targets = list(sn.tensor_targets)
-    new_sn.deps            = dict() # /!\
-    new_sn.users        = dict() # /!\
+    new_sn.deps           = dict() # /!\
+    new_sn.users          = dict() # /!\
     new_sn.protected      = sn.protected
     return new_sn
 
-def copy_graph(sg : S_graph):
+def copy_S_graph(sg : S_graph):
     # -> a copy of sg with fresh nodes
     new_sg = S_graph()
     new_sg.hidden_inputs  = list(sg.hidden_inputs)
     new_sg.direct_inputs  = list(sg.direct_inputs)
     new_sg.hidden_output  = sg.hidden_output
     new_sg.direct_outputs = list(sg.direct_outputs)
-    new_sg.dict_info      = sg.dict_info
-    new_sg.dict_rand      = sg.dict_rand
+    new_sg.dict_info      = dict(sg.dict_info)
+    new_sg.dict_rand      = dict(sg.dict_rand)
     dict_nodes = {}
-    new_init = copy_node(sg.init_node)
+    new_init = copy_S_node(sg.init_node)
     new_nodes = []
     dict_nodes[new_init.main_target] = new_init
     for sn in sg.nodes:
-        new_sn = copy_node(sn)
+        new_sn = copy_S_node(sn)
         new_nodes.append(new_sn)
         dict_nodes[sn.main_target] = new_sn
         for (req_sn,set_str) in sn.deps.items():
@@ -540,7 +544,7 @@ def copy_graph(sg : S_graph):
 
 
 def cut(sg : S_graph): # -> list of S_graph
-    main_sg = copy_graph(sg) # to protect from side effects
+    main_sg = copy_S_graph(sg) # to protect from side effects
     main_sg.nodes.insert(0,main_sg.init_node)
     seps = cut_based_on_deps(main_sg)
     print_debug(f"S separators : {[sep.main_target for sep in seps]}")
