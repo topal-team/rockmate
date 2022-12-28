@@ -71,24 +71,26 @@ class Translator():#to execute Op
             req_shape = kdn.info.tsize
             target_tensor = None
             mt = kdn.main_target
-            if is_self:target_tensor = f"{kdn.main_target}.grad"
             dict_info = self.info_global if self.aggressive else op_sched.kdn_info
             for name,info in dict_info.items():
                 if "data" not in name:continue
                 if (np.prod(info.tsize)==np.prod(req_shape) 
                     and _is_alive(name, i)):
                     target_tensor = name.split(" ")[0]#main_target
-            if not target_tensor or not self.aggressive:
+            if is_self:target_tensor = f"{kdn.main_target}.grad"
+            if (target_tensor is None) or not self.aggressive:
                 # No available live tensor to use
                 target_tensor = f"torch.zeros({req_shape},device=device)"
-            prep_code += f"{mt}.data = {target_tensor}.reshape({req_shape});"
+                prep_code += f"{mt}.data = {target_tensor};"
+            else:
+                prep_code += f"{mt}.data = {target_tensor}.reshape({req_shape});"
             prep_code += ";".join([make_str_assign(bc) for bc in 
                                     list(kdn.deps)[0].body_code])+"\n"
             after_code += f"{mt}.data = torch.zeros(0,device=device);"
             for v in kdn.all_targets:
                 after_code += (f"{v}.data = torch.zeros(0,device=device); ")
             if is_self:
-                prep_code += f"_{mt}.data = {target_tensor}.reshape({req_shape});"
+                prep_code += f"_{mt}.data = {target_tensor};"
                 after_code += f"_{mt}.data = torch.zeros(0,device=device);"
             return prep_code, after_code
         
@@ -138,8 +140,7 @@ class Translator():#to execute Op
                         if DelOp(kdn) in op_sched.op_list[prev_i:i]:
                             rec_list += kdn.all_targets
                     inputs = ",".join(rec_list)
-                    code = f"_{mt}.backward({mt}.grad, \
-                            inputs=[{inputs}], retain_graph={not last})"
+                    code = f"_{mt}.backward({mt}.grad, inputs=[{inputs}], retain_graph={not last})"
                 else:
                     code=f"_{mt}.backward({mt}.grad, retain_graph={not last})"
                 bwd_code = (
@@ -153,8 +154,7 @@ class Translator():#to execute Op
             if op.kdn_type == "data":
                 if (op.info.requires_grad and 
                     _is_alive(op.name.replace("data", "phantoms"), i)):
-                    code += f"_{op.main_target}.data \
-                                = torch.zeros(0,device=device);"
+                    code += f"_{op.main_target}.data = torch.zeros(0,device=device);"
                 for v in op.tensor_targets:
                     code += (f"{v}.data = torch.zeros(0,device=device); ")
             if op.kdn_type == "grad":
