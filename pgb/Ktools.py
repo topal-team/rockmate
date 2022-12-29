@@ -201,10 +201,10 @@ class K_graph():
                 b *= eq_node(kn1,kn2)
         keys1 = list(g1.dict_kn)
         keys2 = list(g2.dict_kn)
-        if force_order:
-            keys1 = sort_targets(keys1)
-            keys2 = sort_targets(keys2)
-        b *= (keys1 == keys2)
+        #if force_order:
+        #    keys1 = sort_names(keys1)
+        #    keys2 = sort_names(keys2)
+        #b *= (keys1 == keys2)
         if not b and raise_exception:
             raise Exception("Kgraphs differ on dict_kn's keys (order?)")
         for k in keys1:
