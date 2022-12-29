@@ -3,19 +3,21 @@ from . import Btools
 from . import Dtools
 from . import Stools
 from . import Ktools
+from . import graph_translator
 
 # ==========================
 # ====== OUTPUT CLASS ======
 # ==========================
 
 class all_graphs():
-    def __init__(self,bg,dg,sg,kg,list_sg,list_kg):
+    def __init__(self,bg,dg,sg,kg,list_sg,list_kg,cc):
         self.B_graph = bg
         self.D_graph = dg
         self.S_graph = sg
         self.K_graph = kg
         self.S_graph_list = list_sg
         self.K_graph_list = list_kg
+        self.equivalent_classes = cc
 
 # ==========================
 
@@ -125,10 +127,11 @@ def make_all_graphs(model,
         list_sg = Stools.cut(sg)
     else: list_sg = None
     if bool_list_kg:
-        list_kg = Ktools.S_list_to_K_list(list_sg,model,device=device)
-    else: list_kg = None
+        cc,list_kg = graph_translator.S_list_to_K_list_eco(
+            list_sg,model,device=device)
+    else: list_kg = None ; cc = None
 
-    return all_graphs(bg,dg,sg,kg,list_sg,list_kg)
+    return all_graphs(bg,dg,sg,kg,list_sg,list_kg,cc)
 
 # ==========================
 

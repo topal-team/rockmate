@@ -233,10 +233,10 @@ def S_list_to_K_list_eco(
         sg_num_to_cc_num[sg_num] = cc_num
 
     nb_cc = len(tab_S_repr_cc)
+    cc = [[] for _ in range(nb_cc)]
+    for sg_num in range(nb_sg):
+        cc[sg_num_to_cc_num[sg_num]].append(sg_num)
     if print_cc:
-        cc = [[] for _ in range(nb_cc)]
-        for sg_num in range(nb_sg):
-            cc[sg_num_to_cc_num[sg_num]].append(sg_num)
         for cc_num in range(nb_cc):
             print(f"Connexe component n°{cc_num}: {cc[cc_num]}")
         print(
@@ -277,17 +277,7 @@ def S_list_to_K_list_eco(
         assert(real_inp_data.main_target == fake_inp_data.main_target)
         assert(real_inp_grad.main_target == fake_inp_grad.main_target)
 
-    return list_kg
-
-
-
-
-
-
-
-
-
-
+    return cc,list_kg
 
 
 
