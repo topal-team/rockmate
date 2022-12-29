@@ -64,7 +64,11 @@ class CheckpointedModule(torch.nn.Module):
     def get_chain(self, nb_budget_abar=10, nb_budget_all=5):
         #  -- use checkmate to solve all the blocks --
         self.rk_chain = RK_Chain(
-            self.list_kg, nb_budget_abar, nb_budget_all, mem_unit=self.mem_unit
+            self.list_kg,
+            self.pgb_res.equivalent_classes,
+            nb_budget_abar,
+            nb_budget_all,
+            mem_unit=self.mem_unit,
         )
 
     def get_sequence(self, mem_limit):

@@ -289,22 +289,33 @@ class RK_Block:
 
 class RK_Chain:
     def __init__(
-        self, list_kg, nb_budget_abar=10, nb_budget_all=3, mem_unit=None
+        self,
+        list_kg,
+        eq_classes,
+        nb_budget_abar=10,
+        nb_budget_all=3,
+        mem_unit=None,
     ):
         if mem_unit:
             self.mem_unit = mem_unit
         else:
             self.mem_unit = 1024 ** 2
-        self.body = []
-        # TODO: add the information from pgb
-        identical_kg = [
-            list_kg[:1],
-            list_kg[1:-2],
-            [list_kg[-2]],
-            [list_kg[-1]],
-        ]
-        for l_kg in identical_kg:
-            self.body += get_rk_block(l_kg, nb_budget_abar, nb_budget_all)
+        self.body = [None] * len(list_kg)
+        # identical_kg = [
+        #     list_kg[:1],
+        #     list_kg[1:-2],
+        #     [list_kg[-2]],
+        #     [list_kg[-1]],
+        # ]
+        # eq_classes = [[0], [1,2,3,4,5], [6], [7]]
+        for cls in eq_classes:
+            l_kg = [list_kg[i] for i in cls]
+            l_block = get_rk_block(l_kg, nb_budget_abar, nb_budget_all)
+            for i, j in enumerate(cls):
+                self.body[j] = l_block[i]
+
+        # for l_kg in identical_kg:
+        #     self.body += get_rk_block(l_kg, nb_budget_abar, nb_budget_all)
 
         # for g in list_kg:
         #     self.body.append(RK_Block(g,nb_budget_abar,nb_budget_all))
