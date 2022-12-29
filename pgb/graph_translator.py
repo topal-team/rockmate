@@ -4,8 +4,6 @@
 from .utils import *
 from . import Stools
 from . import Ktools
-#from .Stools import S_node,S_graph,copy_S_graph
-#from .Ktools import K_C_node,K_D_node,K_graph,copy_K_graph
 
 # ==================
 # ====== INIT ======
@@ -27,14 +25,13 @@ class Graph_Translator():
             for s1,s2 in reverse_translator.dict.items():
                 d[s2] = s1
         else:
-            self.dict = r_to_a = dict()
-            nb_var = 0
+            # we want to respect the original order of sn.num
+            # -> so we first gather all the names, then sort
+            # -> them based on sn.num, and anonymize them.
+            all_real_names = set()
             def handle_str(real):
-                if not real in r_to_a:
-                    nonlocal nb_var
-                    nb_var += 1
-                    ano = f"a{nb_var}"
-                    r_to_a[real] = ano
+                if not real in all_real_names:
+                    all_real_names.add(real)
             def handle_ast(a):
                 if isinstance(a,ast.AST):
                     if isinstance(a,ast.Name):
@@ -55,6 +52,15 @@ class Graph_Translator():
                 for st,sc in sn.body_code:
                     handle_str(st)
                     handle_ast(sc)
+            # Now that "all_real_names" is complete, we generate the dict
+            all_real_names = sorted(all_real_names,key = get_num_tar)
+            self.dict = r_to_a = dict()
+            nb_var = 0
+            for real_name in all_real_names:
+                nb_var += 1
+                ano_name = f"__{nb_var}_ano"
+                r_to_a[real_name] = ano_name
+            # To finish, build the reverse_translator :
             self.reverse_translator = (
                 Graph_Translator(reverse_translator=self))
 
@@ -215,16 +221,18 @@ def make_list_kg_eco(list_sg,model,verbose=None,device=None):
         sg_num_to_cc_num[sg_num] = cc_num
 
     # 2) move anonymized graphs from S to K
+    dict_info_global = list_sg[0].dict_info # we lost some global info
     Ktools.aux_init_S_to_K(model,verbose,device)
     tab_K_repr_cc = []
-    dict_info_global = list_sg[0].dict_info
     for ano_sg in tab_S_repr_cc:
         ano_sg.dict_info.update(dict_info_global)
         tab_K_repr_cc.append(Ktools.aux_build_S_to_K(ano_sg,model,None))
     list_kg = []
     for sg_num,cc_num in enumerate(sg_num_to_cc_num):
         ano_kg = tab_K_repr_cc[cc_num]
-        list_kg.append(list_translator[sg_num].reverse_translate(ano_kg))
+        real_kg = list_translator[sg_num].reverse_translate(ano_kg)
+        real_kg.dict_info.update(dict_info_global)
+        list_kg.append(real_kg)
 
     # 3) link the K blocks
     for i in range(1,nb_sg):
@@ -234,6 +242,8 @@ def make_list_kg_eco(list_sg,model,verbose=None,device=None):
         real_inp_grad = prev_kg.output_kdn_grad
         fake_inp_data = kg.input_kdn_data
         fake_inp_grad = kg.input_kdn_grad
+        kg.input_kdn_data = real_inp_data
+        kg.input_kdn_grad = real_inp_grad
         for fst_kcn in fake_inp_data.users_global:
             fst_kcn.deps_global.discard(fake_inp_data)
             fst_kcn.deps_global.add(real_inp_data)

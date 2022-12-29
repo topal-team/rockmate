@@ -318,11 +318,21 @@ def get_target(n):
 def get_num_tar(tar):
     try:    return int(tar.split('_')[2])
     except: return (-1)
+def get_num_name(name): # for KCN or KDN's name
+    if (name.startswith("fwd_")
+    or  name.startswith("bwd_")):
+        return get_num_tar(name[4:])
+    elif (name.endswith("data")
+    or    name.endswith("grad")):
+        return get_num_tar(name[:-4])
+    elif name.endswith("phantoms"):
+        return get_num_tar(name[:-8])
 def get_num(n): # can be used on B, D, S or K
     return get_num_tar(get_target(n))
 
 sort_nodes = lambda s : sorted(s,key=get_num)
 sort_targets = lambda s : sorted(s,key=get_num_tar)
+sort_names = lambda s : sorted(s,key=get_num_name)
 
 def get_deps(n):
     # To be compatible with different type/name of attribute "deps"
