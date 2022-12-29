@@ -16,7 +16,8 @@ class K_C_node():
             is_fwd=True,
             main_code=None,body_code=None,
             deps_real=None,deps_fake=None,
-            deps_through_size_artefacts=None):
+            deps_through_size_artefacts=None,
+            unique_id_generator = None):
         # ** informative **
         self.main_target = mt = target
         self.all_targets = []
@@ -25,6 +26,11 @@ class K_C_node():
         self.is_fwd      = is_fwd
         self.main_code   = main_code # target * AST
         self.body_code   = body_code if body_code else [] # (str*AST) list
+        if unique_id_generator is None: self.unique_id = id(self)
+        else:
+            u = unique_id_generator[0]
+            self.unique_id = u
+            unique_id_generator[0] = u+1
 
         # ** deps/used_by **
         self.deps_real    = deps_real if deps_real else set() # KDN set
@@ -75,7 +81,7 @@ class K_C_node():
             raise Exception("kcns differ on attr .time")
         return bool(b)
     def __hash__(self):
-        return self.name.__hash__()
+        return self.unique_id
 
     def get_main_code(self):
         return make_str_assign(self.main_code)
@@ -96,7 +102,8 @@ class K_D_node():
             target   = "/!\\ No target /!\\",
             all_targets = None,
             info        = None,
-            deps        = None):
+            deps        = None,
+            unique_id_generator = None):
         # ** informative **
         self.kdn_type    = kdn_type # data, grad or phantoms
         self.main_target = mt = target
@@ -104,6 +111,10 @@ class K_D_node():
         self.name        = f"{mt} {self.kdn_type}"
         self.mem         = MemSize(0)
         self.info        = info
+        if unique_id_generator is None: self.unique_id = id(self)
+        else:
+            u = unique_id_generator[0]
+            self.unique_id = u
 
         # ** deps/used_by **
         self.users_real   = set() # KCN set
@@ -133,7 +144,7 @@ class K_D_node():
                 raise Exception(f"kdns differ on attr {attr}")
         return bool(b)
     def __hash__(self):
-        return self.name.__hash__()
+        return self.unique_id
 
 
 # ***********
@@ -141,7 +152,7 @@ class K_D_node():
 # ***********
 
 class K_graph():
-    def __init__(self,sg : S_graph = None):
+    def __init__(self,sg : S_graph = None,unique_id_generator=None):
         self.dict_kn  = dict() # KDN/KCN.name -> KDN/KCN
         self.list_kcn = []     # KCN list : Toposorted
         self.list_kdn = []     # KDN list : Arbitrary order
@@ -158,6 +169,8 @@ class K_graph():
         self.init_code = make_ast_list_assign(sg.init_node.body_code)
         self.dict_info = sg.dict_info
         self.dict_rand = sg.dict_rand
+        self.unique_id_generator = unique_id_generator
+        # -> to generate K_node.__hash__
         self.sg = sg # TO REMOVE
 
     def make_users(self):
@@ -182,8 +195,10 @@ class K_graph():
         for kcn in self.list_kcn:
             if not kcn.is_fwd and len(kcn.users) == 0:
                 leaves_kcn.add(kcn)
-        root_kdn = K_D_node(deps = leaves_kcn)
-        root_kcn = K_C_node(deps_real=set([root_kdn]))
+        root_kdn = K_D_node(deps = leaves_kcn,
+            unique_id_generator = self.unique_id_generator)
+        root_kcn = K_C_node(deps_real=set([root_kdn]),
+            unique_id_generator = self.unique_id_generator)
         self.list_kcn = l = sort_based_on_deps(root_kcn)
         l.remove(root_kcn)
 
@@ -482,7 +497,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
     dict_KDN_data = dict() # mt -> KDN(data)
     dict_KDN_grad = dict() # ...
     dict_KDN_phantoms = dict()
-    kg = K_graph(sg)
+    unique_id_generator = [0]
+    kg = K_graph(sg,unique_id_generator)
 
     # ============  
     def handle_node(sn : S_node):
@@ -524,7 +540,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             main_code = sn.main_code,
             body_code = sn.body_code,
             deps_real = kcn_fwd_deps,
-            deps_through_size_artefacts = kcn_deps_art_kcn)
+            deps_through_size_artefacts = kcn_deps_art_kcn,
+            unique_id_generator = unique_id_generator)
         kcn_fwd.all_targets = sn.all_targets
         kcn_fwd.tensor_targets = sn.tensor_targets
         dict_KCN_fwd[mt] = kcn_fwd
@@ -535,7 +552,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             target      = mt,
             all_targets = sn.tensor_targets,
             info        = info,
-            deps        = set([kcn_fwd]))
+            deps        = set([kcn_fwd]),
+            unique_id_generator = unique_id_generator)
         dict_KDN_data[mt] = kdn_data
 
 
@@ -557,7 +575,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                 target    = mt,
                 is_fwd    = False,
                 deps_real = kcn_bwd_deps_real,
-                deps_fake = kcn_bwd_deps_fake)
+                deps_fake = kcn_bwd_deps_fake,
+                unique_id_generator = unique_id_generator)
             dict_KCN_bwd[mt] = kcn_bwd
 
             # -> KDN(phantoms)
@@ -566,7 +585,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                     kdn_type    = "phantoms",
                     target      = mt,
                     info        = info,
-                    deps        = set([kcn_fwd]))
+                    deps        = set([kcn_fwd]),
+                    unique_id_generator = unique_id_generator)
                 dict_KDN_phantoms[mt] = kdn_phantoms
                 kcn_bwd.deps_real.add(kdn_phantoms)
                 kcn_fwd.has_phantoms = True
@@ -576,7 +596,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             kdn_grad = K_D_node(
                 kdn_type    = "grad",
                 info        = info,
-                target      = mt)
+                target      = mt,
+                unique_id_generator = unique_id_generator)
             dict_KDN_grad[mt] = kdn_grad
             kcn_bwd.deps_real.add(kdn_grad)
 
@@ -631,7 +652,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
         target    = "loss",
         is_fwd    = True,
         main_code = ("loss",make_ast_constant("LOSS")),
-        deps_real = set([output_kdn_data]))
+        deps_real = set([output_kdn_data]),
+        unique_id_generator = unique_id_generator)
     loss_kcn.time     = 0
     loss_kcn.overhead = MemSize(0)
     dict_KCN_fwd[loss_kcn.main_target] = loss_kcn
@@ -663,10 +685,12 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
         else: inp_mt = sg.hidden_inputs[0]
         kg.input_kdn_data=input_kdn_data = K_D_node(
             kdn_type = "data", target = inp_mt,
-            all_targets = sg.direct_inputs)
+            all_targets = sg.direct_inputs,
+            unique_id_generator = unique_id_generator)
         kg.input_kdn_grad=input_kdn_grad = K_D_node(
             kdn_type = "grad", target = inp_mt,
-            all_targets = sg.direct_inputs)
+            all_targets = sg.direct_inputs,
+            unique_id_generator = unique_id_generator)
 
     # -> users of inp_data and deps of inp_grad
     input_sn_users_mt = [
@@ -726,6 +750,7 @@ def copy_K_C_node(kcn : K_C_node):
     new_kcn.time         = kcn.time
     new_kcn.overhead     = kcn.overhead
     new_kcn.has_phantoms = kcn.has_phantoms
+    new_kcn.unique_id    = kcn.unique_id
     for attr in ["deps_real","deps_fake","deps_global",
         "users","users_global","deps_through_size_artefacts"]:
         setattr(new_kcn,attr,set()) # /!\
@@ -739,6 +764,7 @@ def copy_K_D_node(kdn : K_D_node):
     new_kdn.name        = kdn.name
     new_kdn.mem         = kdn.mem
     new_kdn.info        = kdn.info
+    new_kdn.unique_id   = kdn.unique_id
     for attr in ["users_real","users_fake",
         "deps","users_global","deps_global"]:
         setattr(new_kdn,attr,set()) # /!\
@@ -750,6 +776,7 @@ def copy_K_graph(kg : K_graph):
     new_kg.dict_info = dict(kg.dict_info)
     new_kg.dict_rand = dict(kg.dict_rand)
     new_kg.init_code = kg.init_code
+    new_kg.unique_id_generator = copy_generator(kg.unique_id_generator)
 
     # == NODES ==
     new_dict_kn = new_kg.dict_kn
@@ -857,7 +884,8 @@ def aux_print_graph(dot,kg,uniq_num):
         edge(req_inp_grad.name,inp_grad.name,**kwargs)
 
 
-def print_K_graph(kg : K_graph,name="complete K-graph",open=True):
+def print_K_graph(kg : K_graph,name=None,open=True):
+    if name is None: name = "complet K-graph"
     print(
         f"Forward + Backward graph with Computation and "\
         f"Data nodes: {len(kg.list_kcn)} + {len(kg.list_kdn)}")
@@ -867,7 +895,8 @@ def print_K_graph(kg : K_graph,name="complete K-graph",open=True):
     graph_render(dot,open,"K") # from utils.py
 
 
-def print_K_graph_list(list_kg,name="seq K-graphs",open=True):
+def print_K_graph_list(list_kg,name=None,open=True):
+    if name is None: name = "seq K-graphs"
     list_nb_kcn = [len(kg.list_kcn) for kg in list_kg]
     list_nb_kdn = [len(kg.list_kdn) for kg in list_kg]
     tot_nb_kcn = sum(list_nb_kcn)

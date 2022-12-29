@@ -15,9 +15,6 @@ import astunparse
 import torch
 import numpy as np
 from torch import tensor
-#from .Btools import B_node 
-#from .Stools import S_node 
-#from .Ktools import K_node 
 import graphviz
 
 # == rotor == -> for inspection in Ktools.py
@@ -166,6 +163,10 @@ def check_attr(o1,o2,list_attr,raise_exception=False):
     return True
 def vdir(c):
     return [s for s in dir(c) if not s.startswith("__")]
+
+def copy_generator(gen):
+    if gen is None: return None
+    else: return [gen[0]]
 # ==========================
 
 
@@ -239,12 +240,14 @@ def is_constant(v):
 
 
 # ==========================
-# ===== OP OVER EDGES ======
+# ==== OP OVER S EDGES =====
 # ==========================
+
+# S edges (ie S_nodes.deps/users) are (S_node -> str set) dict
 
 # /!\ By default the following operations are NOT inplace
 # inplace op end up with "_inplace". 
-# dict_edges are (S_node -> str set) dict, e.g. S_nodes.deps/users
+
 def dict_edges_merge_inplace(de_main,de_sub):
     for k in de_sub.keys():
         s = de_main[k] if k in de_main else set()

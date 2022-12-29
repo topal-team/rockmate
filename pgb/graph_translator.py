@@ -121,11 +121,18 @@ class Graph_Translator():
             x.main_target = translate(x.main_target)
             x.all_targets = translate(x.all_targets)
             x.tensor_targets = translate(x.tensor_targets)
+            # Since S_node.__hash__ isn't changed, we change dict inplace
+            for req_sn,st in x.deps.items():
+                x.deps[req_sn] = translate(st)
+            for user_sn,st in x.users.items():
+                x.users[user_sn] = translate(st)
+            """
             # due to S_node.__hash__ we cannot change dict inplace
-            deps  = list(x.deps.items())  ; x.deps.clear()
-            users = list(x.users.items()) ; x.users.clear()
-            for req_sn,st in deps:   x.deps[req_sn]   = translate(st)
-            for user_sn,st in users: x.users[user_sn] = translate(st)
+            # deps  = list(x.deps.items())  ; x.deps.clear()
+            # users = list(x.users.items()) ; x.users.clear()
+            # for req_sn,st in deps:   x.deps[req_sn]   = translate(st)
+            # for user_sn,st in users: x.users[user_sn] = translate(st)
+            """
             return ()
 
         # -- K_C_NODE --
@@ -149,6 +156,7 @@ class Graph_Translator():
             sg = Stools.copy_S_graph(x) # to protect x : NOT inplace
             snodes = [sg.init_node] + sg.nodes
             translate(snodes)
+            """
             # since S_nodes' name changed, and S_node.__hash__ is terrible
             # I prefer to regenerate all the dict once again
             for sn in snodes:
@@ -156,8 +164,10 @@ class Graph_Translator():
                 users = list(sn.users.items()) ; sn.users.clear()
                 for req_sn,st in deps:   sn.deps[req_sn]   = st
                 for user_sn,st in users: sn.users[user_sn] = st
+                """
             # dict_info is currently shared by all the graphs
-            # it's annoying so I clean it up.
+            # thus it contains impossible name to translate
+            # -> so I clean it up.
             dict_info_keys = set(sg.dict_info.keys())
             for k in dict_info_keys:
                 if k not in self.dict: del sg.dict_info[k]
@@ -203,7 +213,9 @@ class Graph_Translator():
 # ==================
 
 # cc : connexe componente
-def make_list_kg_eco(list_sg,model,verbose=None,device=None):
+def S_list_to_K_list_eco(
+        list_sg,model,verbose=None,
+        device=None,print_cc = False):
     nb_sg = len(list_sg)
     # 1) anonymize S_graphs and recognize similar S_graphs
     list_translator = [None] * nb_sg
@@ -219,6 +231,16 @@ def make_list_kg_eco(list_sg,model,verbose=None,device=None):
             else: cc_num += 1
         if not b: tab_S_repr_cc.append(ano_sg)
         sg_num_to_cc_num[sg_num] = cc_num
+
+    nb_cc = len(tab_S_repr_cc)
+    if print_cc:
+        cc = [[] for _ in range(nb_cc)]
+        for sg_num in range(nb_sg):
+            cc[sg_num_to_cc_num[sg_num]].append(sg_num)
+        for cc_num in range(nb_cc):
+            print(f"Connexe component n°{cc_num}: {cc[cc_num]}")
+        print(
+          f"We now have only {nb_cc} blocks to handle, instead of {nb_sg}")
 
     # 2) move anonymized graphs from S to K
     dict_info_global = list_sg[0].dict_info # we lost some global info
@@ -255,7 +277,7 @@ def make_list_kg_eco(list_sg,model,verbose=None,device=None):
         assert(real_inp_data.main_target == fake_inp_data.main_target)
         assert(real_inp_grad.main_target == fake_inp_grad.main_target)
 
-    return list_translator,list_kg
+    return list_kg
 
 
 

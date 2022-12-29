@@ -6,7 +6,10 @@ from .Dtools import D_node,D_graph
 # ==========================
 
 class S_node():
-    def __init__(self,code=None,protected=False,fct="",target="No target"):
+    def __init__(self,
+            target="No target",fct="",
+            code=None,protected=False,
+            unique_id_generator = None):
         """
         A S_node is composed by one "real" computation, defining the
         "main_target", and followed by size / view operations over it.
@@ -41,7 +44,11 @@ class S_node():
         self.deps = dict()
         self.users = dict()
         self.protected = protected
-        self.num = get_num(self)
+        if unique_id_generator is None: self.unique_id = id(self)
+        else:
+            u = unique_id_generator[0]
+            self.unique_id = u
+            unique_id_generator[0] = u+1
     def __eq__(self,sn2):
         sn1 = self
         b = check_attr(sn1,sn2,[
@@ -54,11 +61,9 @@ class S_node():
             and (sn1.get_code() == sn2.get_code()))
         return b
     def __hash__(self):
-        return self.num
-        # we use the assomption that a node is uniquely
-        # defined by its .main_target within a graph
-    # -> /!\ /!\ doing set/dict of S_nodes is extremly dangereous /!\ /!\ 
-    # but I'm doing this to fix an order to avoid undeterminism
+        return self.unique_id
+    # -> /!\ /!\ doing set/dict of S_nodes is dangereous /!\ /!\ 
+    # but I'm doing this to avoid undeterminism
 
     def get_code(self):
         mc = make_str_assign(self.main_code)
@@ -134,7 +139,8 @@ class S_node():
                     dict_edges_discard_edge_inplace(
                         art_user_sn,other_user_sn)
                 if art_user_sn.users == dict():
-                    dict_edges_discard_sn_from_users_of_its_deps(art_user_sn)
+                    dict_edges_discard_sn_from_users_of_its_deps(
+                        art_user_sn)
                     art_user_sn.deps = dict()
 
     def clear_siblings_artefact(self):
@@ -146,7 +152,7 @@ class S_node():
             req_sn.clear_children_artefact()
 
 class S_graph():
-    def __init__(self,dg : D_graph = None):
+    def __init__(self,dg : D_graph = None,unique_id_generator=None):
         self.nodes          = []
         self.init_node      = None
         self.output_node    = None
@@ -161,6 +167,8 @@ class S_graph():
             self.direct_outputs = [dg.output]
             self.dict_info      = dg.dict_info
             self.dict_rand      = dg.dict_rand
+        self.unique_id_generator = unique_id_generator
+        # -> to generate S_node.__hash__
     def __eq__(self,sg2):
         return check_attr(self,sg2,[
             "direct_inputs","hidden_inputs",
@@ -254,8 +262,10 @@ class S_graph():
 
 def D_to_S_init(dg : D_graph,keep_sequential=False) -> S_graph:
     global ref_keep_seq ; ref_keep_seq = keep_sequential
-    sg = S_graph(dg)
-    init_node = S_node(target="-- inputs --")
+    unique_id_generator = [0]
+    sg = S_graph(dg,unique_id_generator)
+    init_node = S_node(target="-- inputs --",
+        unique_id_generator = unique_id_generator)
     init_node.all_targets=[]
     s_nodes = sg.nodes
     dict_s_nodes = {} # to translate D to S
@@ -263,7 +273,8 @@ def D_to_S_init(dg : D_graph,keep_sequential=False) -> S_graph:
         sn = S_node(code=dn.ast_code,
                 protected=dn.protected,
                 fct=dn.fct,
-                target=dn.target)
+                target=dn.target,
+                unique_id_generator = unique_id_generator)
         s_nodes.append(sn)
         dict_s_nodes[dn.target] = sn
         for req_dn in dn.deps:
@@ -508,12 +519,12 @@ def copy_S_node(sn : S_node): # aux for copy_S_graph
     new_sn.main_fct       = sn.main_fct
     new_sn.body_code      = [tuple(c) for c in sn.body_code]
     new_sn.main_target    = sn.main_target
-    new_sn.num            = sn.num
     new_sn.all_targets    = list(sn.all_targets)
     new_sn.tensor_targets = list(sn.tensor_targets)
     new_sn.deps           = dict() # /!\
     new_sn.users          = dict() # /!\
     new_sn.protected      = sn.protected
+    new_sn.unique_id      = sn.unique_id
     return new_sn
 
 def copy_S_graph(sg : S_graph):
@@ -525,6 +536,9 @@ def copy_S_graph(sg : S_graph):
     new_sg.direct_outputs = list(sg.direct_outputs)
     new_sg.dict_info      = dict(sg.dict_info)
     new_sg.dict_rand      = dict(sg.dict_rand)
+    new_sg.unique_id_generator = copy_generator(sg.unique_id_generator)
+    id_gen = sg.unique_id_generator
+    if id_gen: new_sg.unique_id_generator = [id_gen[0]]
     dict_nodes = {}
     new_init = copy_S_node(sg.init_node)
     new_nodes = []
@@ -550,7 +564,9 @@ def cut(sg : S_graph): # -> list of S_graph
     print_debug(f"S separators : {[sep.main_target for sep in seps]}")
     list_sg = []
     for i in range(1,len(seps)):
-        new_sg = S_graph()
+        unique_id_generator = [0]
+        new_sg = S_graph(
+            unique_id_generator=copy_generator(sg.unique_id_generator))
         list_sg.append(new_sg)
         # -- get nodes --
         inp_node = seps[i-1]
@@ -567,7 +583,8 @@ def cut(sg : S_graph): # -> list of S_graph
             new_sg.direct_inputs = main_sg.direct_inputs
         else:
             ino = S_node(
-                target=f"init_node of bloc {i}>1, should NEVER be used")
+                target=f"init_node of bloc {i}>1, should NEVER be used",
+                unique_id_generator = new_sg.unique_id_generator)
             new_sg.hidden_inputs = [inp_node.main_target]
             new_sg.direct_inputs = inp_node.all_targets
             new_sg.init_node = ino
