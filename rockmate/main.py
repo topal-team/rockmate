@@ -152,7 +152,7 @@ class CheckpointedModule(torch.nn.Module):
             else:
                 with torch.enable_grad():
                     self._exec(code_list, record_mem)
-        if add_output_grad:
+        if record_mem and add_output_grad:
             self.allo_mem[loss_idx] += self.output.info.memsize.v
 
     def expect_time(self):

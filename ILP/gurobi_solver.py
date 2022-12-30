@@ -67,7 +67,9 @@ class ModelGurobi:
         ]
 
         self.create_list = [
-            (k, i) for k, kcn in enumerate(self.kg.list_kcn) for i in _users_c[k]
+            (k, i)
+            for k, kcn in enumerate(self.kg.list_kcn)
+            for i in _users_c[k]
         ]
         self.delete_list = [
             (k, i)
@@ -86,7 +88,9 @@ class ModelGurobi:
 
         # define objective function
         self.md.setObjective(
-            quicksum(self.R[t, i] * self.time[i] for t in range(T) for i in range(T))
+            quicksum(
+                self.R[t, i] * self.time[i] for t in range(T) for i in range(T)
+            )
             + quicksum(
                 self.delete[t, k] * (T - t) / T * 0.1
                 for t in range(T)
@@ -112,12 +116,16 @@ class ModelGurobi:
         )
         self.md.addLConstr(
             quicksum(
-                self.P[t, i] for i in range(I) for t in range(min(_deps_d[i]) + 1)
+                self.P[t, i]
+                for i in range(I)
+                for t in range(min(_deps_d[i]) + 1)
             ),
             GRB.EQUAL,
             0,
         )
-        self.md.addLConstr(quicksum(self.R[t, t] for t in range(T)), GRB.EQUAL, T)
+        self.md.addLConstr(
+            quicksum(self.R[t, t] for t in range(T)), GRB.EQUAL, T
+        )
         self.md.addLConstr(
             quicksum(self.R[t, self.loss_idx] for t in range(T)), GRB.EQUAL, 1
         )  # fwd_loss can only run once
@@ -125,7 +133,9 @@ class ModelGurobi:
         for t in range(T):
             for j in range(Cr):
                 self.md.addLConstr(
-                    self.S[t, j], GRB.LESS_EQUAL, self.P[t, self.create_list[j][1]]
+                    self.S[t, j],
+                    GRB.LESS_EQUAL,
+                    self.P[t, self.create_list[j][1]],
                 )
         for t in range(T - 1):
             for i in range(Cr):
@@ -139,7 +149,9 @@ class ModelGurobi:
             for j, (k, i) in enumerate(self.create_list):
                 for k_ in _users_d[i]:
                     self.md.addLConstr(
-                        self.R[t, k_], GRB.LESS_EQUAL, self.R[t, k] + self.S[t, j]
+                        self.R[t, k_],
+                        GRB.LESS_EQUAL,
+                        self.R[t, k] + self.S[t, j],
                     )
 
         self.alive = {}
@@ -167,7 +179,9 @@ class ModelGurobi:
                     )
 
             for eidx, (k, i) in enumerate(self.create_list):
-                self.md.addLConstr(self.create[t, eidx], GRB.LESS_EQUAL, self.R[t, k])
+                self.md.addLConstr(
+                    self.create[t, eidx], GRB.LESS_EQUAL, self.R[t, k]
+                )
             for i in range(I):
                 if t + 1 < T:
                     self.md.addLConstr(
@@ -178,7 +192,9 @@ class ModelGurobi:
                 else:  # if i not in self.output_indices:
                     # in the end of bwd, del everything except output grad
                     self.md.addLConstr(
-                        self.alive[(t, max(_deps_d[i] + _users_d[i]), i)], GRB.EQUAL, 0
+                        self.alive[(t, max(_deps_d[i] + _users_d[i]), i)],
+                        GRB.EQUAL,
+                        0,
                     )
 
         def _num_hazards(t, i, k):
@@ -192,7 +208,9 @@ class ModelGurobi:
                     + quicksum(self.R[t, j] for j in _users_d[i] if j > k)
                 )
             return (
-                1 - self.R[t, k] + quicksum(self.R[t, j] for j in _users_d[i] if j > k)
+                1
+                - self.R[t, k]
+                + quicksum(self.R[t, j] for j in _users_d[i] if j > k)
             )
 
         def _max_num_hazards(t, i, k):
@@ -263,7 +281,9 @@ class ModelGurobi:
                     self.budget,
                 )
                 if t == T // 2 and self.save_budget:
-                    self.md.addLConstr(self.U[(t, k)], GRB.LESS_EQUAL, self.save_budget)
+                    self.md.addLConstr(
+                        self.U[(t, k)], GRB.LESS_EQUAL, self.save_budget
+                    )
 
     def solve(self):
 
@@ -299,6 +319,7 @@ class ModelGurobi:
                         op_list.append(RunOp(kcn))
                         alive_list.append(alive_status.copy())
                         alive_status[kg.list_kdn.index(kg.output_kdn_grad)] = 1
+                        alive_status[kg.list_kdn.index(kg.output_kdn_data)] = 0
                     for eidx, (k_, i) in enumerate(self.create_list):
                         if k == k_ and self.create[t, eidx].X:
                             alive_status[i] = 1
@@ -325,13 +346,14 @@ class ModelGurobi:
             alive_list[: loss_i + 1],
             kg.list_kdn,
             input_size=input_size,
-            output_size=output_size
+            output_size=output_size,
         )
         bwd_sched = OpSchedule(
             op_list[loss_i + 1 :],
             alive_list[loss_i + 1 :],
             kg.list_kdn,
             input_size=input_size,
-            output_size=output_size
+            output_size=output_size,
         )
+        # fwd_sched.del_input(kg)
         return fwd_sched, bwd_sched

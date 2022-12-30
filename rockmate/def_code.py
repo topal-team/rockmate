@@ -113,6 +113,7 @@ class OpSchedule:
         self.tmp = np.zeros(L)
         self.is_fwd = True
         input_grad = False
+        output_grad = False
         for i, op in enumerate(op_list):
             if isinstance(op, RunOp):
                 self.tmp[i] = op.overhead
@@ -120,12 +121,17 @@ class OpSchedule:
                     self.is_fwd = False
                     for kdn in op.users_global:
                         if not input_grad and self.input_size[0] in kdn.name:
-                            self.save[i] += self.input_size[1]
+                            self.save[i:] += self.input_size[1]
+                            input_grad = True
             self.save[i] += alive_list[i].dot(np.array(self.mem_sizes))
-            if alive_list[i][
-                self.kdn_names.index(self.output_size[0] + " grad")
-            ]:
-                self.save[i] -= self.output_size[1]
+            if (
+                not output_grad
+                and alive_list[i][
+                    self.kdn_names.index(self.output_size[0] + " grad")
+                ]
+            ):
+                self.save[i:] -= self.output_size[1]
+                output_grad = True
         self.overhead = max(self.save + self.tmp) - self.save[-1]
         self.time = sum([op.time for op in self.op_list])
         self.del_input_idx = -1

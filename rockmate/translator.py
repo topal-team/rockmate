@@ -148,7 +148,10 @@ class Translator:  # to execute Op
                 prep_code = ""
                 after_code = ""
                 for kdn in op.deps_fake:
-                    if not _is_alive(kdn.name, i):
+                    if (
+                        not _is_alive(kdn.name, i)
+                        #or op_sched.input_size[0] in kdn.name
+                    ):
                         fake_code = _generate_fake_data(
                             kdn, i, is_self=(kdn.main_target == op.main_target)
                         )
@@ -190,4 +193,9 @@ class Translator:  # to execute Op
                 code_list.append(_run_op(op, i))
             if op.op_type == "Del":
                 code_list.append(_del_op(op, i))
+            # if op_sched.del_input_idx == i:
+            #     code = "\n"
+            #     for target in op_sched.del_input_op.tensor_targets:
+            #         code += f"{target}.data = torch.zeros(0,device=device);"
+            #     code_list[-1] += code
         return code_list
