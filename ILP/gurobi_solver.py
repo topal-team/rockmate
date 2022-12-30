@@ -317,16 +317,21 @@ class ModelGurobi:
             if "loss" in op.name:
                 loss_i = i
                 break
+        input_size = (kg.input_kdn_data.main_target, kg.input_kdn_data.mem.v)
+        output_size = (kg.output_kdn_data.main_target, kg.output_kdn_data.mem.v)
+
         fwd_sched = OpSchedule(
             op_list[: loss_i + 1],
             alive_list[: loss_i + 1],
             kg.list_kdn,
-            output=kg.output_kdn_data,
+            input_size=input_size,
+            output_size=output_size
         )
         bwd_sched = OpSchedule(
             op_list[loss_i + 1 :],
             alive_list[loss_i + 1 :],
             kg.list_kdn,
-            output=kg.output_kdn_grad,
+            input_size=input_size,
+            output_size=output_size
         )
         return fwd_sched, bwd_sched

@@ -114,16 +114,20 @@ class RK_Block:
                         alive_list.append(alive_status.copy())
             return op_list, alive_list
 
+        input_size = (kg.input_kdn_data.main_target, kg.input_kdn_data.mem.v)
+        output_size = (kg.output_kdn_data.main_target, kg.output_kdn_data.mem.v)
         self.Fc_sched = OpSchedule(
             *_fast_fwd_sched(),
             kg.list_kdn,
-            output=kg.output_kdn_data,
+            input_size=input_size,
+            output_size=output_size,
             no_grad=True,
         )
         self.Fn_sched = OpSchedule(
             *_fast_fwd_sched(),
             kg.list_kdn,
-            output=kg.output_kdn_data,
+            input_size=input_size,
+            output_size=output_size,
             no_grad=True,
         )
         self.Fn_sched.del_input(kg)

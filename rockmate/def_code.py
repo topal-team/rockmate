@@ -90,10 +90,17 @@ class DelOp:
 
 class OpSchedule:
     def __init__(
-        self, op_list, alive_list, list_kdn, output=None, no_grad=False
+        self,
+        op_list,
+        alive_list,
+        list_kdn,
+        input_size=None,
+        output_size=None,
+        no_grad=False,
     ):
         self.no_grad = no_grad
-        self.output = output
+        self.input_size = input_size
+        self.output_size = output_size
         self.mem_sizes = [kdn.mem.v for kdn in list_kdn]
         self.kdn_names = [kdn.name for kdn in list_kdn]
         self.kdn_info = {
@@ -105,12 +112,20 @@ class OpSchedule:
         self.save = np.zeros(L)
         self.tmp = np.zeros(L)
         self.is_fwd = True
+        input_grad = False
         for i, op in enumerate(op_list):
             if isinstance(op, RunOp):
                 self.tmp[i] = op.overhead
                 if "bwd" in op.name:
                     self.is_fwd = False
-            self.save[i] = alive_list[i].dot(np.array(self.mem_sizes))
+                    for kdn in op.users_global:
+                        if not input_grad and self.input_size[0] in kdn.name:
+                            self.save[i] += self.input_size[1]
+            self.save[i] += alive_list[i].dot(np.array(self.mem_sizes))
+            if alive_list[i][
+                self.kdn_names.index(self.output_size[0] + " grad")
+            ]:
+                self.save[i] -= self.output_size[1]
         self.overhead = max(self.save + self.tmp) - self.save[-1]
         self.time = sum([op.time for op in self.op_list])
         self.del_input_idx = -1
@@ -124,7 +139,7 @@ class OpSchedule:
         # self.del_input_idx = max(self.op_list.index(kcn)
         #                     for kcn in input_kdn.users_global
         #                     if kcn in self.op_list)
-        self.save[self.del_input_idx + 1 :] -= input_kdn.mem.v
+        self.save[self.del_input_idx :] -= input_kdn.mem.v
         self.overhead = max(self.save + self.tmp) - self.save[-1]
 
 

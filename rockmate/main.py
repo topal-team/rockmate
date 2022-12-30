@@ -140,10 +140,11 @@ class CheckpointedModule(torch.nn.Module):
 
         return self.storage.get_val(self.output.main_target)
 
-    def backward(self, record_mem=False):
+    def backward(self, record_mem=False, add_output_grad=True):
         if record_mem:
-            self.allo_mem[-1] += self.output.info.memsize.v
-        # output grad is generated outside
+            # self.allo_mem[-1] += self.output.info.memsize.v
+            # output grad is generated outside
+            loss_idx = len(self.allo_mem)
         for code_list, seq in zip(self.bwd_code, self.bwd_seq.seq):
             if seq.op_sched.no_grad:
                 with torch.no_grad():
@@ -151,6 +152,8 @@ class CheckpointedModule(torch.nn.Module):
             else:
                 with torch.enable_grad():
                     self._exec(code_list, record_mem)
+        if add_output_grad:
+            self.allo_mem[loss_idx] += self.output.info.memsize.v
 
     def expect_time(self):
         # Sum of the measured time of each operation for one batch

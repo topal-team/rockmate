@@ -56,7 +56,7 @@ class Translator:  # to execute Op
                     for target in op_sched.del_input_op.tensor_targets:
                         code += f"{target}.data = torch.zeros(0,device=device);"
                     code_list[-1] += code
-            code_list[-1] += f"\n{op_sched.output.main_target}.requires_grad_()"
+            code_list[-1] += f"\n{op_sched.output_size[0]}.requires_grad_()"
             return code_list
 
         def _is_alive(kdn_name, i):
@@ -118,7 +118,7 @@ class Translator:  # to execute Op
                     if (
                         (not during_fwd)
                         and (not op_sched.no_grad)
-                        and (op.main_target == op_sched.output.main_target)
+                        and (op.main_target == op_sched.output_size[0])
                     ):
                         rec = True
                     proxy_code = make_str_assign(op.main_code, prefix="_")
