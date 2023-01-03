@@ -96,7 +96,8 @@ class RK_Block:
 
             op_list = []
             alive_list = []
-            alive_status = np.zeros(len(kg.list_kdn), dtype=bool)
+            alive_status = np.zeros(len(kg.list_kdn)+2, dtype=bool)
+            alive_status[-1] = True
             loss_idx = kg.list_kcn.index(kg.loss_kcn)
             for i, kcn in enumerate(kg.list_kcn[:loss_idx]):
                 op_list.append(RunOp(kcn))
@@ -114,22 +115,8 @@ class RK_Block:
                         alive_list.append(alive_status.copy())
             return op_list, alive_list
 
-        input_size = (kg.input_kdn_data.main_target, kg.input_kdn_data.mem.v)
-        output_size = (kg.output_kdn_data.main_target, kg.output_kdn_data.mem.v)
-        self.Fc_sched = OpSchedule(
-            *_fast_fwd_sched(),
-            kg.list_kdn,
-            input_size=input_size,
-            output_size=output_size,
-            no_grad=True,
-        )
-        self.Fn_sched = OpSchedule(
-            *_fast_fwd_sched(),
-            kg.list_kdn,
-            input_size=input_size,
-            output_size=output_size,
-            no_grad=True,
-        )
+        self.Fc_sched = OpSchedule(*_fast_fwd_sched(), kg, no_grad=True,)
+        self.Fn_sched = OpSchedule(*_fast_fwd_sched(), kg, no_grad=True,)
         self.Fn_sched.del_input(kg)
         self.overhead_fast_fwd = self.Fc_sched.overhead
         self.time_fast_fwd = self.Fc_sched.time
@@ -305,13 +292,6 @@ class RK_Chain:
         else:
             self.mem_unit = 1024 ** 2
         self.body = [None] * len(list_kg)
-        # identical_kg = [
-        #     list_kg[:1],
-        #     list_kg[1:-2],
-        #     [list_kg[-2]],
-        #     [list_kg[-1]],
-        # ]
-        # eq_classes = [[0], [1,2,3,4,5], [6], [7]]
         for cls in eq_classes:
             l_kg = [list_kg[i] for i in cls]
             l_block = get_rk_block(l_kg, nb_budget_abar, nb_budget_all)

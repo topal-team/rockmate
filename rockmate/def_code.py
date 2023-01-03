@@ -90,17 +90,24 @@ class DelOp:
 
 class OpSchedule:
     def __init__(
-        self,
-        op_list,
-        alive_list,
-        list_kdn,
-        input_size=None,
-        output_size=None,
-        no_grad=False,
+        self, op_list, alive_list, kg, no_grad=False,
     ):
         self.no_grad = no_grad
-        self.input_size = input_size
-        self.output_size = output_size
+
+        self.input_size = (
+            kg.input_kdn_data.main_target,
+            kg.input_kdn_data.mem.v,
+        )
+        self.output_size = (
+            kg.output_kdn_data.main_target,
+            kg.output_kdn_data.mem.v,
+        )
+
+        # save the del_input op in case needed
+        input_kdn = kg.input_kdn_data
+        self.del_input_op = DelOp(input_kdn)
+
+        list_kdn = kg.list_kdn + [kg.input_kdn_grad, kg.input_kdn_data]
         self.mem_sizes = [kdn.mem.v for kdn in list_kdn]
         self.kdn_names = [kdn.name for kdn in list_kdn]
         self.kdn_info = {
@@ -123,7 +130,9 @@ class OpSchedule:
                         if not input_grad and self.input_size[0] in kdn.name:
                             self.save[i:] += self.input_size[1]
                             input_grad = True
-            self.save[i] += alive_list[i].dot(np.array(self.mem_sizes))
+            self.save[i] += alive_list[i][:-2].dot(
+                np.array(self.mem_sizes[:-2])
+            )  # input kdn is not included
             if (
                 not output_grad
                 and alive_list[i][
@@ -138,7 +147,6 @@ class OpSchedule:
 
     def del_input(self, kg):
         input_kdn = kg.input_kdn_data
-        self.del_input_op = DelOp(input_kdn)
         for i, op in enumerate(self.op_list):
             if isinstance(op, RunOp) and input_kdn in op.deps_global:
                 self.del_input_idx = i + 1

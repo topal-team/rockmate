@@ -6,8 +6,14 @@ from rockmate.utils import (
     np,
     ast_to_str,
 )
-from rockmate.def_code import RK_Storage
+from rockmate.def_code import RK_Storage, DelOp
 from rockmate.def_chain import RK_Chain
+from rockmate.def_sequence import (
+    SeqBlockBwd,
+    SeqBlockFc,
+    SeqBlockFn,
+    SeqBlockFe,
+)
 from rockmate.rotor_solver import seq_builder
 from rockmate.translator import Translator
 import torch
@@ -81,6 +87,19 @@ class CheckpointedModule(torch.nn.Module):
         print_debug("mem_limit", self.mem_limit)
         # -- solve the chain like rotor --
         self.seq = seq_builder(self.rk_chain, self.mem_limit // self.mem_unit)
+        enable = np.zeros(len(self.list_kg))
+        for s in self.seq.seq:
+            if isinstance(s, SeqBlockFe):
+                enable[s.index] = 1
+            if isinstance(s, SeqBlockBwd):
+                if not enable[s.index - 1]:
+                    s.op_sched.op_list.append(s.op_sched.del_input_op)
+                    s.op_sched.alive_list.append(s.op_sched.alive_list[-1])
+                    s.op_sched.alive_list[-1][-1] = 0
+                    s.op_sched.save = np.append(
+                        s.op_sched.save, s.op_sched.save[-1]
+                    )
+
         self.fwd_seq, self.bwd_seq = self.seq.cut_fwd_bwd()
         self.fwd_op_list = [
             op for seq in self.fwd_seq.seq for op in seq.op_sched.op_list
@@ -163,9 +182,14 @@ class CheckpointedModule(torch.nn.Module):
         # Peak mem based on the measured memory/overhead of each operation
         pred_mem = []
         acc_mem = np.zeros(len(self.fwd_seq.seq))
+        # alive_dict = {}
+        # for kg in self.list_kg:
+        #     for kdn in kg.list_kdn:
+        #         alive_dict[kdn.name] = (0, kdn.mem)
         for i, seq in enumerate(self.fwd_seq.seq + self.bwd_seq.seq):
             op_sched = seq.op_sched
             for s, op in zip(op_sched.save, op_sched.op_list):
+                # for i, op in enumerate(op_sched.op_list):
                 acc_mem[seq.index] = s
                 pred_mem.append(sum(acc_mem))
                 if overhead and op.op_type == "Run":

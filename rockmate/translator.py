@@ -80,7 +80,7 @@ class Translator:  # to execute Op
                 self.info_global if self.aggressive else op_sched.kdn_info
             )
             for name, info in dict_info.items():
-                if "data" not in name:
+                if "data" not in name or "src" in name:
                     continue
                 if np.prod(info.tsize) == np.prod(req_shape) and _is_alive(
                     name, i
@@ -102,7 +102,7 @@ class Translator:  # to execute Op
                 )
                 + "\n"
             )
-            after_code += f"{mt}.data = torch.zeros(0,device=device);"
+            # after_code += f"{mt}.data = torch.zeros(0,device=device);"
             for v in kdn.all_targets:
                 after_code += f"{v}.data = torch.zeros(0,device=device); "
             if is_self:
@@ -150,7 +150,7 @@ class Translator:  # to execute Op
                 for kdn in op.deps_fake:
                     if (
                         not _is_alive(kdn.name, i)
-                        #or op_sched.input_size[0] in kdn.name
+                        # or op_sched.input_size[0] in kdn.name
                     ):
                         fake_code = _generate_fake_data(
                             kdn, i, is_self=(kdn.main_target == op.main_target)
@@ -173,8 +173,10 @@ class Translator:  # to execute Op
         def _del_op(op, i):
             code = ""
             if op.kdn_type == "data":
-                if op.info.requires_grad and _is_alive(
-                    op.name.replace("data", "phantoms"), i
+                if (
+                    op.info is not None
+                    and op.info.requires_grad
+                    and _is_alive(op.name.replace("data", "phantoms"), i)
                 ):
                     code += f"_{op.main_target}.data = torch.zeros(0,device=device);"
                 for v in op.tensor_targets:

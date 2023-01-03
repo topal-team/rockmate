@@ -106,7 +106,14 @@ def solve_dp_functionnal(chain: RK_Chain, mmax):
                 opt_add(m, a, b, float("inf"))
             else:
                 #  -- Solution 1 --
-                sols_later = [(j,(sum(ff_fw[a:j])+ solve_aux(m - cw[j], j, b)+ solve_aux(m, a, j - 1)),
+                sols_later = [
+                    (
+                        j,
+                        (
+                            sum(ff_fw[a:j])
+                            + solve_aux(m - cw[j], j, b)
+                            + solve_aux(m, a, j - 1)
+                        ),
                     )
                     for j in range(a + 1, b + 1)
                     if m >= cw[j]
@@ -169,7 +176,9 @@ def seq_builder(chain: RK_Chain, memory_limit):
         if lmin > lmax:
             return seq
         if cmem <= 0:
-            raise ValueError(f"Can't process a chain with neg mem {cmem}")
+            raise ValueError(
+                "Can't find a feasible sequence with the given budget"
+            )
         if opt[cmem][lmin][lmax] == float("inf"):
             """
             print('a')
@@ -181,8 +190,9 @@ def seq_builder(chain: RK_Chain, memory_limit):
                 print(chain.bwd_tmp[i])
             """
             raise ValueError(
-                f"Can't process this chain from index "
-                f"{lmin} to {lmax} with memory {memory_limit}"
+                "Can't find a feasible sequence with the given budget"
+                # f"Can't process this chain from index "
+                # f"{lmin} to {lmax} with memory {memory_limit}"
             )
 
         if lmin == chain.ln:

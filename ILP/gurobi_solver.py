@@ -91,11 +91,12 @@ class ModelGurobi:
             quicksum(
                 self.R[t, i] * self.time[i] for t in range(T) for i in range(T)
             )
-            + quicksum(
-                self.delete[t, k] * (T - t) / T * 0.1
-                for t in range(T)
-                for k in range(De)
-            ),
+            # + quicksum(
+            #     self.delete[t, k] * (T - t) / T * 0.1 * max(self.time)
+            #     for t in range(T)
+            #     for k in range(De)
+            # )
+            ,
             GRB.MINIMIZE,
         )
 
@@ -310,7 +311,8 @@ class ModelGurobi:
 
         op_list = []
         alive_list = []
-        alive_status = np.zeros(I, dtype=bool)
+        alive_status = np.zeros(I + 2, dtype=bool)
+        alive_status[-1] = 1  # input_data_kdn
         for t in range(T):
             for k in range(T):
                 if self.R[t, k].X:
@@ -338,22 +340,24 @@ class ModelGurobi:
             if "loss" in op.name:
                 loss_i = i
                 break
-        input_size = (kg.input_kdn_data.main_target, kg.input_kdn_data.mem.v)
-        output_size = (kg.output_kdn_data.main_target, kg.output_kdn_data.mem.v)
+
+        input_kdn = kg.input_kdn_data
+        # if "src" not in input_kdn.name:
+        #     del_input_op = DelOp(input_kdn)
+        #     del_input_idx = len(op_list)
+        #     for i, op in enumerate(op_list):
+        #         if isinstance(op, RunOp) and input_kdn in op.deps_global:
+        #             del_input_idx = i + 1
+        #     op_list.insert(del_input_idx, del_input_op)
+        #     alive_status = alive_list[del_input_idx - 1]
+        #     alive_status[-1] = 0
+        #     alive_list.insert(del_input_idx, alive_status)
 
         fwd_sched = OpSchedule(
-            op_list[: loss_i + 1],
-            alive_list[: loss_i + 1],
-            kg.list_kdn,
-            input_size=input_size,
-            output_size=output_size,
+            op_list[: loss_i + 1], alive_list[: loss_i + 1], kg
         )
         bwd_sched = OpSchedule(
-            op_list[loss_i + 1 :],
-            alive_list[loss_i + 1 :],
-            kg.list_kdn,
-            input_size=input_size,
-            output_size=output_size,
+            op_list[loss_i + 1 :], alive_list[loss_i + 1 :], kg
         )
         # fwd_sched.del_input(kg)
         return fwd_sched, bwd_sched
