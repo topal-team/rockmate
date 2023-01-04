@@ -1,5 +1,5 @@
 from .utils import *
-from .Dtools import D_node,D_graph
+from .Dtools import D_node,D_graph,get_info
 
 # ==========================
 # ====== S structure =======
@@ -9,6 +9,7 @@ class S_node():
     def __init__(self,
             target="No target",fct="",
             code=None,protected=False,
+            is_rand=False,deps_rand=None,
             unique_id_generator = None):
         """
         A S_node is composed by one "real" computation, defining the
@@ -32,7 +33,8 @@ class S_node():
         .deps       : (S_node,str set) dict = dict_edges
             -> required nodes with the vars needed per node.
         .users      : dict_edges : reciprocal of .deps
-        <TODO> : is_rand and deps_rand ?
+        .is_rand    : bool
+        .deps_rand  : str set : because we don't want random src nodes here
         """
         self.is_artefact = False
         self.main_code = (target,code)
@@ -44,6 +46,8 @@ class S_node():
         self.deps = dict()
         self.users = dict()
         self.protected = protected
+        self.is_rand = is_rand
+        self.deps_rand = deps_rand if deps_rand else set()
         if unique_id_generator is None: self.unique_id = id(self)
         else:
             u = unique_id_generator[0]
@@ -53,6 +57,7 @@ class S_node():
         sn1 = self
         b = check_attr(sn1,sn2,[
             "is_artefact","main_fct",
+            "is_rand","deps_rand",
             "main_target","all_targets",
             "tensor_targets","protected"])
         b = (b
@@ -104,6 +109,10 @@ class S_node():
         self.body_code.append(aux_sn.main_code)
         self.body_code.extend(aux_sn.body_code)
         self.all_targets.extend(aux_sn.all_targets)
+        self.is_rand = self.is_rand or aux_sn.is_rand
+        self.deps_rand.update(aux_sn.deps_rand)
+
+        # -- edges --
         self.deps = merged_deps
         self.users = merged_users
         dict_edges_make_users_using_deps(self)
@@ -274,6 +283,8 @@ def D_to_S_init(dg : D_graph,keep_sequential=False) -> S_graph:
                 protected=dn.protected,
                 fct=dn.fct,
                 target=dn.target,
+                is_rand=dn.is_rand,
+                deps_rand= set(dn.deps_rand),
                 unique_id_generator = unique_id_generator)
         s_nodes.append(sn)
         dict_s_nodes[dn.target] = sn
@@ -299,7 +310,10 @@ def D_to_S_init(dg : D_graph,keep_sequential=False) -> S_graph:
 # === remove cheap nodes ===
 # ==========================
 
-def insert_ast_code(main_sn,mc,st : str,sc):
+def insert_ast_code(main_sn,sub_sn):
+    mc = main_sn.main_code[1]
+    st = sub_sn.main_target
+    sc = sub_sn.main_code[1]
     # st : sub target, sc : sub code
     # mc : main_sn.main_code
     # assert main_code is has depth=1 (no sub calls)
@@ -347,9 +361,10 @@ def simplify_node(sn):
             dict_edges_discard_inplace(req_sn.users,sn)
             dict_edges_add_inplace(req_sn.users,user_sn,str_set)
         # -- insert the code --
-        insert_ast_code(
-            user_sn,user_sn.main_code[1],
-            sn.main_target,sn.main_code[1])
+        insert_ast_code(user_sn,sn)
+        # -- handle randomness --
+        user_sn.is_rand = user_sn.is_rand or sn.is_rand
+        user_sn.deps_rand.update(sn.deps_rand)
     sn.deps  = dict()
     sn.users = dict()
 
@@ -490,14 +505,51 @@ def simplify_view(sg):
 
 
 # ==========================
+#  Insert random operations 
+#  which were in dict_rand
+# ==========================
+# -> Now that we simplified everything,
+# -> we can insert random nodes from dict_rand
+
+def create_random_snodes_from_dict_rand(sg,model,device):
+    dict_random_sn = dict() # str -> S_node
+    for name,ast_code in sg.dict_rand.items():
+        dict_random_sn[name] = S_node(
+            target    = name,
+            fct       = "--Random function--",
+            code      = ast_code,
+            protected = True,
+            is_rand   = True,
+            unique_id_generator = sg.unique_id_generator)
+        # -> We need to generate ".info" using Dtools.get_info
+        # -> to do so we first need to generate the variable <name>
+        our_global = globals().copy()
+        if model: our_global["self"] = model
+        if device: our_global["device"] = device
+        dict_info[name] = get_info(
+            eval(ast_to_str(ast_code),our_global)
+        )
+    for sn in sg.nodes:
+        for req_rd in sn.deps_rand:
+            req_sn_rd = dict_random_sn[req_rd]
+            dict_edges_add_inplace(sn.deps,req_sn_rd,set([req_rd]))
+            dict_edges_add_inplace(req_sn_rd.users,sn,set([req_rd]))
+    sg.nodes = list(dict_random_sn.values()) + sg.nodes
+
+# ==========================
+
+
+
+# ==========================
 # = Move from D to S graph =
 # ==========================
 
-def D_to_S(dg,keep_sequential=False):
+def D_to_S(dg,keep_sequential=False,model=None,device=None):
     sg = D_to_S_init(dg,keep_sequential)
     simplify_cheap(sg)
     simplify_size(sg)
     simplify_view(sg)
+    create_random_snodes_from_dict_rand(sg,model,device)
     sg.check_relations()
     sg.make_tensor_targets()
     sg.assert_ready()
@@ -521,6 +573,8 @@ def copy_S_node(sn : S_node): # aux for copy_S_graph
     new_sn.main_target    = sn.main_target
     new_sn.all_targets    = list(sn.all_targets)
     new_sn.tensor_targets = list(sn.tensor_targets)
+    new_sn.is_rand        = sn.is_rand
+    new_sn.deps_rand      = set(sn.deps_rand)
     new_sn.deps           = dict() # /!\
     new_sn.users          = dict() # /!\
     new_sn.protected      = sn.protected

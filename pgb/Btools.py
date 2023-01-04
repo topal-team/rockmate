@@ -37,7 +37,7 @@ class B_node:
         else:
             self.deps = deps
         self.is_input = is_input
-        self.is_rand = None  # unknown for the moment
+        self.is_rand  = bool(fct in list_rand_fct)
         self.deps_rand = set()
         global all_nodes
         all_nodes.append(self)
@@ -58,12 +58,12 @@ class B_var:
         self.is_attr_of_self = is_attr_of_self
         self.path_from_self = path_from_self
         self.val = val
-        self.has_node = False  # by default, e.g. has_node = False for const
-        self.is_rand = False  # by default
-        if node is not None:
+        self.has_node = False # by default
+        self.is_rand  = False # by default
+        if node:
             if node.deps == set() and not node.is_input:
-                if node.fct in list_rand_fct:
-                    dict_rand[node.target] = node.get_code()
+                if node.is_rand:
+                    dict_rand[node.target] = node.ast_code
                     self.is_rand = True
                 else:  # src neither input or rand
                     self.val = node.ast_code
@@ -72,11 +72,10 @@ class B_var:
                 self.node = node
 
     def get_value(self, calling_node):
-        if self.is_rand:
-            calling_node.is_rand = True
-            calling_node.deps_rand.add(self.val)
-        elif self.has_node:
+        if self.has_node:
             calling_node.deps.add(self.node)
+        elif self.is_rand:
+            calling_node.deps_rand.add(self.val)
         return self.val
 
     def inherits(self, parent, l_attr):  # for a getattr
@@ -90,7 +89,7 @@ class B_graph:
     def __init__(self):
         self.nodes = []  # tmp -> should not be trusted
         self.output = None  # B_var
-        self.dict_rand = dict_rand  # str code
+        self.dict_rand = dict_rand  # str -> ast code (not Ast.assign)
 
 
 # ==========================

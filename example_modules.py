@@ -29,7 +29,7 @@ class FeedForward(nn.Module):
         self.c_proj  = Conv1D(nx, d_model)
         self.act     = F.gelu
         self.dropout = nn.Dropout(dropout)
-        self.dropout = nn.Identity()
+        #self.dropout = nn.Identity()
 
     def forward(self, x):
         return self.dropout(self.c_proj(self.act(self.c_fc(x))))

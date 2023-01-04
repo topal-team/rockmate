@@ -14,6 +14,7 @@ class K_C_node():
     def __init__(self,
             target="/!\\ No target /!\\",
             is_fwd=True,
+            is_rand=False,
             main_code=None,body_code=None,
             deps_real=None,deps_fake=None,
             deps_through_size_artefacts=None,
@@ -24,6 +25,7 @@ class K_C_node():
         self.tensor_targets = []
         self.name        = f"fwd_{mt}" if is_fwd else f"bwd_{mt}"
         self.is_fwd      = is_fwd
+        self.is_rand     = is_rand
         self.main_code   = main_code # target * AST
         self.body_code   = body_code if body_code else [] # (str*AST) list
         if unique_id_generator is None: self.unique_id = id(self)
@@ -55,7 +57,7 @@ class K_C_node():
         kcn1 = self
         b = (
         check_attr(kcn1,kcn2,
-            ["name","main_target","is_fwd","all_targets",
+            ["name","main_target","is_fwd","all_targets","is_rand",
              "tensor_targets","overhead","has_phantoms"],
             raise_exception=raise_exception)
         and kcn1.get_code() == kcn2.get_code())
@@ -168,7 +170,8 @@ class K_graph():
 
         self.init_code = make_ast_list_assign(sg.init_node.body_code)
         self.dict_info = sg.dict_info
-        self.dict_rand = sg.dict_rand
+        # -> no more .dict_rand
+        # -> random op have been inserted at the end of Simplification
         self.unique_id_generator = unique_id_generator
         # -> to generate K_node.__hash__
         self.sg = sg # TO REMOVE
@@ -224,7 +227,7 @@ class K_graph():
             raise Exception("Kgraphs differ on dict_kn's keys (order?)")
         for k in keys1:
             b *= eq_node(g1.dict_kn[k],g2.dict_kn[k])
-        b *= check_attr(g1,g2,["dict_info","dict_rand"],raise_exception)
+        b *= check_attr(g1,g2,["dict_info"],raise_exception)
         return bool(b)
     def __hash__(self):
         return id(self)
@@ -269,10 +272,11 @@ def generate_tmp_local(sn,sg : S_graph,our_global):
                             generate_val(req_req_info,device))
             exec(make_str_list_assign(req_sn.body_code),
                 our_global,tmp_local)
-    """ TODO
+    """ NO longer needed
     if sn.is_rand:
         for req_rd in sn.deps_rand:
-            exec(sg.dict_rand[req_rd],our_global,tmp_local)
+            code = make_str_assign(req_rd,sg.dict_rand[req_rd])
+            exec(code,our_global,tmp_local)
     """
     return tmp_local
 
@@ -292,10 +296,6 @@ def generate_deep_tmp_local(sn,sg,our_global):
 # trace grad_fn to know what
 #   is needed to backward
 # ==========================
-
-# TODO : TO TEST "exist_phantoms"
-# -> I don't want to use inspection to detect phantoms
-# -> Ktools shouldn't requires a GPU to produce a correct graph
 
 def get_useful_vars(sn : S_node,sg : S_graph,our_global):
     params = dict(our_global['self'].named_parameters())
@@ -360,17 +360,17 @@ def get_useful_vars(sn : S_node,sg : S_graph,our_global):
 # ======= INSPECTION =======
 # ==========================
 
-# TODO : rewrite + clean this section
-
-def dummy_inspection():
-    d = dict()
-    for attr in ["mem_del_fwd",
-        "overhead_bwd","mem_run_bwd","mem_fgt_bwd",
-        "overhead_fwd","mem_run_fwd","mem_fgt_fwd"]:
-        d[attr] = MemSize(0)
-    d["time_run_fwd"] = 0
-    d["time_run_bwd"] = 0
-    return d
+class Inspection_result():
+    def __init__(self):
+        self.mem_del_fwd  = MemSize(0)
+        self.overhead_fwd = MemSize(0)
+        self.overhead_bwd = MemSize(0)
+        self.mem_run_fwd  = MemSize(0)
+        self.mem_run_bwd  = MemSize(0)
+        self.mem_fgt_fwd  = MemSize(0)
+        self.mem_fgt_bwd  = MemSize(0)
+        self.time_run_fwd = 0
+        self.time_run_bwd = 0
 
 class inspector():
     def __init__(self, sn : S_node, sg : S_graph,our_global):
@@ -381,7 +381,7 @@ class inspector():
         self.memUsage = rotor.memory.MeasureMemory(device)
         self.our_global = our_global
         self.tmp_local = generate_tmp_local(sn,sg,our_global)
-        self.ret = {}
+        self.ret = Inspection_result()
     
     # -- aux --
     def measure_time(self, fct, inter_fct=None):
@@ -418,17 +418,17 @@ class inspector():
         gc.disable()
         _ , mem_run_fwd , peak_fwd = self.memUsage.measure(fct_run_fwd)
         overhead_fwd = peak_fwd - mem_run_fwd
-        self.ret["overhead_fwd"] = overhead_fwd
-        self.ret["mem_run_fwd"] = mem_run_fwd
+        self.ret.overhead_fwd = overhead_fwd
+        self.ret.mem_run_fwd = mem_run_fwd
         if not only_run:
             _ , mem_del_fwd , _ = self.memUsage.measure(fct_del_fwd)
-            self.ret["mem_del_fwd"] = minus_mem(mem_del_fwd)
+            self.ret.mem_del_fwd = minus_mem(mem_del_fwd)
             _ , _ , _ = self.memUsage.measure(fct_run_fwd)
 
             _ , mem_fgt_fwd , _ = self.memUsage.measure(fct_fgt_fwd)
             time_run_fwd = self.measure_time(fct_run_fwd)
-            self.ret["mem_fgt_fwd"] = minus_mem(mem_fgt_fwd)
-            self.ret["time_run_fwd"] = time_run_fwd
+            self.ret.mem_fgt_fwd = minus_mem(mem_fgt_fwd)
+            self.ret.time_run_fwd = time_run_fwd
         gc.enable()
     # ===============
 
@@ -469,10 +469,10 @@ class inspector():
             time_run_bwd = self.measure_time(self.fct_run_bwd, self.fct_prepare_bwd)
             # overhead_bwd contains n.target.data now /!\
             gc.enable()
-            self.ret["overhead_bwd"] = overhead_bwd
-            self.ret["mem_run_bwd"]  = mem_run_bwd
-            self.ret["mem_fgt_bwd"]  = minus_mem(mem_fgt_bwd)
-            self.ret["time_run_bwd"] = time_run_bwd
+            self.ret.overhead_bwd = overhead_bwd
+            self.ret.mem_run_bwd  = mem_run_bwd
+            self.ret.mem_fgt_bwd  = minus_mem(mem_fgt_bwd)
+            self.ret.time_run_bwd = time_run_bwd
     # # ===============
 # ==========================
 
@@ -608,35 +608,36 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
 
 
         # *** inspection ***
-        ins = inspector(sn,sg,our_global)
-        ins.measure_fwd()
-        ins.measure_bwd()
         if device == torch.device("cpu"):
-            res = dummy_inspection()
-        else: res = ins.ret
+            res = Inspection_result()
+        else:
+            ins = inspector(sn,sg,our_global)
+            ins.measure_fwd()
+            ins.measure_bwd()
+            res = ins.ret
 
         # -> fwd ins
-        kcn_fwd.overhead = res["overhead_fwd"]
-        kcn_fwd.time     = res["time_run_fwd"]
-        kdn_data.mem     = res["mem_fgt_fwd"]
-        info.memsize     = res["mem_fgt_fwd"]
+        kcn_fwd.overhead = res.overhead_fwd
+        kcn_fwd.time     = res.time_run_fwd
+        kdn_data.mem     = res.mem_fgt_fwd
+        info.memsize     = res.mem_fgt_fwd
 
         # -> bwd ins
         if info.requires_grad:
-            kcn_bwd.overhead = res["overhead_bwd"]
-            kcn_bwd.time     = res["time_run_bwd"]
+            kcn_bwd.overhead = res.overhead_bwd
+            kcn_bwd.time     = res.time_run_bwd
             kdn_grad.mem     = kdn_data.mem
 
             # -> phantoms ins
             if ref_test_phantoms_detection[0]:
-                exist_diff=res["mem_run_fwd"].v - res["mem_fgt_fwd"].v > 0
+                exist_diff=res.mem_run_fwd.v - res.mem_fgt_fwd.v > 0
                 if exist_diff or exist_phantoms:
                     print(f"For node {mt}: mem_diff : {exist_diff} "\
                           f"and detection {exist_phantoms}")
 
             if exist_phantoms:
                 kdn_phantoms.mem = MemSize(
-                    res["mem_run_fwd"].v - res["mem_fgt_fwd"].v)
+                    res.mem_run_fwd.v - res.mem_fgt_fwd.v)
 
         # ins.tmp_local.clear()
     # ============ 
@@ -774,7 +775,6 @@ def copy_K_D_node(kdn : K_D_node):
 def copy_K_graph(kg : K_graph):
     new_kg = K_graph(kg.sg) # TO CHANGE
     new_kg.dict_info = dict(kg.dict_info)
-    new_kg.dict_rand = dict(kg.dict_rand)
     new_kg.init_code = kg.init_code
     new_kg.unique_id_generator = copy_generator(kg.unique_id_generator)
 

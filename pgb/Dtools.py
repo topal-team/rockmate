@@ -6,7 +6,8 @@ from .Btools import B_node,B_graph
 # ==========================
 
 class D_node(B_node):
-    def __init__(self,target="",code=None,fct=""):
+    def __init__(self,target="",code=None,fct="",
+            is_rand=False,deps_rand=None):
         """ attributes :
         .target    : str  : the name of the only var defined in the node
         .ast_code  : AST  : right part of the assigning code
@@ -19,18 +20,21 @@ class D_node(B_node):
         .protected : bool : ? self is a 1-separator of the graph
         """
         super().__init__(target,code,fct)
+        self.is_rand = is_rand
+        self.deps_rand = deps_rand if deps_rand else set()
         self.users = set()
         self.protected = False
         self.num = get_num(self)
     def __eq__(self,dn2):
         dn1 = self
-        b = check_attr(dn1,dn2,["protected","target","fct","is_rand"])
+        b = check_attr(dn1,dn2,
+            ["protected","target","fct","is_rand","deps_rand"])
         mkstr = lambda nl : [rn.target for rn in nl]
         b = (b
             and (mkstr(dn1.deps) == mkstr (dn2.deps))
             and (mkstr(dn1.users) == mkstr (dn2.users))
             and (dn1.get_code() == dn2.get_code()))
-        return b # missing deps_rand equality
+        return b
     def __hash__(self):
         return self.num
         #return id(self) # __eq__ => need __hash__
@@ -102,15 +106,15 @@ def get_info(x) -> FWD_info:
         raise Exception(f"The type {tt} is unknown")
     return info
 
-def generate_tmp_local(g,dict_info,dn):
+def generate_tmp_local(g,dict_info,dn,our_global):
     tmp_local = {}
     for req_dn in dn.deps:
         req_dn_info = dict_info[req_dn.target]
         req_x = generate_val(req_dn_info,device) # from utils.py
         tmp_local[req_dn.target] = req_x
-    if dn.is_rand:
-        for req_rd in dn.deps_rand:
-            exec(g.dict_rand[req_rd],our_global,tmp_local)
+    for req_rd in dn.deps_rand:
+        code = make_str_assign(req_rd,g.dict_rand[req_rd])
+        exec(code,our_global,tmp_local)
     return tmp_local
 
 # ==========================
@@ -143,7 +147,9 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None):
 
     for bn in b_nodes:
         # -- translate B node to D --
-        dn = D_node(bn.target,bn.ast_code,bn.fct)
+        dn = D_node(bn.target,bn.ast_code,bn.fct,
+                is_rand = bn.is_rand,
+                deps_rand = set(bn.deps_rand))
         if bn.is_input:
             inputs.append(bn.target)
             dn.is_input = True
@@ -157,7 +163,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None):
 
         # -- compute the forward to get info --
         if not bn.is_input:
-            tmp_local = generate_tmp_local(dg,dict_info,bn)
+            tmp_local = generate_tmp_local(dg,dict_info,bn,our_global)
             exec(bn.get_code(), our_global, tmp_local)
             dict_info[bn.target] = get_info(tmp_local[bn.target])
             del tmp_local
@@ -242,12 +248,13 @@ def test_fw_code(dg : D_graph,model,dict_inputs : dict):
     loc_dict["self"] = model
     for inp in dg.inputs:
         loc_dict[inp] = dict_inputs[inp]
-    for v in dg.dict_rand:
-        exec(dg.dict_rand[v], globals(), loc_dict)
+    for rd_tar,ast_code in dg.dict_rand.items():
+        code = make_str_assign(rd_tar,ast_code)
+        exec(code, globals(), loc_dict)
     for dn in dg.nodes:
-        if dn.is_rand:
-            for req_rd in dn.deps_rand:
-                exec(dg.dict_rand[req_rd])
+        for req_rd in dn.deps_rand:
+            code = make_str_assign(req_rd,dg.dict_rand[req_rd])
+            exec(code,globals(),loc_dict)
         if not dn.is_input:
             exec(dn.get_code(), globals(), loc_dict)
     return loc_dict[dg.output]

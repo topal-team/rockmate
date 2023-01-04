@@ -189,7 +189,7 @@ class Graph_Translator():
             dict_info_keys = set(kg.dict_info.keys())
             for k in dict_info_keys:
                 if k not in self.dict: del kg.dict_info[k]
-            for attr in ["init_code","dict_info","dict_rand"]:
+            for attr in ["init_code","dict_info"]:
                 setattr(kg,attr,translate(getattr(kg,attr)))
             return kg
 
