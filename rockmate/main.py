@@ -15,7 +15,7 @@ from rockmate.def_sequence import (
     SeqBlockFe,
 )
 from rockmate.rotor_solver import seq_builder
-from rockmate.translator import Translator
+from rockmate.translator import Translator, RngState
 import torch
 
 
@@ -93,12 +93,13 @@ class CheckpointedModule(torch.nn.Module):
                 enable[s.index] = 1
             if isinstance(s, SeqBlockBwd):
                 if not enable[s.index - 1]:
-                    s.op_sched.op_list.append(s.op_sched.del_input_op)
-                    s.op_sched.alive_list.append(s.op_sched.alive_list[-1])
-                    s.op_sched.alive_list[-1][-1] = 0
-                    s.op_sched.save = np.append(
-                        s.op_sched.save, s.op_sched.save[-1]
-                    )
+                    s.op_sched.del_input()
+                    # s.op_sched.op_list.append(s.op_sched.del_input_op)
+                    # s.op_sched.alive_list.append(s.op_sched.alive_list[-1])
+                    # s.op_sched.alive_list[-1][-1] = 0
+                    # s.op_sched.save = np.append(
+                    #     s.op_sched.save, s.op_sched.save[-1]
+                    # )
 
         self.fwd_seq, self.bwd_seq = self.seq.cut_fwd_bwd()
         self.fwd_op_list = [
@@ -110,6 +111,7 @@ class CheckpointedModule(torch.nn.Module):
 
     def get_code(self, aggressive=True):
         self.storage = RK_Storage(self.device, self.original_mod)
+        self.storage.gd["rng_state"] = RngState()
         self.translator = Translator(self.storage, aggressive=aggressive)
         fwd_code = []
         for seq_block in self.fwd_seq.seq:
@@ -188,12 +190,21 @@ class CheckpointedModule(torch.nn.Module):
         #         alive_dict[kdn.name] = (0, kdn.mem)
         for i, seq in enumerate(self.fwd_seq.seq + self.bwd_seq.seq):
             op_sched = seq.op_sched
-            for s, op in zip(op_sched.save, op_sched.op_list):
-                # for i, op in enumerate(op_sched.op_list):
-                acc_mem[seq.index] = s
+            for a, op in zip(op_sched.alive_list, op_sched.op_list):
+                acc_mem[seq.index] = (
+                    np.dot(a, op_sched.mem_sizes) - op_sched.input_size[1]
+                )
+                # if not op_sched.is_fwd:
+                #     acc_mem[seq.index] -= op_sched.output_size[1]
                 pred_mem.append(sum(acc_mem))
                 if overhead and op.op_type == "Run":
                     pred_mem[-1] += op.overhead
+            # for s, op in zip(op_sched.save, op_sched.op_list):
+            # for i, op in enumerate(op_sched.op_list):
+            # acc_mem[seq.index] = s
+            # pred_mem.append(sum(acc_mem))
+            # if overhead and op.op_type == "Run":
+            #     pred_mem[-1] += op.overhead
         return pred_mem
 
     def reinit(self):

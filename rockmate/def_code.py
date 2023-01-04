@@ -58,6 +58,7 @@ class RunOp:
             if kdn.kdn_type != "data":
                 continue
             self.proxy = kdn.info.requires_grad
+        self.is_rand = kcn.is_rand
 
     def __eq__(self, op2):
         return check_attr(self, op2, ["name", "kcn"])
@@ -67,7 +68,7 @@ class RunOp:
 
 
 class DelOp:
-    def __init__(self, kdn):
+    def __init__(self, kdn, proxy=True):
         self.name = kdn.name
         self.kdn_type = kdn.kdn_type
         self.time = 0
@@ -80,6 +81,7 @@ class DelOp:
         self.info = kdn.info
         self.is_fgt = True
         self.op_type = "Del"
+        self.proxy = proxy
 
     def __eq__(self, op2):
         return check_attr(self, op2, ["name"])
@@ -92,6 +94,10 @@ class OpSchedule:
     def __init__(
         self, op_list, alive_list, kg, no_grad=False,
     ):
+        self.op_list = op_list
+        self.alive_list = alive_list
+        L = len(op_list)
+
         self.no_grad = no_grad
 
         self.input_size = (
@@ -105,7 +111,8 @@ class OpSchedule:
 
         # save the del_input op in case needed
         input_kdn = kg.input_kdn_data
-        self.del_input_op = DelOp(input_kdn)
+        self.del_input_op = DelOp(input_kdn, proxy=False)
+        self.del_input_idx = L
 
         list_kdn = kg.list_kdn + [kg.input_kdn_grad, kg.input_kdn_data]
         self.mem_sizes = [kdn.mem.v for kdn in list_kdn]
@@ -113,48 +120,68 @@ class OpSchedule:
         self.kdn_info = {
             kdn.name: kdn.info for kdn in list_kdn
         }  # dict: name->info
-        self.op_list = op_list
-        self.alive_list = alive_list
-        L = len(op_list)
+
+        self.is_fwd = True
+        self.get_mem_time()
+
+    def get_mem_time(self):
+        """
+        everytime op_list/alive_list are changed, run this to update mem
+        """
+        L = len(self.op_list)
         self.save = np.zeros(L)
         self.tmp = np.zeros(L)
-        self.is_fwd = True
         input_grad = False
         output_grad = False
-        for i, op in enumerate(op_list):
+        for i, op in enumerate(self.op_list):
             if isinstance(op, RunOp):
                 self.tmp[i] = op.overhead
                 if "bwd" in op.name:
                     self.is_fwd = False
+                    # rotor assumes the space for input data but not input grad
                     for kdn in op.users_global:
                         if not input_grad and self.input_size[0] in kdn.name:
-                            self.save[i:] += self.input_size[1]
+                            self.tmp[i:] += self.input_size[1]
                             input_grad = True
-            self.save[i] += alive_list[i][:-2].dot(
+
+            self.save[i] += self.alive_list[i][:-2].dot(
                 np.array(self.mem_sizes[:-2])
             )  # input kdn is not included
-            if (
-                not output_grad
-                and alive_list[i][
-                    self.kdn_names.index(self.output_size[0] + " grad")
-                ]
-            ):
-                self.save[i:] -= self.output_size[1]
-                output_grad = True
+            # if (
+            #     not output_grad
+            #     and self.alive_list[i][
+            #         self.kdn_names.index(self.output_size[0] + " grad")
+            #     ]
+            # ):
+            #     self.save[i:] -= self.output_size[1]
+            #     output_grad = True
         self.overhead = max(self.save + self.tmp) - self.save[-1]
         self.time = sum([op.time for op in self.op_list])
-        self.del_input_idx = -1
 
-    def del_input(self, kg):
+    def get_del_input_idx(self, kg):
+        """
+        This method is to find the idx where input is no longer needed. 
+        Should only used for Fn
+        """
         input_kdn = kg.input_kdn_data
         for i, op in enumerate(self.op_list):
             if isinstance(op, RunOp) and input_kdn in op.deps_global:
                 self.del_input_idx = i + 1
-        # self.del_input_idx = max(self.op_list.index(kcn)
-        #                     for kcn in input_kdn.users_global
-        #                     if kcn in self.op_list)
-        self.save[self.del_input_idx :] -= input_kdn.mem.v
-        self.overhead = max(self.save + self.tmp) - self.save[-1]
+
+    def del_input(self):
+        self.op_list.insert(self.del_input_idx, self.del_input_op)
+        alive_status = self.alive_list[self.del_input_idx - 1].copy()
+        self.alive_list.insert(self.del_input_idx, alive_status)
+        for i in range(self.del_input_idx, len(self.op_list)):
+            self.alive_list[i][-1] = False
+
+        self.get_mem_time()
+        # self.save = np.append(self.save, self.save[-1])
+        # # self.del_input_idx = max(self.op_list.index(kcn)
+        # #                     for kcn in input_kdn.users_global
+        # #                     if kcn in self.op_list)
+        # self.save[self.del_input_idx :] -= input_kdn.mem.v
+        # self.overhead = max(self.save + self.tmp) - self.save[-1]
 
 
 class RK_Function:

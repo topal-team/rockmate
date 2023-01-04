@@ -1,12 +1,28 @@
-from rockmate.utils import make_str_assign, np
+from rockmate.utils import make_str_assign, np, torch
 from rockmate.def_code import DelOp
+
+
+class RngState:
+    def __init__(self):
+        self.cpu_states = {}
+        self.gpu_states = {}
+
+    def get(self, op_name):
+        if op_name not in self.cpu_states.keys():
+            self.cpu_states[op_name] = torch.get_rng_state()
+            self.gpu_states[op_name] = torch.cuda.get_rng_state()
+
+    def restore(self, op_name):
+        # pass
+        torch.set_rng_state(self.cpu_states[op_name])
+        torch.cuda.set_rng_state(self.gpu_states[op_name])
 
 
 class Translator:  # to execute Op
     def __init__(self, storage, aggressive=True):
         self.storage = storage
-        self.live = {}  # variables -> CodeAtom
-        self.fgt = []  # variables been fgt
+        self.live = {}
+        self.fgt = []
         self.code = []
         self.grad = {}
         self.fwd_op_sched = []
@@ -31,6 +47,8 @@ class Translator:  # to execute Op
             for i, kdn_name in enumerate(op_sched.kdn_names):
                 self.alive_global[kdn_name] = op_sched.alive_list[-1][i]
                 self.info_global[kdn_name] = op_sched.kdn_info[kdn_name]
+        else:
+            self.alive_global = {}
         # Fc/Fn cases
         if op_sched.no_grad:
             code_list = []  # ["with torch.no_grad():"]
@@ -43,19 +61,29 @@ class Translator:  # to execute Op
                         # code += "\n"+ast_to_str(make_ast_module(op.body_code))
                         # code = op.code
                         # code = "\t".join(code.splitlines(True))
-                        code_list.append(f"{op.code}")
+                        if op.is_rand:
+                            code = f"rng_state.get('{op.name}');rng_state.restore('{op.name}')\n{op.code}"
+                        else:code = op.code
+                        code_list.append(f"{code}")
                 elif op.kdn_type == "data":
                     code = ""
-                    for target in op.all_targets:
-                        code += f"del {target};"
+                    if op_sched.del_input_idx == i:
+                        for target in op_sched.del_input_op.tensor_targets:
+                            # code += f"del {target};"
+                            code += (
+                                f"{target}.data = torch.zeros(0,device=device);"
+                            )
+                    else:
+                        for target in op.all_targets:
+                            code += f"del {target};"
                     code_list.append(code)
                 else:
                     code_list.append("")
-                if op_sched.del_input_idx == i:
-                    code = "\n"
-                    for target in op_sched.del_input_op.tensor_targets:
-                        code += f"{target}.data = torch.zeros(0,device=device);"
-                    code_list[-1] += code
+                # if op_sched.del_input_idx == i:
+                #     code = "\n"
+                #     for target in op_sched.del_input_op.tensor_targets:
+                #         code += f"{target}.data = torch.zeros(0,device=device);"
+                #     code_list[-1] += code
             code_list[-1] += f"\n{op_sched.output_size[0]}.requires_grad_()"
             return code_list
 
@@ -139,6 +167,8 @@ class Translator:  # to execute Op
                     if rec and (bc[0] in op.tensor_targets):
                         suffix = ".data"
                     code += "\n" + make_str_assign(bc, suffix=suffix)
+                if op.is_rand:
+                    code = f"rng_state.get('{op.name}');rng_state.restore('{op.name}')\n{code}"
                 return code
             # Backward operation
             elif "bwd" in op.name:
@@ -168,6 +198,8 @@ class Translator:  # to execute Op
                 else:
                     code = f"_{mt}.backward({mt}.grad, retain_graph={not last})"
                 bwd_code = f"{prep_code}\n" f"{code}\n" f"{after_code}"
+                if op.is_rand:
+                    bwd_code = f"rng_state.get('{op.name}');rng_state.restore('{op.name}')\n{bwd_code}"
                 return bwd_code
 
         def _del_op(op, i):
@@ -177,6 +209,7 @@ class Translator:  # to execute Op
                     op.info is not None
                     and op.info.requires_grad
                     and _is_alive(op.name.replace("data", "phantoms"), i)
+                    and op.proxy
                 ):
                     code += f"_{op.main_target}.data = torch.zeros(0,device=device);"
                 for v in op.tensor_targets:

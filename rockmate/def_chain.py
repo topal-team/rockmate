@@ -96,7 +96,7 @@ class RK_Block:
 
             op_list = []
             alive_list = []
-            alive_status = np.zeros(len(kg.list_kdn)+2, dtype=bool)
+            alive_status = np.zeros(len(kg.list_kdn) + 2, dtype=bool)
             alive_status[-1] = True
             loss_idx = kg.list_kcn.index(kg.loss_kcn)
             for i, kcn in enumerate(kg.list_kcn[:loss_idx]):
@@ -117,7 +117,8 @@ class RK_Block:
 
         self.Fc_sched = OpSchedule(*_fast_fwd_sched(), kg, no_grad=True,)
         self.Fn_sched = OpSchedule(*_fast_fwd_sched(), kg, no_grad=True,)
-        self.Fn_sched.del_input(kg)
+        self.Fn_sched.get_del_input_idx(kg)
+        self.Fn_sched.del_input()
         self.overhead_fast_fwd = self.Fc_sched.overhead
         self.time_fast_fwd = self.Fc_sched.time
 
