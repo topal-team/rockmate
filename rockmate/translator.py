@@ -63,7 +63,8 @@ class Translator:  # to execute Op
                         # code = "\t".join(code.splitlines(True))
                         if op.is_rand:
                             code = f"rng_state.get('{op.name}');rng_state.restore('{op.name}')\n{op.code}"
-                        else:code = op.code
+                        else:
+                            code = op.code
                         code_list.append(f"{code}")
                 elif op.kdn_type == "data":
                     code = ""
@@ -108,7 +109,7 @@ class Translator:  # to execute Op
                 self.info_global if self.aggressive else op_sched.kdn_info
             )
             for name, info in dict_info.items():
-                if "data" not in name or "src" in name:
+                if "data" not in name or info is None:
                     continue
                 if np.prod(info.tsize) == np.prod(req_shape) and _is_alive(
                     name, i

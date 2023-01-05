@@ -22,7 +22,7 @@ class ModelGurobi:
         self.kg = kg
         self.time = [kcn.time for kcn in self.kg.list_kcn]
         self.gcd = gcd if gcd else 1
-        self.budget = budget // self.gcd
+        self.budget = budget / self.gcd
         self.save_budget = save_budget / self.gcd
         self.overhead = [kcn.overhead.v / self.gcd for kcn in self.kg.list_kcn]
         self.mem = [kdn.mem.v / self.gcd for kdn in self.kg.list_kdn]
@@ -191,7 +191,7 @@ class ModelGurobi:
                         self.alive[(t, max(_deps_d[i] + _users_d[i]), i)],
                     )
                 else:  # if i not in self.output_indices:
-                    # in the end of bwd, del everything except output grad
+                    # in the end of bwd, del everything
                     self.md.addLConstr(
                         self.alive[(t, max(_deps_d[i] + _users_d[i]), i)],
                         GRB.EQUAL,

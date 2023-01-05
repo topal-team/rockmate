@@ -54,13 +54,13 @@ def get_rk_block(list_kg, nb_bdg_abar, nb_bdg_all):
     overheads = [kcn.overhead.v for kcn in kg.list_kcn]
     max_bdg = sum(kdn_sizes) + max(overheads)
     min_bdg = (
-        list_blocks[-1].Fc_sched.overhead + +list_blocks[-1].Fc_sched.save[-1]
+        list_blocks[-1].Fc_sched.overhead + list_blocks[-1].Fc_sched.save[-1]
     )
     l_bd_all = np.linspace(min_bdg, max_bdg, nb_bdg_all)
     sols = []
     uniq_sols = set()
     for bd_all in l_bd_all:
-        l_bd_abar = np.linspace(0, bd_all, nb_bdg_abar)
+        l_bd_abar = np.linspace(kg.output_kdn_data.mem.v, bd_all, nb_bdg_abar)
         for bd_abar in l_bd_abar:
             if bd_all >= bd_abar:
                 sol = get_rk_solution(list_kg, bd_abar, bd_all)
