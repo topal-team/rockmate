@@ -84,9 +84,12 @@ def sort_nodes(g : B_graph): # -> B_node list
     else: return sort_based_on_deps(o_var.node)
 
 
-def get_info(x) -> FWD_info:
+def get_info(x,is_inplace=False,inplace_real_name=None) -> FWD_info:
     # for FWD_info see utils.py
     info = FWD_info()
+    info.is_inplace=is_inplace
+    if is_inplace:
+        info.inplace_real_name = inplace_real_name
     if (isinstance(x,int) or
         (isinstance(x,torch.Tensor) and x.shape==torch.Size([]))):
         tt = torch.Size
@@ -111,6 +114,7 @@ def generate_tmp_local(g,dict_info,dn,our_global):
     for req_dn in dn.deps:
         req_dn_info = dict_info[req_dn.target]
         req_x = generate_val(req_dn_info,device) # from utils.py
+        req_x = req_x.clone()
         tmp_local[req_dn.target] = req_x
     for req_rd in dn.deps_rand:
         code = make_str_assign(req_rd,g.dict_rand[req_rd])
@@ -165,7 +169,24 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None):
         if not bn.is_input:
             tmp_local = generate_tmp_local(dg,dict_info,bn,our_global)
             exec(bn.get_code(), our_global, tmp_local)
-            dict_info[bn.target] = get_info(tmp_local[bn.target])
+            # - detect inplace operation -
+            bn_value = tmp_local[bn.target]
+            is_inplace = False # by default
+            inplace_real_name = None
+            if isinstance(bn_value,torch.Tensor):
+                for o_name,o_value in tmp_local.items():
+                    if (o_name != bn.target
+                    and o_name in dict_info
+                    and o_value is bn_value):
+                        o_info = dict_info[o_name]
+                        is_inplace = True
+                        if o_info.is_inplace:
+                            inplace_real_name = o_info.inplace_real_name
+                        else:
+                            inplace_real_name = o_name
+                        break
+            dict_info[bn.target] = get_info(
+                bn_value,is_inplace,inplace_real_name)
             del tmp_local
 
     # --- translate output ---

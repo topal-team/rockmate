@@ -263,7 +263,8 @@ def generate_tmp_local(sn,sg : S_graph,our_global):
             # but the body_code may requires some artefacts
             req_sn_mt = req_sn.main_target
             main_info = sg.dict_info[req_sn_mt]
-            tmp_local[req_sn_mt] = generate_val(main_info,device)
+            req_sn_mt_value = generate_val(main_info,device)
+            tmp_local[req_sn_mt] = req_sn_mt_value.clone()
             for req_req_sn in req_sn.deps.keys():
                 if not (req_req_sn is sg.init_node):
                     for req_req_tar in req_req_sn.all_targets:

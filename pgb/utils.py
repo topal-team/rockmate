@@ -432,6 +432,8 @@ class FWD_info(): # everything needed to randomly regenerate a var
         self.sub_info = None # if ttype = list or tuple
         self.requires_grad = None # if Tensor or Size
         self.memsize = None # done much later
+        self.is_inplace = False
+        self.inplace_real_name = None
     def __eq__(self,i2):
         d = vdir(self)
         for s in d:

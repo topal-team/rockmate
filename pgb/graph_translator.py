@@ -113,6 +113,11 @@ class Graph_Translator():
             else: raise Exception(
                 f"{x}'s type ({ty}) is not handled by the translator")
 
+        # -- info --
+        elif isinstance(x,FWD_info): # /!\ inplace /!\
+            x.inplace_real_name = translate(x.inplace_real_name)
+            return x
+
         # -- S_NODE --
         elif isinstance(x,Stools.S_node): # /!\ inplace /!\
             # op done inplace because it's impossible to change deps/users

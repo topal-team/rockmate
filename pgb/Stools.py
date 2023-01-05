@@ -451,18 +451,37 @@ def simplify_view(sg):
     for sn in sg.nodes:
         #if ( sn.main_target != sg.output
         #    and (not ref_keep_seq or not sn.protected)
-         if sn.main_fct in list_view_fct or sn.main_fct == "getattr":
-            # /!\ ASSERTION remaining getattr are related to views !! 
+        sn_info = sg.dict_info[sn.main_target]
+        if (sn.main_fct in list_view_fct
+        or  sn.main_fct == "getattr"
+        or  sn_info.is_inplace):
+            # ASSERTION remaining getattr are related to views !! 
+            # we also consider inplace ops as views
             real_deps = get_direct_real_deps(sn)
             if len(real_deps)==1:
                 req_sn = real_deps.pop()
                 req_sn.insert(sn,strong=True,sg=sg)
                 req_sn.clear_siblings_artefact()
-            elif len(real_deps) > 1: print(
-                f"Warning : {sn.main_target} is a view op, with "\
-                f"several tensor deps, thus it's impossible to "\
-                f"to simplify it, very dangerous...",
-                file = sys.stderr)
+            elif len(real_deps) > 1:
+                if not sn_info.is_inplace: print(
+                    f"Warning : {sn.main_target} is a view op (not "\
+                    f"inplace), with several tensor deps, thus it's "\
+                    f"impossible to simplify it, very dangerous...",
+                    file = sys.stderr)
+                else:
+                    inplace_real_node = None
+                    for req_sn in real_deps:
+                        if req_sn.main_target == sn_info.inplace_real_name:
+                            inplace_real_node = req_sn
+                            break
+                    if inplace_real_node is None: print(
+                        f"Warning : {sn.main_target} comes from an "\
+                        f"inplace operations, but it's main tensor "\
+                        f"isn't in {sn.main_target}'s node deps",
+                        file = sys.stderr)
+                    else:
+                        inplace_real_node.insert(sn,strong=True,sg=sg)
+                        inplace_real_node.clear_siblings_artefact()
             elif len(real_deps)==0 and len(sn.deps)>0:
                 # experimental : I assume that views which don't 
                 # require any real tensor are views over parameters
