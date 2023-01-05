@@ -114,7 +114,8 @@ def generate_tmp_local(g,dict_info,dn,our_global):
     for req_dn in dn.deps:
         req_dn_info = dict_info[req_dn.target]
         req_x = generate_val(req_dn_info,device) # from utils.py
-        req_x = req_x.clone()
+        if isinstance(req_x,torch.Tensor):
+            req_x = req_x.clone()
         tmp_local[req_dn.target] = req_x
     for req_rd in dn.deps_rand:
         code = make_str_assign(req_rd,g.dict_rand[req_rd])
