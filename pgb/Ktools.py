@@ -378,6 +378,7 @@ class Inspection_result():
 class inspector():
     def __init__(self, sn : S_node, sg : S_graph,our_global):
         self.sn = sn
+        self.sg = sg
         self.mt = sn.main_target
         self.info = sg.dict_info[self.mt]
         self.timer = rotor.timing.make_timer(device)
@@ -447,6 +448,7 @@ class inspector():
                 for tar in req_sn.tensor_targets:
                     self.tmp_local[tar].grad = None
     def fct_prepare_bwd(self):
+        self.tmp_local = generate_tmp_local(self.sn,self.sg,self.our_global)
         self.code_run_fwd = self.sn.get_code()
         exec(self.code_run_fwd, self.our_global, self.tmp_local)
         self.tmp_local[self.sn.main_target].grad = generate_val(self.info,device)
