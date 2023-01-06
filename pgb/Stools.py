@@ -1,5 +1,5 @@
 from .utils import *
-from .Dtools import D_node,D_graph,get_info
+from .Dtools import D_node,D_graph
 
 # ==========================
 # ====== S structure =======
@@ -180,7 +180,7 @@ class S_graph():
         # -> to generate S_node.__hash__
     def __eq__(self,sg2):
         return check_attr(self,sg2,[
-            "direct_inputs","hidden_inputs",
+            # "direct_inputs","hidden_inputs", TO TODO
             "direct_outputs","hidden_output",
             "dict_info","nodes"])
     def __hash__(self):
@@ -540,12 +540,12 @@ def create_random_snodes_from_dict_rand(sg,model,device):
             protected = True,
             is_rand   = True,
             unique_id_generator = sg.unique_id_generator)
-        # -> We need to generate ".info" using Dtools.get_info
+        # -> We need to generate ".info" from def_info.py
         # -> to do so we first need to generate the variable <name>
         our_global = globals().copy()
         if model: our_global["self"] = model
         if device: our_global["device"] = device
-        dict_info[name] = get_info(
+        dict_info[name] = def_info.Var_info(
             eval(ast_to_str(ast_code),our_global)
         )
     for sn in sg.nodes:

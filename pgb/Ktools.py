@@ -1,4 +1,5 @@
 from .utils import *
+from . import def_info
 from .Stools import S_node,S_graph
 import copy
 import gc
@@ -207,7 +208,7 @@ class K_graph():
 
     def __eq__(self,g2,force_order=False,raise_exception=False):
         g1 = self
-        eq_node = lambda n1,n2 : n1.__eq__(n2,force_order,raise_exception)
+        eq_node= lambda n1,n2 : n1.__eq__(n2,force_order,raise_exception)
         b = (ast_to_str(self.init_code) == ast_to_str(g2.init_code))
         if not b and raise_exception:
             raise Exception("K_graphs diff init_code")
@@ -247,11 +248,12 @@ def generate_our_global(sg,model,device):
     our_global["device"] = device
     for inp in sg.direct_inputs:
         info = sg.dict_info[inp]
-        x = generate_val(info,device)
+        x = def_info.generate_val(info,device)
         our_global[inp]=x
+        """ TO REMOVE
         if inp in sg.hidden_inputs:
             info.memsize = MemSize(int(tensorMsize(x)))
-            # need to be done at least once
+            # need to be done at least once """
     return our_global
 
 def generate_tmp_local(sn,sg : S_graph,our_global):
@@ -263,7 +265,7 @@ def generate_tmp_local(sn,sg : S_graph,our_global):
             # but the body_code may requires some artefacts
             req_sn_mt = req_sn.main_target
             main_info = sg.dict_info[req_sn_mt]
-            req_sn_mt_value = generate_val(main_info,device)
+            req_sn_mt_value = def_info.generate_val(main_info,device)
             if isinstance(req_sn_mt_value,torch.Tensor):
                 req_sn_mt_value = req_sn_mt_value.clone()
             tmp_local[req_sn_mt] = req_sn_mt_value
@@ -272,7 +274,7 @@ def generate_tmp_local(sn,sg : S_graph,our_global):
                     for req_req_tar in req_req_sn.all_targets:
                         req_req_info = sg.dict_info[req_req_tar]
                         tmp_local[req_req_tar] = (
-                            generate_val(req_req_info,device))
+                            def_info.generate_val(req_req_info,device))
             exec(make_str_list_assign(req_sn.body_code),
                 our_global,tmp_local)
     """ NO longer needed
@@ -451,7 +453,8 @@ class inspector():
         self.tmp_local = generate_tmp_local(self.sn,self.sg,self.our_global)
         self.code_run_fwd = self.sn.get_code()
         exec(self.code_run_fwd, self.our_global, self.tmp_local)
-        self.tmp_local[self.sn.main_target].grad = generate_val(self.info,device)
+        self.tmp_local[self.sn.main_target].grad = (
+            def_info.generate_val(self.info,device))
 
     # measure
     def measure_bwd(self):
@@ -625,7 +628,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
         kcn_fwd.overhead = res.overhead_fwd
         kcn_fwd.time     = res.time_run_fwd
         kdn_data.mem     = res.mem_fgt_fwd
-        info.memsize     = res.mem_fgt_fwd
+        info.memsize     = res.mem_fgt_fwd # -> may correct
 
         # -> bwd ins
         if info.requires_grad:

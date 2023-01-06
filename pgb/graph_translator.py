@@ -1,68 +1,119 @@
 # Anonymize graphs
 # A way to recognize similar blocks
 # for instance for GPT2 -> Transformer blocks
+import re
 from .utils import *
+from . import def_info
 from . import Stools
 from . import Ktools
+
+
+# Note : to handle parameters anonymization :
+# 1) I need to check "info" equality, -> I need the model
+# 2) It's impossible to run inspection with anonymized params
+#    -> I need to reverse_translate the parameters first
+#    -> then re-translate, and finally reverse_translate
+#    -> for all the copies of the ano graph
+
 
 # ==================
 # ====== INIT ======
 # ==================
 
 class Graph_Translator():
-    def __init__(self,sg=None,reverse_translator=None):
+    def __init__(self,sg=None,model=None,reverse_translator=None):
         """ There are two ways to __init__ a graph_translator,
         either you give a S_graph and it creates a translator to
         anonymize the graph, or you give it a translator and it
-        creates the reverse translator. """
-        if (sg is None) == (reverse_translator is None):
-            raise Exception(
-                "To __init__ a graph_translator, you must either give\n"\
-                "it a S_graph or the reverse translator, not both.")
-        if reverse_translator != None:
-            self.reverse_translator = reverse_translator
-            self.dict = d = dict()
-            for s1,s2 in reverse_translator.dict.items():
-                d[s2] = s1
-        else:
+        creates the reverse translator.
+        Note: to fully translate S_graph, I try to translate
+        parameters too, to do so I need to precise their shape."""
+        if not reverse_translator is None:
+            self.reverse_translator = rev = reverse_translator
+            self.main_dict  = md = dict()
+            self.param_dict = pd = dict()
+            for s1,s2 in rev.main_dict.items(): md[s2] = s1
+            for s1,(s2,info) in rev.param_dict.items():
+                pd[s2] = (s1,info)
+        elif not sg is None:
             # we want to respect the original order of sn.num
             # -> so we first gather all the names, then sort
             # -> them based on sn.num, and anonymize them.
-            all_real_names = set()
-            def handle_str(real):
-                if not real in all_real_names:
-                    all_real_names.add(real)
-            def handle_ast(a):
+
+            ########## FIRST PART ########## 
+            all_real_vars   = []
+            all_real_params = []
+            def handle_str(real_str):
+                if (real_str[:2] == "__"
+                and not real_str in all_real_vars):
+                    all_real_vars.append(real_str)
+                elif (real_str[:5] == "self."
+                and not real_str in all_real_params):
+                    all_real_params.append(real_str)
+            def search_through(a):
                 if isinstance(a,ast.AST):
                     if isinstance(a,ast.Name):
-                        real = a.id
-                        if real[:2] == "__":
-                            handle_str(real)
+                        handle_str(a.id)
                     else:
                         for s in a._fields:
-                            try: handle_ast(getattr(a,s))
+                            try: search_through(getattr(a,s))
                             except: pass
+                elif isinstance(a,str): handle_str(a)
                 elif hasattr(a,"__iter__"):
-                    for sub_a in a: handle_ast(sub_a)
+                    for sub_a in a: search_through(sub_a)
+
+            """for attr in [
+                "direct_inputs","hidden_inputs",
+                "direct_outputs","hidden_output"]:
+                search_through(getattr(sg,attr))"""
+            search_through(getattr(sg,"hidden_inputs"))
             snodes = [sg.init_node] + sg.nodes
             for sn in snodes:
+                search_through(sn.main_code)
+                search_through(sn.body_code)
+            """
                 mt,mc = sn.main_code
                 handle_str(mt)
-                handle_ast(mc)
+                search_through(mc)
                 for st,sc in sn.body_code:
                     handle_str(st)
-                    handle_ast(sc)
-            # Now that "all_real_names" is complete, we generate the dict
-            all_real_names = sorted(all_real_names,key = get_num_tar)
-            self.dict = r_to_a = dict()
+                    search_through(sc)"""
+
+
+            ########## SECOND PART ########## 
+            # Now that "all_real_vars" is complete, we generate the dict
+            all_real_vars = sorted(all_real_vars,key = get_num_tar)
+            self.main_dict = r_to_a = dict()
             nb_var = 0
-            for real_name in all_real_names:
+            for real_name in all_real_vars:
                 nb_var += 1
                 ano_name = f"__{nb_var}_ano"
                 r_to_a[real_name] = ano_name
+
+            # Try to anonymize parameters:
+            self.param_dict = param_dict = dict()
+            nb_param = 0
+            if model:
+                for param_full_name in all_real_params: # strings
+                    # -> e.g. param_full_name = "self.layer1.weight"
+                    path_from_self = re.split(
+                            '\.|\[|\]',param_full_name)[1:]
+                    param = model
+                    for attr in path_from_self:
+                        if attr == "": continue
+                        try: param = param[int(attr)]
+                        except: param = getattr(param, attr)
+                    info_param = def_info.Var_info(param)
+                    nb_param += 1
+                    param_dict[param_full_name] = (
+                        f"self.param_{nb_param}",info_param)
             # To finish, build the reverse_translator :
             self.reverse_translator = (
                 Graph_Translator(reverse_translator=self))
+        else:
+            self.main_dict = dict()
+            self.param_dict = dict()
+            self.reverse_translator = self
 
 # ==================
 
@@ -76,6 +127,7 @@ class Graph_Translator():
         # x's type can be :
         # -> str
         # -> ast.AST
+        # -> Var_info (/!\ in place /!\)
         # -> S_node (/!\ in place /!\)
         # -> K_C/D_node (/!\ in place /!\)
         # -> S_graph
@@ -84,8 +136,11 @@ class Graph_Translator():
         translate = self.translate
         # -- STR --
         if isinstance(x,str):
-            if x not in self.dict: return x
-            else: return self.dict[x]
+            if x[:2] == "__" and x in self.main_dict:
+                return self.main_dict[x]
+            elif x[:5] == "self." and x in self.param_dict:
+                return self.param_dict[x][0]
+            return x
 
         # -- AST --
         elif isinstance(x,ast.AST):
@@ -114,7 +169,7 @@ class Graph_Translator():
                 f"{x}'s type ({ty}) is not handled by the translator")
 
         # -- info --
-        elif isinstance(x,FWD_info): # /!\ inplace /!\
+        elif isinstance(x,def_info.Var_info): # /!\ inplace /!\
             x.inplace_real_name = translate(x.inplace_real_name)
             return x
 
@@ -174,8 +229,9 @@ class Graph_Translator():
             # thus it contains impossible name to translate
             # -> so I clean it up.
             dict_info_keys = set(sg.dict_info.keys())
-            for k in dict_info_keys:
-                if k not in self.dict: del sg.dict_info[k]
+            if len(self.main_dict) != 0: # to avoid special case
+                for k in dict_info_keys:
+                    if k not in self.main_dict: del sg.dict_info[k]
             for attr in [
                 "hidden_inputs","direct_inputs","dict_info",
                 "hidden_output","direct_outputs","dict_rand"]:
@@ -192,8 +248,9 @@ class Graph_Translator():
             dkn = list(kg.dict_kn.values()) ; kg.dict_kn.clear()
             for kn in dkn: kg.dict_kn[kn.name] = kn
             dict_info_keys = set(kg.dict_info.keys())
-            for k in dict_info_keys:
-                if k not in self.dict: del kg.dict_info[k]
+            if len(self.main_dict) != 0: # to avoid special case
+                for k in dict_info_keys:
+                    if k not in self.main_dict: del kg.dict_info[k]
             for attr in ["init_code","dict_info"]:
                 setattr(kg,attr,translate(getattr(kg,attr)))
             return kg
@@ -226,17 +283,36 @@ def S_list_to_K_list_eco(
     list_translator = [None] * nb_sg
     sg_num_to_cc_num = [None] * nb_sg
     tab_S_repr_cc = [] # cc_num -> S_graph
+    cc_num_to_repr_sg_num = []
     for sg_num in range(nb_sg):
         sg = list_sg[sg_num]
-        list_translator[sg_num] = translator = Graph_Translator(sg)
+        list_translator[sg_num] = translator = (
+            Graph_Translator(sg,model=model))
         ano_sg = translator.translate(sg)
         b = False ; cc_num = 0 ; nb_cc = len(tab_S_repr_cc)
         while not b and cc_num < nb_cc:
-            if ano_sg == tab_S_repr_cc[cc_num]: b = True
+            if ano_sg == tab_S_repr_cc[cc_num]:
+                print(
+                    f"{sg_num} and {cc_num_to_repr_sg_num[cc_num]}")
+                # -> We also need to manualy check param_info equalities
+                sort_key = lambda v : int(v[0][11:])
+                repr_tr = list_translator[cc_num_to_repr_sg_num[cc_num]]
+                ano_param_sg = sorted(
+                    translator.param_dict.values(),key=sort_key)
+                ano_param_repr = sorted(
+                    repr_tr.param_dict.values(),key=sort_key)
+                if ano_param_sg == ano_param_repr:
+                    b = True
+                else: cc_num += 1
             else: cc_num += 1
-        if not b: tab_S_repr_cc.append(ano_sg)
+        if not b:
+            tab_S_repr_cc.append(ano_sg)
+            cc_num_to_repr_sg_num.append(sg_num)
         sg_num_to_cc_num[sg_num] = cc_num
 
+    return tab_S_repr_cc,list_translator
+
+    # 1') Compute and print connexe components
     nb_cc = len(tab_S_repr_cc)
     cc = [[] for _ in range(nb_cc)]
     for sg_num in range(nb_sg):
@@ -245,15 +321,26 @@ def S_list_to_K_list_eco(
         for cc_num in range(nb_cc):
             print(f"Connexe component n°{cc_num}: {cc[cc_num]}")
         print(
-          f"We now have only {nb_cc} blocks to handle, instead of {nb_sg}")
+          f"We now have {nb_cc} blocks "\
+          f"to handle, instead of {nb_sg}")
 
     # 2) move anonymized graphs from S to K
+    # -> /!\ attention to params /!\
     dict_info_global = list_sg[0].dict_info # we lost some global info
     Ktools.aux_init_S_to_K(model,verbose,device)
     tab_K_repr_cc = []
-    for ano_sg in tab_S_repr_cc:
+    for cc_num,ano_sg in enumerate(tab_S_repr_cc):
+        repr_trans = list_translator[cc_num_to_repr_sg_num[cc_num]]
+        tmp_trans_to_handle_params = Graph_Translator()
+        tmp_trans_to_handle_params.param_dict = repr_trans.param_dict
+        tmp_trans_to_handle_params.reverse_translator = (
+            Graph_Translator(
+                reverse_translator=tmp_trans_to_handle_params))
+        ano_sg = tmp_trans_to_handle_params.reverse_translate(ano_sg)
         ano_sg.dict_info.update(dict_info_global)
-        tab_K_repr_cc.append(Ktools.aux_build_S_to_K(ano_sg,model,None))
+        ano_kg = Ktools.aux_build_S_to_K(ano_sg,model,None)
+        ano_kg = tmp_trans_to_handle_params.translate(ano_kg)
+        tab_K_repr_cc.append(ano_kg)
     list_kg = []
     for sg_num,cc_num in enumerate(sg_num_to_cc_num):
         ano_kg = tab_K_repr_cc[cc_num]

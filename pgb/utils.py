@@ -421,45 +421,6 @@ def cut_based_on_deps(g): # used on D and S
 
 
 # ==========================
-# ======== FWD INFO ========
-# ==========================
-
-class FWD_info(): # everything needed to randomly regenerate a var
-    def __init__(self):
-        self.dtype = None
-        self.ttype = None # target_type
-        self.tsize = None # target_size
-        self.sub_info = None # if ttype = list or tuple
-        self.requires_grad = None # if Tensor or Size
-        self.memsize = None # done much later
-        self.is_inplace = False
-        self.inplace_real_name = None
-    def __eq__(self,i2):
-        d = vdir(self)
-        for s in d:
-            if getattr(self,s) != getattr(i2,s): return False
-        return True
-
-
-def generate_val(info,device):
-    tt = info.ttype
-    if tt==torch.Size:
-        return info.tsize
-    elif tt==torch.Tensor:
-        return torch.ones(info.tsize,
-            dtype=info.dtype,
-            requires_grad=info.requires_grad,
-            device=device)
-    else:
-        assert(tt==list or tt==tuple)
-        x = [generate_val(sub_info,device) for sub_info in info.sub_info]
-        return tt(x)
-
-# ==========================
-
-
-
-# ==========================
 # == SAFELY USE GRAPHVIZ ===
 # ==========================
 

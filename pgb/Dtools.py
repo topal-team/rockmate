@@ -1,4 +1,5 @@
 from .utils import *
+from . import def_info
 from .Btools import B_node,B_graph
 
 # ==========================
@@ -84,36 +85,11 @@ def sort_nodes(g : B_graph): # -> B_node list
     else: return sort_based_on_deps(o_var.node)
 
 
-def get_info(x,is_inplace=False,inplace_real_name=None) -> FWD_info:
-    # for FWD_info see utils.py
-    info = FWD_info()
-    info.is_inplace=is_inplace
-    if is_inplace:
-        info.inplace_real_name = inplace_real_name
-    if (isinstance(x,int) or
-        (isinstance(x,torch.Tensor) and x.shape==torch.Size([]))):
-        tt = torch.Size
-    else:
-        tt = type(x)
-    info.ttype = tt
-    if tt==torch.Size:
-        info.tsize = int(x)
-        info.requires_grad = False
-    elif tt==torch.Tensor:
-        info.tsize = x.shape
-        info.dtype = x.dtype
-        info.requires_grad = x.requires_grad
-    elif tt==tuple or tt==list:
-        info.sub_info = [get_info(y) for y in x]
-    else:
-        raise Exception(f"The type {tt} is unknown")
-    return info
-
 def generate_tmp_local(g,dict_info,dn,our_global):
     tmp_local = {}
     for req_dn in dn.deps:
         req_dn_info = dict_info[req_dn.target]
-        req_x = generate_val(req_dn_info,device) # from utils.py
+        req_x = def_info.generate_val(req_dn_info,device)
         if isinstance(req_x,torch.Tensor):
             req_x = req_x.clone()
         tmp_local[req_dn.target] = req_x
@@ -158,7 +134,8 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None):
         if bn.is_input:
             inputs.append(bn.target)
             dn.is_input = True
-            dict_info[bn.target] = get_info(dict_inputs[bn.target])
+            dict_info[bn.target] = def_info.Var_info(
+                dict_inputs[bn.target])
         for req_bn in bn.deps:
             req_dn = dict_nodes[req_bn]
             dn.deps.add(req_dn)
@@ -186,7 +163,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None):
                         else:
                             inplace_real_name = o_name
                         break
-            dict_info[bn.target] = get_info(
+            dict_info[bn.target] = def_info.Var_info(
                 bn_value,is_inplace,inplace_real_name)
             del tmp_local
 
@@ -211,13 +188,6 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None):
 # === printing functions ===
 # ==========================
 
-def print_info(info : FWD_info):
-    print(f"\tttype = {info.ttype}")
-    print(f"\ttsize = {info.tsize}")
-    print(f"\tdtype = {info.dtype}")
-    print(f"\trequires_grad = {info.requires_grad}")
-    print(f"\tsub_info = {info.sub_info}")
-
 def print_all_fw_nodes(g,print_ast=True):
     # g : B or D graph
     print(g.dict_rand)
@@ -230,8 +200,7 @@ def print_all_fw_nodes(g,print_ast=True):
     if isinstance(g,D_graph):
         print("dict_info : ")
         for (tar,info) in g.dict_info.items():
-            print(f"{tar} info :")
-            print_info(info)
+            print(f"{tar} info : {info}")
 
 def print_fw_code(dg : D_graph):
     print(dg.dict_rand)
