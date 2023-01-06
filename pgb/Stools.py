@@ -453,8 +453,8 @@ def simplify_view(sg):
         #    and (not ref_keep_seq or not sn.protected)
         sn_info = sg.dict_info[sn.main_target]
         if (sn.main_fct in list_view_fct
-        or  sn.main_fct == "getattr"):
-        #or  sn_info.is_inplace):
+        or  sn.main_fct == "getattr"
+        or  sn_info.is_inplace):
             # ASSERTION remaining getattr are related to views !! 
             # we also consider inplace ops as views
             real_deps = get_direct_real_deps(sn)

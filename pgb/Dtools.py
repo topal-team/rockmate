@@ -85,18 +85,33 @@ def sort_nodes(g : B_graph): # -> B_node list
     else: return sort_based_on_deps(o_var.node)
 
 
-def generate_tmp_local(g,dict_info,dn,our_global):
-    tmp_local = {}
-    for req_dn in dn.deps:
-        req_dn_info = dict_info[req_dn.target]
-        req_x = def_info.generate_val(req_dn_info,device)
-        #if isinstance(req_x,torch.Tensor):
-        #    req_x = req_x.clone()
-        tmp_local[req_dn.target] = req_x
-    for req_rd in dn.deps_rand:
+def generate_tmp_local(g,dict_info,bn,our_global,tmp_local=None):
+    if tmp_local is None: tmp_local = dict()
+    for req_bn in bn.deps:
+        if req_bn.target not in tmp_local:
+            req_bn_info = dict_info[req_bn.target]
+            req_x = def_info.generate_val(req_bn_info,device)
+            if isinstance(req_x,torch.Tensor):
+                req_x = req_x.clone()
+            tmp_local[req_bn.target] = req_x
+    for req_rd in bn.deps_rand:
         code = make_str_assign(req_rd,g.dict_rand[req_rd])
         exec(code,our_global,tmp_local)
     return tmp_local
+
+def generate_deep_tmp_local(g,dict_info,bn,our_global):
+    tmp_local = dict()
+    already_done = set()
+    for req_bn in bn.deps:
+        if not req_bn.is_input:
+            generate_tmp_local(
+                g,dict_info,req_bn,our_global,tmp_local=tmp_local)
+            exec(req_bn.get_code(), our_global, tmp_local)
+    generate_tmp_local(
+        g,dict_info,bn,our_global,tmp_local=tmp_local)
+    # to generate the missing inputs
+    return tmp_local
+
 
 # ==========================
 
@@ -145,7 +160,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None):
 
         # -- compute the forward to get info --
         if not bn.is_input:
-            tmp_local = generate_tmp_local(dg,dict_info,bn,our_global)
+            tmp_local = generate_deep_tmp_local(dg,dict_info,bn,our_global)
             exec(bn.get_code(), our_global, tmp_local)
             # - detect inplace operation -
             bn_value = tmp_local[bn.target]

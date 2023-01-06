@@ -256,11 +256,13 @@ def generate_our_global(sg,model,device):
             # need to be done at least once """
     return our_global
 
-def generate_tmp_local(sn,sg : S_graph,our_global):
-    tmp_local = {}
-    exec(sg.init_node.get_code(),our_global,tmp_local)
+def generate_tmp_local(sn,sg : S_graph,our_global,tmp_local=None):
+    if tmp_local is None:
+        tmp_local = dict()
+        exec(sg.init_node.get_code(),our_global,tmp_local)
     for req_sn in sn.deps.keys():
-        if not (req_sn is sg.init_node):
+        if (not (req_sn is sg.init_node)
+        and req_sn.main_target not in tmp_local):
             # we create the main_target value, and we run the body_code
             # but the body_code may requires some artefacts
             req_sn_mt = req_sn.main_target
@@ -277,18 +279,12 @@ def generate_tmp_local(sn,sg : S_graph,our_global):
                             def_info.generate_val(req_req_info,device))
             exec(make_str_list_assign(req_sn.body_code),
                 our_global,tmp_local)
-    """ NO longer needed
-    if sn.is_rand:
-        for req_rd in sn.deps_rand:
-            code = make_str_assign(req_rd,sg.dict_rand[req_rd])
-            exec(code,our_global,tmp_local)
-    """
     return tmp_local
 
 def generate_deep_tmp_local(sn,sg,our_global):
     tmp_local = dict()
     for req_sn in sn.deps.keys():
-        tmp_local.update(generate_tmp_local(req_sn,sg,our_global))
+        generate_tmp_local(req_sn,sg,our_global,tmp_local=tmp_local)
         exec(req_sn.get_code(), our_global, tmp_local)
     return tmp_local
 
@@ -338,6 +334,7 @@ def get_useful_vars(sn : S_node,sg : S_graph,our_global):
 
     req_real = []
     req_ptrs = []
+    print_debug(f"SEE WHICH VARS ARE USEFUL FOR {sn.main_target}")
     for name,val in tmp_local.items():
         if (name not in sg.direct_inputs
         and isinstance(val,torch.Tensor)
