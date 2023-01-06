@@ -154,7 +154,8 @@ def print_graph(g,name=None,open=True):
     open (boolean):
         To automatically open the .pdf with the default reader.
     """
-    if isinstance(g,Dtools.D_graph): Dtools.print_D_graph(g,name,open)
+    if g is None: pass
+    elif isinstance(g,Dtools.D_graph): Dtools.print_D_graph(g,name,open)
     elif isinstance(g,Stools.S_graph): Stools.print_S_graph(g,name,open)
     elif isinstance(g,Ktools.K_graph): Ktools.print_K_graph(g,name,open)
     else: raise Exception(
@@ -168,7 +169,8 @@ def print_graph_list(gl,name=None,open=True):
          i.e. one graph cut by PGB in blocks
          i.e. S_graph_list of K_graph_list
     """
-    if len(gl) == 0: print("Empty list, no graph to visualize")
+    if gl is None: pass
+    elif len(gl) == 0: print("Empty list, no graph to visualize")
     else:
         t = type(gl[0])
         for i in range(1,len(gl)):

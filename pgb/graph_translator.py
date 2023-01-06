@@ -310,7 +310,7 @@ def S_list_to_K_list_eco(
             cc_num_to_repr_sg_num.append(sg_num)
         sg_num_to_cc_num[sg_num] = cc_num
 
-    return tab_S_repr_cc,list_translator
+    # return tab_S_repr_cc,list_translator
 
     # 1') Compute and print connexe components
     nb_cc = len(tab_S_repr_cc)
