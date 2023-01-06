@@ -266,8 +266,8 @@ def generate_tmp_local(sn,sg : S_graph,our_global):
             req_sn_mt = req_sn.main_target
             main_info = sg.dict_info[req_sn_mt]
             req_sn_mt_value = def_info.generate_val(main_info,device)
-            if isinstance(req_sn_mt_value,torch.Tensor):
-                req_sn_mt_value = req_sn_mt_value.clone()
+            # if isinstance(req_sn_mt_value,torch.Tensor):
+            #   req_sn_mt_value = req_sn_mt_value.clone()
             tmp_local[req_sn_mt] = req_sn_mt_value
             for req_req_sn in req_sn.deps.keys():
                 if not (req_req_sn is sg.init_node):
