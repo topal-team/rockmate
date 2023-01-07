@@ -9,15 +9,18 @@ from .utils import *
 
 # attributes : 
 # dtype ; ttype ; tsize ; sub_info ; requires_grad
-# memsize ; is_insplace ; inplace_real_name
+# memsize ; is_insplace ; data_owner_name
 
 class Var_info(): # everything needed to randomly regenerate a var
     def __init__(self,
         value,
+        is_view=False,
         is_inplace=False,
-        inplace_real_name=None):
+        data_owner_name=None):
+        self.is_view    = is_view
         self.is_inplace = is_inplace
-        self.inplace_real_name = inplace_real_name
+        self.data_owner_name = data_owner_name
+        # -> in case is_view or is_inplace
         if (isinstance(value,int) or
             (isinstance(value,torch.Tensor)
             and value.shape==torch.Size([]))):

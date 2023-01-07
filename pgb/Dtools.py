@@ -164,22 +164,32 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None):
             exec(bn.get_code(), our_global, tmp_local)
             # - detect inplace operation -
             bn_value = tmp_local[bn.target]
+            is_view    = False # by default
             is_inplace = False # by default
-            inplace_real_name = None
-            if isinstance(bn_value,torch.Tensor):
+            data_owner_name = None
+            if has_a_data_ptr(bn_value):
+                bn_data_ptr = get_data_ptr(bn_value)
                 for o_name,o_value in tmp_local.items():
                     if (o_name != bn.target
                     and o_name in dict_info
-                    and o_value is bn_value):
-                        o_info = dict_info[o_name]
-                        is_inplace = True
-                        if o_info.is_inplace:
-                            inplace_real_name = o_info.inplace_real_name
+                    and has_a_data_ptr(o_value)
+                    and get_data_ptr(o_value) == bn_data_ptr):
+                        data_owner_name = o_name
+                        if o_value is bn_value:
+                            is_inplace = True
+                            break
                         else:
-                            inplace_real_name = o_name
-                        break
+                            is_view = True
+                            # -> continue
+            if data_owner_name:
+                o_info = dict_info[data_owner_name]
+                if o_info.is_inplace or o_info.is_view:
+                    data_owner_name = o_info.data_owner_name
             dict_info[bn.target] = def_info.Var_info(
-                bn_value,is_inplace,inplace_real_name)
+                bn_value,
+                is_view    = is_view,
+                is_inplace = is_inplace,
+                data_owner_name = data_owner_name)
             del tmp_local
 
     # --- translate output ---

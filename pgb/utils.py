@@ -195,6 +195,24 @@ def vdir(c):
 def copy_generator(gen):
     if gen is None: return None
     else: return [gen[0]]
+
+def has_a_data_ptr(value):
+    return (
+    isinstance(value,torch.Tensor)
+        or
+        ( ( isinstance(value,list) or isinstance(value,tuple))
+        and
+            isinstance(value[0],torch.Tensor))
+    )
+
+
+def get_data_ptr(value):
+    if (isinstance(value,list)
+    or  isinstance(value,tuple)):
+        return get_data_ptr(value[0])
+    elif isinstance(value,torch.Tensor):
+        return value.data_ptr()
+    else: return None
 # ==========================
 
 

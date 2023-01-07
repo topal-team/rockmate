@@ -475,7 +475,8 @@ def simplify_view(sg):
         #if ( sn.main_target != sg.output
         #    and (not ref_keep_seq or not sn.protected)
         sn_info = sg.dict_info[sn.main_target]
-        if (sn.main_fct in list_view_fct
+        if (sn_info.is_view
+        or  sn.main_fct in list_view_fct # in case of op over params
         or  sn.main_fct == "getattr"
         or  sn_info.is_inplace):
             # ASSERTION remaining getattr are related to views !! 
@@ -494,7 +495,7 @@ def simplify_view(sg):
                 else:
                     inplace_real_node = None
                     for req_sn in real_deps:
-                        if req_sn.main_target == sn_info.inplace_real_name:
+                        if req_sn.main_target == sn_info.data_owner_name:
                             inplace_real_node = req_sn
                             break
                     if inplace_real_node is None: print(
