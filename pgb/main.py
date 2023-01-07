@@ -10,7 +10,7 @@ from . import graph_translator
 # ==========================
 
 class all_graphs():
-    def __init__(self,bg,dg,sg,kg,list_sg,list_kg,cc):
+    def __init__(self,bg,dg,sg,kg,list_sg,list_kg,cc,list_ano_S):
         self.B_graph = bg
         self.D_graph = dg
         self.S_graph = sg
@@ -18,6 +18,7 @@ class all_graphs():
         self.S_graph_list = list_sg
         self.K_graph_list = list_kg
         self.equivalent_classes = cc
+        self.list_ano_S = list_ano_S
 
 # ==========================
 
@@ -128,11 +129,11 @@ def make_all_graphs(model,
         list_sg = Stools.cut(sg)
     else: list_sg = None
     if bool_list_kg:
-        cc,list_kg = graph_translator.S_list_to_K_list_eco(
+        cc,list_kg,list_ano_S = graph_translator.S_list_to_K_list_eco(
             list_sg,model,device=device)
-    else: list_kg = None ; cc = None
+    else: list_kg = None ; cc = None ; list_ano_S = None
 
-    return all_graphs(bg,dg,sg,kg,list_sg,list_kg,cc)
+    return all_graphs(bg,dg,sg,kg,list_sg,list_kg,cc,list_ano_S)
 
 # ==========================
 
@@ -142,7 +143,7 @@ def make_all_graphs(model,
 # === printing functions ===
 # ==========================
 
-def print_graph(g,name=None,open=True):
+def print_graph(g,name=None,open=True,render_format="svg"):
     r"""To visualize D, S or K graph.
     This function creates a .gv file, and using
     graphviz's dot function builds a .pdf file.
@@ -155,13 +156,16 @@ def print_graph(g,name=None,open=True):
         To automatically open the .pdf with the default reader.
     """
     if g is None: pass
-    elif isinstance(g,Dtools.D_graph): Dtools.print_D_graph(g,name,open)
-    elif isinstance(g,Stools.S_graph): Stools.print_S_graph(g,name,open)
-    elif isinstance(g,Ktools.K_graph): Ktools.print_K_graph(g,name,open)
+    elif isinstance(g,Dtools.D_graph):
+        Dtools.print_D_graph(g,name,open,render_format)
+    elif isinstance(g,Stools.S_graph):
+        Stools.print_S_graph(g,name,open,render_format)
+    elif isinstance(g,Ktools.K_graph):
+        Ktools.print_K_graph(g,name,open,render_format)
     else: raise Exception(
         "g is neither of type D_graph, S_graph or K_graph")
 
-def print_graph_list(gl,name=None,open=True):
+def print_graph_list(gl,name=None,open=True,render_format="svg"):
     r"""The equivalent of pgb.print_graph for a list of graph.
     Generates all graphs next to each other in a single pdf.
     Note:
@@ -177,17 +181,21 @@ def print_graph_list(gl,name=None,open=True):
             if type(gl[i]) != t: raise Exception(
               f"All graphs in the list must share the same type"\
               f"type(gl[{i}])={type(gl[i])} and type(gl[0])={t}")
-        if t == Stools.S_graph:   Stools.print_S_graph_list(gl,name,open)
-        elif t == Ktools.K_graph: Ktools.print_K_graph_list(gl,name,open)
+        if t == Stools.S_graph:
+            Stools.print_S_graph_list(gl,name,open,render_format)
+        elif t == Ktools.K_graph:
+            Ktools.print_K_graph_list(gl,name,open,render_format)
         else: raise Exception(
             "gl is neither a S_graph list or K_graph list")
 
-def print_all_graphs(a,name,open):
-    print_graph(a.D_graph,f"{name}_D_graph",open)
-    print_graph(a.S_graph,f"{name}_S_graph",open)
-    print_graph(a.K_graph,f"{name}_K_graph",open)
-    print_graph_list(a.S_graph_list,f"{name}_S_cut_graph",open)
-    print_graph_list(a.K_graph_list,f"{name}_K_cut_graph",open)
+def print_all_graphs(a,name="",open=True,render_format="svg"):
+    print_graph(a.D_graph,f"{name}_D_graph",open,render_format)
+    print_graph(a.S_graph,f"{name}_S_graph",open,render_format)
+    print_graph(a.K_graph,f"{name}_K_graph",open,render_format)
+    print_graph_list(a.S_graph_list,f"{name}_S_cut_graph",
+        open,render_format)
+    print_graph_list(a.K_graph_list,f"{name}_K_cut_graph",
+        open,render_format)
 
 # ==========================
 

@@ -53,17 +53,23 @@ class S_node():
             u = unique_id_generator[0]
             self.unique_id = u
             unique_id_generator[0] = u+1
-    def __eq__(self,sn2):
+    def __eq__(self,sn2,raise_exception=False):
         sn1 = self
         b = check_attr(sn1,sn2,[
             "is_artefact","main_fct",
             "is_rand","deps_rand",
             "main_target","all_targets",
-            "tensor_targets","protected"])
+            "tensor_targets","protected"],
+            raise_exception=raise_exception)
         b = (b
-            and dict_edges_eq(sn1.deps,sn2.deps)
-            and dict_edges_eq(sn1.users,sn2.users)
+            and dict_edges_eq(sn1.deps,sn2.deps,
+                raise_exception=raise_exception)
+            and dict_edges_eq(sn1.users,sn2.users,
+                raise_exception=raise_exception)
             and (sn1.get_code() == sn2.get_code()))
+        if not b and raise_exception: raise Exception(
+            f"Node diff : code diff : \n {sn1.get_code()}\n"\
+            f"==== DIFFERENT ==== \n {sn2.get_code()}")
         return b
     def __hash__(self):
         return self.unique_id
@@ -178,11 +184,28 @@ class S_graph():
             self.dict_rand      = dg.dict_rand
         self.unique_id_generator = unique_id_generator
         # -> to generate S_node.__hash__
-    def __eq__(self,sg2):
+    def __eq__(self,sg2,raise_exception=False):
         return check_attr(self,sg2,[
             # "direct_inputs","hidden_inputs", TO TODO
-            "direct_outputs","hidden_output",
-            "dict_info","nodes"])
+            "direct_outputs","hidden_output","dict_info","nodes"],
+            raise_exception=raise_exception)
+        """
+        sg1 = self
+        b = check_attr(sg1,sg2,[
+            # "direct_inputs","hidden_inputs", TO TODO
+            "direct_outputs","hidden_output","dict_info"],
+            raise_exception=raise_exception)
+        nodes1 = sort_nodes(sg1.nodes)
+        nodes2 = sort_nodes(sg2.nodes)
+        b *= len(nodes1) == len(nodes2)
+        if not b and raise_exception: raise Exception(
+            f"S_graph diff, len(nodes) diff : "\
+            f"{len(nodes1)} != {len(nodes1)}")
+        for sn1,sn2 in zip(nodes1,nodes2):
+            b *= sn1.__eq__(sn2,raise_exception=raise_exception)
+        return b
+    """
+
     def __hash__(self):
         return id(self)
 
@@ -656,7 +679,7 @@ def cut(sg : S_graph): # -> list of S_graph
             new_sg.direct_inputs = main_sg.direct_inputs
         else:
             ino = S_node(
-                target=f"init_node of bloc {i}>1, should NEVER be used",
+                target=f"init_node of bloc, should NEVER be used",
                 unique_id_generator = new_sg.unique_id_generator)
             new_sg.hidden_inputs = [inp_node.main_target]
             new_sg.direct_inputs = inp_node.all_targets
@@ -705,17 +728,17 @@ def aux_print_graph(dot,sg,uniq_num):
     edge(sg.hidden_output,"output",sg.direct_outputs)
 
 
-def print_S_graph(sg : S_graph,name=None,open=True):
+def print_S_graph(sg : S_graph,name=None,open=True,render_format="svg"):
     print(f"Simplified forward graph : {len(sg.nodes)} nodes")
     if name is None: name = "forward S-graph"
     dot = graphviz.Digraph(
         name,
         comment="S_graph = Simplified forward graph")
     aux_print_graph(dot,sg,0)
-    graph_render(dot,open,"S") # from utils.py
+    graph_render(dot,open,"S",render_format) # from utils.py
 
 
-def print_S_graph_list(list_sg,name=None,open=True):
+def print_S_graph_list(list_sg,name=None,open=True,render_format="svg"):
     s = "+".join([str(len(sg.nodes)) for sg in list_sg])
     print(
         f"{len(list_sg)} blocs of S_graph, with {s} = "\
@@ -726,7 +749,7 @@ def print_S_graph_list(list_sg,name=None,open=True):
         comment="S_graph list : cut simplified forward graph")
     for i in range(len(list_sg)):
         aux_print_graph(dot,list_sg[i],i)
-    graph_render(dot,open,"S") # from utils.py
+    graph_render(dot,open,"S",render_format) # from utils.py
 
 # ==========================
 

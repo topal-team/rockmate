@@ -220,14 +220,14 @@ class K_graph():
                 b *= eq_node(kn1,kn2)
         keys1 = list(g1.dict_kn)
         keys2 = list(g2.dict_kn)
-        #if force_order:
-        #    keys1 = sort_names(keys1)
-        #    keys2 = sort_names(keys2)
-        #b *= (keys1 == keys2)
+        if force_order:
+            keys1 = sort_names(keys1)
+            keys2 = sort_names(keys2)
+        b *= (keys1 == keys2)
         if not b and raise_exception:
             raise Exception("Kgraphs differ on dict_kn's keys (order?)")
-        for k in keys1:
-            b *= eq_node(g1.dict_kn[k],g2.dict_kn[k])
+        #for k in keys1:
+        #    b *= eq_node(g1.dict_kn[k],g2.dict_kn[k])
         b *= check_attr(g1,g2,["dict_info"],raise_exception)
         return bool(b)
     def __hash__(self):
@@ -268,8 +268,8 @@ def generate_tmp_local(sn,sg : S_graph,our_global,tmp_local=None):
             req_sn_mt = req_sn.main_target
             main_info = sg.dict_info[req_sn_mt]
             req_sn_mt_value = def_info.generate_val(main_info,device)
-            # if isinstance(req_sn_mt_value,torch.Tensor):
-            #   req_sn_mt_value = req_sn_mt_value.clone()
+            if isinstance(req_sn_mt_value,torch.Tensor):
+                req_sn_mt_value = req_sn_mt_value.clone()
             tmp_local[req_sn_mt] = req_sn_mt_value
             for req_req_sn in req_sn.deps.keys():
                 if not (req_req_sn is sg.init_node):
@@ -364,6 +364,7 @@ def get_useful_vars(sn : S_node,sg : S_graph,our_global):
 
 class Inspection_result():
     def __init__(self):
+        self.relevant     = False # -> turn True is result of inspection
         self.mem_del_fwd  = MemSize(0)
         self.overhead_fwd = MemSize(0)
         self.overhead_bwd = MemSize(0)
@@ -385,6 +386,7 @@ class inspector():
         self.our_global = our_global
         self.tmp_local = generate_tmp_local(sn,sg,our_global)
         self.ret = Inspection_result()
+        self.ret.relevant = True
     
     # -- aux --
     def measure_time(self, fct, inter_fct=None):
@@ -625,7 +627,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
         kcn_fwd.overhead = res.overhead_fwd
         kcn_fwd.time     = res.time_run_fwd
         kdn_data.mem     = res.mem_fgt_fwd
-        info.memsize     = res.mem_fgt_fwd # -> may correct
+        if res.relevant: info.memsize = res.mem_fgt_fwd
 
         # -> bwd ins
         if info.requires_grad:
@@ -889,7 +891,7 @@ def aux_print_graph(dot,kg,uniq_num):
         edge(req_inp_grad.name,inp_grad.name,**kwargs)
 
 
-def print_K_graph(kg : K_graph,name=None,open=True):
+def print_K_graph(kg : K_graph,name=None,open=True,render_format="svg"):
     if name is None: name = "complet K-graph"
     print(
         f"Forward + Backward graph with Computation and "\
@@ -897,10 +899,10 @@ def print_K_graph(kg : K_graph,name=None,open=True):
     dot = graphviz.Digraph(name,
         comment="K_graph = Forward + Backward with Comp and Data nodes")
     aux_print_graph(dot,kg,0)
-    graph_render(dot,open,"K") # from utils.py
+    graph_render(dot,open,"K",render_format) # from utils.py
 
 
-def print_K_graph_list(list_kg,name=None,open=True):
+def print_K_graph_list(list_kg,name=None,open=True,render_format="svg"):
     if name is None: name = "seq K-graphs"
     list_nb_kcn = [len(kg.list_kcn) for kg in list_kg]
     list_nb_kdn = [len(kg.list_kdn) for kg in list_kg]
@@ -918,7 +920,7 @@ def print_K_graph_list(list_kg,name=None,open=True):
         comment="K_graph list : cut fwd+bwd with Comp and Data nodes")
     for i in range(len(list_kg)):
         aux_print_graph(dot,list_kg[i],i)
-    graph_render(dot,open,"K") # from utils.py
+    graph_render(dot,open,"K",render_format) # from utils.py
 
 # ==========================
 

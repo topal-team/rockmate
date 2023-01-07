@@ -36,18 +36,22 @@ class Var_info(): # everything needed to randomly regenerate a var
         else:
             raise Exception(f"The type {tt} is not supported for Var_info")
 
-    def __eq__(self,i2):
-        d = vdir(self)
+    def __eq__(self,i2,raise_exception=False):
+        i1 = self
+        d = vdir(i1)
         for s in d:
-            if getattr(self,s) != getattr(i2,s): return False
+            v1 = getattr(i1,s)
+            v2 = getattr(i2,s)
+            if v1 != v2:
+                if raise_exception: raise Exception(
+                    f"Info diff on attr : {s} : {v1} != {v2}")
+                return False
         return True
 
     def __str__(self):
         s = ""
-        for attr in [
-            "ttype","tsize","dtype","requires_grad",
-            "requires_grad","memsize","is_insplace",
-            "inplace_real_name","sub_info"]:
+        attrs = vdir(self)
+        for attr in attrs:
             if hasattr(self,attr):
                 s += f"\t{attr} = {getattr(self,attr)}\n"
         return s

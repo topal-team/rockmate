@@ -225,7 +225,7 @@ def print_fw_code(dg : D_graph):
         if not dn.is_input: print(f"\t{dn.get_code()}")
     print(f"\treturn {dg.output}")
 
-def print_D_graph(dg : D_graph,name=None,open=True):
+def print_D_graph(dg : D_graph,name=None,open=True,render_format="svg"):
     print(len(dg.nodes))
     if name is None:
         name = "forward D-graph"
@@ -239,7 +239,7 @@ def print_D_graph(dg : D_graph,name=None,open=True):
     for dn in dg.nodes:
         for req_dn in dn.deps:
             dot.edge(req_dn.target,dn.target)
-    graph_render(dot,open,"D") # from utils.py
+    graph_render(dot,open,"D",render_format) # from utils.py
 
 # ==========================
 

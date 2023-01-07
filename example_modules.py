@@ -136,7 +136,7 @@ class GPT2(nn.Module):
         if pos_ids is None: pos_ids = torch.arange(0, src.size(-1), dtype=torch.long,device=self.wpe.weight.device).unsqueeze(0)
         inp = self.drop((self.wte(src)+self.wpe(pos_ids)))
         if return_inp: return inp
-        for i in range(self.nlayers): inp = self.h[0](inp)
+        for i in range(self.nlayers): inp = self.h[i](inp)
         inp     = self.ln_f(inp)
         logits  = self.out(inp)
         outputs = (logits,) + (inp,)

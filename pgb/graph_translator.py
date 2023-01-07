@@ -292,8 +292,6 @@ def S_list_to_K_list_eco(
         b = False ; cc_num = 0 ; nb_cc = len(tab_S_repr_cc)
         while not b and cc_num < nb_cc:
             if ano_sg == tab_S_repr_cc[cc_num]:
-                print(
-                    f"{sg_num} and {cc_num_to_repr_sg_num[cc_num]}")
                 # -> We also need to manualy check param_info equalities
                 sort_key = lambda v : int(v[0][11:])
                 repr_tr = list_translator[cc_num_to_repr_sg_num[cc_num]]
@@ -369,7 +367,7 @@ def S_list_to_K_list_eco(
         assert(real_inp_data.main_target == fake_inp_data.main_target)
         assert(real_inp_grad.main_target == fake_inp_grad.main_target)
 
-    return cc,list_kg
+    return cc,list_kg,tab_S_repr_cc
 
 
 

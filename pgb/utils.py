@@ -155,11 +155,39 @@ list_view_fct = [
 # ==========================
 # === SMALL USEFUL FCTS ====
 # ==========================
+def clean__eq__(a1,a2,raise_exception=False):
+    if not raise_exception: return bool(a1 == a2)
+    if type(a1) != type(a2): raise Exception(
+        f"{a1} and {a2} differ on type")
+    if (isinstance(a1,list)
+    or isinstance(a1,tuple)
+    or isinstance(a1,set)):
+        if len(a1) != len(a2): raise Exception(
+            f"iterables diff: length diff: {len(a1)} != {len(a2)}")
+        for x1,x2 in zip(a1,a2): clean__eq__(x1,x2,True)
+    elif isinstance(a1,dict):
+        keys1 = list(a1.keys())
+        nb1 = len(keys1)
+        nb2 = len(a2.keys())
+        if nb1 != nb2: raise Exception(
+            f"dict diff : nb of keys diff : {nb1} != {nb2}")
+        for k in keys1:
+            if k not in a2: raise Exception(
+                f"dict diff : {k} is in dict1 but not dict2")
+            clean__eq__(a1[k],a2[k],True)
+    else:
+        try: return a1.__eq__(a2,raise_exception=True)
+        except TypeError: return bool(a1 == a2)
+    return True
+
+
 def check_attr(o1,o2,list_attr,raise_exception=False):
     for s in list_attr:
-        if getattr(o1,s) != getattr(o2,s):
-            if raise_exception: raise Exception(f"attr diff {s}")
-            return False
+        v1 = getattr(o1,s)
+        v2 = getattr(o2,s)
+        if not raise_exception:
+            if v1 != v2: return False
+        else: clean__eq__(v1,v2,raise_exception=True)
     return True
 def vdir(c):
     return [s for s in dir(c) if not s.startswith("__")]
@@ -271,10 +299,25 @@ def dict_edges_add(de,sn,str_set):
     dict_edges_add_inplace(d,sn,str_set)
     return d
 
-def dict_edges_eq(de1,de2):
+def dict_edges_eq(de1,de2,raise_exception=False):
     ds1 = dict((n.main_target,s) for (n,s) in de1.items())
     ds2 = dict((n.main_target,s) for (n,s) in de2.items())
-    return ds1 == ds2
+    if not raise_exception:
+        return ds1 == ds2
+    else:
+        keys1 = sort_targets(ds1.keys())
+        keys2 = sort_targets(ds2.keys())
+        if len(keys1) != len(keys2): raise Exception(
+            "Difference of dict_edges: "\
+            "number of edges (keys) diff")
+        for i,(k1,k2) in enumerate(zip(keys1,keys2)):
+            if k1 != k2: raise Exception(
+                f"Difference of dict_edges: "\
+                f"{i}-th edge key diff : {k1} != {k2}")
+            if ds1[k1] != ds2[k2]: raise Exception(
+                f"Difference of dict_edges: "\
+                f"{i}-th edge labels diff : {ds1[k1]} != {ds2[k2]}")
+        return True
     # since this function is an auxilary function for S_node.__eq__ method
     # we cannot check s_nodes equalities, we just check .main_target
 
@@ -424,9 +467,12 @@ def cut_based_on_deps(g): # used on D and S
 # == SAFELY USE GRAPHVIZ ===
 # ==========================
 
-def graph_render(dot,open,graph_type):
+def graph_render(dot,open,graph_type,render_format):
     try:
-      dot.render(directory="graphviz_dir",quiet=True,view=open)
+      dot.render(directory="graphviz_dir",
+              format=render_format,
+              quiet=True,
+              view=open)
     except:
       print(f"Warning : issue with graphviz to print {graph_type}_graph, "\
             f"probably because Graphviz isn't installed on the computer "\
