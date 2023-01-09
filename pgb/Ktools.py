@@ -16,8 +16,11 @@ class K_C_node():
             target="/!\\ No target /!\\",
             is_fwd=True,
             is_rand=False,
-            main_code=None,body_code=None,
-            deps_real=None,deps_fake=None,
+            main_code=None,
+            inplace_code=None,
+            body_code=None,
+            deps_real=None,
+            deps_fake=None,
             deps_through_size_artefacts=None,
             unique_id_generator = None):
         # ** informative **
@@ -28,6 +31,7 @@ class K_C_node():
         self.is_fwd      = is_fwd
         self.is_rand     = is_rand
         self.main_code   = main_code # target * AST
+        self.inplace_code= inplace_code if inplace_code else []
         self.body_code   = body_code if body_code else [] # (str*AST) list
         if unique_id_generator is None: self.unique_id = id(self)
         else:
@@ -88,11 +92,15 @@ class K_C_node():
 
     def get_main_code(self):
         return make_str_assign(self.main_code)
-    def get_code(self):
+    def get_code(self): # -> S_node.get_code
+        dict_ic = dict(self.inplace_code)
+        bc = [
+            (tar,dict_ic[tar] if tar in dict_ic else acode)
+            for (tar,acode) in self.body_code]
         mc = make_str_assign(self.main_code)
         mc = "" if mc == "" else mc+"\n"
-        bc = make_str_list_assign(self.body_code)
-        return mc + bc
+        bc = make_str_list_assign(bc)
+        return mc+bc
 
 
 # ************

@@ -24,9 +24,12 @@ class S_node():
             -> (done by s_graph.make_tensor_targets)
         .main_code  : tar*AST :
             -> .main_target * AST right part of the assigning code of it
+        .inplace_code : tar*AST list
+            -> every assigns needed before the last inplace op
         .body_code  : tar*AST list
             -> for every tar except main_target:
             -> target name * AST value of the assign
+            -> in case of inplace op: "a = b.relu_" -> "a = b"
         .main_fct   : str  : fct used in .main_code
         .protected  : bool : see Doc (1-separator of the graph)
         .is_artefact: bool : see Doc (useful size node)
@@ -39,7 +42,8 @@ class S_node():
         self.is_artefact = False
         self.main_code = (target,code)
         self.main_fct = fct
-        self.body_code = [] # list of tar * AST
+        self.inplace_code = [] # list of tar * AST
+        self.body_code    = []
         self.main_target = target # str
         self.all_targets = [target]
         self.tensor_targets = [] # later
@@ -66,22 +70,90 @@ class S_node():
                 raise_exception=raise_exception)
             and dict_edges_eq(sn1.users,sn2.users,
                 raise_exception=raise_exception)
-            and (sn1.get_code() == sn2.get_code()))
+            and (sn1.full_code() == sn2.full_code()))
         if not b and raise_exception: raise Exception(
-            f"Node diff : code diff : \n {sn1.get_code()}\n"\
-            f"==== DIFFERENT ==== \n {sn2.get_code()}")
+            f"Node diff : code diff : \n {sn1.full_code()}\n"\
+            f"==== DIFFERENT ==== \n {sn2.full_code()}")
         return b
     def __hash__(self):
         return self.unique_id
     # -> /!\ /!\ doing set/dict of S_nodes is dangereous /!\ /!\ 
     # but I'm doing this to avoid undeterminism
 
+    # -- Code generation --
     def get_code(self):
+        return get_code(self)
+        dict_ic = dict(self.inplace_code)
+        bc = [
+            (tar,dict_ic[tar] if tar in dict_ic else acode)
+            for (tar,acode) in self.body_code]
         mc = make_str_assign(self.main_code)
         mc = "" if mc == "" else mc+"\n"
-        bc = make_str_list_assign(self.body_code)
+        bc = make_str_list_assign(bc)
         return mc+bc
+    def full_code(self):
+        # This function is a way to produce what the final
+        # code will look like (including detach). But it's
+        # never used in RK, the translator isn't that simple.
+        mt = self.main_target
+        mc = make_str_assign(self.main_code,prefix="_")
+        ic = make_str_list_assign(self.inplace_code)
+        bc = make_str_list_assign(self.body_code)
+        if mc == "":
+            return bc
+        else:
+            s = f"{mc}\n{mt} = _{mt}\n"
+            s += ic+"\n" if ic != "" else ""
+            s += f"{mt} = _{mt}.detach().requires_grad_()\n"
+            s += make_str_list_assign(bc)
+            return s
+    # -----
 
+
+    # -----
+    def insert_code(self,aux_sn,sg):
+        # -> aux function of .insert method
+        # -> but used directly sometimes
+        dict_info = sg.dict_info
+        aux_mt = aux_sn.main_target
+        aux_info = dict_info[aux_mt]
+        if not aux_info.is_inplace:
+            if aux_sn.main_code is None: print(
+                f"Warning : we tried to insert {aux_mt}'s "\
+                f"node in {self.main_target}'s node, but aux_sn's "\
+                f"main_code is empty ? How could this be possible ?!",
+                file = sys.stderr)
+            else:
+                self.body_code.append(aux_sn.main_code)
+            self.body_code.extend(aux_sn.body_code)
+        else:
+            # -> we need to push inplace code (and its deps)
+            data_parents = []
+            data_owner = aux_info.data_owner_name
+            p_info = aux_info
+            p_name = p_info.data_direct_parent_name
+            while p_name != data_owner:
+                data_parents.append(p_name)
+                p_info = dict_info[p_name]
+                p_name = p_info.data_direct_parent_name
+            ic = self.inplace_code
+            bc = self.body_code
+            already_in_ic = set(c[0] for c in ic)
+            for code in bc:
+                if (code[0] in data_parents
+                and code[0] not in already_in_ic):
+                    ic.append(code)
+            ic.append(aux_sn.main_code)
+            bc.append((aux_mt,ast.Name(aux_info.data_direct_parent_name)))
+            bc.extend(aux_sn.body_code)
+
+        self.all_targets.extend(aux_sn.all_targets)
+        self.is_rand = self.is_rand or aux_sn.is_rand
+        self.deps_rand.update(aux_sn.deps_rand)
+    # -----
+
+
+    # -----
     def insert(self,aux_sn,strong,sg):
         # this is the fct to merge nodes : we insert "aux_sn" in "self"
         # if strong: delete aux_sn else aux_sn becomes an artefact
@@ -111,22 +183,16 @@ class S_node():
             # -> artefact
 
         # -- insert aux_sn code --
-        assert(aux_sn.main_code is not None)
-        self.body_code.append(aux_sn.main_code)
-        self.body_code.extend(aux_sn.body_code)
-        self.all_targets.extend(aux_sn.all_targets)
-        self.is_rand = self.is_rand or aux_sn.is_rand
-        self.deps_rand.update(aux_sn.deps_rand)
-
+        self.insert_code(aux_sn,sg)
         # -- edges --
         self.deps = merged_deps
         self.users = merged_users
         dict_edges_make_users_using_deps(self)
         dict_edges_make_deps_using_users(self)
-
         # -- special case if aux_n is the output --
         if aux_sn is sg.output_node:
             sg.output_node = self
+    # -----
 
     def clear_children_artefact(self):
         # clean useless artefact children of self
@@ -318,7 +384,7 @@ def D_to_S_init(dg : D_graph,keep_sequential=False) -> S_graph:
     # -- merge all the inputs in the special "init_node" --
     for inp in dg.inputs:
         init_node.insert(dict_s_nodes[inp],strong=True,sg=sg)
-    init_node.body_code = []
+    init_node.body_code = [] # because all input nodes have dummy code
     sg.init_node = init_node
     sg.output_node = dict_s_nodes[dg.output]
     sg.clear()
@@ -527,9 +593,8 @@ def simplify_view(sg):
                     assert(len(art_req.deps)==1) # as an artefact
                     real_req = list(art_req.deps.keys())[0]
                     # - Insert sn's code both in art_req and real_req -
-                    for aux_sn in [art_req,real_req]:
-                        aux_sn.body_code.append(sn.main_code)
-                        aux_sn.body_code.extend(sn.body_code)
+                    art_req.insert_code(sn,sg)
+                    real_req.insert_code(sn,sg)
                     # - plug art_req to sn's users -
                     dict_edges_merge_inplace(art_req.users,sn.users)
                     for (user_sn,str_set) in sn.users.items():
@@ -612,6 +677,7 @@ def copy_S_node(sn : S_node): # aux for copy_S_graph
     new_sn.is_artefact    = sn.is_artefact
     new_sn.main_code      = tuple(sn.main_code)
     new_sn.main_fct       = sn.main_fct
+    new_sn.inplace_code   = [tuple(c) for c in sn.inplace_code]
     new_sn.body_code      = [tuple(c) for c in sn.body_code]
     new_sn.main_target    = sn.main_target
     new_sn.all_targets    = list(sn.all_targets)

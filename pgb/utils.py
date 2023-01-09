@@ -375,6 +375,32 @@ def dict_edges_is_subset(de1,de2):
 # ==== TOPO SORT GRAPHS ====
 # ==========================
 
+def get_code(n): # For S_node or KCN
+    dict_ic = dict(n.inplace_code)
+    bc = [
+        (tar,dict_ic[tar] if tar in dict_ic else acode)
+        for (tar,acode) in n.body_code]
+    mc = make_str_assign(n.main_code)
+    mc = "" if mc == "" else mc+"\n"
+    bc = make_str_list_assign(bc)
+    return mc+bc
+def full_code(self):
+    # This function is a way to produce what the final
+    # code will look like (including detach). But it's
+    # never used in RK, the translator isn't that simple.
+    mt = self.main_target
+    mc = make_str_assign(self.main_code,prefix="_")
+    ic = make_str_list_assign(self.inplace_code)
+    bc = make_str_list_assign(self.body_code)
+    if mc == "":
+        return bc
+    else:
+        s = f"{mc}\n{mt} = _{mt}\n"
+        s += ic+"\n" if ic != "" else ""
+        s += f"{mt} = _{mt}.detach().requires_grad_()\n"
+        s += make_str_list_assign(bc)
+        return s
+
 def get_target(n):
     try: return n.target
     except: return n.main_target
