@@ -1,5 +1,7 @@
 __pycache__
-.ipynb_checkpoints/*
-/rotor/.ipynb_checkpoints/*
+.ipynb_checkpoints/
 *.ipynb
-/graphviz_dir/*
+*.swp
+graphviz_dir/
+bean/
+lehellard_theotime.pdf
