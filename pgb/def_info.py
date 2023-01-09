@@ -8,18 +8,23 @@ from .utils import *
 # -> e.g. to regenerate it, using def_info.generate_var(info,device)
 
 # attributes : 
-# dtype ; ttype ; tsize ; sub_info ; requires_grad
-# memsize ; is_insplace ; data_owner_name
+# dtype ; ttype ; tsize
+# sub_info ; requires_grad ; memsize
+# is_view ; is_inplace ; 
+# data_owner_name ; data_direct_parent_name
 
 class Var_info(): # everything needed to randomly regenerate a var
     def __init__(self,
         value,
         is_view=False,
         is_inplace=False,
-        data_owner_name=None):
+        data_owner_name=None,
+        data_direct_parent_name=None):
         self.is_view    = is_view
         self.is_inplace = is_inplace
         self.data_owner_name = data_owner_name
+        ddpn = data_direct_parent_name
+        self.data_direct_parent_name = ddpn if ddpn else data_owner_name
         # -> in case is_view or is_inplace
         if (isinstance(value,int) or
             (isinstance(value,torch.Tensor)

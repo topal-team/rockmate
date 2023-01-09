@@ -171,6 +171,8 @@ class Graph_Translator():
         # -- info --
         elif isinstance(x,def_info.Var_info): # /!\ inplace /!\
             x.data_owner_name = translate(x.data_owner_name)
+            x.data_direct_parent_name = (
+                translate(x.data_direct_parent_name))
             return x
 
         # -- S_NODE --
