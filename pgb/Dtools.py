@@ -150,7 +150,8 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None):
             inputs.append(bn.target)
             dn.is_input = True
             dict_info[bn.target] = def_info.Var_info(
-                dict_inputs[bn.target])
+                dict_inputs[bn.target],
+                data_owner_name = bn.target)
         for req_bn in bn.deps:
             req_dn = dict_nodes[req_bn]
             dn.deps.add(req_dn)
@@ -166,7 +167,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None):
             bn_value = tmp_local[bn.target]
             is_view    = False # by default
             is_inplace = False # by default
-            data_owner_name = None
+            data_parents = set()
             if has_a_data_ptr(bn_value):
                 bn_data_ptr = get_data_ptr(bn_value)
                 for o_name,o_value in tmp_local.items():
@@ -174,22 +175,28 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None):
                     and o_name in dict_info
                     and has_a_data_ptr(o_value)
                     and get_data_ptr(o_value) == bn_data_ptr):
+                        data_parents.add(o_name)
                         data_owner_name = o_name
-                        if o_value is bn_value:
-                            is_inplace = True
-                            break
-                        else:
-                            is_view = True
-                            # -> continue
-            if data_owner_name:
-                o_info = dict_info[data_owner_name]
-                if o_info.is_inplace or o_info.is_view:
-                    data_owner_name = o_info.data_owner_name
+                        if o_value is bn_value: is_inplace = True
+                        else: is_view = True
+            if is_inplace or is_view:
+                bn_deps_names = set(req_bn.target for req_bn in bn.deps)
+                data_direct_parents = bn_deps_names & data_parents
+                if len(data_direct_parents) == 0: raise Exception(
+                    f"{bn.target} is an inplace or view op, it doesn't "\
+                    f"share its data with any of its deps ?!")
+                data_direct_parent_name = data_direct_parents.pop()
+                o_info = dict_info[data_direct_parent_name]
+                data_owner_name = o_info.data_owner_name
+            else:
+                data_owner_name = bn.target
+                data_direct_parent_name = bn.target
             dict_info[bn.target] = def_info.Var_info(
                 bn_value,
                 is_view    = is_view,
                 is_inplace = is_inplace,
-                data_owner_name = data_owner_name)
+                data_owner_name = data_owner_name,
+                data_direct_parent_name = data_direct_parent_name)
             del tmp_local
 
     # --- translate output ---
