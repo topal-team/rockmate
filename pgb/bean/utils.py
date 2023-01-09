@@ -40,14 +40,6 @@ py_version = svi.major + svi.minor/10
 # ====== GLOBAL VARS =======
 # ==========================
 
-time_min_duration = 0
-time_min_repeat = 5
-
-# -> print debug messages
-ref_verbose = [False]
-def print_debug(*args, **kwargs):
-    if ref_verbose[0]:
-        print(*args, **kwargs)
 
 # -> to raise exceptions with lambda functions
 def raise_(s):
@@ -89,14 +81,7 @@ def get_device_and_check_all_same_device(
 
 
 
-# -> acceptance rate for two time measures to be declared equal
-ref_reasonable_rate = [0.4]
-def change_reasonable_rate(x):
-    assert(0<=x)
-    ref_reasonable_rate[0] = x
 
-# -> to test phantoms detection
-ref_test_phantoms_detection = [False]
 
 # ==========================
 
@@ -106,7 +91,7 @@ ref_test_phantoms_detection = [False]
 # === LISTS OF FUNCTIONS ===
 # ==========================
 
-list_rand_fct = ["torch.randn"]
+list_rand_fct = ["torch.randn","torch.dropout"]
 # TODO : complete this list
 
 list_cheap_fct = [

@@ -1,9 +1,11 @@
-from .utils import *
-from . import Btools
-from . import Dtools
-from . import Stools
-from . import Ktools
-from . import graph_translator
+from pgb.utils import *
+from pgb import Btools
+from pgb import Dtools
+from pgb import Stools
+from pgb import Ktools
+from pgb import Atools
+import inspect
+
 
 # ==========================
 # ====== OUTPUT CLASS ======
@@ -91,7 +93,7 @@ def make_all_graphs(model,
     bool_bg = bool_bg or bool_dg
 
     # check inputs
-    ref_verbose[0] = verbose
+    global_vars.ref_verbose[0] = verbose
     check_inputs(model,dict_inputs)
 
     # check device
@@ -109,7 +111,8 @@ def make_all_graphs(model,
             if not p.is_cuda: b=True
         if b: things_not_on_cuda.append("the model")
     print_cuda_warning_msg(things_not_on_cuda)
-    device = get_device_and_check_all_same_device(model,dict_inputs)
+    device = small_fcts.get_device_and_check_all_same_device(
+        model,dict_inputs)
 
 
     # -- the whole module --
@@ -129,7 +132,7 @@ def make_all_graphs(model,
         list_sg = Stools.cut(sg)
     else: list_sg = None
     if bool_list_kg:
-        cc,list_kg,list_ano_S = graph_translator.S_list_to_K_list_eco(
+        cc,list_kg,list_ano_S = Atools.S_list_to_K_list_eco(
             list_sg,model,device=device)
     else: list_kg = None ; cc = None ; list_ano_S = None
 

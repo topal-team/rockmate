@@ -9,7 +9,7 @@
 # mostly "target = fct_name(*(const / var name / sub_obj))
 # ------------------------------------
 
-from .utils import *
+from pgb.utils import *
 
 # ==========================
 #  ====== B structure =======
@@ -29,7 +29,7 @@ class B_node:
         """
         self.target = target
         if not code:
-            code = make_ast_constant("/!\\ not defined /!\\")
+            code = ast_add_on.make_ast_constant("/!\\ not defined /!\\")
         self.ast_code = code
         self.fct = fct
         if deps is None:
@@ -37,13 +37,13 @@ class B_node:
         else:
             self.deps = deps
         self.is_input = is_input
-        self.is_rand  = bool(fct in list_rand_fct)
+        self.is_rand  = bool(fct in global_vars.list_rand_fct)
         self.deps_rand = set()
         global all_nodes
         all_nodes.append(self)
 
     def get_code(self):
-        return make_str_assign((self.target, self.ast_code))
+        return ast_add_on.make_str_assign((self.target, self.ast_code))
 
 
 class B_var:
@@ -134,7 +134,7 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
         for i in range(1, nb_i):
             i_node = B_node(
                 target=inputs[i],
-                code=make_ast_constant("INPUT"),
+                code=ast_add_on.make_ast_constant("INPUT"),
                 fct="INPUT",
                 deps=set(),
                 is_input=True,
@@ -173,7 +173,7 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
             attr = ".".join(l_attr)
             new_val = ast.Call(
                 func=ast.Name("getattr"),
-                args=[p_val, make_ast_constant(attr)],
+                args=[p_val, ast_add_on.make_ast_constant(attr)],
                 keywords=[],
             )
         return new_val
@@ -197,7 +197,7 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
         return new_var
 
     def handle_attr(expr: ast.Attribute, target: str):
-        l_name = open_attr_until_name(expr)
+        l_name = ast_add_on.open_attr_until_name(expr)
         assert l_name[0] in dict_vars
         # -> else raise "Unknown variable, global ?"
         parent_var = dict_vars[l_name[0]]
@@ -224,7 +224,8 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
             main_val = main_var.get_value(calling_node=new_node)
             assert isinstance(main_val, ast.Name)
             # else : to much simplifications :/
-            new_node.ast_code = ast.Subscript(main_val, make_ast_constant(i))
+            new_node.ast_code = ast.Subscript(
+                main_val, ast_add_on.make_ast_constant(i))
             new_var = B_var(ast.Name(new_tg_id), node=new_node)
             dict_vars[tg] = new_var
 
@@ -233,25 +234,26 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
     # -- handle a function call -- (cross recursive with handle_expr)
     def handle_call(expr: ast.Call, target) -> B_var:
-        l_name = open_attr_until_name(expr.func)  # full name
+        l_name = ast_add_on.open_attr_until_name(expr.func)  # full name
         args = list(expr.args)
 
         # == explicit getattr ==
         if len(l_name) == 1 and l_name[0] == "getattr":
             assert len(args) == 2
-            assert is_constant(args[1])
+            assert ast_add_on.is_constant(args[1])
             # assert(isinstance(args[1],ast.Constant))
             # -> otherwise handle_expr ?
             parent_var = handle_expr(args[0])
             attr = args[1].value
             if attr.isdigit():
                 format_fct = lambda pv: ast.Subscript(
-                    value=pv, slice=make_ast_constant(int(attr))
+                    value=pv,
+                    slice=ast_add_on.make_ast_constant(int(attr))
                 )
             else:
                 format_fct = lambda pv: ast.Call(
                     func=ast.Name("getattr"),
-                    args=[pv, make_ast_constant(attr)],
+                    args=[pv, ast_add_on.make_ast_constant(attr)],
                     keywords=[],
                 )
             return aux_handle_attr(target, parent_var, format_fct, [attr])
@@ -274,15 +276,15 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
             if l_name[0] in dict_vars:
                 sub_var = dict_vars[l_name[0]]
                 print_debug(
-                    f"In {sub_mod_str}.{sub_fct} try to sub "
-                    f"open {ast_to_str(sub_var.val)}.{l_name[1:]}"
+                    f"In {sub_mod_str}.{sub_fct} try to sub open "
+                    f"{ast_add_on.ast_to_str(sub_var.val)}.{l_name[1:]}"
                 )
                 assert sub_var.is_attr_of_self
                 sub_sub_mod = sub_mod
                 path_from_self = sub_var.path_from_self + l_name[1:-1]
                 for at in path_from_self:
                     sub_sub_mod = getattr(sub_sub_mod, at)
-                sub_sub_str = ast_to_str(sub_var.val)
+                sub_sub_str = ast_add_on.ast_to_str(sub_var.val)
                 sub_graph = open_sub_module(
                     sub_sub_mod, sub_sub_str, l_name[-1], args_Bvar
                 )
@@ -331,7 +333,7 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
                     elif not (
                         (
                             (kw.arg == "dtype" or kw.arg == "layout")
-                            and is_constant(kw.value)
+                            and ast_add_on.is_constant(kw.value)
                             and isinstance(kw.value.value, int)
                         )
                         or (kw.arg == "layout" and kw.value.value is None)
@@ -378,7 +380,7 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
     # The optional parameter  "target" imposes the name of the var created
     # /!\ TorchScript's global constant vars must have been removed
     def handle_expr(expr, target: str = None) -> B_var:
-        if is_constant(expr):
+        if ast_add_on.is_constant(expr):
             return B_var(expr)
         elif isinstance(expr, ast.Name):
             assert expr.id in dict_vars
@@ -388,7 +390,7 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
             and isinstance(expr.value, ast.Name)
             and expr.value.id == "CONSTANTS"
         ):
-            return B_var(make_ast_constant(memory[expr.attr]))
+            return B_var(ast_add_on.make_ast_constant(memory[expr.attr]))
         elif isinstance(expr, ast.Attribute):
             return handle_attr(expr, target)  # may creates one node
         elif isinstance(expr, ast.Call):
@@ -400,7 +402,7 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
             return aux_handle_tuple_or_list(expr, target, "tuple")
         elif isinstance(expr, ast.UnaryOp):
             assert isinstance(expr.op, ast.USub)  # quick fix
-            assert is_constant(expr.operand)
+            assert ast_add_on.is_constant(expr.operand)
             return B_var(expr)
         else:
             raise Exception(f"{type(expr)} unknown")
@@ -460,7 +462,7 @@ def make_B(model, ex_inputs, verbose=None, impose_device=True, device=None):
     fresh_var = 0
     var_impose_device = impose_device
     if not (verbose is None):
-        ref_verbose[0] = verbose
+        global_vars.ref_verbose[0] = verbose
 
     # device :
     if not device:

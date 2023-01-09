@@ -1,11 +1,9 @@
-from .utils import *
-from . import def_info
-from .Stools import S_node,S_graph
-import copy
-import gc
 # ==========================
 # ====== K structure =======
 # ==========================
+
+from pgb.utils import *
+from pgb.Stools import S_node,S_graph
 
 # ************
 # * K_C_node *
@@ -61,11 +59,14 @@ class K_C_node():
     def __eq__(self,kcn2,force_order=False,raise_exception=False):
         kcn1 = self
         b = (
-        check_attr(kcn1,kcn2,
+        small_fcts.check_attr(kcn1,kcn2,
             ["name","main_target","is_fwd","all_targets","is_rand",
              "tensor_targets","overhead","has_phantoms"],
             raise_exception=raise_exception)
-        and kcn1.get_code() == kcn2.get_code())
+        and kcn1.full_code() == kcn2.full_code())
+        if not b and raise_exception: raise Exception(
+            f"{kcn1.main_target} and {kcn2.main_target} KCN differ on "\
+            f"code : {kcn1.full_code()}\n===\n{kcn2.full_code()}")
 
         # ** deps/users **
         mt = lambda nl : [rn.main_target for rn in nl]
@@ -80,7 +81,7 @@ class K_C_node():
         # ** time **
         t1 = kcn1.time
         t2 = kcn2.time
-        r = ref_reasonable_rate[0]
+        r = global_vars.ref_reasonable_rate[0]
         if not (((t1 == t2)
             or (isinstance(t1,float) and isinstance(t2,float)
             and (abs(t1 - t2) < (r * max(t1,t2)))))):return False
@@ -91,16 +92,11 @@ class K_C_node():
         return self.unique_id
 
     def get_main_code(self):
-        return make_str_assign(self.main_code)
-    def get_code(self): # -> S_node.get_code
-        dict_ic = dict(self.inplace_code)
-        bc = [
-            (tar,dict_ic[tar] if tar in dict_ic else acode)
-            for (tar,acode) in self.body_code]
-        mc = make_str_assign(self.main_code)
-        mc = "" if mc == "" else mc+"\n"
-        bc = make_str_list_assign(bc)
-        return mc+bc
+        return ast_add_on.make_str_assign(self.main_code)
+    def get_code(self):
+        return shared_methods.get_code(self)
+    def full_code(self):
+        return shared_methods.full_code(self)
 
 
 # ************
@@ -120,7 +116,7 @@ class K_D_node():
         self.main_target = mt = target
         self.all_targets = all_targets if all_targets else [target]
         self.name        = f"{mt} {self.kdn_type}"
-        self.mem         = MemSize(0)
+        self.mem         = rotor_MemSize(0)
         self.info        = info
         if unique_id_generator is None: self.unique_id = id(self)
         else:
@@ -140,7 +136,7 @@ class K_D_node():
 
     def __eq__(self,kdn2,force_order=False,raise_exception=False):
         kdn1 = self
-        b = check_attr(kdn1,kdn2,
+        b = small_fcts.check_attr(kdn1,kdn2,
             ["name","mem","kdn_type",
              "main_target","all_targets"],
             raise_exception=raise_exception)
@@ -177,7 +173,8 @@ class K_graph():
         # -> otherwise they are shared with the previous k_graph
         # -> output_kdn_data/grad are shared with the next one
 
-        self.init_code = make_ast_list_assign(sg.init_node.body_code)
+        self.init_code = ast_add_on.make_ast_list_assign(
+            sg.init_node.body_code)
         self.dict_info = sg.dict_info
         # -> no more .dict_rand
         # -> random op have been inserted at the end of Simplification
@@ -211,7 +208,7 @@ class K_graph():
             unique_id_generator = self.unique_id_generator)
         root_kcn = K_C_node(deps_real=set([root_kdn]),
             unique_id_generator = self.unique_id_generator)
-        self.list_kcn = l = sort_based_on_deps(root_kcn)
+        self.list_kcn = l = shared_methods.sort_based_on_deps(root_kcn)
         l.remove(root_kcn)
 
     def __eq__(self,g2,force_order=False,raise_exception=False):
@@ -229,266 +226,18 @@ class K_graph():
         keys1 = list(g1.dict_kn)
         keys2 = list(g2.dict_kn)
         if force_order:
-            keys1 = sort_names(keys1)
-            keys2 = sort_names(keys2)
+            keys1 = shared_methods.sort_names(keys1)
+            keys2 = shared_methods.sort_names(keys2)
         b *= (keys1 == keys2)
         if not b and raise_exception:
             raise Exception("Kgraphs differ on dict_kn's keys (order?)")
         #for k in keys1:
         #    b *= eq_node(g1.dict_kn[k],g2.dict_kn[k])
-        b *= check_attr(g1,g2,["dict_info"],raise_exception)
+        b *= small_fcts.check_attr(g1,g2,["dict_info"],raise_exception)
         return bool(b)
     def __hash__(self):
         return id(self)
 
-# ==========================
-
-
-
-# ==========================
-# === generate tmp local ===
-# fresh env to exec one node 
-# ==========================
-
-def generate_our_global(sg,model,device):
-    our_global = globals().copy()
-    our_global["self"] = model
-    our_global["device"] = device
-    for inp in sg.direct_inputs:
-        info = sg.dict_info[inp]
-        x = def_info.generate_val(info,device)
-        our_global[inp]=x
-        """ TO REMOVE
-        if inp in sg.hidden_inputs:
-            info.memsize = MemSize(int(tensorMsize(x)))
-            # need to be done at least once """
-    return our_global
-
-def generate_tmp_local(sn,sg : S_graph,our_global,tmp_local=None):
-    if tmp_local is None:
-        tmp_local = dict()
-        exec(sg.init_node.get_code(),our_global,tmp_local)
-    for req_sn in sn.deps.keys():
-        if (not (req_sn is sg.init_node)
-        and req_sn.main_target not in tmp_local):
-            # we create the main_target value, and we run the body_code
-            # but the body_code may requires some artefacts
-            req_sn_mt = req_sn.main_target
-            main_info = sg.dict_info[req_sn_mt]
-            req_sn_mt_value = def_info.generate_val(main_info,device)
-            if isinstance(req_sn_mt_value,torch.Tensor):
-                req_sn_mt_value = req_sn_mt_value.clone()
-            tmp_local[req_sn_mt] = req_sn_mt_value
-            for req_req_sn in req_sn.deps.keys():
-                if not (req_req_sn is sg.init_node):
-                    for req_req_tar in req_req_sn.all_targets:
-                        req_req_info = sg.dict_info[req_req_tar]
-                        tmp_local[req_req_tar] = (
-                            def_info.generate_val(req_req_info,device))
-            exec(make_str_list_assign(req_sn.body_code),
-                our_global,tmp_local)
-    return tmp_local
-
-def generate_deep_tmp_local(sn,sg,our_global):
-    tmp_local = dict()
-    for req_sn in sn.deps.keys():
-        generate_tmp_local(req_sn,sg,our_global,tmp_local=tmp_local)
-        exec(req_sn.get_code(), our_global, tmp_local)
-    return tmp_local
-
-# ==========================
-
-
-
-# ==========================
-# == get dep and phantoms ==
-# trace grad_fn to know what
-#   is needed to backward
-# ==========================
-
-def get_useful_vars(sn : S_node,sg : S_graph,our_global):
-    params = dict(our_global['self'].named_parameters())
-    print_debug(f"Try to open {sn.main_target}'s grad_fn")
-    # == INIT ==
-    tmp_local = generate_deep_tmp_local(sn,sg,our_global)
-    exec(sn.get_code(), our_global, tmp_local)
-    mt = sn.main_target
-    fn = tmp_local[mt].grad_fn
-    explicit_vars = set() # set of Tensors
-    phantom_vars  = set() # set of Tensors
-
-    # == SEARCH THROUGH GRAD_FN == 
-    def trace_gradfn(f,path): # path useless, just testing TO REMOVE
-        if hasattr(f,"variable"):
-            explicit_vars.add(f.variable)
-        for attr in dir(f):
-            x = getattr(f,attr)
-            if (attr != "variable" and isinstance(x,torch.Tensor)):
-                is_para = False ; is_input = False
-                for p in params.values():
-                    if p is x: is_para  = True
-                for t in our_global.values():
-                    if t is x: is_input = True
-                if not is_para and not is_input:
-                    phantom_vars.add(x)
-        if hasattr(f,"next_functions"):
-            for k,t in enumerate(f.next_functions):
-                trace_gradfn(t[0],path+[k])
-    trace_gradfn(fn,[])
-
-    # == recognize which var are concerned ==
-    used_vars = explicit_vars.union(phantom_vars)
-    used_ptrs = [v.data_ptr() for v in used_vars]
-
-    req_real = []
-    req_ptrs = []
-    print_debug(f"SEE WHICH VARS ARE USEFUL FOR {sn.main_target}")
-    for name,val in tmp_local.items():
-        if (name not in sg.direct_inputs
-        and isinstance(val,torch.Tensor)
-        and val.data_ptr() in used_ptrs):
-            req_real.append(name)
-            req_ptrs.append(val.data_ptr())
-            print_debug(f"usefull var : {name}")
-
-    # == check for the presence of phantoms ==
-    exist_phantoms = False
-    for v in phantom_vars:
-        p = v.data_ptr()
-        if p not in req_ptrs:
-            exist_phantoms = True
-            print_debug(f"yes {mt} have phantoms")
-
-    return req_real,exist_phantoms
-
-
-# ==========================
-
-
-
-# ==========================
-# ======= INSPECTION =======
-# ==========================
-
-class Inspection_result():
-    def __init__(self):
-        self.relevant     = False # -> turn True is result of inspection
-        self.mem_del_fwd  = MemSize(0)
-        self.overhead_fwd = MemSize(0)
-        self.overhead_bwd = MemSize(0)
-        self.mem_run_fwd  = MemSize(0)
-        self.mem_run_bwd  = MemSize(0)
-        self.mem_fgt_fwd  = MemSize(0)
-        self.mem_fgt_bwd  = MemSize(0)
-        self.time_run_fwd = 0
-        self.time_run_bwd = 0
-
-class inspector():
-    def __init__(self, sn : S_node, sg : S_graph,our_global):
-        self.sn = sn
-        self.sg = sg
-        self.mt = sn.main_target
-        self.info = sg.dict_info[self.mt]
-        self.timer = rotor.timing.make_timer(device)
-        self.memUsage = rotor.memory.MeasureMemory(device)
-        self.our_global = our_global
-        self.tmp_local = generate_tmp_local(sn,sg,our_global)
-        self.ret = Inspection_result()
-        self.ret.relevant = True
-    
-    # -- aux --
-    def measure_time(self, fct, inter_fct=None):
-        t = self.timer.measure_median(fct,samples=1)
-        nb_repeat = 1
-        measures = [t] ; tot = t
-        while (tot < time_min_duration or nb_repeat < time_min_repeat):
-            if inter_fct: inter_fct()
-            t = self.timer.measure_median(fct,samples=1)
-            measures.append(t)
-            tot += t ; nb_repeat += 1
-        if len(measures)>2:
-            return (sum(measures)-max(measures)-min(measures))/(len(measures)-2)
-        else:np.median(measures)
-    # ---------
-
-    # === FORWARD ===
-    # -- measure forward --
-    def measure_fwd(self,only_run=False):
-        def fct_run_fwd():
-            self.code_run_fwd = self.sn.get_code()
-            exec(self.code_run_fwd, self.our_global, self.tmp_local)
-
-        def fct_fgt_fwd():
-            for tar in self.sn.tensor_targets:
-                self.tmp_local[tar].data = torch.zeros(0,device=device)
-            
-        def fct_del_fwd():
-            code = ""
-            for tar in self.sn.tensor_targets:
-                code += f"del {tar};"
-            self.code_del_fwd = code#Only include the phantom part 
-            exec(self.code_del_fwd, self.our_global, self.tmp_local)
-        gc.disable()
-        _ , mem_run_fwd , peak_fwd = self.memUsage.measure(fct_run_fwd)
-        overhead_fwd = peak_fwd - mem_run_fwd
-        self.ret.overhead_fwd = overhead_fwd
-        self.ret.mem_run_fwd = mem_run_fwd
-        if not only_run:
-            _ , mem_del_fwd , _ = self.memUsage.measure(fct_del_fwd)
-            self.ret.mem_del_fwd = minus_mem(mem_del_fwd)
-            _ , _ , _ = self.memUsage.measure(fct_run_fwd)
-
-            _ , mem_fgt_fwd , _ = self.memUsage.measure(fct_fgt_fwd)
-            time_run_fwd = self.measure_time(fct_run_fwd)
-            self.ret.mem_fgt_fwd = minus_mem(mem_fgt_fwd)
-            self.ret.time_run_fwd = time_run_fwd
-        gc.enable()
-    # ===============
-
-    # === BACKWARD ===
-
-    def fct_run_bwd(self):
-        self.code_run_bwd = f"{self.mt}.backward({self.mt}.grad)"
-        exec(self.code_run_bwd, self.our_global, self.tmp_local)
-
-    def fct_fgt_bwd(self):
-        for req_sn in self.sn.deps.keys():
-            if not req_sn.is_artefact:
-                for tar in req_sn.tensor_targets:
-                    self.tmp_local[tar].grad = None
-    def fct_prepare_bwd(self):
-        self.tmp_local = generate_tmp_local(self.sn,self.sg,self.our_global)
-        self.code_run_fwd = self.sn.get_code()
-        exec(self.code_run_fwd, self.our_global, self.tmp_local)
-        self.tmp_local[self.sn.main_target].grad = (
-            def_info.generate_val(self.info,device))
-
-    # measure
-    def measure_bwd(self):
-        #def fct_run_fwd():
-        #    self.code_run_fwd = self.n.get_code() 
-        #    exec(self.code_run_fwd, self.our_global, self.tmp_local)
-        if self.info.requires_grad:
-            #self.tmp_local[self.mt].data = generate_val(self.info,device)
-            #self.tmp_local[self.mt].grad = generate_val(self.info,device)
-            gc.disable()
-            self.fct_prepare_bwd()
-            _ , mem_run_bwd , peak_bwd = self.memUsage.measure(self.fct_run_bwd)
-            overhead_bwd = peak_bwd - mem_run_bwd
-            _ , mem_fgt_bwd , _ = self.memUsage.measure(self.fct_fgt_bwd)
-            #fct_run_fwd()
-            #self.timer.measure_median(fct_run_fwd)
-
-            #self.tmp_local[self.n.main_target].grad = generate_val(self.info,device)
-            self.fct_prepare_bwd()
-            time_run_bwd = self.measure_time(self.fct_run_bwd, self.fct_prepare_bwd)
-            # overhead_bwd contains n.target.data now /!\
-            gc.enable()
-            self.ret.overhead_bwd = overhead_bwd
-            self.ret.mem_run_bwd  = mem_run_bwd
-            self.ret.mem_fgt_bwd  = minus_mem(mem_fgt_bwd)
-            self.ret.time_run_bwd = time_run_bwd
-    # # ===============
 # ==========================
 
 
@@ -502,7 +251,7 @@ def aux_init_S_to_K(model,verbose,d):
     global device
     device = d if d else (
         get_device_and_check_all_same_device(model,dict(),True))
-    if not (verbose is None): ref_verbose[0] = verbose
+    if not (verbose is None): global_vars.ref_verbose[0] = verbose
 
 # the function that does it all
 def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
@@ -519,7 +268,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
     def handle_node(sn : S_node):
         mt = sn.main_target
         print_debug(f"start to handle {mt}'s S_node in S_to_K")
-        our_global = generate_our_global(sg,model,device)
+        our_global = def_inspection.generate_our_global(sg,model,device)
         info = sg.dict_info[mt]
 
         # For artefact nodes :
@@ -550,11 +299,12 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
 
         # -> KCN(fwd)
         kcn_fwd = K_C_node(
-            target    = mt,
-            is_fwd    = True,
-            main_code = sn.main_code,
-            body_code = sn.body_code,
-            deps_real = kcn_fwd_deps,
+            target       = mt,
+            is_fwd       = True,
+            main_code    = sn.main_code,
+            inplace_code = sn.inplace_code,
+            body_code    = sn.body_code,
+            deps_real    = kcn_fwd_deps,
             deps_through_size_artefacts = kcn_deps_art_kcn,
             unique_id_generator = unique_id_generator)
         kcn_fwd.all_targets = sn.all_targets
@@ -576,7 +326,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
         if info.requires_grad:
             # -> get kdn_data and phantoms deps for bwd
             deps_real_name,exist_phantoms = (
-                get_useful_vars(sn,sg,our_global))
+                def_inspection.get_useful_vars(sn,sg,our_global,device))
             bwd_deps_real_mt = (
                 set(deps_real_name).intersection(set(sn_deps_mt)))
             kcn_bwd_deps_real = set(
@@ -624,9 +374,9 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
 
         # *** inspection ***
         if device == torch.device("cpu"):
-            res = Inspection_result()
+            res = def_inspection.Inspection_result()
         else:
-            ins = inspector(sn,sg,our_global)
+            ins = def_inspection.inspector(sn,sg,our_global,device)
             ins.measure_fwd()
             ins.measure_bwd()
             res = ins.ret
@@ -644,14 +394,14 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             kdn_grad.mem     = kdn_data.mem
 
             # -> phantoms ins
-            if ref_test_phantoms_detection[0]:
+            if global_vars.ref_test_phantoms_detection[0]:
                 exist_diff=res.mem_run_fwd.v - res.mem_fgt_fwd.v > 0
                 if exist_diff or exist_phantoms:
                     print(f"For node {mt}: mem_diff : {exist_diff} "\
                           f"and detection {exist_phantoms}")
 
             if exist_phantoms:
-                kdn_phantoms.mem = MemSize(
+                kdn_phantoms.mem = rotor_MemSize(
                     res.mem_run_fwd.v - res.mem_fgt_fwd.v)
 
         # ins.tmp_local.clear()
@@ -667,11 +417,11 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
     kg.loss_kcn=loss_kcn = K_C_node(
         target    = "loss",
         is_fwd    = True,
-        main_code = ("loss",make_ast_constant("LOSS")),
+        main_code = ("loss",ast_add_on.make_ast_constant("LOSS")),
         deps_real = set([output_kdn_data]),
         unique_id_generator = unique_id_generator)
     loss_kcn.time     = 0
-    loss_kcn.overhead = MemSize(0)
+    loss_kcn.overhead = rotor_MemSize(0)
     dict_KCN_fwd[loss_kcn.main_target] = loss_kcn
     output_kdn_grad.deps.add(loss_kcn)
 
@@ -762,6 +512,7 @@ def copy_K_C_node(kcn : K_C_node):
     new_kcn.name         = kcn.name
     new_kcn.is_fwd       = kcn.is_fwd
     new_kcn.main_code    = kcn.main_code
+    new_kcn.inplace_code    = [tuple(c) for c in kcn.inplace_code]
     new_kcn.body_code    = [tuple(c) for c in kcn.body_code]
     new_kcn.time         = kcn.time
     new_kcn.overhead     = kcn.overhead
@@ -791,7 +542,8 @@ def copy_K_graph(kg : K_graph):
     new_kg = K_graph(kg.sg) # TO CHANGE
     new_kg.dict_info = dict(kg.dict_info)
     new_kg.init_code = kg.init_code
-    new_kg.unique_id_generator = copy_generator(kg.unique_id_generator)
+    new_kg.unique_id_generator = small_fcts.copy_generator(
+            kg.unique_id_generator)
 
     # == NODES ==
     new_dict_kn = new_kg.dict_kn
@@ -907,7 +659,7 @@ def print_K_graph(kg : K_graph,name=None,open=True,render_format="svg"):
     dot = graphviz.Digraph(name,
         comment="K_graph = Forward + Backward with Comp and Data nodes")
     aux_print_graph(dot,kg,0)
-    graph_render(dot,open,"K",render_format) # from utils.py
+    small_fcts.graph_render(dot,open,"K",render_format) # from utils.py
 
 
 def print_K_graph_list(list_kg,name=None,open=True,render_format="svg"):
@@ -928,7 +680,7 @@ def print_K_graph_list(list_kg,name=None,open=True,render_format="svg"):
         comment="K_graph list : cut fwd+bwd with Comp and Data nodes")
     for i in range(len(list_kg)):
         aux_print_graph(dot,list_kg[i],i)
-    graph_render(dot,open,"K",render_format) # from utils.py
+    small_fcts.graph_render(dot,open,"K",render_format) # from utils.py
 
 # ==========================
 

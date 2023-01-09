@@ -1,8 +1,9 @@
-from .utils import *
-
 # ==========================
 # ====== Tensor INFO =======
 # ==========================
+
+from pgb.utils.imports import *
+from pgb.utils import small_fcts
 
 # -> all the info concerning a variable/tensor which might be useful
 # -> e.g. to regenerate it, using def_info.generate_var(info,device)
@@ -38,7 +39,7 @@ class Var_info(): # everything needed to randomly regenerate a var
             self.tsize = value.shape
             self.dtype = value.dtype
             self.requires_grad = value.requires_grad
-            self.memsize = MemSize(int(tensorMsize(value)))
+            self.memsize = rotor_MemSize(int(rotor_tensorMsize(value)))
         elif tt==tuple or tt==list:
             self.sub_info = [Var_info(y) for y in value]
         else:
@@ -46,7 +47,7 @@ class Var_info(): # everything needed to randomly regenerate a var
 
     def __eq__(self,i2,raise_exception=False):
         i1 = self
-        d = vdir(i1)
+        d = small_fcts.vdir(i1)
         for s in d:
             v1 = getattr(i1,s)
             v2 = getattr(i2,s)

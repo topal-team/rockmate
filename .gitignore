@@ -2,6 +2,7 @@ __pycache__
 .ipynb_checkpoints/
 *.ipynb
 *.swp
+*.kate-swp
 graphviz_dir/
 bean/
 lehellard_theotime.pdf

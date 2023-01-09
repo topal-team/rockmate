@@ -1,6 +1,5 @@
-from .utils import *
-from . import def_info
-from .Btools import B_node,B_graph
+from pgb.utils import *
+from pgb.Btools import B_node,B_graph
 
 # ==========================
 # ====== D structure =======
@@ -25,7 +24,7 @@ class D_node(B_node):
         self.deps_rand = deps_rand if deps_rand else set()
         self.users = set()
         self.protected = False
-        self.num = get_num(self)
+        self.num = shared_methods.get_num(self)
     def __eq__(self,dn2):
         dn1 = self
         b = check_attr(dn1,dn2,
@@ -60,7 +59,7 @@ class D_graph():
         # but in case of chain of separators, we only protect
         # the last one (we will keep a good structure, while reducing
         # the number of blocs)
-        all_sep = cut_based_on_deps(self) # utils.py : sep from inp to output
+        all_sep = shared_methods.cut_based_on_deps(self)
         important_sep = []
         for i in range(len(all_sep)-1):
             sep = all_sep[i]
@@ -82,7 +81,7 @@ def sort_nodes(g : B_graph): # -> B_node list
     # /!\ never trust B_graph.nodes
     o_var = g.output
     if not o_var.has_node: return []
-    else: return sort_based_on_deps(o_var.node)
+    else: return shared_methods.sort_based_on_deps(o_var.node)
 
 
 def generate_tmp_local(g,dict_info,bn,our_global,tmp_local=None):
@@ -95,7 +94,7 @@ def generate_tmp_local(g,dict_info,bn,our_global,tmp_local=None):
                 req_x = req_x.clone()
             tmp_local[req_bn.target] = req_x
     for req_rd in bn.deps_rand:
-        code = make_str_assign(req_rd,g.dict_rand[req_rd])
+        code = ast_add_on.make_str_assign(req_rd,g.dict_rand[req_rd])
         exec(code,our_global,tmp_local)
     return tmp_local
 
@@ -119,7 +118,8 @@ def generate_deep_tmp_local(g,dict_info,bn,our_global):
 
 def B_to_D(bg : B_graph,model,dict_inputs,device=None):
     if not device:
-        device = get_device_and_check_all_same_device(model,dict_inputs)
+        device = small_fcts.get_device_and_check_all_same_device(
+            model,dict_inputs)
     globals()["device"] = device
 
     # --- init and sort ---
@@ -168,13 +168,13 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None):
             is_view    = False # by default
             is_inplace = False # by default
             data_parents = set()
-            if has_a_data_ptr(bn_value):
-                bn_data_ptr = get_data_ptr(bn_value)
+            if small_fcts.has_a_data_ptr(bn_value):
+                bn_data_ptr = small_fcts.get_data_ptr(bn_value)
                 for o_name,o_value in tmp_local.items():
                     if (o_name != bn.target
                     and o_name in dict_info
-                    and has_a_data_ptr(o_value)
-                    and get_data_ptr(o_value) == bn_data_ptr):
+                    and small_fcts.has_a_data_ptr(o_value)
+                    and small_fcts.get_data_ptr(o_value) == bn_data_ptr):
                         data_parents.add(o_name)
                         data_owner_name = o_name
                         if o_value is bn_value: is_inplace = True
@@ -225,8 +225,8 @@ def print_all_fw_nodes(g,print_ast=True):
     print(g.dict_rand)
     for n in g.nodes:
         if print_ast:
-            print(ast.dump(
-                make_ast_assign((n.target,n.ast_code)),indent=4))
+            print(ast.dump(ast_add_on.make_ast_assign(
+                (n.target,n.ast_code)),indent=4))
         else:
             print(f"({n.target}) : [{n.fct}] : {n.get_code()}")
     if isinstance(g,D_graph):
@@ -256,7 +256,7 @@ def print_D_graph(dg : D_graph,name=None,open=True,render_format="svg"):
     for dn in dg.nodes:
         for req_dn in dn.deps:
             dot.edge(req_dn.target,dn.target)
-    graph_render(dot,open,"D",render_format) # from utils.py
+    small_fcts.graph_render(dot,open,"D",render_format) # from utils.py
 
 # ==========================
 
@@ -272,11 +272,11 @@ def test_fw_code(dg : D_graph,model,dict_inputs : dict):
     for inp in dg.inputs:
         loc_dict[inp] = dict_inputs[inp]
     for rd_tar,ast_code in dg.dict_rand.items():
-        code = make_str_assign(rd_tar,ast_code)
+        code = ast_add_on.make_str_assign(rd_tar,ast_code)
         exec(code, globals(), loc_dict)
     for dn in dg.nodes:
         for req_rd in dn.deps_rand:
-            code = make_str_assign(req_rd,dg.dict_rand[req_rd])
+            code = ast_add_on.make_str_assign(req_rd,dg.dict_rand[req_rd])
             exec(code,globals(),loc_dict)
         if not dn.is_input:
             exec(dn.get_code(), globals(), loc_dict)

@@ -1,5 +1,6 @@
-from .utils import *
-from .Dtools import D_node,D_graph
+from pgb.utils import *
+from pgb.utils.complement_for_Stools import *
+from pgb.Dtools import D_node,D_graph
 
 # ==========================
 # ====== S structure =======
@@ -59,7 +60,7 @@ class S_node():
             unique_id_generator[0] = u+1
     def __eq__(self,sn2,raise_exception=False):
         sn1 = self
-        b = check_attr(sn1,sn2,[
+        b = small_fcts.check_attr(sn1,sn2,[
             "is_artefact","main_fct",
             "is_rand","deps_rand",
             "main_target","all_targets",
@@ -80,34 +81,10 @@ class S_node():
     # -> /!\ /!\ doing set/dict of S_nodes is dangereous /!\ /!\ 
     # but I'm doing this to avoid undeterminism
 
-    # -- Code generation --
     def get_code(self):
-        return get_code(self)
-        dict_ic = dict(self.inplace_code)
-        bc = [
-            (tar,dict_ic[tar] if tar in dict_ic else acode)
-            for (tar,acode) in self.body_code]
-        mc = make_str_assign(self.main_code)
-        mc = "" if mc == "" else mc+"\n"
-        bc = make_str_list_assign(bc)
-        return mc+bc
+        return shared_methods.get_code(self)
     def full_code(self):
-        # This function is a way to produce what the final
-        # code will look like (including detach). But it's
-        # never used in RK, the translator isn't that simple.
-        mt = self.main_target
-        mc = make_str_assign(self.main_code,prefix="_")
-        ic = make_str_list_assign(self.inplace_code)
-        bc = make_str_list_assign(self.body_code)
-        if mc == "":
-            return bc
-        else:
-            s = f"{mc}\n{mt} = _{mt}\n"
-            s += ic+"\n" if ic != "" else ""
-            s += f"{mt} = _{mt}.detach().requires_grad_()\n"
-            s += make_str_list_assign(bc)
-            return s
-    # -----
+        return shared_methods.full_code(self)
 
 
     # -----
@@ -251,13 +228,13 @@ class S_graph():
         self.unique_id_generator = unique_id_generator
         # -> to generate S_node.__hash__
     def __eq__(self,sg2,raise_exception=False):
-        return check_attr(self,sg2,[
+        return small_fcts.check_attr(self,sg2,[
             # "direct_inputs","hidden_inputs", TO TODO
             "direct_outputs","hidden_output","dict_info","nodes"],
             raise_exception=raise_exception)
         """
         sg1 = self
-        b = check_attr(sg1,sg2,[
+        b = small_fcts.check_attr(sg1,sg2,[
             # "direct_inputs","hidden_inputs", TO TODO
             "direct_outputs","hidden_output","dict_info"],
             raise_exception=raise_exception)
@@ -315,7 +292,7 @@ class S_graph():
         # -- re-sorting nodes -- 
         # due to merging, the topo order may not be correct anymore
         # by the way, remove unpluged nodes
-        self.nodes = sort_based_on_deps(self.output_node)
+        self.nodes = shared_methods.sort_based_on_deps(self.output_node)
         self.nodes.remove(self.init_node)
         self.check_artefact()
         self.check_relations()
@@ -461,7 +438,7 @@ def simplify_cheap(sg : S_graph):
     # from root to leaves
     for sn in sg.nodes:
         if ( not (sn is sg.output_node)
-         and sn.main_fct in list_cheap_fct
+         and sn.main_fct in global_vars.list_cheap_fct
          and (not ref_keep_seq or not sn.protected)):
             simplify_node(sn)
     sg.clear()
@@ -542,7 +519,8 @@ def simplify_view(sg):
         #    and (not ref_keep_seq or not sn.protected)
         sn_info = sg.dict_info[sn.main_target]
         if (sn_info.is_view
-        or  sn.main_fct in list_view_fct # in case of op over params
+        or  sn.main_fct in global_vars.list_view_fct
+        # -> in case of op over params
         or  sn.main_fct == "getattr"
         or  sn_info.is_inplace):
             # ASSERTION remaining getattr are related to views !! 
@@ -699,7 +677,8 @@ def copy_S_graph(sg : S_graph):
     new_sg.direct_outputs = list(sg.direct_outputs)
     new_sg.dict_info      = dict(sg.dict_info)
     new_sg.dict_rand      = dict(sg.dict_rand)
-    new_sg.unique_id_generator = copy_generator(sg.unique_id_generator)
+    new_sg.unique_id_generator = small_fcts.copy_generator(
+            sg.unique_id_generator)
     id_gen = sg.unique_id_generator
     if id_gen: new_sg.unique_id_generator = [id_gen[0]]
     dict_nodes = {}
@@ -723,13 +702,14 @@ def copy_S_graph(sg : S_graph):
 def cut(sg : S_graph): # -> list of S_graph
     main_sg = copy_S_graph(sg) # to protect from side effects
     main_sg.nodes.insert(0,main_sg.init_node)
-    seps = cut_based_on_deps(main_sg)
+    seps = shared_methods.cut_based_on_deps(main_sg)
     print_debug(f"S separators : {[sep.main_target for sep in seps]}")
     list_sg = []
     for i in range(1,len(seps)):
         unique_id_generator = [0]
         new_sg = S_graph(
-            unique_id_generator=copy_generator(sg.unique_id_generator))
+            unique_id_generator=small_fcts.copy_generator(
+                sg.unique_id_generator))
         list_sg.append(new_sg)
         # -- get nodes --
         inp_node = seps[i-1]
@@ -802,7 +782,7 @@ def print_S_graph(sg : S_graph,name=None,open=True,render_format="svg"):
         name,
         comment="S_graph = Simplified forward graph")
     aux_print_graph(dot,sg,0)
-    graph_render(dot,open,"S",render_format) # from utils.py
+    small_fcts.graph_render(dot,open,"S",render_format) # from utils.py
 
 
 def print_S_graph_list(list_sg,name=None,open=True,render_format="svg"):
@@ -816,7 +796,7 @@ def print_S_graph_list(list_sg,name=None,open=True,render_format="svg"):
         comment="S_graph list : cut simplified forward graph")
     for i in range(len(list_sg)):
         aux_print_graph(dot,list_sg[i],i)
-    graph_render(dot,open,"S",render_format) # from utils.py
+    small_fcts.graph_render(dot,open,"S",render_format) # from utils.py
 
 # ==========================
 

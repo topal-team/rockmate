@@ -1,12 +1,13 @@
-# Anonymize graphs
+# =======================
+# == Anonymized graphs ==
+# =======================
+
 # A way to recognize similar blocks
 # for instance for GPT2 -> Transformer blocks
 import re
-from .utils import *
-from . import def_info
-from . import Stools
-from . import Ktools
-
+from pgb.utils import *
+from pgb import Stools
+from pgb import Ktools
 
 # Note : to handle parameters anonymization :
 # 1) I need to check "info" equality, -> I need the model
@@ -82,7 +83,8 @@ class Graph_Translator():
 
             ########## SECOND PART ########## 
             # Now that "all_real_vars" is complete, we generate the dict
-            all_real_vars = sorted(all_real_vars,key = get_num_tar)
+            all_real_vars = sorted(
+                all_real_vars,key = shared_methods.get_num_tar)
             self.main_dict = r_to_a = dict()
             nb_var = 0
             for real_name in all_real_vars:
@@ -162,7 +164,7 @@ class Graph_Translator():
             elif ty == ast.Assign:
                 return ty(translate(x.targets),translate(x.value))
             elif ty == ast.Module:
-                return make_ast_module(translate(x.body))
+                return ast_add_on.make_ast_module(translate(x.body))
             elif ty == ast.Constant:
                 return x
             else: raise Exception(
@@ -179,6 +181,7 @@ class Graph_Translator():
         elif isinstance(x,Stools.S_node): # /!\ inplace /!\
             # op done inplace because it's impossible to change deps/users
             x.main_code   = translate(x.main_code)
+            x.inplace_code= translate(x.inplace_code)
             x.body_code   = translate(x.body_code)
             x.main_target = translate(x.main_target)
             x.all_targets = translate(x.all_targets)
@@ -200,6 +203,7 @@ class Graph_Translator():
         # -- K_C_NODE --
         elif isinstance(x,Ktools.K_C_node): # /!\ inplace like S_node /!\
             x.main_code   = translate(x.main_code)
+            x.inplace_code= translate(x.inplace_code)
             x.body_code   = translate(x.body_code)
             x.all_targets = translate(x.all_targets)
             x.main_target = mt = translate(x.main_target)
