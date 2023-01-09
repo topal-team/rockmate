@@ -43,6 +43,7 @@ class RunOp:
         # self.save_mem = cn.mem.v
         self.main_code = kcn.main_code
         self.body_code = kcn.body_code
+        self.inplace_code = kcn.inplace_code
         self.code = kcn.get_code()
         # self.deps_fake = [kdn.name for kdn in kcn.deps_fake]
         # self.deps_global = [kdn.name for kdn in kcn.deps_global]
@@ -160,7 +161,7 @@ class OpSchedule:
 
     def get_del_input_idx(self, kg):
         """
-        This method is to find the idx where input is no longer needed. 
+        This method is to find the idx where input is no longer needed.
         Should only used for Fn
         """
         input_kdn = kg.input_kdn_data

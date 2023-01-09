@@ -82,7 +82,9 @@ class CheckpointedModule(torch.nn.Module):
             self.mem_limit = mem_limit
         else:
             self.mem_limit = (
-                torch.cuda.get_device_properties(0).total_memory * 0.9
+                # If not given a budget, we use the current available memory
+                torch.cuda.get_device_properties(0).total_memory * 0.95
+                - torch.cuda.memory_allocated()
             )
         print_debug("mem_limit", self.mem_limit)
         # -- solve the chain like rotor --
@@ -137,7 +139,7 @@ class CheckpointedModule(torch.nn.Module):
                 exec(code, self.storage.gd, self.storage.ld)
             except Exception as e:
                 print(f"Failed to execute code:\n {code}")
-                print(e)
+                raise (e)
                 break
             if record_mem:
                 allo_mem = torch.cuda.memory_allocated() - self.mem_before

@@ -1,4 +1,4 @@
-from rockmate.utils import make_str_assign, np, torch
+from rockmate.utils import make_str_assign, make_str_list_assign, np, torch
 from rockmate.def_code import DelOp
 
 
@@ -125,12 +125,12 @@ class Translator:  # to execute Op
                 prep_code += (
                     f"{mt}.data = {target_tensor}.reshape({req_shape});"
                 )
-            prep_code += (
-                ";".join(
-                    [make_str_assign(bc) for bc in list(kdn.deps)[0].body_code]
-                )
-                + "\n"
-            )
+            # prep_code += (
+            #     ";".join(
+            #         [make_str_assign(bc) for bc in list(kdn.deps)[0].body_code]
+            #     )
+            #     + "\n"
+            # )
             # after_code += f"{mt}.data = torch.zeros(0,device=device);"
             for v in kdn.all_targets:
                 after_code += f"{v}.data = torch.zeros(0,device=device); "
@@ -141,33 +141,34 @@ class Translator:  # to execute Op
 
         def _run_op(op, i):
             # Forward operation
+            mt = op.main_target
             if "fwd" in op.name:
                 rec = (i > op_sched.op_list.index(op)) or (not op_sched.is_fwd)
                 if op.proxy:
                     if (
                         (not during_fwd)
                         and (not op_sched.no_grad)
-                        and (op.main_target == op_sched.output_size[0])
+                        and (mt == op_sched.output_size[0])
                     ):
                         rec = True
-                    proxy_code = make_str_assign(op.main_code, prefix="_")
-                    code = (
-                        f"{proxy_code};"
-                        f"{op.main_target} = _{op.main_target}.detach();"
-                        f"{op.main_target}.requires_grad_()"
-                    )
+                    code = make_str_assign(op.main_code, prefix="_") + ";"
                     if rec:
-                        code = (
-                            f"{proxy_code};"
-                            f"{op.main_target}.data = _{op.main_target}.data;"
-                        )
+                        code += f"{mt}.data = _{mt}.data;"
+                    else:
+                        code += f"{mt} = _{mt};\n"
+
                 else:
-                    code = make_str_assign(op.main_code)
+                    code = make_str_assign(op.main_code) + "\n"
+                code += make_str_list_assign(op.inplace_code)#.replace(f"{mt}", f"_{mt}")
+                if op.proxy:
+                    if not rec:
+                        code += f"{mt} = _{mt}.detach().requires_grad_();"
                 for bc in op.body_code:
                     suffix = ""
                     if rec and (bc[0] in op.tensor_targets):
                         suffix = ".data"
                     code += "\n" + make_str_assign(bc, suffix=suffix)
+
                 if op.is_rand:
                     code = f"rng_state.get('{op.name}');rng_state.restore('{op.name}')\n{code}"
                 return code
