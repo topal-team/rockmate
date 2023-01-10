@@ -4,7 +4,8 @@
 #  based on rotor/algorithms/parameters.py
 # ==========================
 
-from rockmate.utils import np, ModelGurobi
+from ILP.gurobi_solver import ModelGurobi
+import numpy as np
 from rockmate.def_code import RunOp, DelOp, OpSchedule
 import math
 

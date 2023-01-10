@@ -3,7 +3,8 @@
 # we exec it and how we store things
 # -> to replace rotor/Checkpointable.functions
 # ==========================
-from rockmate.utils import check_attr, np
+from pgb.utils.small_fcts import check_attr
+import numpy as np
 import torch
 
 # ==========================

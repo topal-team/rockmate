@@ -1,4 +1,5 @@
-from rockmate.utils import make_str_assign, make_str_list_assign, np, torch
+from pgb.utils.ast_add_on import make_str_assign, make_str_list_assign
+from pgb.utils import np, torch
 from rockmate.def_code import DelOp
 
 
@@ -159,7 +160,9 @@ class Translator:  # to execute Op
 
                 else:
                     code = make_str_assign(op.main_code) + "\n"
-                code += make_str_list_assign(op.inplace_code)#.replace(f"{mt}", f"_{mt}")
+                code += (
+                    make_str_list_assign(op.inplace_code) + "\n"
+                )  # .replace(f"{mt}", f"_{mt}")
                 if op.proxy:
                     if not rec:
                         code += f"{mt} = _{mt}.detach().requires_grad_();"

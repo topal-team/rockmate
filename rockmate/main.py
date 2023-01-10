@@ -1,11 +1,15 @@
-from rockmate.utils import (
-    print_debug,
-    ref_verbose,
-    get_device,
-    pgb,
-    np,
-    ast_to_str,
-)
+# from rockmate.utils import (
+#     print_debug,
+#     get_device,
+#     pgb,
+#     np,
+#     ast_to_str,
+# )
+import pgb
+from pgb.utils import print_debug, np
+from pgb.utils.global_vars import ref_verbose
+from pgb.utils.small_fcts import get_device
+from pgb.utils.ast_add_on import ast_to_str
 from rockmate.def_code import RK_Storage, DelOp
 from rockmate.def_chain import RK_Chain
 from rockmate.def_sequence import (
