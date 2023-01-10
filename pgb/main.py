@@ -37,15 +37,16 @@ def print_inputs(model):
     print(f"This module has {len(p)} parameters :")
     for c in p: print(c[1])
 
-def check_inputs(model,dict_inputs):
+def make_inputs(model,model_inputs,model_kwargs):
     s = inspect.signature(model.forward)
     p = list(s.parameters.items())
     for (inp,u) in p:
         if ((u.default is inspect._empty)
-            and (not (inp in dict_inputs))):
+            and (not (inp in model_inputs))):
             raise Exception(
               f"input \"{inp}\" of type {u.annotation} is missing,\n"\
               f"you can use \"print_inputs\"(model) to help you.")
+    return model_inputs
 
 # to check is the device is cuda
 def print_cuda_warning_msg(things_not_on_cuda):
@@ -73,7 +74,8 @@ def print_cuda_warning_msg(things_not_on_cuda):
 # ==========================
 
 def make_all_graphs(model,
-    dict_inputs,
+    model_inputs,
+    model_kwargs=None,
     verbose=False,
     impose_device=True,
     bool_bg = True , bool_dg = True ,
@@ -81,11 +83,22 @@ def make_all_graphs(model,
     bool_list_sg = True , bool_list_kg = True,
     check_device_is_gpu = True):
     r"""
-    this function returns an objet with attributes :
-     -> .B_graph, .D_graph, .S_graph and .K_graph -> the whole module
-     -> .S_graph_list and .K_graph_list -> the sequentialized module
+    ***** this function returns an objet with attributes *****
+     -> .B_graph, .D_graph, .S_graph and .K_graph of the whole module
+     -> .S_graph_list and .K_graph_list of the sequentialized module
     on which you can use :
     pgb.print_graph and pgb.print_graph_list or pgb.print_all_graphs
+
+    ***** args *****
+     -> model must be a torch.nn.Module
+    /!\ Most of the time errors occur because of jit.trace /!\
+    /!\ so 'model' must be compatible with jit.trace       /!\
+    -> model_inputs :
+        args of 'model', it can either be a simple
+        variable or an iterable of variables.
+    -> model_kwargs :
+        optional dictionnary in case you want to
+        call 'model' with kwargs
     """
     bool_list_sg = bool_list_sg or bool_list_kg
     bool_sg = bool_sg or bool_kg or bool_list_sg
@@ -94,7 +107,7 @@ def make_all_graphs(model,
 
     # check inputs
     global_vars.ref_verbose[0] = verbose
-    check_inputs(model,dict_inputs)
+    dict_inputs = make_inputs(model,model_inputs,model_kwargs)
 
     # check device
     things_not_on_cuda = []
