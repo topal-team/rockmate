@@ -3,7 +3,7 @@
 # =====================
 
 from pgb.utils.imports import *
-from pgb.utils import def_info,ast_add_on
+from pgb.utils import def_info,ast_add_on,small_fcts
 from pgb.utils.global_vars import print_debug
 import gc
 
@@ -196,12 +196,12 @@ class inspector():
         self.ret.mem_run_fwd = mem_run_fwd
         if not only_run:
             _ , mem_del_fwd , _ = self.memUsage.measure(fct_del_fwd)
-            self.ret.mem_del_fwd = minus_mem(mem_del_fwd)
+            self.ret.mem_del_fwd = small_fcts.minus_mem(mem_del_fwd)
             _ , _ , _ = self.memUsage.measure(fct_run_fwd)
 
             _ , mem_fgt_fwd , _ = self.memUsage.measure(fct_fgt_fwd)
             time_run_fwd = self.measure_time(fct_run_fwd)
-            self.ret.mem_fgt_fwd = minus_mem(mem_fgt_fwd)
+            self.ret.mem_fgt_fwd = small_fcts.minus_mem(mem_fgt_fwd)
             self.ret.time_run_fwd = time_run_fwd
         gc.enable()
     # ===============
@@ -242,7 +242,7 @@ class inspector():
             gc.enable()
             self.ret.overhead_bwd = overhead_bwd
             self.ret.mem_run_bwd  = mem_run_bwd
-            self.ret.mem_fgt_bwd  = minus_mem(mem_fgt_bwd)
+            self.ret.mem_fgt_bwd  = small_fcts.minus_mem(mem_fgt_bwd)
             self.ret.time_run_bwd = time_run_bwd
 
 # ==========================
