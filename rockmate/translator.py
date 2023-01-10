@@ -145,6 +145,7 @@ class Translator:  # to execute Op
             mt = op.main_target
             if "fwd" in op.name:
                 rec = (i > op_sched.op_list.index(op)) or (not op_sched.is_fwd)
+                code = make_str_assign(op.main_code) + "\n"
                 if op.proxy:
                     if (
                         (not during_fwd)
@@ -152,19 +153,19 @@ class Translator:  # to execute Op
                         and (mt == op_sched.output_size[0])
                     ):
                         rec = True
-                    code = make_str_assign(op.main_code, prefix="_") + ";"
+                    # code = make_str_assign(op.main_code, prefix="_") + ";"
+                    # if not rec:
+                    #     code += f"{mt} = _{mt};\n"
+
+                # else:
+                #     code = make_str_assign(op.main_code) + "\n"
+                code += make_str_list_assign(op.inplace_code) + "\n"
+                if op.proxy:
+                    for target in op.tensor_targets:
+                        code = code.replace(target, "_" + target)
                     if rec:
                         code += f"{mt}.data = _{mt}.data;"
                     else:
-                        code += f"{mt} = _{mt};\n"
-
-                else:
-                    code = make_str_assign(op.main_code) + "\n"
-                code += (
-                    make_str_list_assign(op.inplace_code) + "\n"
-                )  # .replace(f"{mt}", f"_{mt}")
-                if op.proxy:
-                    if not rec:
                         code += f"{mt} = _{mt}.detach().requires_grad_();"
                 for bc in op.body_code:
                     suffix = ""
