@@ -6,6 +6,7 @@ import ast
 import astunparse
 import torch
 import numpy as np
+import matplotlib.pyplot as plt
 from torch import tensor
 import graphviz
 

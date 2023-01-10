@@ -9,6 +9,7 @@ __all__ = [
     "print_debug",
     # FROM IMPORTS
     "ast",
+    "np","plt",
     "torch","tensor",
     "graphviz",
     "rotor_MemSize",
