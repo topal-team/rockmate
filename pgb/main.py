@@ -37,16 +37,65 @@ def print_inputs(model):
     print(f"This module has {len(p)} parameters :")
     for c in p: print(c[1])
 
+
 def make_inputs(model,model_inputs,model_kwargs):
-    s = inspect.signature(model.forward)
-    p = list(s.parameters.items())
-    for (inp,u) in p:
-        if ((u.default is inspect._empty)
-            and (not (inp in model_inputs))):
-            raise Exception(
-              f"input \"{inp}\" of type {u.annotation} is missing,\n"\
-              f"you can use \"print_inputs\"(model) to help you.")
-    return model_inputs
+    # 1) Build dict_inputs
+    # -- load params list --
+    sign = inspect.signature(model.forward)
+    params = list(sign.parameters.items())
+    # -- build model_kwargs --
+    if model_kwargs is None: model_kwargs = dict()
+    elif not isinstance(model_kwargs,dict): raise Exception(
+        f"model_kwargs must be a dict not {type(model_kwargs)}")
+    # -- positional params --
+    not_kw_params = [
+        p[0] for p in params
+        if p[0] not in model_kwargs]
+    pos_params = [
+        p[0] for p in params
+        if (p[1].default is inspect._empty
+        and p[0] not in model_kwargs)]
+    # -- build positional inputs --
+    if isinstance(model_inputs,dict):
+        dict_inputs = model_inputs.copy()
+        st_given = set(dict_inputs.keys())
+        st_asked = set(pos_params)
+        st_missing = st_asked - st_given
+        nb_missing = len(st_missing)
+        if nb_missing>0: raise Exception(
+            f"Missing {nb_missing} inputs for the model: {st_missing}")
+    else:
+        if (isinstance(model_inputs,set)
+        or  isinstance(model_inputs,list)
+        or  isinstance(model_inputs,tuple)):
+            inputs = list(model_inputs)
+        else:
+            inputs = [model_inputs]
+        nb_given = len(inputs)
+        nb_asked_pos = len(pos_params)
+        nb_asked_tot = len(not_kw_params)
+        if nb_given < nb_asked_pos: raise Exception(
+            f"To few values given in model_inputs "\
+            f"({nb_asked_pos - nb_given} missing).\n"\
+            f"You can use \"pgb.print_inputs(<model>)\" to help you.")
+        if nb_given > nb_asked_tot: raise Exception(
+            f"To much values given in model_inputs "\
+            f"({nb_given - nb_asked_tot} too many, including kwargs).\n"\
+            f"You can use \"pgb.print_inputs(<model>)\" to help you.")
+        dict_inputs = dict(zip(not_kw_params,inputs))
+
+    dict_inputs.update(model_kwargs)
+
+    # 2) check types
+    for (name,value) in dict_inputs.items():
+        info = sign.parameters[name]
+        if not info.annotation is inspect._empty:
+            if not isinstance(value,info.annotation): raise Exception(
+                f"According to model's signature, {name} argument "\
+                f"is supposed to be of type {info.annotation}, but "\
+                f"the given value has type {type(value)}")
+    return dict_inputs
+
 
 # to check is the device is cuda
 def print_cuda_warning_msg(things_not_on_cuda):
@@ -114,10 +163,8 @@ def make_all_graphs(model,
     if bool_kg and check_device_is_gpu:
         for (key,inp) in dict_inputs.items():
             if not isinstance(inp,torch.Tensor):
-                raise Exception(
-                    f"Sorry, all inputs should have type torch.Tensor\n"\
-                    f"{key} has type {type(inp)}")
-            if not inp.is_cuda:
+                print(f"Warning : {key} has type {type(inp)}")
+            elif not inp.is_cuda:
                 things_not_on_cuda.append(key)
         b = False
         for p in model.parameters():

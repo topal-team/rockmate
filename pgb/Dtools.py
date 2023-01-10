@@ -27,7 +27,7 @@ class D_node(B_node):
         self.num = shared_methods.get_num(self)
     def __eq__(self,dn2):
         dn1 = self
-        b = check_attr(dn1,dn2,
+        b = small_fcts.check_attr(dn1,dn2,
             ["protected","target","fct","is_rand","deps_rand"])
         mkstr = lambda nl : [rn.target for rn in nl]
         b = (b
@@ -48,7 +48,7 @@ class D_graph():
         self.dict_rand = {}
         self.dict_info = {} # target -> FWD_info
     def __eq__(self,g2):
-        return check_attr(self,g2,
+        return small_fcts.check_attr(self,g2,
             ["inputs","output","dict_info","nodes"])
     def __hash__(self):
         return id(self)

@@ -297,25 +297,40 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
 
                 # == torch.nn.functional / torch.Tensor == quick.fix
                 if l_name[0] == "torch" and len(l_name) == 2:
+                    bool_found = False
                     try:
                         exec(f"torch.{l_name[1]}")
-                    except:
+                        fct_name = f"torch.{l_name[1]}"
+                        bool_found = True
+                    except: pass
+                    if not bool_found:
                         try:
                             exec(f"torch.nn.functional.{l_name[1]}")
-                        except:
-                            try:
-                                exec(f"torch.Tensor.{l_name[1]}")
-                            except:
-                                raise Exception(
-                                    f"torch.{l_name[1]} neither found in torch, "
-                                    f"torch.Tensor and torch.nn.functional"
-                                )
-                            else:
-                                fct_name = f"torch.Tensor.{l_name[1]}"
-                        else:
                             fct_name = f"torch.nn.functional.{l_name[1]}"
-                    else:
-                        fct_name = f"torch.{l_name[1]}"
+                            bool_found = True
+                        except: pass
+                    if not bool_found:
+                        try:
+                            exec(f"torch.Tensor.{l_name[1]}")
+                            fct_name = f"torch.Tensor.{l_name[1]}"
+                            bool_found = True
+                        except: pass
+                    if not bool_found:
+                        try:
+                            exec(f"torch._C._nn.{l_name[1]}")
+                            fct_name = f"torch._C._nn.{l_name[1]}"
+                            bool_found = True
+                        except: pass
+                    if not bool_found: raise Exception(
+                        f"jit translate any torch function has: "\
+                        f"torch.<function name>, for instance here:\n"\
+                        f"torch.{l_name[1]}.\nSo we need to find the "\
+                        f"submodule where the function belongs to, but "\
+                        f"here neither:\n torch.{l_name[1]} nor "\
+                        f"torch.nn.functional{l_name[1]} nor "\
+                        f"torch.Tensor.{l_name[1]} nor "\
+                        f"torch._C._nn.{l_name[1]} exist.\n"\
+                        f"So we cannot do anything...")
                 else:
                     fct_name = ".".join(l_name)
 
