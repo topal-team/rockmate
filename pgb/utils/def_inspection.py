@@ -154,6 +154,7 @@ class inspector():
         self.tmp_local = generate_tmp_local(sn,sg,our_global,device)
         self.ret = Inspection_result()
         self.ret.relevant = True
+        self.device = device
 
     # -- aux --
     def measure_time(self, fct, inter_fct=None):
@@ -181,7 +182,7 @@ class inspector():
 
         def fct_fgt_fwd():
             for tar in self.sn.tensor_targets:
-                self.tmp_local[tar].data = torch.zeros(0,device=device)
+                self.tmp_local[tar].data = torch.zeros(0,device=self.device)
 
         def fct_del_fwd():
             code = ""
@@ -219,11 +220,11 @@ class inspector():
                     self.tmp_local[tar].grad = None
     def fct_prepare_bwd(self):
         self.tmp_local = generate_tmp_local(
-            self.sn,self.sg,self.our_global,device)
+            self.sn,self.sg,self.our_global,self.device)
         self.code_run_fwd = self.sn.get_code()
         exec(self.code_run_fwd, self.our_global, self.tmp_local)
         self.tmp_local[self.sn.main_target].grad = (
-            def_info.generate_val(self.info,device))
+            def_info.generate_val(self.info,self.device))
 
     # measure
     def measure_bwd(self):
