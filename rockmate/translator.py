@@ -133,7 +133,7 @@ class Translator:  # to execute Op
             #     + "\n"
             # )
             # after_code += f"{mt}.data = torch.empty(0,device=device);"
-            for v in kdn.all_targets:
+            for v in kdn.tensor_targets:
                 after_code += f"{v}.data = torch.empty(0,device=device); "
             if is_self:
                 prep_code += f"_{mt}.data = {target_tensor};"
@@ -198,7 +198,7 @@ class Translator:  # to execute Op
                     rec_list = []
                     for kdn in op.users_global:
                         if DelOp(kdn) in op_sched.op_list[prev_i:i]:
-                            rec_list += kdn.all_targets
+                            rec_list += kdn.tensor_targets
                     inputs = ",".join(rec_list)
                     code = f"_{mt}.backward({mt}.grad, inputs=[{inputs}], retain_graph={not last})"
                 else:
