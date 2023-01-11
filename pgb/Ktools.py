@@ -377,6 +377,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             for req_sn_mt in sn_deps_mt:
                 if req_sn_mt in dict_KDN_grad: #i.e. requires_grad
                     dict_KDN_grad[req_sn_mt].deps.add(kcn_bwd)
+        else:
+            data_includes_phantoms = False
 
 
         # *** inspection ***
