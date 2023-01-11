@@ -116,7 +116,7 @@ def generate_deep_tmp_local(g,dict_info,bn,our_global):
 
 # ===== Main function ======
 
-def B_to_D(bg : B_graph,model,dict_inputs,device=None):
+def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False):
     if not device:
         device = small_fcts.get_device_and_check_all_same_device(
             model,dict_inputs)
@@ -160,7 +160,9 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None):
         d_nodes.append(dn)
 
         # -- compute the forward to get info --
-        if not bn.is_input:
+        if dont_build_dict_info:
+            dict_info[bn.target] = def_info.Var_info()
+        elif not bn.is_input:
             tmp_local = generate_deep_tmp_local(dg,dict_info,bn,our_global)
             exec(bn.get_code(), our_global, tmp_local)
             # - detect inplace operation -

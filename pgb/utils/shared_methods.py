@@ -3,6 +3,7 @@
 # = for instance methods with similar code
 # ========================================
 from pgb.utils.imports import *
+from pgb.utils.global_vars import print_debug
 from pgb.utils.ast_add_on import (
     make_str_assign, make_str_list_assign)
 
@@ -135,8 +136,15 @@ def sort_based_on_deps(origin_node): # used on B, S and K
 # ======= CUT GRAPHS =======
 # ==========================
 
+# Note : We don't want a block where nothing requires_grad.
+# Because it implies that we don't have a output_kdn_grad 
+# and that Fe/Be make no sense. So the first cut should 
+# happend after the begging of "requires_grad". To do this,
+# the rule is: a separator must requires_grad.
+
 def cut_based_on_deps(g): # used on D and S
     # returns the list of all 1-separator of the graph.
+    dict_info = g.dict_info
     to_be_visited = [g.output_node]
     seen = set([g.output_node])
     dict_nb_usages = dict([(m , len(m.users)) for m in g.nodes])
@@ -145,7 +153,11 @@ def cut_based_on_deps(g): # used on D and S
         n = to_be_visited.pop()
         seen.remove(n)
         if seen==set():
-            separators.append(n)
+            tar = get_target(n)
+            if (tar in dict_info
+            and hasattr(dict_info[tar],"requires_grad")
+            and dict_info[tar].requires_grad):
+                separators.append(n)
         for req_n in get_deps(n):
             seen.add(req_n)
             dict_nb_usages[req_n]-=1

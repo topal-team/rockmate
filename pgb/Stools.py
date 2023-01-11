@@ -229,7 +229,7 @@ class S_graph():
         # -> to generate S_node.__hash__
     def __eq__(self,sg2,raise_exception=False):
         return small_fcts.check_attr(self,sg2,[
-            # "direct_inputs","hidden_inputs", TO TODO
+            # "direct_inputs","hidden_inputs", TODO TODO
             "direct_outputs","hidden_output","dict_info","nodes"],
             raise_exception=raise_exception)
         """
@@ -562,17 +562,22 @@ def simplify_view(sg):
                 # nodes because view operations are cheap.
                 # But I must avoid creating cycle dependancies, so
                 # for the moment I assert len(sn.deps)==1
-                if len(sn.deps)>1: print(
-                    f"Warning : {sn.main_target} is a view op, without "\
-                    f"a real parent, and with several artifact deps",
-                    file = sys.stderr)
-                else:
-                    art_req = list(sn.deps.keys())[0]
-                    assert(len(art_req.deps)==1) # as an artefact
-                    real_req = list(art_req.deps.keys())[0]
-                    # - Insert sn's code both in art_req and real_req -
+                if sn_info.is_inplace: raise Exception(
+                    f"Sorry we do not support inplace operations over "\
+                    f"parameters (or anything that isn't a Tensor). \n"\
+                    f"Here {sn.main_target} only deps on artefacts, but"\
+                    f"sn_info.is_inplace=True :/")
+                for art_req in sn.deps.keys():
+                    if len(art_req.deps)==0:
+                        assert(art_req is sg.init_node)
+                        real_req = None
+                    else:
+                        assert(len(art_req.deps)==1) # as an artefact
+                        real_req = list(art_req.deps.keys())[0]
+                        real_req.insert_code(sn,sg)
                     art_req.insert_code(sn,sg)
-                    real_req.insert_code(sn,sg)
+                    # -> Insert sn's code BOTH in art_req and real_req
+
                     # - plug art_req to sn's users -
                     dict_edges_merge_inplace(art_req.users,sn.users)
                     for (user_sn,str_set) in sn.users.items():
@@ -582,7 +587,7 @@ def simplify_view(sg):
                     dict_edges_discard_sn_from_deps_of_its_users(sn)
                     sn.deps = dict()
                     sn.users = dict()
-                    real_req.clear_children_artefact()
+                    if real_req: real_req.clear_children_artefact()
 
     sg.clear()
 
@@ -702,7 +707,7 @@ def copy_S_graph(sg : S_graph):
 def cut(sg : S_graph): # -> list of S_graph
     main_sg = copy_S_graph(sg) # to protect from side effects
     main_sg.nodes.insert(0,main_sg.init_node)
-    seps = shared_methods.cut_based_on_deps(main_sg)
+    seps = [main_sg.init_node]+shared_methods.cut_based_on_deps(main_sg)
     print_debug(f"S separators : {[sep.main_target for sep in seps]}")
     list_sg = []
     for i in range(1,len(seps)):
@@ -716,7 +721,7 @@ def cut(sg : S_graph): # -> list of S_graph
         out_node = seps[i]
         inp_i = main_sg.nodes.index(inp_node)
         out_i = main_sg.nodes.index(out_node)
-        nodes = main_sg.nodes[inp_i+1:out_i+1]
+        nodes = main_sg.nodes[inp_i+1:out_i+1] # seperator is included
         new_sg.nodes = nodes
         print_debug(f"size of bloc {i} : {out_i}-{inp_i}")
         # -- input --

@@ -118,6 +118,7 @@ class K_D_node():
         self.name        = f"{mt} {self.kdn_type}"
         self.mem         = rotor_MemSize(0)
         self.info        = info
+        self.includes_phantoms = False
         if unique_id_generator is None: self.unique_id = id(self)
         else:
             u = unique_id_generator[0]
@@ -334,7 +335,12 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                 dict_KDN_data[mt] for mt in bwd_deps_real_mt)
             kcn_bwd_deps_fake = (
                 kcn_fwd_deps - kcn_bwd_deps_real)
-            kcn_bwd_deps_fake.add(kdn_data)
+            if mt in deps_real_name:
+                kcn_bwd_deps_real.add(kdn_data)
+                data_includes_phantoms = kdn_data.includes_phantoms = True
+            else:
+                kcn_bwd_deps_fake.add(kdn_data)
+                data_includes_phantoms = False
 
             # -> KCN(bwd)
             kcn_bwd = K_C_node(
@@ -346,7 +352,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             dict_KCN_bwd[mt] = kcn_bwd
 
             # -> KDN(phantoms)
-            if exist_phantoms:
+            if exist_phantoms and not data_includes_phantoms:
                 kdn_phantoms = K_D_node(
                     kdn_type    = "phantoms",
                     target      = mt,
@@ -401,7 +407,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                     print(f"For node {mt}: mem_diff : {exist_diff} "\
                           f"and detection {exist_phantoms}")
 
-            if exist_phantoms:
+            if exist_phantoms and not data_includes_phantoms:
                 kdn_phantoms.mem = rotor_MemSize(
                     res.mem_run_fwd.v - res.mem_fgt_fwd.v)
 
@@ -533,6 +539,7 @@ def copy_K_D_node(kdn : K_D_node):
     new_kdn.name        = kdn.name
     new_kdn.mem         = kdn.mem
     new_kdn.info        = kdn.info
+    new_kdn.includes_phantoms = kdn.includes_phantoms
     new_kdn.unique_id   = kdn.unique_id
     for attr in ["users_real","users_fake",
         "deps","users_global","deps_global"]:

@@ -16,7 +16,7 @@ from pgb.utils import small_fcts
 
 class Var_info(): # everything needed to randomly regenerate a var
     def __init__(self,
-        value,
+        value=None,
         is_view=False,
         is_inplace=False,
         data_owner_name=None,
@@ -27,23 +27,26 @@ class Var_info(): # everything needed to randomly regenerate a var
         ddpn = data_direct_parent_name
         self.data_direct_parent_name = ddpn if ddpn else data_owner_name
         # -> in case is_view or is_inplace
-        if (isinstance(value,int) or
-            (isinstance(value,torch.Tensor)
-            and value.shape==torch.Size([]))):
-            self.ttype = tt = torch.Size
-        else: self.ttype = tt = type(value)
-        if tt==torch.Size:
-            self.tsize = int(value)
-            self.requires_grad = False
-        elif isinstance(value,torch.Tensor):
-            self.tsize = value.shape
-            self.dtype = value.dtype
-            self.requires_grad = value.requires_grad
-            self.memsize = rotor_MemSize(int(rotor_tensorMsize(value)))
-        elif tt==tuple or tt==list:
-            self.sub_info = [Var_info(y) for y in value]
+        if value is None:
+            self.ttype = None
         else:
-            raise Exception(f"The type {tt} is not supported for Var_info")
+            if (isinstance(value,int) or
+                (isinstance(value,torch.Tensor)
+                and value.shape==torch.Size([]))):
+                self.ttype = tt = torch.Size
+            else: self.ttype = tt = type(value)
+            if tt==torch.Size:
+                self.tsize = value if isinstance(value,int) else value.clone()
+                self.requires_grad = False
+            elif isinstance(value,torch.Tensor):
+                self.tsize = value.shape
+                self.dtype = value.dtype
+                self.requires_grad = value.requires_grad
+                self.memsize = rotor_MemSize(int(rotor_tensorMsize(value)))
+            elif tt==tuple or tt==list:
+                self.sub_info = [Var_info(y) for y in value]
+            else:
+                raise Exception(f"The type {tt} is not supported for Var_info")
 
     def __eq__(self,i2,raise_exception=False):
         i1 = self
@@ -59,7 +62,7 @@ class Var_info(): # everything needed to randomly regenerate a var
 
     def __str__(self):
         s = ""
-        attrs = vdir(self)
+        attrs = small_fcts.vdir(self)
         for attr in attrs:
             if hasattr(self,attr):
                 s += f"\t{attr} = {getattr(self,attr)}\n"
