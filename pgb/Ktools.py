@@ -391,7 +391,10 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
         # -> fwd ins
         kcn_fwd.overhead = res.overhead_fwd
         kcn_fwd.time     = res.time_run_fwd
-        kdn_data.mem     = res.mem_fgt_fwd
+        if data_includes_phantoms:
+            kdn_data.mem = res.mem_run_fwd
+        else:
+            kdn_data.mem = res.mem_fgt_fwd
         if res.relevant: info.memsize = res.mem_fgt_fwd
 
         # -> bwd ins
