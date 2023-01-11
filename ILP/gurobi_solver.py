@@ -321,7 +321,7 @@ class ModelGurobi:
                         op_list.append(RunOp(kcn))
                         alive_list.append(alive_status.copy())
                         alive_status[kg.list_kdn.index(kg.output_kdn_grad)] = 1
-                        alive_status[kg.list_kdn.index(kg.output_kdn_data)] = 0
+                        # alive_status[kg.list_kdn.index(kg.output_kdn_data)] = 0
                     for eidx, (k_, i) in enumerate(self.create_list):
                         if k == k_ and self.create[t, eidx].X:
                             alive_status[i] = 1
