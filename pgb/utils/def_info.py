@@ -36,17 +36,20 @@ class Var_info(): # everything needed to randomly regenerate a var
                 self.ttype = tt = torch.Size
             else: self.ttype = tt = type(value)
             if tt==torch.Size:
-                self.tsize = value if isinstance(value,int) else value.clone()
+                self.tsize = (
+                    value if isinstance(value,int) else value.clone())
                 self.requires_grad = False
             elif isinstance(value,torch.Tensor):
                 self.tsize = value.shape
                 self.dtype = value.dtype
                 self.requires_grad = value.requires_grad
-                self.memsize = rotor_MemSize(int(rotor_tensorMsize(value)))
+                self.memsize = (
+                    rotor_MemSize(int(rotor_tensorMsize(value))))
             elif tt==tuple or tt==list:
                 self.sub_info = [Var_info(y) for y in value]
             else:
-                raise Exception(f"The type {tt} is not supported for Var_info")
+                raise Exception(
+                    f"The type {tt} is not supported for Var_info")
 
     def __eq__(self,i2,raise_exception=False):
         i1 = self
@@ -67,6 +70,16 @@ class Var_info(): # everything needed to randomly regenerate a var
             if hasattr(self,attr):
                 s += f"\t{attr} = {getattr(self,attr)}\n"
         return s
+
+    def copy(self):
+        clone = Var_info()
+        attrs = small_fcts.vdir(self)
+        for attr in attrs:
+            setattr(clone,attr,getattr(self,attr))
+        clone.data_owner_name = str(self.data_owner_name)
+        clone.data_direct_parent_name = str(self.data_direct_parent_name)
+        return clone
+
 
 
 def generate_val(info,device):

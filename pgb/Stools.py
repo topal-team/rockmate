@@ -22,7 +22,7 @@ class S_node():
             -> (including .main_target)
         .tensor_targets : str list
             -> all_targets which are tensors
-            -> (done by s_graph.make_tensor_targets)
+            -> (done by s_graph.make_tensor_and_container_targets)
         .main_code  : tar*AST :
             -> .main_target * AST right part of the assigning code of it
         .inplace_code : tar*AST list
@@ -48,6 +48,7 @@ class S_node():
         self.main_target = target # str
         self.all_targets = [target]
         self.tensor_targets = [] # later
+        self.container_targets = [] # later
         self.deps = dict()
         self.users = dict()
         self.protected = protected
@@ -64,6 +65,7 @@ class S_node():
             "is_artefact","main_fct",
             "is_rand","deps_rand",
             "main_target","all_targets",
+            "container_targets",
             "tensor_targets","protected"],
             raise_exception=raise_exception)
         b = (b
@@ -298,14 +300,21 @@ class S_graph():
         self.check_relations()
         self.make_io()
 
-    def make_tensor_targets(self):
+    def make_tensor_and_container_targets(self):
+        dict_info = self.dict_info
         for sn in self.nodes:
             if not sn.is_artefact:
-                l = []
+                tensors = []
+                containers = []
                 for tar in sn.all_targets:
-                    if self.dict_info[tar].ttype==torch.Tensor:
-                        l.append(tar)
-                sn.tensor_targets = l
+                    ttype = dict_info[tar].ttype
+                    if ttype == torch.Tensor:
+                        tensors.append(tar)
+                    elif ttype == tuple or ttype == list:
+                        containers.append(tar)
+                sn.tensor_targets = tensors
+                sn.container_targets = containers
+
 
 
     def assert_ready(self):
@@ -642,7 +651,7 @@ def D_to_S(dg,keep_sequential=False,model=None,device=None):
     simplify_view(sg)
     create_random_snodes_from_dict_rand(sg,model,device)
     sg.check_relations()
-    sg.make_tensor_targets()
+    sg.make_tensor_and_container_targets()
     sg.assert_ready()
     return sg
 
@@ -657,20 +666,21 @@ def D_to_S(dg,keep_sequential=False,model=None,device=None):
 
 def copy_S_node(sn : S_node): # aux for copy_S_graph
     new_sn = S_node()
-    new_sn.is_artefact    = sn.is_artefact
-    new_sn.main_code      = tuple(sn.main_code)
-    new_sn.main_fct       = sn.main_fct
-    new_sn.inplace_code   = [tuple(c) for c in sn.inplace_code]
-    new_sn.body_code      = [tuple(c) for c in sn.body_code]
-    new_sn.main_target    = sn.main_target
-    new_sn.all_targets    = list(sn.all_targets)
-    new_sn.tensor_targets = list(sn.tensor_targets)
-    new_sn.is_rand        = sn.is_rand
-    new_sn.deps_rand      = set(sn.deps_rand)
-    new_sn.deps           = dict() # /!\
-    new_sn.users          = dict() # /!\
-    new_sn.protected      = sn.protected
-    new_sn.unique_id      = sn.unique_id
+    new_sn.is_artefact       = sn.is_artefact
+    new_sn.main_code         = tuple(sn.main_code)
+    new_sn.main_fct          = sn.main_fct
+    new_sn.inplace_code      = [tuple(c) for c in sn.inplace_code]
+    new_sn.body_code         = [tuple(c) for c in sn.body_code]
+    new_sn.main_target       = sn.main_target
+    new_sn.all_targets       = list(sn.all_targets)
+    new_sn.tensor_targets    = list(sn.tensor_targets)
+    new_sn.container_targets = list(sn.container_targets)
+    new_sn.is_rand           = sn.is_rand
+    new_sn.deps_rand         = set(sn.deps_rand)
+    new_sn.deps              = dict() # /!\
+    new_sn.users             = dict() # /!\
+    new_sn.protected         = sn.protected
+    new_sn.unique_id         = sn.unique_id
     return new_sn
 
 def copy_S_graph(sg : S_graph):

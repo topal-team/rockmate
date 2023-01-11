@@ -49,6 +49,7 @@ class Graph_Translator():
                 and not real_str in all_real_vars):
                     all_real_vars.append(real_str)
                 elif (real_str[:5] == "self."
+                or real_str[:5] == "self["
                 and not real_str in all_real_params):
                     all_real_params.append(real_str)
             def search_through(a):
@@ -72,14 +73,6 @@ class Graph_Translator():
             for sn in snodes:
                 search_through(sn.main_code)
                 search_through(sn.body_code)
-            """
-                mt,mc = sn.main_code
-                handle_str(mt)
-                search_through(mc)
-                for st,sc in sn.body_code:
-                    handle_str(st)
-                    search_through(sc)"""
-
 
             ########## SECOND PART ########## 
             # Now that "all_real_vars" is complete, we generate the dict
@@ -140,7 +133,8 @@ class Graph_Translator():
         if isinstance(x,str):
             if x[:2] == "__" and x in self.main_dict:
                 return self.main_dict[x]
-            elif x[:5] == "self." and x in self.param_dict:
+            elif (x[:5] == "self." or x[:5] == "self["
+            and x in self.param_dict):
                 return self.param_dict[x][0]
             return x
 
@@ -171,11 +165,12 @@ class Graph_Translator():
                 f"{x}'s type ({ty}) is not handled by the translator")
 
         # -- info --
-        elif isinstance(x,def_info.Var_info): # /!\ inplace /!\
-            x.data_owner_name = translate(x.data_owner_name)
-            x.data_direct_parent_name = (
-                translate(x.data_direct_parent_name))
-            return x
+        elif isinstance(x,def_info.Var_info):
+            new_x = x.copy()
+            new_x.data_owner_name = translate(new_x.data_owner_name)
+            new_x.data_direct_parent_name = (
+                translate(new_x.data_direct_parent_name))
+            return new_x
 
         # -- S_NODE --
         elif isinstance(x,Stools.S_node): # /!\ inplace /!\
@@ -184,20 +179,14 @@ class Graph_Translator():
             x.inplace_code= translate(x.inplace_code)
             x.body_code   = translate(x.body_code)
             x.main_target = translate(x.main_target)
-            x.all_targets = translate(x.all_targets)
-            x.tensor_targets = translate(x.tensor_targets)
+            x.all_targets       = translate(x.all_targets)
+            x.tensor_targets    = translate(x.tensor_targets)
+            x.container_targets = translate(x.container_targets)
             # Since S_node.__hash__ isn't changed, we change dict inplace
             for req_sn,st in x.deps.items():
                 x.deps[req_sn] = translate(st)
             for user_sn,st in x.users.items():
                 x.users[user_sn] = translate(st)
-            """
-            # due to S_node.__hash__ we cannot change dict inplace
-            # deps  = list(x.deps.items())  ; x.deps.clear()
-            # users = list(x.users.items()) ; x.users.clear()
-            # for req_sn,st in deps:   x.deps[req_sn]   = translate(st)
-            # for user_sn,st in users: x.users[user_sn] = translate(st)
-            """
             return ()
 
         # -- K_C_NODE --
@@ -205,9 +194,10 @@ class Graph_Translator():
             x.main_code   = translate(x.main_code)
             x.inplace_code= translate(x.inplace_code)
             x.body_code   = translate(x.body_code)
-            x.all_targets = translate(x.all_targets)
             x.main_target = mt = translate(x.main_target)
-            x.tensor_targets = translate(x.tensor_targets)
+            x.all_targets       = translate(x.all_targets)
+            x.tensor_targets    = translate(x.tensor_targets)
+            x.container_targets = translate(x.container_targets)
             x.name = f"fwd_{mt}" if x.is_fwd else f"bwd_{mt}"
             return ()
 
@@ -215,6 +205,9 @@ class Graph_Translator():
         elif isinstance(x,Ktools.K_D_node): # /!\ inplace like S_node /!\
             x.all_targets = translate(x.all_targets)
             x.main_target = mt = translate(x.main_target)
+            x.all_targets       = translate(x.all_targets)
+            x.tensor_targets    = translate(x.tensor_targets)
+            x.container_targets = translate(x.container_targets)
             x.name = f"{mt} {x.kdn_type}"
 
         # -- S_GRAPH --
@@ -222,22 +215,19 @@ class Graph_Translator():
             sg = Stools.copy_S_graph(x) # to protect x : NOT inplace
             snodes = [sg.init_node] + sg.nodes
             translate(snodes)
-            """
-            # since S_nodes' name changed, and S_node.__hash__ is terrible
-            # I prefer to regenerate all the dict once again
-            for sn in snodes:
-                deps  = list(sn.deps.items())  ; sn.deps.clear()
-                users = list(sn.users.items()) ; sn.users.clear()
-                for req_sn,st in deps:   sn.deps[req_sn]   = st
-                for user_sn,st in users: sn.users[user_sn] = st
-                """
             # dict_info is currently shared by all the graphs
-            # thus it contains impossible name to translate
-            # -> so I clean it up.
+            # thus it contains unknown names for each block
+            # -> impossible to translate -> so I clean it up.
+            # -> I also disconnect inputs'info from the previous block
             dict_info_keys = set(sg.dict_info.keys())
             if len(self.main_dict) != 0: # to avoid special case
                 for k in dict_info_keys:
-                    if k not in self.main_dict: del sg.dict_info[k]
+                    if k not in self.main_dict:
+                        del sg.dict_info[k]
+                    elif k in sg.direct_inputs:
+                        info = sg.dict_info[k]
+                        info.data_owner_name = k
+                        info.data_direct_parent_name = k
             for attr in [
                 "hidden_inputs","direct_inputs","dict_info",
                 "hidden_output","direct_outputs","dict_rand"]:
@@ -259,6 +249,8 @@ class Graph_Translator():
                     if k not in self.main_dict: del kg.dict_info[k]
             for attr in ["init_code","dict_info"]:
                 setattr(kg,attr,translate(getattr(kg,attr)))
+            for kdn in kg.list_kdn:
+                kdn.info = kg.dict_info[kdn.main_target]
             return kg
 
         # -- ITERABLE --

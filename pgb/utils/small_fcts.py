@@ -2,6 +2,7 @@
 # ==== Useful functions ====
 # ==========================
 from pgb.utils.imports import *
+import inspect
 
 # -> to raise exceptions with lambda functions
 def raise_(s):
@@ -9,7 +10,9 @@ def raise_(s):
 
 # -> to get all the attrs except special ones
 def vdir(c):
-    return [s for s in dir(c) if not s.startswith("__")]
+    return [s for s in dir(c)
+            if (not s.startswith("__")
+            and not inspect.ismethod(getattr(c,s)))]
 
 # -> strings
 def remove_prefix(text, prefix):
@@ -96,7 +99,10 @@ def clean__eq__(a1,a2,raise_exception=False):
             clean__eq__(a1[k],a2[k],True)
     else:
         try: return a1.__eq__(a2,raise_exception=True)
-        except TypeError: return bool(a1 == a2)
+        except TypeError:
+            b = bool(a1 == a2)
+            if not b and raise_exception: raise Exception(
+                f"clean__eq__ default eq test : {a1} != {a2}")
     return True
 
 def check_attr(o1,o2,list_attr,raise_exception=False):
