@@ -46,9 +46,11 @@ class CheckpointedModule(torch.nn.Module):
         mem_limit=None,
         mem_unit=None,
         verbose=False,
-        get_chain=False,
-        get_sequence=False,
-        get_code=False,
+        get_chain=True,
+        get_sequence=True,
+        get_code=True,
+        nb_budget_abar=5,
+        nb_budget_all=5,
     ):
         super(CheckpointedModule, self).__init__()
         ref_verbose[0] = verbose
@@ -65,7 +67,7 @@ class CheckpointedModule(torch.nn.Module):
         self.init_code = ast_to_str(self.list_kg[0].init_code)
         self.output = self.list_kg[-1].output_kdn_data
         if get_chain:
-            self.get_chain()
+            self.get_chain(nb_budget_abar, nb_budget_all)
         if get_sequence:
             self.get_sequence(mem_limit)
         if get_code:
@@ -82,13 +84,32 @@ class CheckpointedModule(torch.nn.Module):
         )
 
     def get_sequence(self, mem_limit):
+        for n, p in self.original_mod.named_parameters():
+            if p.grad is None:
+                p.grad = torch.zeros_like(p)
+
+        self.peak_overhead = max(
+            [
+                sum(
+                    [
+                        kdn.mem.v
+                        for kdn in kcn.deps_fake
+                        if kdn.main_target != kcn.main_target
+                    ]
+                )
+                for kg in self.list_kg
+                for kcn in kg.list_kcn
+            ]
+        )
+
         if mem_limit:
             self.mem_limit = mem_limit
         else:
             self.mem_limit = (
                 # If not given a budget, we use the current available memory
-                torch.cuda.get_device_properties(0).total_memory * 0.95
+                torch.cuda.get_device_properties(0).total_memory * 0.9
                 - torch.cuda.memory_allocated()
+                - self.peak_overhead
             )
         print_debug("mem_limit", self.mem_limit)
         # -- solve the chain like rotor --
