@@ -73,7 +73,7 @@ class Translator:  # to execute Op
                         for target in op_sched.del_input_op.tensor_targets:
                             # code += f"del {target};"
                             code += (
-                                f"{target}.data = torch.zeros(0,device=device);"
+                                f"{target}.data = torch.empty(0,device=device);"
                             )
                     else:
                         for target in op.all_targets:
@@ -84,7 +84,7 @@ class Translator:  # to execute Op
                 # if op_sched.del_input_idx == i:
                 #     code = "\n"
                 #     for target in op_sched.del_input_op.tensor_targets:
-                #         code += f"{target}.data = torch.zeros(0,device=device);"
+                #         code += f"{target}.data = torch.empty(0,device=device);"
                 #     code_list[-1] += code
             code_list[-1] += f"\n{op_sched.output_size[0]}.requires_grad_()"
             return code_list
@@ -120,7 +120,7 @@ class Translator:  # to execute Op
                 target_tensor = f"{kdn.main_target}.grad"
             if (target_tensor is None) or not self.aggressive:
                 # No available live tensor to use
-                target_tensor = f"torch.zeros({req_shape},device=device)"
+                target_tensor = f"torch.empty({req_shape},device=device)"
                 prep_code += f"{mt}.data = {target_tensor};"
             else:
                 prep_code += (
@@ -132,12 +132,12 @@ class Translator:  # to execute Op
             #     )
             #     + "\n"
             # )
-            # after_code += f"{mt}.data = torch.zeros(0,device=device);"
+            # after_code += f"{mt}.data = torch.empty(0,device=device);"
             for v in kdn.all_targets:
-                after_code += f"{v}.data = torch.zeros(0,device=device); "
+                after_code += f"{v}.data = torch.empty(0,device=device); "
             if is_self:
                 prep_code += f"_{mt}.data = {target_tensor};"
-                after_code += f"_{mt}.data = torch.zeros(0,device=device);"
+                after_code += f"_{mt}.data = torch.empty(0,device=device);"
             return prep_code, after_code
 
         def _run_op(op, i):
@@ -166,7 +166,7 @@ class Translator:  # to execute Op
                     if rec:
                         code += f"{mt}.data = _{mt}.data;"
                     else:
-                        code += f"{mt} = _{mt}.detach().requires_grad_();"
+                        code += f"{mt} = _{mt}.detach();{mt}.requires_grad_();"
                 for bc in op.body_code:
                     suffix = ""
                     if rec and (bc[0] in op.tensor_targets):
@@ -217,9 +217,14 @@ class Translator:  # to execute Op
                     and _is_alive(op.name.replace("data", "phantoms"), i)
                     and op.proxy
                 ):
-                    code += f"_{op.main_target}.data = torch.zeros(0,device=device);"
+                    code += f"_{op.main_target}.data = torch.empty(0,device=device);"
+                    if op.includes_phantoms:
+                        code += f"del _{op.main_target};"
                 for v in op.tensor_targets:
-                    code += f"{v}.data = torch.zeros(0,device=device); "
+                    code += f"{v}.data = torch.empty(0,device=device); "
+                for v in op.container_targets:
+                    code += f"del {v};"
+
             if op.kdn_type == "grad":
                 code += f"{op.main_target}.grad = None"
             if op.kdn_type == "phantoms":
@@ -237,6 +242,6 @@ class Translator:  # to execute Op
             # if op_sched.del_input_idx == i:
             #     code = "\n"
             #     for target in op_sched.del_input_op.tensor_targets:
-            #         code += f"{target}.data = torch.zeros(0,device=device);"
+            #         code += f"{target}.data = torch.empty(0,device=device);"
             #     code_list[-1] += code
         return code_list

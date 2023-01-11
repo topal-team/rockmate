@@ -78,12 +78,14 @@ class DelOp:
         self.main_target = kdn.main_target
         self.tensor_targets = kdn.all_targets
         self.all_targets = list(kdn.deps)[0].all_targets if kdn.deps else []
+        self.container_targets = kdn.container_targets
         # self.code = kn.get_code()
         # self.requires_grad = kdn.info.requires_grad
         self.info = kdn.info
         self.is_fgt = True
         self.op_type = "Del"
         self.proxy = proxy
+        self.includes_phantoms = kdn.includes_phantoms
 
     def __eq__(self, op2):
         return check_attr(self, op2, ["name"])
