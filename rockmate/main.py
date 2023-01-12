@@ -6,6 +6,7 @@
 #     ast_to_str,
 # )
 import pgb
+from pgb.main import make_inputs
 from pgb.utils import print_debug, np
 from pgb.utils.global_vars import ref_verbose
 from pgb.utils.small_fcts import get_device
@@ -173,7 +174,10 @@ class CheckpointedModule(torch.nn.Module):
                 self.allo_mem.append(allo_mem)
 
     def forward(self, input, record_mem=False):
-        self.storage.add_val("src", input)  #  hardcoded
+        # self.storage.add_val("src", input)  #  hardcoded
+        dict_inputs = make_inputs(self.original_mod, input, None)
+        for k, v in dict_inputs.items():
+            self.storage.add_val(k, v)
         exec(self.init_code, self.storage.gd, self.storage.ld)
 
         self.max_mem = []
