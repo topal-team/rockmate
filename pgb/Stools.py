@@ -613,6 +613,7 @@ def simplify_view(sg):
 
 def create_random_snodes_from_dict_rand(sg,model,device):
     dict_random_sn = dict() # str -> S_node
+    dict_info = sg.dict_info
     for name,ast_code in sg.dict_rand.items():
         dict_random_sn[name] = S_node(
             target    = name,
@@ -627,7 +628,7 @@ def create_random_snodes_from_dict_rand(sg,model,device):
         if model: our_global["self"] = model
         if device: our_global["device"] = device
         dict_info[name] = def_info.Var_info(
-            eval(ast_to_str(ast_code),our_global)
+            eval(ast_add_on.ast_to_str(ast_code),our_global)
         )
     for sn in sg.nodes:
         for req_rd in sn.deps_rand:

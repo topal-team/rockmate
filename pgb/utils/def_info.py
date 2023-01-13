@@ -4,9 +4,10 @@
 
 from pgb.utils.imports import *
 from pgb.utils import small_fcts
+from pgb.utils import global_vars
 
 # -> all the info concerning a variable/tensor which might be useful
-# -> e.g. to regenerate it, using def_info.generate_var(info,device)
+# -> e.g. to regenerate it, using def_info.generate_val(info,device)
 
 # attributes : 
 # dtype ; ttype ; tsize
@@ -87,10 +88,21 @@ def generate_val(info,device):
     if tt==torch.Size:
         return info.tsize
     elif tt==torch.Tensor:
-        return torch.ones(info.tsize,
-            dtype=info.dtype,
-            requires_grad=info.requires_grad,
-            device=device)
+        if info.dtype in global_vars.int_dtype:
+            return torch.randint(128,info.tsize,
+                dtype=info.dtype,
+                requires_grad=info.requires_grad,
+                device=device)
+        elif info.dtype in global_vars.bool_dtype:
+            return torch.randint(2,info.tsize,
+                dtype=info.dtype,
+                requires_grad=info.requires_grad,
+                device=device)
+        else: # float or complexe
+            return torch.randn(info.tsize,
+                dtype=info.dtype,
+                requires_grad=info.requires_grad,
+                device=device)
     else:
         assert(tt==list or tt==tuple)
         x = [generate_val(sub_info,device) for sub_info in info.sub_info]

@@ -136,6 +136,11 @@ class Graph_Translator():
             elif (x[:5] == "self." or x[:5] == "self["
             and x in self.param_dict):
                 return self.param_dict[x][0]
+            elif ".grad_fn" in x:
+                var = x.split('.')[0]
+                if var in self.main_dict:
+                    new_var = self.main_dict[var]
+                    return new_var + x[len(var):]
             return x
 
         # -- AST --
@@ -251,6 +256,19 @@ class Graph_Translator():
                 setattr(kg,attr,translate(getattr(kg,attr)))
             for kdn in kg.list_kdn:
                 kdn.info = kg.dict_info[kdn.main_target]
+                new_list = []
+                for r in kdn.alias_in_users_phantoms:
+                    new_list.append((r[0],translate(r[1]),translate(r[1])))
+                kdn.alias_in_users_phantoms = new_list
+                new_set = set()
+                for r in kdn.users_impossible_to_restore:
+                    new_set.add((r[0],translate(r[1])))
+                kdn.users_impossible_to_restore = new_set
+            for kcn in kg.list_kcn:
+                new_set = set()
+                for r in kcn.deps_impossible_to_restore:
+                    new_set.add((r[0],translate(r[1])))
+                kcn.deps_impossible_to_restore = new_set
             return kg
 
         # -- ITERABLE --
