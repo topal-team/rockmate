@@ -2,7 +2,9 @@ import torch
 import rockmate as rk
 from copy import deepcopy
 from rotor import timing
+
 device = torch.device("cuda")
+
 
 def test_on_module(module, input, mem_limit=None):
     for n, p in module.named_parameters():
@@ -23,11 +25,11 @@ def test_on_module(module, input, mem_limit=None):
     timer.end()
     peak_mem = torch.cuda.max_memory_allocated() - max_before
     print(f"original module peak memory {peak_mem}")
-    print("original module time: %.4f"%timer.elapsed())
-
-
+    print("original module time: %.4f" % timer.elapsed())
 
     newmod = rk.CheckpointedModule(_module, _input, mem_limit=mem_limit)
+
+    newmod.reinit()
     torch.cuda.reset_peak_memory_stats()
     max_before = torch.cuda.max_memory_allocated()
     timer = timing.make_timer(device)
@@ -41,7 +43,7 @@ def test_on_module(module, input, mem_limit=None):
 
     peak_mem = torch.cuda.max_memory_allocated() - max_before
     print(f"rockmate module peak memory {peak_mem}")
-    print("rockmate module time: %.4f"%timer.elapsed())
+    print("rockmate module time: %.4f" % timer.elapsed())
 
     if torch.allclose(loss, _loss):
         print("Same loss obtained!")
