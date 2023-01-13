@@ -76,8 +76,11 @@ class Translator:  # to execute Op
                                 f"{target}.data = torch.empty(0,device=device);"
                             )
                     else:
-                        for target in op.all_targets:
-                            code += f"del {target};"
+                        for target in op.tensor_targets:
+                            code += (
+                                f"{target}.data = torch.empty(0,device=device);"
+                            )
+                            # code += f"del {target};"
                     code_list.append(code)
                 else:
                     code_list.append("")

@@ -11,7 +11,7 @@ from pgb.utils import print_debug, np
 from pgb.utils.global_vars import ref_verbose
 from pgb.utils.small_fcts import get_device
 from pgb.utils.ast_add_on import ast_to_str
-from rockmate.def_code import RK_Storage, DelOp
+from rockmate.def_code import RK_Storage, DelOp, OpSchedule
 from rockmate.def_chain import RK_Chain
 from rockmate.def_sequence import (
     SeqBlockBwd,
@@ -130,12 +130,57 @@ class CheckpointedModule(torch.nn.Module):
                     # )
 
         self.fwd_seq, self.bwd_seq = self.seq.cut_fwd_bwd()
+        self.fwd_op_sched_list = [seq.op_sched for seq in self.fwd_seq.seq]
+        self.bwd_op_sched_list = [seq.op_sched for seq in self.bwd_seq.seq]
+
         self.fwd_op_list = [
-            op for seq in self.fwd_seq.seq for op in seq.op_sched.op_list
+            op for op_sched in self.fwd_op_sched_list for op in op_sched.op_list
         ]
         self.bwd_op_list = [
-            op for seq in self.bwd_seq.seq for op in seq.op_sched.op_list
+            op for op_sched in self.bwd_op_sched_list for op in op_sched.op_list
         ]
+
+        self.fwd_alive_list = []
+        self.bwd_alive_list = []
+        list_kdn = []
+        start_i = []
+        for kg in self.list_kg:
+            start_i.append(len(list_kdn))
+            list_kdn += kg.list_kdn
+        alive_status = np.zeros(len(list_kdn) + 2, dtype=bool)
+        alive_status[-1] = 1
+        kdn_names = [kdn.name for kdn in list_kdn] + [
+            self.list_kg[0].input_kdn_data.name,
+            self.list_kg[0].input_kdn_grad.name,
+        ]
+        for op_sched in self.fwd_op_sched_list:
+            index = [kdn_names.index(n) for n in op_sched.kdn_names]
+            for a in op_sched.alive_list:
+                alive_status[index] = a
+                self.fwd_alive_list.append(alive_status.copy())
+        for op_sched in self.bwd_op_sched_list:
+            index = [kdn_names.index(n) for n in op_sched.kdn_names]
+            for a in op_sched.alive_list:
+                alive_status[index] = a
+                self.bwd_alive_list.append(alive_status.copy())
+
+        self.fwd_op_sched = OpSchedule(
+            self.fwd_op_list,
+            self.fwd_alive_list,
+            self.list_kg[0].input_kdn_data,
+            self.list_kg[0].input_kdn_grad,
+            self.output,
+            list_kdn,
+        )
+
+        self.bwd_op_sched = OpSchedule(
+            self.bwd_op_list,
+            self.bwd_alive_list,
+            self.list_kg[0].input_kdn_data,
+            self.list_kg[0].input_kdn_grad,
+            self.output,
+            list_kdn,
+        )
 
     def get_code(self, aggressive=True):
         self.storage = RK_Storage(self.device, self.original_mod)

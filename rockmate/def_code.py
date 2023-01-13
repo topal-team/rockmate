@@ -56,6 +56,7 @@ class RunOp:
         self.is_fgt = False
         self.op_type = "Run"
         self.proxy = False
+        self.no_grad = False
         for kdn in kcn.users:
             if kdn.kdn_type != "data":
                 continue
@@ -98,7 +99,14 @@ class DelOp:
 
 class OpSchedule:
     def __init__(
-        self, op_list, alive_list, kg, no_grad=False,
+        self,
+        op_list,
+        alive_list,
+        input_kdn_data,
+        input_kdn_grad,
+        output_kdn_data,
+        list_kdn,
+        no_grad=False,
     ):
         self.op_list = op_list
         self.alive_list = alive_list
@@ -107,20 +115,20 @@ class OpSchedule:
         self.no_grad = no_grad
 
         self.input_size = (
-            kg.input_kdn_data.main_target,
-            kg.input_kdn_data.mem.v,
+            input_kdn_data.main_target,
+            input_kdn_data.mem.v,
         )
         self.output_size = (
-            kg.output_kdn_data.main_target,
-            kg.output_kdn_data.mem.v,
+            output_kdn_data.main_target,
+            output_kdn_data.mem.v,
         )
 
         # save the del_input op in case needed
-        input_kdn = kg.input_kdn_data
+        input_kdn = input_kdn_data
         self.del_input_op = DelOp(input_kdn, proxy=False)
         self.del_input_idx = L
 
-        list_kdn = kg.list_kdn + [kg.input_kdn_grad, kg.input_kdn_data]
+        list_kdn = list_kdn + [input_kdn_grad, input_kdn_data]
         self.mem_sizes = [kdn.mem.v for kdn in list_kdn]
         self.kdn_names = [kdn.name for kdn in list_kdn]
         self.kdn_info = {

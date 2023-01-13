@@ -101,7 +101,9 @@ class RK_Block:
             alive_status[-1] = True
             loss_idx = kg.list_kcn.index(kg.loss_kcn)
             for i, kcn in enumerate(kg.list_kcn[:loss_idx]):
-                op_list.append(RunOp(kcn))
+                op = RunOp(kcn)
+                op.no_grad = True
+                op_list.append(op)
                 for kdn in kcn.users:
                     if "data" not in kdn.kdn_type:
                         continue
@@ -111,13 +113,29 @@ class RK_Block:
                     if kdn in [kg.output_kdn_data, kg.output_kdn_grad]:
                         continue
                     if alive_status[j] and _can_del(i, kdn):
-                        op_list.append(DelOp(kdn))
+                        op = DelOp(kdn)
+                        op.proxy = False
+                        op_list.append(op)
                         alive_status[j] = 0
                         alive_list.append(alive_status.copy())
             return op_list, alive_list
 
-        self.Fc_sched = OpSchedule(*_fast_fwd_sched(), kg, no_grad=True,)
-        self.Fn_sched = OpSchedule(*_fast_fwd_sched(), kg, no_grad=True,)
+        self.Fc_sched = OpSchedule(
+            *_fast_fwd_sched(),
+            kg.input_kdn_data,
+            kg.input_kdn_grad,
+            kg.output_kdn_data,
+            kg.list_kdn,
+            no_grad=True,
+        )
+        self.Fn_sched = OpSchedule(
+            *_fast_fwd_sched(),
+            kg.input_kdn_data,
+            kg.input_kdn_grad,
+            kg.output_kdn_data,
+            kg.list_kdn,
+            no_grad=True,
+        )
         self.Fn_sched.get_del_input_idx(kg)
         self.Fn_sched.del_input()
         self.overhead_fast_fwd = self.Fc_sched.overhead

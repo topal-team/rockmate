@@ -354,10 +354,20 @@ class ModelGurobi:
         #     alive_list.insert(del_input_idx, alive_status)
 
         fwd_sched = OpSchedule(
-            op_list[: loss_i + 1], alive_list[: loss_i + 1], kg
+            op_list[: loss_i + 1],
+            alive_list[: loss_i + 1],
+            kg.input_kdn_data,
+            kg.input_kdn_grad,
+            kg.output_kdn_data,
+            kg.list_kdn,
         )
         bwd_sched = OpSchedule(
-            op_list[loss_i + 1 :], alive_list[loss_i + 1 :], kg
+            op_list[loss_i + 1 :],
+            alive_list[loss_i + 1 :],
+            kg.input_kdn_data,
+            kg.input_kdn_grad,
+            kg.output_kdn_data,
+            kg.list_kdn
         )
         # fwd_sched.del_input(kg)
         return fwd_sched, bwd_sched
