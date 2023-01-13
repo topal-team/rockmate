@@ -50,6 +50,7 @@ class K_C_node():
         self.deps_global  = set() # KDN set
         self.users_global = set() # KDN set
         self.users        = set() # KDN set
+        self.deps_impossible_to_restore = set() # (KDN * str) set
         da = deps_through_size_artefacts
         self.deps_through_size_artefacts = da if da else set() # KCN set
         # -> just for the toposort, we don't need the reciprocal users_..
@@ -77,14 +78,19 @@ class K_C_node():
             f"code : {kcn1.full_code()}\n===\n{kcn2.full_code()}")
 
         # ** deps/users **
-        mt = lambda nl : [rn.main_target for rn in nl]
-        s = sort_nodes if force_order else (lambda s : s)
+        mmt = lambda nl : [rn.main_target for rn in nl]
+        s = shared_methods.sort_nodes if force_order else (lambda s : s)
         for attr in ["deps_real","deps_fake","deps_global",
             "users","users_global","deps_through_size_artefacts"]:
-            c = mt(s(getattr(kcn1,attr))) == mt(s(getattr(kcn2,attr)))
+            c = mmt(s(getattr(kcn1,attr))) == mmt(s(getattr(kcn2,attr)))
             b *= c
             if not c and raise_exception:
                 raise Exception(f"kcns differ on attr {attr}")
+        mmt2 = lambda nl : [(r[0].main_target,r[1]) for r in nl]
+        b *= small_fcts.clean__eq__(
+            mmt2(kcn1.deps_impossible_to_restore),
+            mmt2(kcn2.deps_impossible_to_restore),
+            raise_exception=raise_exception)
 
         # ** time **
         t1 = kcn1.time
@@ -145,6 +151,8 @@ class K_D_node():
         self.users_global = set() # KCN set
         self.deps_global  = set() # KCN set
         self.deps         = deps if deps else set() # KCN set
+        self.users_impossible_to_restore = set() # (KCN * str) set
+        self.alias_in_users_phantoms = []
     def deps_only_global(self):
         return self.deps_global - self.deps
     def users_only_global(self):
@@ -159,13 +167,23 @@ class K_D_node():
             raise_exception=raise_exception)
         # ** deps/users **
         mt = lambda nl : [rn.main_target for rn in nl]
-        s = sort_nodes if force_order else (lambda s : s)
+        s = shared_methods.sort_nodes if force_order else (lambda s : s)
         for attr in ["users_real","users_fake",
             "deps","users_global","deps_global"]:
             c = mt(s(getattr(kdn1,attr))) == mt(s(getattr(kdn2,attr)))
             b *= c
             if not c and raise_exception:
                 raise Exception(f"kdns differ on attr {attr}")
+        mmt2 = lambda nl : [(r[0].main_target,r[1]) for r in nl]
+        b *= small_fcts.clean__eq__(
+            mmt2(kdn1.users_impossible_to_restore),
+            mmt2(kdn2.users_impossible_to_restore),
+            raise_exception=raise_exception)
+        mmt3 = lambda nl : [(r[0].main_target,r[1],r[2]) for r in nl]
+        b *= small_fcts.clean__eq__(
+            mmt3(kdn1.alias_in_users_phantoms),
+            mmt3(kdn2.alias_in_users_phantoms),
+            raise_exception=raise_exception)
         return bool(b)
     def __hash__(self):
         return self.unique_id
@@ -203,6 +221,8 @@ class K_graph():
         for kcn in self.list_kcn:
             for req_kdn in kcn.deps_real: req_kdn.users_real.add(kcn)
             for req_kdn in kcn.deps_fake: req_kdn.users_fake.add(kcn)
+            for req_kdn,ph_name in kcn.deps_impossible_to_restore:
+                req_kdn.users_impossible_to_restore.add((kcn,ph_name))
         for kdn in self.list_kdn:
             for req_kcn in kdn.deps: req_kcn.users.add(kdn)
     def init_deps_and_users_global(self):
@@ -231,7 +251,8 @@ class K_graph():
     def __eq__(self,g2,force_order=False,raise_exception=False):
         g1 = self
         eq_node= lambda n1,n2 : n1.__eq__(n2,force_order,raise_exception)
-        b = (ast_to_str(self.init_code) == ast_to_str(g2.init_code))
+        b = (ast_add_on.ast_to_str(self.init_code) 
+            == ast_add_on.ast_to_str(g2.init_code))
         if not b and raise_exception:
             raise Exception("K_graphs diff init_code")
         for attr in ["input_kdn_grad","output_kdn_grad",
@@ -267,7 +288,7 @@ class K_graph():
 def aux_init_S_to_K(model,verbose,d):
     global device
     device = d if d else (
-        get_device_and_check_all_same_device(model,dict(),True))
+        small_fcts.get_device_and_check_all_same_device(model,dict(),True))
     if not (verbose is None): global_vars.ref_verbose[0] = verbose
 
 # the function that does it all
@@ -346,15 +367,21 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
         # *** build the bwd part ***
         if info.requires_grad:
             # -> get kdn_data and phantoms deps for bwd
-            deps_real_name,exist_phantoms = (
+            (explicit_deps,
+            data_ptr_only_ph_deps,
+            valid_view_ph_deps,
+            exist_phs) = (
                 def_inspection.get_useful_vars(sn,sg,our_global,device))
+            all_deps_mt = set(explicit_deps).union(
+                set(data_ptr_only_ph_deps.keys()).union(
+                set(valid_view_ph_deps.keys())))
             bwd_deps_real_mt = (
-                set(deps_real_name).intersection(set(sn_deps_mt)))
+                all_deps_mt.intersection(set(sn_deps_mt)))
             kcn_bwd_deps_real = set(
                 dict_KDN_data[mt] for mt in bwd_deps_real_mt)
             kcn_bwd_deps_fake = (
                 kcn_fwd_deps - kcn_bwd_deps_real)
-            if mt in deps_real_name:
+            if mt in all_deps_mt:
                 kcn_bwd_deps_real.add(kdn_data)
                 data_includes_phantoms = kdn_data.includes_phantoms = True
             else:
@@ -373,8 +400,24 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                 unique_id_generator = unique_id_generator)
             dict_KCN_bwd[mt] = kcn_bwd
 
+            # -> phantom deps
+            for ph_name,(used_name,owner_name) in valid_view_ph_deps.items():
+                try:
+                    used_kdn = dict_KDN_data[owner_name]
+                    used_kdn.alias_in_users_phantoms.append(
+                        (kcn_bwd,used_name,ph_name))
+                except:
+                    print("Warning : this is strange, I will fix it tomorrow")
+            for ph_name,owner_name in data_ptr_only_ph_deps.items():
+                try:
+                    used_kdn = dict_KDN_data[owner_name]
+                    kcn_bwd.deps_impossible_to_restore.add((used_kdn,ph_name))
+                except:
+                    print("Warning : this is strange, I will fix it tomorrow")
+
+
             # -> KDN(phantoms)
-            if exist_phantoms and not data_includes_phantoms:
+            if exist_phs and not data_includes_phantoms:
                 kdn_phantoms = K_D_node(
                     kdn_type    = "phantoms",
                     target      = mt,
@@ -436,11 +479,11 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             # -> phantoms ins
             if global_vars.ref_test_phantoms_detection[0]:
                 exist_diff=res.mem_run_fwd.v - res.mem_fgt_fwd.v > 0
-                if exist_diff or exist_phantoms:
+                if exist_diff or exist_phs:
                     print(f"For node {mt}: mem_diff : {exist_diff} "\
-                          f"and detection {exist_phantoms}")
+                          f"and detection {exist_phs}")
 
-            if exist_phantoms and not data_includes_phantoms:
+            if exist_phs and not data_includes_phantoms:
                 kdn_phantoms.mem = rotor_MemSize(
                     res.mem_run_fwd.v - res.mem_fgt_fwd.v)
 
@@ -605,11 +648,22 @@ def copy_K_graph(kg : K_graph):
             old_edges = getattr(old_kcn,attr)
             for old_aux_kn in old_edges:
                 getattr(new_kcn,attr).add(new_dict_kn[old_aux_kn.name])
+        for old_req_kdn,ph_name in old_kcn.deps_impossible_to_restore:
+            new_kcn.deps_impossible_to_restore.add(
+                (new_dict_kn[old_req_kdn.name],str(ph_name)))
     for new_kdn,old_kdn in zip(new_list_kdn,kg.list_kdn):
         for attr in ["users_real","users_fake","deps"]:
             old_edges = getattr(old_kdn,attr)
             for old_aux_kn in old_edges:
                 getattr(new_kdn,attr).add(new_dict_kn[old_aux_kn.name])
+        for old_user_kcn,ph_name in old_kdn.users_impossible_to_restore:
+            new_kdn.users_impossible_to_restore.add(
+                (new_dict_kn[old_user_kcn.name],str(ph_name)))
+        for old_user_kcn,used_name,ph_name in old_kdn.alias_in_users_phantoms:
+            new_kdn.alias_in_users_phantoms.append((
+                new_dict_kn[old_user_kcn.name],
+                str(used_name), str(ph_name)))
+
 
     # -- global edges --
     # /!\ new_kg is a standalone graph /!\

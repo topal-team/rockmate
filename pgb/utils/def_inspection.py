@@ -69,15 +69,16 @@ def get_useful_vars(sn,sg,our_global,device):
     params = dict(our_global['self'].named_parameters())
     print_debug(f"Try to open {sn.main_target}'s grad_fn")
     # == INIT ==
+    dict_info = sg.dict_info
     tmp_local = generate_deep_tmp_local(sn,sg,our_global,device)
     exec(sn.get_code(), our_global, tmp_local)
     mt = sn.main_target
     fn = tmp_local[mt].grad_fn
-    explicit_vars = set() # set of Tensors
-    phantom_vars  = set() # set of Tensors
+    explicit_vars  = set() # set of Tensors
+    phs_found = set() # set of Tensors
 
     # == SEARCH THROUGH GRAD_FN == 
-    def trace_gradfn(f,path): # path useless, just testing TO REMOVE
+    def trace_gradfn(f,path):
         if hasattr(f,"variable"):
             explicit_vars.add(f.variable)
         for attr in dir(f):
@@ -89,36 +90,58 @@ def get_useful_vars(sn,sg,our_global,device):
                 for t in our_global.values():
                     if t is x: is_input = True
                 if not is_para and not is_input:
-                    phantom_vars.add(x)
+                    path_str = [f".next_functions[{k}][0]" for k in path]
+                    ph_name = (
+                        "f{sn.main_target}.grad_fn" 
+                        + "".join(path_str)
+                        + "." + attr)
+                    phs_found.add((x,ph_name))
         if hasattr(f,"next_functions"):
             for k,t in enumerate(f.next_functions):
                 trace_gradfn(t[0],path+[k])
     trace_gradfn(fn,[])
 
     # == recognize which var are concerned ==
-    used_vars = explicit_vars.union(phantom_vars)
-    used_ptrs = [v.data_ptr() for v in used_vars]
+    explicit_deps = []
+    data_ptr_ph_deps = dict() 
+    # ph_name -> data_owner_name with equal data_ptr
+    valid_view_ph_deps = dict() 
+    # ph_name -> (var_name,data_owner_name) st .view == ph
 
-    req_real = []
-    req_ptrs = []
-    print_debug(f"SEE WHICH VARS ARE USEFUL FOR {sn.main_target}")
     for name,val in tmp_local.items():
         if (name not in sg.direct_inputs
-        and isinstance(val,torch.Tensor)
-        and val.data_ptr() in used_ptrs):
-            req_real.append(name)
-            req_ptrs.append(val.data_ptr())
-            print_debug(f"usefull var : {name}")
+        and isinstance(val,torch.Tensor)):
+            if name not in dict_info: 
+                print(
+                    f"Warning: {name} is a Tensor in tmp_local"\
+                    f" which isn't in dict_info ? How is it ?",
+                    file = sys.stderr)
+                data_owner_name = name
+            else:
+                data_owner_name = dict_info[name].data_owner_name
+            for explicit_var in explicit_vars:
+                if val is explicit_var:
+                    explicit_deps.append(data_owner_name)
+                    break
+            for ph_val,ph_name in phs_found:
+                if val.data_ptr() == ph_val.data_ptr():
+                    data_ptr_ph_deps[ph_name] = data_owner_name
+                    if torch.equal(val.view(ph_val.shape),ph_val):
+                        valid_view_ph_deps[ph_name] = (
+                            name,data_owner_name)
+    
+    # == check for the presence of original phantoms ==
+    exist_phs = False
+    for ph_val,ph_name in phs_found:
+        if ph_name not in data_ptr_ph_deps:
+            exist_phs = True
+            print_debug(f"{ph_name} is an original ph of {mt}")
 
-    # == check for the presence of phantoms ==
-    exist_phantoms = False
-    for v in phantom_vars:
-        p = v.data_ptr()
-        if p not in req_ptrs:
-            exist_phantoms = True
-            print_debug(f"yes {mt} have phantoms")
+    # == clean data_ptr_ph_deps ==
+    for ph_name in valid_view_ph_deps:
+        del data_ptr_ph_deps[ph_name]
 
-    return req_real,exist_phantoms
+    return (explicit_deps,data_ptr_ph_deps,valid_view_ph_deps,exist_phs)
 
 # ======================
 

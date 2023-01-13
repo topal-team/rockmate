@@ -1,6 +1,7 @@
 # ====================
 # = global variables =
 # ====================
+from pgb.utils.imports import torch
 
 time_min_duration = 0
 time_min_repeat = 5
@@ -25,7 +26,7 @@ ref_test_phantoms_detection = [False]
 # === LISTS OF FUNCTIONS ===
 # ==========================
 
-list_rand_fct = ["torch.randn","torch.dropout"]
+list_rand_fct = ["torch.randn","torch.dropout","torch.rand","torch.randint"]
 # TODO : complete this list
 
 list_cheap_fct = [
@@ -66,5 +67,12 @@ list_view_fct = [
     "torch.Tensor.values","torch.Tensor.indices",
     ]
 # list imported from https://pytorch.org/docs/stable/tensor_view.html
+
+int_dtype = [
+    torch.uint8,torch.int8,
+    torch.int16,torch.int32,
+    torch.int64]
+bool_dtype = [
+    torch.bool]
 
 # ==========================
