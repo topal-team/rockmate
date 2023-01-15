@@ -34,7 +34,7 @@ list_rand_fct = [
 list_cheap_fct = [
     "torch.add","torch.sub",
     "torch.mul","torch.div",
-    "torch.floor_devide"]
+    "torch.floor_divide"]
 
 # TODO : complete this list
 list_cheap_fct.extend(["list constructor","tuple constructor"])

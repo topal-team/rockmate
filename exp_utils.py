@@ -1,4 +1,5 @@
 import torch
+import pgb
 import rockmate as rk
 from copy import deepcopy
 from rotor import timing
@@ -6,7 +7,7 @@ from rotor import timing
 device = torch.device("cuda")
 
 
-def test_on_module(module, input, mem_limit=None):
+def sanity_check(module, input, mem_limit=None):
     for n, p in module.named_parameters():
         if p.grad is None:
             p.grad = torch.zeros_like(p)
@@ -69,3 +70,40 @@ def test_on_module(module, input, mem_limit=None):
                 same_grad = False
     if same_grad:
         print("Same grad obtained!")
+
+def test_pgb(module, input):
+    pgb_res = pgb.make_all_graphs(module,input)
+    list_kg = pgb_res.K_graph_list
+    kg = pgb_res.K_graph
+    print("Generated all the graphs !\n")
+    print(f"Equiv classes are : {pgb_res.equivalent_classes}")
+    print(
+        f"So we have only {len(pgb_res.equivalent_classes)} "\
+        f"blocks to solve ILP on, instead of {len(list_kg)}\n")
+    print("CONCERNING K_graph_list :")
+    list_nb_kcn = [len(kg.list_kcn) for kg in list_kg]
+    list_nb_kdn = [len(kg.list_kdn) for kg in list_kg]
+    tot_nb_kcn = sum(list_nb_kcn)
+    tot_nb_kdn = sum(list_nb_kdn)
+    str_list_nb_kcn = "+".join(str(i) for i in list_nb_kcn)
+    str_list_nb_kdn = "+".join(str(i) for i in list_nb_kdn)
+    print(
+        f"{len(list_kg)} K_graphs in seq, with :\n"\
+        f"{str_list_nb_kcn} = {tot_nb_kcn} Comp nodes\n"\
+        f"{str_list_nb_kdn} = {tot_nb_kdn} Data nodes\n"\
+        f"=> total of {tot_nb_kcn + tot_nb_kdn} nodes\n")
+    print("CONCERNING phantoms impossible to restore :")
+    nb_ips = 0
+    for kcn in kg.list_kcn:
+        deps_ips = kcn.deps_impossible_to_restore
+        if len(deps_ips) != 0:
+            nb_ips += 1
+            print(
+                f"{kcn.main_target}'s phantoms must be "\
+                f"protected, because deps_impossible_to_restore :")
+            for kdn,ph_name in deps_ips:
+                print(f"deps on {kdn} through {ph_name}")
+    print(f"Total nb of special phantoms :  {nb_ips}")
+    return pgb_res
+            
+

@@ -289,6 +289,9 @@ def aux_init_S_to_K(model,verbose,d):
     device = d if d else (
         small_fcts.get_device_and_check_all_same_device(model,dict(),True))
     if not (verbose is None): global_vars.ref_verbose[0] = verbose
+    for n,p in model.named_parameters():
+        if p.grad is None:
+            p.grad = torch.zeros_like(p)
 
 # the function that does it all
 def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
@@ -462,19 +465,39 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
         if device == torch.device("cpu"):
             res = def_inspection.Inspection_result()
         else:
-            ins = def_inspection.inspector(sn,sg,our_global,device)
-            ins.measure_fwd()
-            ins.measure_bwd()
-            res = ins.ret
+            ins1 = def_inspection.inspector(sn,sg,our_global,device)
+            ins1.measure_fwd()
+            ins1.measure_bwd()
+            res = ins1.ret
+            """
+            our_global = def_inspection.generate_our_global(sg,model,device)
+            ins1 = def_inspection.inspector(sn,sg,our_global,device)
+            our_global = def_inspection.generate_our_global(sg,model,device)
+            ins2 = def_inspection.inspector(sn,sg,our_global,device)
+            setattr(kcn_fwd,"inspector",ins1)
+            ins1.measure_fwd()
+            ins1.measure_bwd()
+            ins2.measure_fwd()
+            ins2.measure_bwd()
+            ins1.ret.__eq__(ins2.ret,raise_exception=True)
+            res = ins1.ret
+            """
 
         # -> fwd ins
         kcn_fwd.overhead = res.overhead_fwd
         kcn_fwd.time     = res.time_run_fwd
+        # kdn_data.mem     = info.memsize
         if data_includes_phantoms:
             kdn_data.mem = res.mem_run_fwd
         else:
             kdn_data.mem = res.mem_fgt_fwd
-        # if res.relevant: info.memsize = res.mem_fgt_fwd
+        """
+        if res.relevant: 
+            tMs = info.memsize
+            mff = res.mem_fgt_fwd
+            if tMs.v != mff.v:
+                print(f'For {mt}, tensorMsize is {tMs} but mem_fgt_fwd is {mff}')
+        """
 
         # -> bwd ins
         if info.requires_grad:
