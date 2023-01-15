@@ -15,6 +15,12 @@ def sanity_check(module, input, mem_limit=None):
     _input = input.clone()
     _module = deepcopy(module)
 
+    # To warm up
+    y = module(input)
+    loss = y.mean()
+    loss.backward()
+
+    module.zero_grad()
     torch.cuda.reset_peak_memory_stats()
     max_before = torch.cuda.max_memory_allocated()
     timer = timing.make_timer(device)
@@ -107,3 +113,41 @@ def test_pgb(module, input):
     return pgb_res
             
 
+
+def throughput_exp(module, input, batch_sizes, mem_limit=None):
+    newmod = rk.CheckpointedModule(module, input, mem_limit=mem_limit)
+    original_batch = input.shape[0]
+    throughput = {}
+    y = newmod(input)
+    newmod.reinit()
+    for batch_size in batch_sizes:
+        try:
+            newmod.get_sequence(mem_limit * original_batch / batch_size)
+        except:
+            throughput[batch_size] = "infeasible"
+            continue
+        newmod.get_code()
+
+        newmod.reinit()
+        torch.cuda.reset_peak_memory_stats()
+        max_before = torch.cuda.max_memory_allocated()
+        timer = timing.make_timer(device)
+        timer.start()
+        torch.random.manual_seed(0)
+        input = torch.randint(0, 600, [batch_size, input.shape[1]]).to(device)
+        y = newmod(input)
+        loss = y.mean()
+        loss.backward()
+        newmod.backward()
+        timer.end()
+
+        peak_mem = torch.cuda.max_memory_allocated() - max_before
+        print(f"rockmate module peak memory {peak_mem}")
+        print("rockmate module time: %.4f" % timer.elapsed())
+        print(f"batch size {batch_size}")
+        print(f"throughput: {batch_size / timer.elapsed()}")
+        throughput[batch_size] = batch_size / timer.elapsed()
+        del y
+        del loss
+        input.grad = None
+    return throughput

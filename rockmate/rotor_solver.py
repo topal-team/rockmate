@@ -70,7 +70,7 @@ def solve_dp_functionnal(chain: RK_Chain, mmax):
         for k in range(nb_sol[i]):
             limit = max(
                 cw[i] + cbw[i + 1][k] + fwd_tmp[i][k],
-                cw[i] + cw[i + 1] + cbw[i + 1][k] + bwd_tmp[i][k],
+                cw[i] + cbw[i + 1][k] + bwd_tmp[i][k],
             )
             if m >= limit:
                 possibilities.append((k, fw[i][k] + bw[i][k]))
@@ -129,7 +129,7 @@ def solve_dp_functionnal(chain: RK_Chain, mmax):
                 sols_now = []
                 for k in range(nb_sol[a]):
                     mem_f = cw[a + 1] + cbw[a + 1][k] + fwd_tmp[a][k]
-                    mem_b = cw[a] + cw[a + 1] + cbw[a + 1][k] + bwd_tmp[a][k]
+                    mem_b = cw[a] + cbw[a + 1][k] + bwd_tmp[a][k]
                     limit = max(mem_f, mem_b)
                     if m >= limit:
                         time = fw[a][k] + bw[a][k]
