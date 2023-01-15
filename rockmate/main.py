@@ -7,7 +7,7 @@
 # )
 import pgb
 from pgb.main import make_inputs
-from pgb.utils import print_debug, np
+from pgb.utils import print_debug, np, rotor_tensorMsize
 from pgb.utils.global_vars import ref_verbose
 from pgb.utils.small_fcts import get_device
 from pgb.utils.ast_add_on import ast_to_str
@@ -241,6 +241,9 @@ class CheckpointedModule(torch.nn.Module):
 
     def backward(self, record_mem=False, add_output_grad=True):
         if record_mem:
+            self.output_size = rotor_tensorMsize(
+                self.storage.ld[self.output.main_target]
+            )
             # self.allo_mem[-1] += self.output.info.memsize.v
             # output grad is generated outside
             loss_idx = len(self.allo_mem)
@@ -252,7 +255,7 @@ class CheckpointedModule(torch.nn.Module):
                 with torch.enable_grad():
                     self._exec(code_list, record_mem)
         if record_mem and add_output_grad:
-            self.allo_mem[loss_idx] += self.output.info.memsize.v
+            self.allo_mem[loss_idx] += self.output_size
 
     def expect_time(self):
         # Sum of the measured time of each operation for one batch
