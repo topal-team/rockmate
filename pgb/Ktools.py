@@ -373,8 +373,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             exist_phs) = (
                 def_inspection.get_useful_vars(sn,sg,our_global,device))
             all_deps_mt = set(explicit_deps).union(
-                set(data_ptr_only_ph_deps.keys()).union(
-                set(valid_view_ph_deps.keys())))
+                set(data_ptr_only_ph_deps.values()).union(
+                set([t[1] for t in valid_view_ph_deps.values()])))
             bwd_deps_real_mt = (
                 all_deps_mt.intersection(set(sn_deps_mt)))
             kcn_bwd_deps_real = set(

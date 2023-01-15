@@ -261,7 +261,7 @@ class Graph_Translator():
                 kdn.info = kg.dict_info[kdn.main_target]
                 new_list = []
                 for r in kdn.alias_in_users_phantoms:
-                    new_list.append((r[0],translate(r[1]),translate(r[1])))
+                    new_list.append((r[0],translate(r[1]),translate(r[2])))
                 kdn.alias_in_users_phantoms = new_list
                 new_set = set()
                 for r in kdn.users_impossible_to_restore:
