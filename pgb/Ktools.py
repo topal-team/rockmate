@@ -183,13 +183,6 @@ class K_D_node():
             mmt2(kdn1.users_impossible_to_restore),
             mmt2(kdn2.users_impossible_to_restore),
             raise_exception=raise_exception)
-        """
-        mmt3 = lambda nl : [(r[0].main_target,r[1],r[2]) for r in nl]
-        b *= small_fcts.clean__eq__(
-            mmt3(kdn1.alias_in_users_phantoms),
-            mmt3(kdn2.alias_in_users_phantoms),
-            raise_exception=raise_exception)
-        """ # TO REMOVE
         return bool(b)
     def __hash__(self):
         return self.unique_id
