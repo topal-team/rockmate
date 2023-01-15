@@ -51,6 +51,8 @@ class RunOp:
         self.deps_global = kcn.deps_global
         self.deps_fake = kcn.deps_fake
         self.users_global = kcn.users_global
+        self.alias_in_users_phantoms = kcn.alias_in_users_phantoms
+        self.phantom_names = kcn.phantom_names
         if keep_kcn:
             self.kcn = kcn
         self.is_fgt = False
@@ -89,6 +91,7 @@ class DelOp:
         self.op_type = "Del"
         self.proxy = proxy
         self.includes_phantoms = kdn.includes_phantoms
+        self.alias_in_users_phantoms = kdn.alias_in_users_phantoms
 
     def __eq__(self, op2):
         return check_attr(self, op2, ["name"])

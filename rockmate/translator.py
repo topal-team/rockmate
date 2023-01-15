@@ -50,6 +50,7 @@ class Translator:  # to execute Op
                 self.info_global[kdn_name] = op_sched.kdn_info[kdn_name]
         else:
             self.alive_global = {}
+        op_name_list = [op.name for op in op_sched.op_list]
         # Fc/Fn cases
         if op_sched.no_grad:
             code_list = []  # ["with torch.no_grad():"]
@@ -66,7 +67,14 @@ class Translator:  # to execute Op
                             code = f"rng_state.get('{op.name}');rng_state.restore('{op.name}')\n{op.code}"
                         else:
                             code = op.code
+                        # for target in op.tensor_targets:
+                        #     code += f"shapes['{target}'] = {target}.shape;"
+                        # for phantom_name in op.phantom_names:
+                        #     code += (
+                        #         f"shapes['{phantom_name}'] = _{phantom_name}.shape;"
+                        #     )
                         code_list.append(f"{code}")
+
                 elif op.kdn_type == "data":
                     code = ""
                     if op_sched.del_input_idx == i:
@@ -89,7 +97,9 @@ class Translator:  # to execute Op
                 #     for target in op_sched.del_input_op.tensor_targets:
                 #         code += f"{target}.data = torch.empty(0,device=device);"
                 #     code_list[-1] += code
-            code_list[-1] += f"\n{op_sched.output_size[0]}.requires_grad_()"
+            out_target = op_sched.output_size[0]
+            code_list[-1] += f"\n{out_target}.requires_grad_();"
+            code_list[-1] += f"shapes['{out_target}'] = {out_target}.shape;"
             return code_list
 
         def _is_alive(kdn_name, i):
@@ -101,6 +111,16 @@ class Translator:  # to execute Op
                 return self.alive_global[kdn_name]
             else:
                 return True
+
+        def _is_phantom_alive(kdn_target, i):
+            if f"{kdn_target} phantoms" in op_sched.kdn_names:
+                return op_sched.alive_list[i][
+                    op_sched.kdn_names.index(f"{kdn_target} phantoms")
+                ]
+            else:  # phantom kdn does not exist, need to check fwd/bwd
+                return ("fwd_{kdn_target}" in op_name_list[:i]) and (
+                    "bwd_{kdn_target}" in op_name_list[i + 1 :]
+                )
 
         def _generate_fake_data(kdn, i, is_self=False):
             # return code for generate the target fake tensor (only for data/grad)
@@ -123,11 +143,11 @@ class Translator:  # to execute Op
                 target_tensor = f"{kdn.main_target}.grad"
             if (target_tensor is None) or not self.aggressive:
                 # No available live tensor to use
-                target_tensor = f"torch.empty({req_shape},device=device)"
+                target_tensor = f"torch.empty(shapes['{mt}'],device=device)"
                 prep_code += f"{mt}.data = {target_tensor};"
             else:
                 prep_code += (
-                    f"{mt}.data = {target_tensor}.reshape({req_shape});"
+                    f"{mt}.data = {target_tensor}.reshape(shapes['{mt}']);"
                 )
             # prep_code += (
             #     ";".join(
@@ -167,15 +187,28 @@ class Translator:  # to execute Op
                     for target in op.tensor_targets:
                         code = code.replace(target, "_" + target)
                     if rec:
-                        code += f"{mt}.data = _{mt}.data;"
+                        code += f"{mt}.data = _{mt}.data;\n"
                     else:
-                        code += f"{mt} = _{mt}.detach();{mt}.requires_grad_();"
+                        code += (
+                            f"{mt} = _{mt}.detach();{mt}.requires_grad_();\n"
+                        )
                 for bc in op.body_code:
                     suffix = ""
                     if rec and (bc[0] in op.tensor_targets):
                         suffix = ".data"
-                    code += "\n" + make_str_assign(bc, suffix=suffix)
+                    code += make_str_assign(bc, suffix=suffix) + "\n"
+                for user, tensor, phantom_name in op.alias_in_users_phantoms:
+                    if rec and _is_phantom_alive(user, i):
+                        code += f"_{phantom_name}.data = {tensor}.reshape(shapes['{phantom_name}']);"
 
+                if not rec:
+                    for target in op.tensor_targets:
+                        if "loss" not in target:
+                            code += f"shapes['{target}'] = {target}.shape;"
+                    for phantom_name in op.phantom_names:
+                        code += (
+                            f"shapes['{phantom_name}'] = _{phantom_name}.shape;"
+                        )
                 if op.is_rand:
                     code = f"rng_state.get('{op.name}');rng_state.restore('{op.name}')\n{code}"
                 return code
@@ -214,6 +247,9 @@ class Translator:  # to execute Op
         def _del_op(op, i):
             code = ""
             if op.kdn_type == "data":
+                for user, tensor, phantom_name in op.alias_in_users_phantoms:
+                    if _is_phantom_alive(user, i):
+                        code += f"_{phantom_name}.data = torch.empty(0,device=device); "
                 if (
                     op.info is not None
                     and op.info.requires_grad
@@ -225,13 +261,14 @@ class Translator:  # to execute Op
                         code += f"del _{op.main_target};"
                 for v in op.tensor_targets:
                     code += f"{v}.data = torch.empty(0,device=device); "
+
                 for v in op.container_targets:
                     code += f"del {v};"
 
             if op.kdn_type == "grad":
-                code += f"{op.main_target}.grad = None"
+                code += f"{op.main_target}.grad = None;"
             if op.kdn_type == "phantoms":
-                code += f"del _{op.main_target}"
+                code += f"del _{op.main_target};"
             return code
 
         code_list = []

@@ -185,6 +185,8 @@ class CheckpointedModule(torch.nn.Module):
     def get_code(self, aggressive=True):
         self.storage = RK_Storage(self.device, self.original_mod)
         self.storage.gd["rng_state"] = RngState()
+        self.storage.gd["shapes"] = {}
+
         self.translator = Translator(self.storage, aggressive=aggressive)
         fwd_code = []
         for seq_block in self.fwd_seq.seq:

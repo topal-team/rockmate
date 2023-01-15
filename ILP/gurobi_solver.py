@@ -333,9 +333,17 @@ class ModelGurobi:
                 for eidx, (k_, i) in enumerate(self.delete_list):
                     if k == k_ and self.delete[t, eidx].X:
                         kdn = kg.list_kdn[i]
-                        alive_status[i] = 0
-                        op_list.append(DelOp(kdn))
-                        alive_list.append(alive_status.copy())
+                        if  "phantom" in kdn.name:
+                            alive_status[i] = 0
+                            op_list.append(DelOp(kdn))
+                            alive_list.append(alive_status.copy())
+                for eidx, (k_, i) in enumerate(self.delete_list):
+                    if k == k_ and self.delete[t, eidx].X:
+                        kdn = kg.list_kdn[i]
+                        if  "phantom" not in kdn.name:
+                            alive_status[i] = 0
+                            op_list.append(DelOp(kdn))
+                            alive_list.append(alive_status.copy())
         for i, op in enumerate(op_list):
             if "loss" in op.name:
                 loss_i = i
