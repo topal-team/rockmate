@@ -68,7 +68,7 @@ class Graph_Translator():
                 "direct_inputs","hidden_inputs",
                 "direct_outputs","hidden_output"]:
                 search_through(getattr(sg,attr))"""
-            search_through(getattr(sg,"hidden_inputs"))
+            # search_through(getattr(sg,"direct_inputs")) # TO REMOVE
             snodes = [sg.init_node] + sg.nodes
             for sn in snodes:
                 search_through(sn.main_code)
@@ -233,10 +233,13 @@ class Graph_Translator():
                         info = sg.dict_info[k]
                         info.data_owner_name = k
                         info.data_direct_parent_name = k
+                        info.is_inplace = False
+                        info.is_view = False
             for attr in [
-                "hidden_inputs","direct_inputs","dict_info",
-                "hidden_output","direct_outputs","dict_rand"]:
+                "direct_inputs","dict_info","dict_rand",
+                "hidden_output","direct_outputs"]:
                 setattr(sg,attr,translate(getattr(sg,attr)))
+            # -> I do NOT translate hidden/direct_inputs 
             return sg
 
         # -- K_GRAPH --
@@ -380,8 +383,12 @@ def S_list_to_K_list_eco(
             lst_kcn.users_global.discard(fake_inp_grad)
             lst_kcn.users_global.add(real_inp_grad)
             real_inp_grad.deps_global.add(lst_kcn)
-        assert(real_inp_data.main_target == fake_inp_data.main_target)
-        assert(real_inp_grad.main_target == fake_inp_grad.main_target)
+        #assert(real_inp_data.main_target == fake_inp_data.main_target)
+        #assert(real_inp_grad.main_target == fake_inp_grad.main_target)
+        # We cannot make this assertion because I don't 
+        # translate hidden inputs because we don't care 
+        # about how direct_inputs was generated. But it 
+        # implies that fake_inp_data targets are dummy.
 
     return cc,list_kg,tab_S_repr_cc
 

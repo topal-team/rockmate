@@ -26,7 +26,9 @@ ref_test_phantoms_detection = [False]
 # === LISTS OF FUNCTIONS ===
 # ==========================
 
-list_rand_fct = ["torch.randn","torch.dropout","torch.rand","torch.randint"]
+list_rand_fct = [
+    "torch.randn","torch.dropout",
+    "torch.rand","torch.randint"]
 # TODO : complete this list
 
 list_cheap_fct = [

@@ -183,7 +183,7 @@ def make_all_graphs(model,
     if bool_dg: dg = Dtools.B_to_D(bg,model,dict_inputs,device=device)
     else: dg = None
     if bool_sg: sg = Stools.D_to_S(
-        dg,keep_sequential=True,model=model,device=device)
+        dg,model=model,device=device)
     else: sg = None
     if bool_kg: kg = Ktools.S_to_K(sg,model,device=device)
     else: kg = None

@@ -402,18 +402,19 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
 
             # -> phantom deps
             for ph_name,(used_name,owner_name) in valid_view_ph_deps.items():
-                try:
-                    used_kdn = dict_KDN_data[owner_name]
-                    used_kdn.alias_in_users_phantoms.append(
-                        (kcn_bwd,used_name,ph_name))
-                except:
-                    print("Warning : this is strange, I will fix it tomorrow")
+                if owner_name not in dict_KDN_data: raise Exception(
+                    f"Warning : {ph_name}'s owner is {owner_name}"\
+                    f"but we cannot find it's KDN_data node ??"\
+                    f"its used name is {used_name}")
+                used_kdn = dict_KDN_data[owner_name]
+                used_kdn.alias_in_users_phantoms.append(
+                    (kcn_bwd,used_name,ph_name))
             for ph_name,owner_name in data_ptr_only_ph_deps.items():
-                try:
-                    used_kdn = dict_KDN_data[owner_name]
-                    kcn_bwd.deps_impossible_to_restore.add((used_kdn,ph_name))
-                except:
-                    print("Warning : this is strange, I will fix it tomorrow")
+                if owner_name not in dict_KDN_data: raise Exception(
+                    f"Warning : {ph_name}'s owner is {owner_name}"\
+                    f"but we cannot find it's KDN_data node ??")
+                used_kdn = dict_KDN_data[owner_name]
+                kcn_bwd.deps_impossible_to_restore.add((used_kdn,ph_name))
 
 
             # -> KDN(phantoms)
@@ -468,7 +469,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             kdn_data.mem = res.mem_run_fwd
         else:
             kdn_data.mem = res.mem_fgt_fwd
-        if res.relevant: info.memsize = res.mem_fgt_fwd
+        # if res.relevant: info.memsize = res.mem_fgt_fwd
 
         # -> bwd ins
         if info.requires_grad:

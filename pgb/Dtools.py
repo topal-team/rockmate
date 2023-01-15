@@ -89,7 +89,7 @@ def generate_tmp_local(g,dict_info,bn,our_global,tmp_local=None):
     for req_bn in bn.deps:
         if req_bn.target not in tmp_local:
             req_bn_info = dict_info[req_bn.target]
-            req_x = def_info.generate_val(req_bn_info,device)
+            req_x = def_info.generate_val(req_bn_info,our_global["device"])
             if isinstance(req_x,torch.Tensor):
                 req_x = req_x.clone()
             tmp_local[req_bn.target] = req_x
@@ -120,7 +120,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
     if not device:
         device = small_fcts.get_device_and_check_all_same_device(
             model,dict_inputs)
-    globals()["device"] = device
+    # globals()["device"] = device
 
     # --- init and sort ---
     dg = D_graph()
@@ -128,7 +128,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
     d_nodes      = dg.nodes
     dict_info    = dg.dict_info
     dg.dict_rand = bg.dict_rand
-    dict_nodes   = {}
+    dict_nodes   = dict()
     b_nodes      = sort_nodes(bg)
 
     # --- translate B node to D and make dict_info ---
@@ -153,10 +153,10 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
                 dict_inputs[bn.target],
                 data_owner_name = bn.target)
         for req_bn in bn.deps:
-            req_dn = dict_nodes[req_bn]
+            req_dn = dict_nodes[req_bn.target]
             dn.deps.add(req_dn)
             req_dn.users.add(dn)
-        dict_nodes[bn] = dn
+        dict_nodes[bn.target] = dn
         d_nodes.append(dn)
 
         # -- compute the forward to get info --
@@ -190,6 +190,11 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
                 data_direct_parent_name = data_direct_parents.pop()
                 o_info = dict_info[data_direct_parent_name]
                 data_owner_name = o_info.data_owner_name
+                # -> we must protect the data_owner from cheap simplification
+                if is_inplace:
+                    data_owner = dict_nodes[data_owner_name]
+                    data_owner.protected = True
+
             else:
                 data_owner_name = bn.target
                 data_direct_parent_name = bn.target
@@ -206,7 +211,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
     assert(isinstance(o_var.val,ast.Name))
     str_val = o_var.val.id
     if o_var.has_node:
-        dg.output_node = dict_nodes[o_var.node]
+        dg.output_node = dict_nodes[str_val]
     dg.output = str_val
 
     # -- prepares the sequencing --

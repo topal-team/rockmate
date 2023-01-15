@@ -5,3 +5,4 @@ __pycache__
 *.kate-swp
 graphviz_dir/
 trash/
+*jupyter.*

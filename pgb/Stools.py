@@ -220,8 +220,8 @@ class S_graph():
         self.direct_inputs  = [] # str list
         self.hidden_output  = "" # str
         self.direct_outputs = [] # str list
-        self.dict_info      = {}
-        self.dict_rand      = {}
+        self.dict_info      = dict()
+        self.dict_rand      = dict()
         if dg:
             self.hidden_inputs  = dg.inputs
             self.direct_outputs = [dg.output]
@@ -234,22 +234,6 @@ class S_graph():
             # "direct_inputs","hidden_inputs", TODO TODO
             "direct_outputs","hidden_output","dict_info","nodes"],
             raise_exception=raise_exception)
-        """
-        sg1 = self
-        b = small_fcts.check_attr(sg1,sg2,[
-            # "direct_inputs","hidden_inputs", TO TODO
-            "direct_outputs","hidden_output","dict_info"],
-            raise_exception=raise_exception)
-        nodes1 = sort_nodes(sg1.nodes)
-        nodes2 = sort_nodes(sg2.nodes)
-        b *= len(nodes1) == len(nodes2)
-        if not b and raise_exception: raise Exception(
-            f"S_graph diff, len(nodes) diff : "\
-            f"{len(nodes1)} != {len(nodes1)}")
-        for sn1,sn2 in zip(nodes1,nodes2):
-            b *= sn1.__eq__(sn2,raise_exception=raise_exception)
-        return b
-    """
 
     def __hash__(self):
         return id(self)
@@ -315,7 +299,17 @@ class S_graph():
                 sn.tensor_targets = tensors
                 sn.container_targets = containers
 
-
+    def refresh_info_data_name(self):
+        dict_info = self.dict_info
+        # First we need to know where each var is :
+        dict_node_name = dict() 
+        for sn in self.nodes:
+            mt = sn.main_target
+            for tar in sn.all_targets:
+                dict_node_name[tar] = mt
+        for name,info in dict_info.items():
+            if name in dict_node_name:
+                info.data_owner_name = dict_node_name[info.data_owner_name]
 
     def assert_ready(self):
         # check if ready to be given to S_to_K
@@ -344,8 +338,7 @@ class S_graph():
 # = Init move from D to S  =
 # ==========================
 
-def D_to_S_init(dg : D_graph,keep_sequential=False) -> S_graph:
-    global ref_keep_seq ; ref_keep_seq = keep_sequential
+def D_to_S_init(dg : D_graph) -> S_graph:
     unique_id_generator = [0]
     sg = S_graph(dg,unique_id_generator)
     init_node = S_node(target="-- inputs --",
@@ -448,7 +441,7 @@ def simplify_cheap(sg : S_graph):
     for sn in sg.nodes:
         if ( not (sn is sg.output_node)
          and sn.main_fct in global_vars.list_cheap_fct
-         and (not ref_keep_seq or not sn.protected)):
+         and not sn.protected):
             simplify_node(sn)
     sg.clear()
 
@@ -645,14 +638,15 @@ def create_random_snodes_from_dict_rand(sg,model,device):
 # = Move from D to S graph =
 # ==========================
 
-def D_to_S(dg,keep_sequential=False,model=None,device=None):
-    sg = D_to_S_init(dg,keep_sequential)
+def D_to_S(dg,model=None,device=None):
+    sg = D_to_S_init(dg)
     simplify_cheap(sg)
     simplify_size(sg)
     simplify_view(sg)
     create_random_snodes_from_dict_rand(sg,model,device)
     sg.check_relations()
     sg.make_tensor_and_container_targets()
+    sg.refresh_info_data_name()
     sg.assert_ready()
     return sg
 

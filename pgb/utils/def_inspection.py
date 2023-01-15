@@ -92,7 +92,7 @@ def get_useful_vars(sn,sg,our_global,device):
                 if not is_para and not is_input:
                     path_str = [f".next_functions[{k}][0]" for k in path]
                     ph_name = (
-                        "f{sn.main_target}.grad_fn" 
+                        f"{sn.main_target}.grad_fn" 
                         + "".join(path_str)
                         + "." + attr)
                     phs_found.add((x,ph_name))
@@ -126,9 +126,15 @@ def get_useful_vars(sn,sg,our_global,device):
             for ph_val,ph_name in phs_found:
                 if val.data_ptr() == ph_val.data_ptr():
                     data_ptr_ph_deps[ph_name] = data_owner_name
-                    if torch.equal(val.view(ph_val.shape),ph_val):
-                        valid_view_ph_deps[ph_name] = (
-                            name,data_owner_name)
+                    if torch.numel(val) == torch.numel(ph_val):
+                        try:
+                            if torch.equal(val.view(ph_val.shape),ph_val):
+                                valid_view_ph_deps[ph_name] = (
+                                    name,data_owner_name)
+                        except: pass
+                        # -> applying val.view raise an error if 
+                        # -> val stride and size isn't compatible with
+                        # -> the original data_owner
     
     # == check for the presence of original phantoms ==
     exist_phs = False
