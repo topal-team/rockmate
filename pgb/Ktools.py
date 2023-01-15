@@ -58,7 +58,9 @@ class K_C_node():
         # ** inspection **
         self.time         = None
         self.overhead     = None
-        self.has_phantoms = None # TO REMOVE ?
+        self.phantom_names = []
+        self.alias_in_users_phantoms = []
+
     def deps_only_global(self):
         return self.deps_global - self.deps_real.union(self.deps_fake)
     def users_only_global(self):
@@ -70,7 +72,8 @@ class K_C_node():
         small_fcts.check_attr(kcn1,kcn2,
             ["name","main_target","is_fwd","all_targets",
              "tensor_targets","container_targets",
-             "is_rand","overhead","has_phantoms"],
+             "is_rand","overhead","phantom_names",
+             "alias_in_users_phantoms"],
             raise_exception=raise_exception)
         and kcn1.full_code() == kcn2.full_code())
         if not b and raise_exception: raise Exception(
@@ -163,7 +166,8 @@ class K_D_node():
         b = small_fcts.check_attr(kdn1,kdn2,
             ["name","mem","kdn_type",
              "main_target","container_targets",
-             "tensor_targets","all_targets"],
+             "tensor_targets","all_targets",
+             "alias_in_users_phantoms"],
             raise_exception=raise_exception)
         # ** deps/users **
         mt = lambda nl : [rn.main_target for rn in nl]
@@ -179,11 +183,13 @@ class K_D_node():
             mmt2(kdn1.users_impossible_to_restore),
             mmt2(kdn2.users_impossible_to_restore),
             raise_exception=raise_exception)
+        """
         mmt3 = lambda nl : [(r[0].main_target,r[1],r[2]) for r in nl]
         b *= small_fcts.clean__eq__(
             mmt3(kdn1.alias_in_users_phantoms),
             mmt3(kdn2.alias_in_users_phantoms),
             raise_exception=raise_exception)
+        """ # TO REMOVE
         return bool(b)
     def __hash__(self):
         return self.unique_id
@@ -407,14 +413,20 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                     f"but we cannot find it's KDN_data node ??"\
                     f"its used name is {used_name}")
                 used_kdn = dict_KDN_data[owner_name]
+                used_kcn = dict_KCN_fwd[owner_name]
                 used_kdn.alias_in_users_phantoms.append(
-                    (kcn_bwd,used_name,ph_name))
+                    (mt,used_name,ph_name))
+                used_kcn.alias_in_users_phantoms.append(
+                    (mt,used_name,ph_name))
             for ph_name,owner_name in data_ptr_only_ph_deps.items():
                 if owner_name not in dict_KDN_data: raise Exception(
                     f"Warning : {ph_name}'s owner is {owner_name}"\
                     f"but we cannot find it's KDN_data node ??")
                 used_kdn = dict_KDN_data[owner_name]
                 kcn_bwd.deps_impossible_to_restore.add((used_kdn,ph_name))
+            kcn_fwd.phantom_names = (
+                list(valid_view_ph_deps.keys())
+                + list(data_ptr_only_ph_deps.keys()))
 
 
             # -> KDN(phantoms)
@@ -602,7 +614,8 @@ def copy_K_C_node(kcn : K_C_node):
     new_kcn.body_code    = [tuple(c) for c in kcn.body_code]
     new_kcn.time         = kcn.time
     new_kcn.overhead     = kcn.overhead
-    new_kcn.has_phantoms = kcn.has_phantoms
+    new_kcn.alias_in_users_phantoms = list(kcn.alias_in_users_phantoms)
+    new_kcn.phantom_names = list(kcn.phantom_names)
     new_kcn.unique_id    = kcn.unique_id
     for attr in ["deps_real","deps_fake","deps_global",
         "users","users_global","deps_through_size_artefacts"]:
@@ -620,6 +633,7 @@ def copy_K_D_node(kdn : K_D_node):
     new_kdn.mem         = kdn.mem
     new_kdn.info        = kdn.info
     new_kdn.includes_phantoms = kdn.includes_phantoms
+    new_kdn.alias_in_users_phantoms = list(kdn.alias_in_users_phantoms)
     new_kdn.unique_id   = kdn.unique_id
     for attr in ["users_real","users_fake",
         "deps","users_global","deps_global"]:
@@ -660,10 +674,6 @@ def copy_K_graph(kg : K_graph):
         for old_user_kcn,ph_name in old_kdn.users_impossible_to_restore:
             new_kdn.users_impossible_to_restore.add(
                 (new_dict_kn[old_user_kcn.name],str(ph_name)))
-        for old_user_kcn,used_name,ph_name in old_kdn.alias_in_users_phantoms:
-            new_kdn.alias_in_users_phantoms.append((
-                new_dict_kn[old_user_kcn.name],
-                str(used_name), str(ph_name)))
 
 
     # -- global edges --

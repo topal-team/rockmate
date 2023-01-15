@@ -196,23 +196,32 @@ class Graph_Translator():
 
         # -- K_C_NODE --
         elif isinstance(x,Ktools.K_C_node): # /!\ inplace like S_node /!\
-            x.main_code   = translate(x.main_code)
-            x.inplace_code= translate(x.inplace_code)
-            x.body_code   = translate(x.body_code)
-            x.main_target = mt = translate(x.main_target)
-            x.all_targets       = translate(x.all_targets)
-            x.tensor_targets    = translate(x.tensor_targets)
-            x.container_targets = translate(x.container_targets)
+            for attr in [
+                "main_code","inplace_code","body_code",
+                "main_target","container_targets",
+                "tensor_targets","all_targets",
+                "alias_in_users_phantoms",
+                "phantom_names"]:
+                setattr(x,attr,translate(getattr(x,attr)))
+                # x.main_code   = translate(x.main_code)
+                # x.inplace_code= translate(x.inplace_code)
+                # x.body_code   = translate(x.body_code)
+                # x.main_target = mt = translate(x.main_target)
+                # x.all_targets       = translate(x.all_targets)
+                # x.tensor_targets    = translate(x.tensor_targets)
+                # x.container_targets = translate(x.container_targets)
+            mt = x.main_target
             x.name = f"fwd_{mt}" if x.is_fwd else f"bwd_{mt}"
             return ()
 
         # -- K_D_NODE --
         elif isinstance(x,Ktools.K_D_node): # /!\ inplace like S_node /!\
-            x.all_targets = translate(x.all_targets)
-            x.main_target = mt = translate(x.main_target)
-            x.all_targets       = translate(x.all_targets)
-            x.tensor_targets    = translate(x.tensor_targets)
-            x.container_targets = translate(x.container_targets)
+            for attr in [
+                "main_target","container_targets",
+                "tensor_targets","all_targets",
+                "alias_in_users_phantoms"]:
+                setattr(x,attr,translate(getattr(x,attr)))
+            mt = x.main_target
             x.name = f"{mt} {x.kdn_type}"
 
         # -- S_GRAPH --
@@ -259,10 +268,6 @@ class Graph_Translator():
                 setattr(kg,attr,translate(getattr(kg,attr)))
             for kdn in kg.list_kdn:
                 kdn.info = kg.dict_info[kdn.main_target]
-                new_list = []
-                for r in kdn.alias_in_users_phantoms:
-                    new_list.append((r[0],translate(r[1]),translate(r[2])))
-                kdn.alias_in_users_phantoms = new_list
                 new_set = set()
                 for r in kdn.users_impossible_to_restore:
                     new_set.add((r[0],translate(r[1])))

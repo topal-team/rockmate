@@ -70,7 +70,8 @@ def get_useful_vars(sn,sg,our_global,device):
     print_debug(f"Try to open {sn.main_target}'s grad_fn")
     # == INIT ==
     dict_info = sg.dict_info
-    tmp_local = generate_deep_tmp_local(sn,sg,our_global,device)
+    # tmp_local = generate_deep_tmp_local(sn,sg,our_global,device)
+    tmp_local = generate_tmp_local(sn,sg,our_global,device)
     exec(sn.get_code(), our_global, tmp_local)
     mt = sn.main_target
     fn = tmp_local[mt].grad_fn
@@ -124,6 +125,8 @@ def get_useful_vars(sn,sg,our_global,device):
                     explicit_deps.append(data_owner_name)
                     break
             for ph_val,ph_name in phs_found:
+                if val is ph_val:
+                    explicit_deps.append(data_owner_name)
                 if val.data_ptr() == ph_val.data_ptr():
                     data_ptr_ph_deps[ph_name] = data_owner_name
                     if torch.numel(val) == torch.numel(ph_val):
