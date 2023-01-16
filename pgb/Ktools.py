@@ -207,8 +207,7 @@ class K_graph():
         # -> otherwise they are shared with the previous k_graph
         # -> output_kdn_data/grad are shared with the next one
 
-        self.init_code = ast_add_on.make_ast_list_assign(
-            sg.init_node.body_code)
+        self.init_code = shared_methods.get_code_ast(sg.init_node)
         self.dict_info = sg.dict_info
         # -> no more .dict_rand
         # -> random op have been inserted at the end of Simplification
