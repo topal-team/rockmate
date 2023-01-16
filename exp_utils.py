@@ -2,6 +2,7 @@ import torch
 import rockmate as rk
 from copy import deepcopy
 from rotor import timing
+import numpy as np
 
 device = torch.device("cuda")
 
@@ -13,7 +14,6 @@ def sanity_check(module, input, mem_limit=None):
 
     _input = input.clone()
     _module = deepcopy(module)
-
     # To warm up
     y = module(input)
     loss = y.mean()
@@ -78,39 +78,93 @@ def sanity_check(module, input, mem_limit=None):
 
 
 def throughput_exp(module, input, batch_sizes, mem_limit=None):
-    newmod = rk.CheckpointedModule(module, input, mem_limit=mem_limit)
-    original_batch = input.shape[0]
     throughput = {}
-    y = newmod(input)
-    newmod.reinit()
-    for batch_size in batch_sizes:
-        try:
-            newmod.get_sequence(mem_limit * original_batch / batch_size)
-        except:
-            throughput[batch_size] = "infeasible"
-            continue
-        newmod.get_code()
+    original_batch = input.shape[0]
+    # print(torch.cuda.memory_allocated())
 
-        newmod.reinit()
+    def original():
+
+        y = module(input)
+        loss = y.mean()
+        loss.backward()
+        y.grad = None
+        y.data = torch.empty(0)
+        module.zero_grad()
+
         torch.cuda.reset_peak_memory_stats()
         max_before = torch.cuda.max_memory_allocated()
         timer = timing.make_timer(device)
         timer.start()
-        torch.random.manual_seed(0)
-        input = torch.randint(0, 600, [batch_size, input.shape[1]]).to(device)
+        y = module(input)
+        loss = y.mean()
+        loss.backward()
+        timer.end()
+        peak_mem = torch.cuda.max_memory_allocated() - max_before
+        print(f"original module peak memory {peak_mem}")
+        print("original module time: %.4f" % timer.elapsed())
+        print(f"batch size {original_batch}")
+        print(f"throughput: {original_batch / timer.elapsed()}")
+        throughput[original_batch] = original_batch / timer.elapsed()
+
+        y.grad = None
+        y.data = torch.empty(0)
+
+    original()
+    # print(torch.cuda.memory_allocated())
+
+    def rockmate(input):
+        batch_size = input.shape[0]
+        try:
+
+            newmod = rk.CheckpointedModule(module, input, mem_limit=mem_limit)
+            # newmod.get_sequence(mem_limit)
+        except:
+            throughput[batch_size] = "infeasible"
+            return None
+        newmod.get_code()
+
         y = newmod(input)
         loss = y.mean()
         loss.backward()
         newmod.backward()
-        timer.end()
+        y.grad = None
+        y.data = torch.empty(0)
+        timer = timing.make_timer(device)
+        times = []
+        for _ in range(repeat):
+            # print(torch.cuda.memory_allocated())
+            newmod.reinit()
 
-        peak_mem = torch.cuda.max_memory_allocated() - max_before
+            torch.cuda.reset_peak_memory_stats()
+            max_before = torch.cuda.max_memory_allocated()
+            timer.start()
+            torch.random.manual_seed(0)
+
+            y = newmod.forward(input)
+            loss = y.mean()
+            loss.backward()
+            newmod.backward()
+            timer.end()
+
+            peak_mem = torch.cuda.max_memory_allocated() - max_before
+            del y
+            del loss
+            input.grad = None
+            times.append(timer.elapsed())
+
         print(f"rockmate module peak memory {peak_mem}")
-        print("rockmate module time: %.4f" % timer.elapsed())
+        print(f"rockmate module budget {newmod.mem_limit}")
+        print("rockmate module time: %.4f" % np.mean(times))
         print(f"batch size {batch_size}")
-        print(f"throughput: {batch_size / timer.elapsed()}")
-        throughput[batch_size] = batch_size / timer.elapsed()
-        del y
-        del loss
+        print(f"throughput: {batch_size / np.mean(times)}\n")
+        throughput[batch_size] = batch_size / np.mean(times)
+
+    for batch_size in batch_sizes:
+        repeat = 5
+        input = torch.randint(0, 600, [batch_size, input.shape[1]]).to(device)
+
+        rockmate(input)
+        # input.data = torch.empty(0)
         input.grad = None
+        module.eval()
     return throughput
