@@ -5,21 +5,27 @@
 from pgb.utils.imports import *
 from pgb.utils.global_vars import print_debug
 from pgb.utils.ast_add_on import (
-    make_str_assign, make_str_list_assign)
+    make_str_assign, 
+    make_str_list_assign,
+    make_ast_list_assign,
+    ast_to_str)
 
 # ======================================
 # ==== GENERATE STR CODE FOR S AND K==== 
 # ======================================
 
-def get_code(n): # For S_node or KCN
+def get_code_ast(n): # For S_node or KCN
+    mc = n.main_code
+    mc = [] if mc is None or mc[1] is None else [mc]
     dict_ic = dict(n.inplace_code)
     bc = [
         (tar,dict_ic[tar] if tar in dict_ic else acode)
         for (tar,acode) in n.body_code]
-    mc = make_str_assign(n.main_code)
-    mc = "" if mc == "" else mc+"\n"
-    bc = make_str_list_assign(bc)
-    return mc+bc
+    code = mc + bc
+    return make_ast_list_assign(code)
+
+def get_code(n): # For S_node or KCN
+    return ast_to_str(get_code_ast(n))
 
 def full_code(n): # For S_node or KCN
     # This function is a way to produce what the final
