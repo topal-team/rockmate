@@ -50,6 +50,7 @@ class Graph_Translator():
                     all_real_vars.append(real_str)
                 elif (real_str[:5] == "self."
                 or real_str[:5] == "self["
+                or real_str[:13] == "getattr(self."
                 and not real_str in all_real_params):
                     all_real_params.append(real_str)
             def search_through(a):
@@ -91,6 +92,7 @@ class Graph_Translator():
             if model:
                 for param_full_name in all_real_params: # strings
                     # -> e.g. param_full_name = "self.layer1.weight"
+                    """
                     path_from_self = re.split(
                             '\.|\[|\]',param_full_name)[1:]
                     param = model
@@ -98,6 +100,8 @@ class Graph_Translator():
                         if attr == "": continue
                         try: param = param[int(attr)]
                         except: param = getattr(param, attr)
+                    """
+                    param = eval(param_full_name,{"self":model},{})
                     info_param = def_info.Var_info(param)
                     nb_param += 1
                     param_dict[param_full_name] = (
@@ -133,7 +137,9 @@ class Graph_Translator():
         if isinstance(x,str):
             if x[:2] == "__" and x in self.main_dict:
                 return self.main_dict[x]
-            elif (x[:5] == "self." or x[:5] == "self["
+            elif (x[:5] == "self." 
+            or x[:5] == "self["
+            or x[:13] == "getattr(self."
             and x in self.param_dict):
                 return self.param_dict[x][0]
             elif ".grad_fn" in x:

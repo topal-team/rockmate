@@ -104,7 +104,6 @@ class S_node():
                 file = sys.stderr)
             else:
                 self.body_code.append(aux_sn.main_code)
-            self.body_code.extend(aux_sn.body_code)
         else:
             # -> we need to push inplace code (and its deps)
             data_parents = []
@@ -124,7 +123,9 @@ class S_node():
                     ic.append(code)
             ic.append(aux_sn.main_code)
             bc.append((aux_mt,ast.Name(aux_info.data_direct_parent_name)))
-            bc.extend(aux_sn.body_code)
+        # anyway :
+        self.inplace_code.extend(aux_sn.inplace_code)
+        self.body_code.extend(aux_sn.body_code)
 
         self.all_targets.extend(aux_sn.all_targets)
         self.is_rand = self.is_rand or aux_sn.is_rand

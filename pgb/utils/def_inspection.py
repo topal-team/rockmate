@@ -172,6 +172,12 @@ class Inspection_result():
         self.mem_fgt_bwd  = rotor_MemSize(0)
         self.time_run_fwd = 0
         self.time_run_bwd = 0
+    def __eq__(self,res2,raise_exception=False):
+        return small_fcts.check_attr(self,res2,
+            ["mem_del_fwd","overhead_fwd","overhead_bwd",
+            "mem_run_fwd","mem_run_bwd",
+            "mem_fgt_fwd","mem_fgt_bwd"],
+            raise_exception=raise_exception)
 
 # TODO : clean the following 100 lines
 class inspector():
@@ -221,7 +227,7 @@ class inspector():
             code = ""
             for tar in self.sn.tensor_targets:
                 code += f"del {tar};"
-            self.code_del_fwd = code#Only include the phantom part 
+            self.code_del_fwd = code
             exec(self.code_del_fwd, self.our_global, self.tmp_local)
         gc.disable()
         _ , mem_run_fwd , peak_fwd = self.memUsage.measure(fct_run_fwd)
@@ -231,7 +237,8 @@ class inspector():
         if not only_run:
             _ , mem_del_fwd , _ = self.memUsage.measure(fct_del_fwd)
             self.ret.mem_del_fwd = small_fcts.minus_mem(mem_del_fwd)
-            _ , _ , _ = self.memUsage.measure(fct_run_fwd)
+            #_ , _ , _ = self.memUsage.measure(fct_run_fwd)
+            fct_run_fwd()
 
             _ , mem_fgt_fwd , _ = self.memUsage.measure(fct_fgt_fwd)
             time_run_fwd = self.measure_time(fct_run_fwd)
@@ -278,6 +285,8 @@ class inspector():
             self.ret.mem_run_bwd  = mem_run_bwd
             self.ret.mem_fgt_bwd  = small_fcts.minus_mem(mem_fgt_bwd)
             self.ret.time_run_bwd = time_run_bwd
+    
+            self.tmp_local.clear()
 
 # ==========================
 
