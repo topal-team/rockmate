@@ -77,15 +77,17 @@ def sanity_check(module, input, mem_limit=None):
     if same_grad:
         print("Same grad obtained!")
 
+
 def test_pgb(module, input):
-    pgb_res = pgb.make_all_graphs(module,input)
+    pgb_res = pgb.make_all_graphs(module, input)
     list_kg = pgb_res.K_graph_list
     kg = pgb_res.K_graph
     print("Generated all the graphs !\n")
     print(f"Equiv classes are : {pgb_res.equivalent_classes}")
     print(
-        f"So we have only {len(pgb_res.equivalent_classes)} "\
-        f"blocks to solve ILP on, instead of {len(list_kg)}\n")
+        f"So we have only {len(pgb_res.equivalent_classes)} "
+        f"blocks to solve ILP on, instead of {len(list_kg)}\n"
+    )
     print("CONCERNING K_graph_list :")
     list_nb_kcn = [len(kg.list_kcn) for kg in list_kg]
     list_nb_kdn = [len(kg.list_kdn) for kg in list_kg]
@@ -94,10 +96,11 @@ def test_pgb(module, input):
     str_list_nb_kcn = "+".join(str(i) for i in list_nb_kcn)
     str_list_nb_kdn = "+".join(str(i) for i in list_nb_kdn)
     print(
-        f"{len(list_kg)} K_graphs in seq, with :\n"\
-        f"{str_list_nb_kcn} = {tot_nb_kcn} Comp nodes\n"\
-        f"{str_list_nb_kdn} = {tot_nb_kdn} Data nodes\n"\
-        f"=> total of {tot_nb_kcn + tot_nb_kdn} nodes\n")
+        f"{len(list_kg)} K_graphs in seq, with :\n"
+        f"{str_list_nb_kcn} = {tot_nb_kcn} Comp nodes\n"
+        f"{str_list_nb_kdn} = {tot_nb_kdn} Data nodes\n"
+        f"=> total of {tot_nb_kcn + tot_nb_kdn} nodes\n"
+    )
     print("CONCERNING phantoms impossible to restore :")
     nb_ips = 0
     for kcn in kg.list_kcn:
@@ -105,19 +108,20 @@ def test_pgb(module, input):
         if len(deps_ips) != 0:
             nb_ips += 1
             print(
-                f"{kcn.main_target}'s phantoms must be "\
-                f"protected, because deps_impossible_to_restore :")
-            for kdn,ph_name in deps_ips:
+                f"{kcn.main_target}'s phantoms must be "
+                f"protected, because deps_impossible_to_restore :"
+            )
+            for kdn, ph_name in deps_ips:
                 print(f"deps on {kdn} through {ph_name}")
     print(f"Total nb of special phantoms :  {nb_ips}")
     return pgb_res
-            
 
 
 def throughput_exp(module, input, batch_sizes, mem_limit=None):
     throughput = {}
     original_batch = input.shape[0]
     # print(torch.cuda.memory_allocated())
+    seq_length = input.shape[1]
 
     def original():
 
@@ -132,16 +136,17 @@ def throughput_exp(module, input, batch_sizes, mem_limit=None):
         max_before = torch.cuda.max_memory_allocated()
         timer = timing.make_timer(device)
         timer.start()
-        y = module(input)
-        loss = y.mean()
-        loss.backward()
+        for _ in range(5):
+            y = module(input)
+            loss = y.mean()
+            loss.backward()
         timer.end()
         peak_mem = torch.cuda.max_memory_allocated() - max_before
         print(f"original module peak memory {peak_mem}")
-        print("original module time: %.4f" % timer.elapsed())
+        print("original module time: %.4f" % (timer.elapsed() / 5))
         print(f"batch size {original_batch}")
-        print(f"throughput: {original_batch / timer.elapsed()}")
-        throughput[original_batch] = original_batch / timer.elapsed()
+        print(f"throughput: {original_batch / timer.elapsed()*5}")
+        throughput["original"] = original_batch / timer.elapsed() * 5
 
         y.grad = None
         y.data = torch.empty(0)
@@ -149,8 +154,10 @@ def throughput_exp(module, input, batch_sizes, mem_limit=None):
     original()
     # print(torch.cuda.memory_allocated())
 
-    def rockmate(input):
-        batch_size = input.shape[0]
+    def rockmate(batch_size):
+        input = torch.randint(0, 600, [batch_size, seq_length]).to(device)
+
+        # batch_size = input.shape[0]
         try:
 
             newmod = rk.CheckpointedModule(module, input, mem_limit=mem_limit)
@@ -159,7 +166,9 @@ def throughput_exp(module, input, batch_sizes, mem_limit=None):
             throughput[batch_size] = "infeasible"
             return None
         newmod.get_code()
-
+        for n, p in newmod.original_mod.named_parameters():
+            if p.grad is None:
+                p.grad = torch.zeros_like(p)
         y = newmod(input)
         loss = y.mean()
         loss.backward()
@@ -198,10 +207,9 @@ def throughput_exp(module, input, batch_sizes, mem_limit=None):
 
     for batch_size in batch_sizes:
         repeat = 5
-        input = torch.randint(0, 600, [batch_size, input.shape[1]]).to(device)
 
-        rockmate(input)
+        rockmate(batch_size)
         # input.data = torch.empty(0)
         input.grad = None
-        module.eval()
+        module.zero_grad()
     return throughput
