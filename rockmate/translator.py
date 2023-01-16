@@ -140,14 +140,15 @@ class Translator:  # to execute Op
                 ):
                     target_tensor = name.split(" ")[0]  # main_target
             if is_self:
-                target_tensor = f"{kdn.main_target}.grad"
+                target_tensor = f"{mt}.grad"
             if (target_tensor is None) or not self.aggressive:
                 # No available live tensor to use
-                target_tensor = f"torch.empty(shapes['{mt}'],device=device)"
+                # target_tensor = f"torch.empty(shapes['{mt}'],device=device)"
+                target_tensor = f"metensor.expand(np.prod(shapes['{mt}']))"
                 prep_code += f"{mt}.data = {target_tensor};"
             else:
                 prep_code += (
-                    f"{mt}.data = {target_tensor}.reshape(shapes['{mt}']);"
+                    f"{mt}.data = {target_tensor}.view(shapes['{mt}']);"
                 )
             # prep_code += (
             #     ";".join(
@@ -199,7 +200,7 @@ class Translator:  # to execute Op
                     code += make_str_assign(bc, suffix=suffix) + "\n"
                 for user, tensor, phantom_name in op.alias_in_users_phantoms:
                     if rec and _is_phantom_alive(user, i):
-                        code += f"_{phantom_name}.data = {tensor}.reshape(shapes['{phantom_name}']);"
+                        code += f"_{phantom_name}.data = {tensor}.view(shapes['{phantom_name}']);"
 
                 if not rec:
                     for target in op.tensor_targets:

@@ -18,6 +18,7 @@ class RK_Storage:
             "self": nn_mod,
             "device": device,
             "torch": torch,
+            "np": np,
         }
         self.ld = dict()
 

@@ -74,7 +74,7 @@ class CheckpointedModule(torch.nn.Module):
         if get_code:
             self.get_code()
 
-    def get_chain(self, nb_budget_abar=10, nb_budget_all=5):
+    def get_chain(self, nb_budget_abar=10, nb_budget_all=10):
         #  -- use checkmate to solve all the blocks --
         self.rk_chain = RK_Chain(
             self.list_kg,
@@ -186,6 +186,7 @@ class CheckpointedModule(torch.nn.Module):
         self.storage = RK_Storage(self.device, self.original_mod)
         self.storage.gd["rng_state"] = RngState()
         self.storage.gd["shapes"] = {}
+        self.storage.gd["metensor"] = torch.ones(1, device=self.device)
 
         self.translator = Translator(self.storage, aggressive=aggressive)
         fwd_code = []
@@ -203,22 +204,23 @@ class CheckpointedModule(torch.nn.Module):
             self.full_code += code_list
 
     def _exec(self, code_list, record_mem=False):
-        for code in code_list:
-            if record_mem:
+        if record_mem:
+            for code in code_list:
                 torch.cuda.reset_peak_memory_stats()
                 self.mem_before = torch.cuda.memory_allocated()
                 self.max_before = torch.cuda.max_memory_allocated()
-            try:
-                exec(code, self.storage.gd, self.storage.ld)
-            except Exception as e:
-                print(f"Failed to execute code:\n {code}")
-                raise (e)
-                break
-            if record_mem:
+                try:
+                    exec(code, self.storage.gd, self.storage.ld)
+                except Exception as e:
+                    print(f"Failed to execute code:\n {code}")
+                    raise (e)
+                    break
                 allo_mem = torch.cuda.memory_allocated() - self.mem_before
                 peak_mem = torch.cuda.max_memory_allocated() - self.max_before
                 self.max_mem.append(peak_mem - allo_mem)
                 self.allo_mem.append(allo_mem)
+        else:
+            exec("\n".join(code_list), self.storage.gd, self.storage.ld)
 
     def forward(self, input, record_mem=False):
         # self.storage.add_val("src", input)  #  hardcoded
