@@ -35,6 +35,11 @@ def sanity_check(module, input, mem_limit=None):
     print("original module time: %.4f" % timer.elapsed())
 
     newmod = rk.CheckpointedModule(_module, _input, mem_limit=mem_limit)
+    torch.random.manual_seed(0)
+    _y = newmod(_input)
+    _loss = _y.mean()
+    _loss.backward()
+    newmod.backward()
 
     newmod.reinit()
     torch.cuda.reset_peak_memory_stats()

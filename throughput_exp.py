@@ -3,25 +3,46 @@ import rockmate as rk
 from models.GPT import get_GPT
 
 from exp_utils import sanity_check, throughput_exp
+import warnings
+
+warnings.filterwarnings("ignore")
 
 device = torch.device("cuda")
 
 from models.GPT import get_GPT
 import numpy as np
 
-model = get_GPT("GPT2-large").to(device)
-x = torch.randint(0, 600, [6, 256]).to(device)
+throughput_res = {}
 
-throughput_res = throughput_exp(model, x, np.arange(8, 32, 1), mem_limit=7.5e9)
+name = "GPT2-medium"
+input_size = [6, 512]
+batch_sizes = np.arange(6, 16, 1)
+budget = 11.6e9
+model = get_GPT(name).to(device)
+x = torch.randint(0, 600, input_size).to(device)
 
+throughput_res[name] = throughput_exp(model, x, batch_sizes, mem_limit=budget)
 
-# model = get_GPT("GPT2-xl").to(device)
-# x = torch.randint(0, 600, [2, 256]).to(device)
+name = "GPT2-large"
+input_size = [6, 256]
+batch_sizes = np.arange(6, 16, 1)
+budget = 7.8e9
+model = get_GPT(name).to(device)
+x = torch.randint(0, 600, input_size).to(device)
 
-# throughput_res = throughput_exp(model, x, np.arange(1, 7, 1), mem_limit=4.5e9)
+throughput_res[name] = throughput_exp(model, x, batch_sizes, mem_limit=budget)
+
+name = "GPT2-xl"
+input_size = [1, 256]
+batch_sizes = np.arange(1, 8, 1)
+budget = 2.4e9
+model = get_GPT(name).to(device)
+x = torch.randint(0, 600, input_size).to(device)
+
+throughput_res[name] = throughput_exp(model, x, batch_sizes, mem_limit=budget)
 
 
 import pickle
 
-with open("throughput.pkl", "wb") as f:
-    pickle.dump(throughput_res, f)
+# with open("throughput.pkl", "wb") as f:
+#     pickle.dump(throughput_res, f)

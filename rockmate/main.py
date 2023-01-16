@@ -22,6 +22,7 @@ from rockmate.def_sequence import (
 from rockmate.rotor_solver import seq_builder
 from rockmate.translator import Translator, RngState
 import torch
+import ast
 
 
 def print_memsizes(list_kg):
@@ -200,7 +201,17 @@ class CheckpointedModule(torch.nn.Module):
         self.fwd_code = fwd_code
         self.bwd_code = bwd_code
         self.full_code = []
-        for code_list in fwd_code + bwd_code:
+        self.fwd_compile_code = []
+        self.bwd_compile_code = []
+        for code_list in fwd_code:
+            self.fwd_compile_code.append(
+                compile(ast.parse("\n".join(code_list)), "", "exec")
+            )
+            self.full_code += code_list
+        for code_list in bwd_code:
+            self.bwd_compile_code.append(
+                compile(ast.parse("\n".join(code_list)), "", "exec")
+            )
             self.full_code += code_list
 
     def _exec(self, code_list, record_mem=False):
@@ -216,13 +227,15 @@ class CheckpointedModule(torch.nn.Module):
                     raise (e)
                     break
                 allo_mem = torch.cuda.memory_allocated() - self.mem_before
-                peak_mem = torch.cuda.max_memory_allocated() - self.max_before
+                peak_mem = (
+                    torch.cuda.max_memory_allocated() - self.max_before
+                )
                 self.max_mem.append(peak_mem - allo_mem)
                 self.allo_mem.append(allo_mem)
         else:
             exec("\n".join(code_list), self.storage.gd, self.storage.ld)
 
-    def forward(self, input, record_mem=False):
+    def forward(self, input, record_mem=False, compiled=True):
         # self.storage.add_val("src", input)  #  hardcoded
         dict_inputs = make_inputs(self.original_mod, input, None)
         for k, v in dict_inputs.items():
@@ -231,17 +244,23 @@ class CheckpointedModule(torch.nn.Module):
 
         self.max_mem = []
         self.allo_mem = []
-        for code_list, seq in zip(self.fwd_code, self.fwd_seq.seq):
+        for i, seq in enumerate(self.fwd_seq.seq):
             if seq.op_sched.no_grad:
                 with torch.no_grad():
-                    self._exec(code_list, record_mem)
+                    if compiled:
+                        exec(self.fwd_compile_code[i], self.storage.gd, self.storage.ld)
+                    else:
+                        self._exec(self.fwd_code[i], record_mem)
             else:
                 with torch.enable_grad():
-                    self._exec(code_list, record_mem)
+                    if compiled:
+                        exec(self.fwd_compile_code[i], self.storage.gd, self.storage.ld)
+                    else:
+                        self._exec(self.fwd_code[i], record_mem)
 
         return self.storage.get_val(self.output.main_target)
 
-    def backward(self, record_mem=False, add_output_grad=True):
+    def backward(self, record_mem=False, add_output_grad=True, compiled=True):
         if record_mem:
             self.output_size = rotor_tensorMsize(
                 self.storage.ld[self.output.main_target]
@@ -249,13 +268,19 @@ class CheckpointedModule(torch.nn.Module):
             # self.allo_mem[-1] += self.output.info.memsize.v
             # output grad is generated outside
             loss_idx = len(self.allo_mem)
-        for code_list, seq in zip(self.bwd_code, self.bwd_seq.seq):
+        for i, seq in enumerate(self.bwd_seq.seq):
             if seq.op_sched.no_grad:
                 with torch.no_grad():
-                    self._exec(code_list, record_mem)
+                    if compiled:
+                        exec(self.bwd_compile_code[i], self.storage.gd, self.storage.ld)
+                    else:
+                        self._exec(self.bwd_code[i], record_mem)
             else:
                 with torch.enable_grad():
-                    self._exec(code_list, record_mem)
+                    if compiled:
+                        exec(self.bwd_compile_code[i], self.storage.gd, self.storage.ld)
+                    else:
+                        self._exec(self.bwd_code[i], record_mem)
         if record_mem and add_output_grad:
             self.allo_mem[loss_idx] += self.output_size
 
