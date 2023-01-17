@@ -35,6 +35,11 @@ def sanity_check(module, input, mem_limit=None):
     print("original module time: %.4f" % timer.elapsed())
 
     newmod = rk.CheckpointedModule(_module, _input, mem_limit=mem_limit)
+    for n, m in newmod.original_mod.named_modules():
+        if isinstance(m, torch.nn.BatchNorm2d):
+            m.running_mean[:] = 0.0
+            m.running_var[:] = 1.0
+
     torch.random.manual_seed(0)
     _y = newmod(_input)
     _loss = _y.mean()

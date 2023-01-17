@@ -46,7 +46,7 @@ class RunOp:
         self.main_code = kcn.main_code
         self.body_code = kcn.body_code
         self.inplace_code = kcn.inplace_code
-        self.code = kcn.get_code()
+        self.ff_code = kcn.get_code(force_special_kwargs=True)
         # self.deps_fake = [kdn.name for kdn in kcn.deps_fake]
         # self.deps_global = [kdn.name for kdn in kcn.deps_global]
         self.deps_global = kcn.deps_global

@@ -43,7 +43,7 @@ class Translator:  # to execute Op
                 mem += self.mt2op[mt].mem
         return mem
 
-    def translate(self, op_sched, during_fwd=True, reorder=False):
+    def translate(self, op_sched, during_fwd=True, first=False):
         if self.aggressive:
             for i, kdn_name in enumerate(op_sched.kdn_names):
                 self.alive_global[kdn_name] = op_sched.alive_list[-1][i]
@@ -64,9 +64,9 @@ class Translator:  # to execute Op
                         # code = op.code
                         # code = "\t".join(code.splitlines(True))
                         if op.is_rand:
-                            code = f"rng_state.get('{op.name}');rng_state.restore('{op.name}')\n{op.code}"
+                            code = f"rng_state.get('{op.name}');rng_state.restore('{op.name}')\n{op.ff_code}"
                         else:
-                            code = op.code
+                            code = op.ff_code
                         # for target in op.tensor_targets:
                         #     code += f"shapes['{target}'] = {target}.shape;"
                         # for phantom_name in op.phantom_names:
@@ -132,19 +132,21 @@ class Translator:  # to execute Op
             dict_info = (
                 self.info_global if self.aggressive else op_sched.kdn_info
             )
-            for name, info in dict_info.items():
-                if "data" not in name or info is None:
-                    continue
-                if np.prod(info.tsize) == np.prod(req_shape) and _is_alive(
-                    name, i
-                ):
-                    target_tensor = name.split(" ")[0]  # main_target
+            # for name, info in dict_info.items():
+            #     if "data" not in name or info is None:
+            #         continue
+            #     if np.prod(info.tsize) == np.prod(req_shape) and _is_alive(
+            #         name, i
+            #     ):
+            #         target_tensor = name.split(" ")[0]  # main_target
             if is_self:
                 target_tensor = f"{mt}.grad"
             if (target_tensor is None) or not self.aggressive:
                 # No available live tensor to use
                 # target_tensor = f"torch.empty(shapes['{mt}'],device=device)"
-                target_tensor = f"metensor.expand(np.prod(shapes['{mt}']))"
+                target_tensor = (
+                    f"metensor.clone().expand(np.prod(shapes['{mt}']))"
+                )
                 prep_code += f"{mt}.data = {target_tensor};"
             else:
                 prep_code += (
@@ -169,7 +171,12 @@ class Translator:  # to execute Op
             mt = op.main_target
             if "fwd" in op.name:
                 rec = (i > op_sched.op_list.index(op)) or (not op_sched.is_fwd)
-                code = make_str_assign(op.main_code) + "\n"
+                force = rec or not first
+                code = (
+                    make_str_assign(op.main_code, force_special_kwargs=force)
+                    + "\n"
+                )
+
                 if op.proxy:
                     if (
                         (not during_fwd)
@@ -183,7 +190,12 @@ class Translator:  # to execute Op
 
                 # else:
                 #     code = make_str_assign(op.main_code) + "\n"
-                code += make_str_list_assign(op.inplace_code) + "\n"
+                code += (
+                    make_str_list_assign(
+                        op.inplace_code, force_special_kwargs=force
+                    )
+                    + "\n"
+                )
                 if op.proxy:
                     for target in op.tensor_targets:
                         code = code.replace(target, "_" + target)
@@ -197,7 +209,12 @@ class Translator:  # to execute Op
                     suffix = ""
                     if rec and (bc[0] in op.tensor_targets):
                         suffix = ".data"
-                    code += make_str_assign(bc, suffix=suffix) + "\n"
+                    code += (
+                        make_str_assign(
+                            bc, suffix=suffix, force_special_kwargs=force
+                        )
+                        + "\n"
+                    )
                 for user, tensor, phantom_name in op.alias_in_users_phantoms:
                     if rec and _is_phantom_alive(user, i):
                         code += f"_{phantom_name}.data = {tensor}.view(shapes['{phantom_name}']);"

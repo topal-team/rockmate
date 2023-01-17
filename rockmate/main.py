@@ -190,13 +190,21 @@ class CheckpointedModule(torch.nn.Module):
         self.storage.gd["metensor"] = torch.ones(1, device=self.device)
 
         self.translator = Translator(self.storage, aggressive=aggressive)
+        seen = []
         fwd_code = []
         for seq_block in self.fwd_seq.seq:
-            fwd_code.append(self.translator.translate(seq_block.op_sched, True))
+            fwd_code.append(
+                self.translator.translate(
+                    seq_block.op_sched,
+                    True,
+                    first=(seq_block.index not in seen),
+                )
+            )
+            seen.append(seq_block.index)
         bwd_code = []
         for seq_block in self.bwd_seq.seq:
             bwd_code.append(
-                self.translator.translate(seq_block.op_sched, False)
+                self.translator.translate(seq_block.op_sched, False, first=True)
             )
         self.fwd_code = fwd_code
         self.bwd_code = bwd_code
@@ -227,9 +235,7 @@ class CheckpointedModule(torch.nn.Module):
                     raise (e)
                     break
                 allo_mem = torch.cuda.memory_allocated() - self.mem_before
-                peak_mem = (
-                    torch.cuda.max_memory_allocated() - self.max_before
-                )
+                peak_mem = torch.cuda.max_memory_allocated() - self.max_before
                 self.max_mem.append(peak_mem - allo_mem)
                 self.allo_mem.append(allo_mem)
         else:
@@ -248,13 +254,21 @@ class CheckpointedModule(torch.nn.Module):
             if seq.op_sched.no_grad:
                 with torch.no_grad():
                     if compiled:
-                        exec(self.fwd_compile_code[i], self.storage.gd, self.storage.ld)
+                        exec(
+                            self.fwd_compile_code[i],
+                            self.storage.gd,
+                            self.storage.ld,
+                        )
                     else:
                         self._exec(self.fwd_code[i], record_mem)
             else:
                 with torch.enable_grad():
                     if compiled:
-                        exec(self.fwd_compile_code[i], self.storage.gd, self.storage.ld)
+                        exec(
+                            self.fwd_compile_code[i],
+                            self.storage.gd,
+                            self.storage.ld,
+                        )
                     else:
                         self._exec(self.fwd_code[i], record_mem)
 
@@ -272,13 +286,21 @@ class CheckpointedModule(torch.nn.Module):
             if seq.op_sched.no_grad:
                 with torch.no_grad():
                     if compiled:
-                        exec(self.bwd_compile_code[i], self.storage.gd, self.storage.ld)
+                        exec(
+                            self.bwd_compile_code[i],
+                            self.storage.gd,
+                            self.storage.ld,
+                        )
                     else:
                         self._exec(self.bwd_code[i], record_mem)
             else:
                 with torch.enable_grad():
                     if compiled:
-                        exec(self.bwd_compile_code[i], self.storage.gd, self.storage.ld)
+                        exec(
+                            self.bwd_compile_code[i],
+                            self.storage.gd,
+                            self.storage.ld,
+                        )
                     else:
                         self._exec(self.bwd_code[i], record_mem)
         if record_mem and add_output_grad:

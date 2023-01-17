@@ -21,9 +21,13 @@ from example_modules import GPT2
 from transformers import GPT2Tokenizer
 
 
-def analyze_mem(i, newmod, code=True):
+def analyze_mem(i, newmod, code=True, diff=False):
     print(f"allo memory: {newmod.allo_mem[i]}")
     print(f"expt memory: {newmod.expect_mem()[i] - newmod.expect_mem()[i - 1]}")
+    if diff:
+        print(
+            f"{newmod.allo_mem[i]-(newmod.expect_mem()[i] - newmod.expect_mem()[i - 1])}"
+        )
     if code:
         print(newmod.full_code[i])
 
