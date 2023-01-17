@@ -82,6 +82,13 @@ def sanity_check(module, input, mem_limit=None):
     if same_grad:
         print("Same grad obtained!")
 
+    module.eval()
+    _module.eval()
+    if torch.allclose(module(input), _module(_input)):
+        print("Same evaluation obtained!")
+    else:
+        print("Unequal evaluation")
+
 
 def test_pgb(module, input):
     pgb_res = pgb.make_all_graphs(module, input)
@@ -141,17 +148,17 @@ def throughput_exp(module, input, batch_sizes, mem_limit=None):
         max_before = torch.cuda.max_memory_allocated()
         timer = timing.make_timer(device)
         timer.start()
-        for _ in range(5):
+        for _ in range(10):
             y = module(input)
             loss = y.mean()
             loss.backward()
         timer.end()
         peak_mem = torch.cuda.max_memory_allocated() - max_before
         print(f"original module peak memory {peak_mem}")
-        print("original module time: %.4f" % (timer.elapsed() / 5))
+        print("original module time: %.4f" % (timer.elapsed() / 10))
         print(f"batch size {original_batch}")
-        print(f"throughput: {original_batch / timer.elapsed()*5}")
-        throughput["original"] = original_batch / timer.elapsed() * 5
+        print(f"throughput: {original_batch / timer.elapsed()*10}")
+        throughput["original"] = original_batch / timer.elapsed() * 10
 
         y.grad = None
         y.data = torch.empty(0)
@@ -211,7 +218,7 @@ def throughput_exp(module, input, batch_sizes, mem_limit=None):
         throughput[batch_size] = batch_size / np.mean(times)
 
     for batch_size in batch_sizes:
-        repeat = 5
+        repeat = 10
 
         rockmate(batch_size)
         # input.data = torch.empty(0)
