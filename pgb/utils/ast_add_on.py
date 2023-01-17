@@ -57,7 +57,7 @@ def make_ast_assign(
         fct_name = a.func.id
         if fct_name in dict_forced_kwargs:
             attrs_to_inforce = dict_forced_kwargs[fct_name]
-            for arg_name,arg_value in attrs_to_inforce:
+            for arg_name,arg_pos,arg_value in attrs_to_inforce:
                 arg_value_ast = make_ast_constant(arg_value)
                 args_ast = list(a.args)
                 kws_ast = list(a.keywords)
@@ -69,17 +69,20 @@ def make_ast_assign(
                         break
                 if not found:
                     fct = eval(fct_name)
-                    sign = inspect.signature(fct)
-                    params = list(sign.parameters.items())
-                    for i,(p_name,_) in enumerate(params):
-                        if p_name == arg_name:
-                            args_ast[i] = arg_value_ast
-                            found = True
-                            break
-                    if not found:
-                        kws_ast.append(
-                            ast.keyword(arg_name,arg_value_ast)
-                        )
+                    try:
+                        sign = inspect.signature(fct)
+                        params = list(sign.parameters.items())
+                        for i,(p_name,_) in enumerate(params):
+                            if p_name == arg_name:
+                                args_ast[i] = arg_value_ast
+                                found = True
+                                break
+                        if not found:
+                            kws_ast.append(
+                                ast.keyword(arg_name,arg_value_ast)
+                            )
+                    except:
+                        args_ast[arg_pos] = arg_value_ast
                 a = ast.Call(a.func,args_ast,kws_ast)
         right_part = a
     a = ast.Assign([ast.Name(prefix+tar+suffix)],right_part)

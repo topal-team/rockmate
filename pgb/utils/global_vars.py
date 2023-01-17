@@ -78,7 +78,7 @@ bool_dtype = [
     torch.bool]
 
 default_forced_kwargs = dict([
-    (("torch.batch_norm",[("training",False)]))
+    (("torch.batch_norm",[("training",5,False)]))
 ])
 # This dict is used by default when force_special_kwargs=True
 # -> dict of : fct_name -> (arg_name,arg_value) list to inforce
