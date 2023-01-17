@@ -14,7 +14,7 @@ from pgb.utils.ast_add_on import (
 # ==== GENERATE STR CODE FOR S AND K==== 
 # ======================================
 
-def get_code_ast(n): # For S_node or KCN
+def get_code_ast(n,force_special_kwargs=False): # For S_node or KCN
     mc = n.main_code
     mc = [] if mc is None or mc[1] is None else [mc]
     dict_ic = dict(n.inplace_code)
@@ -22,19 +22,23 @@ def get_code_ast(n): # For S_node or KCN
         (tar,dict_ic[tar] if tar in dict_ic else acode)
         for (tar,acode) in n.body_code]
     code = mc + bc
-    return make_ast_list_assign(code)
+    return make_ast_list_assign(code,
+        force_special_kwargs=force_special_kwargs)
 
-def get_code(n): # For S_node or KCN
-    return ast_to_str(get_code_ast(n))
+def get_code(n,force_special_kwargs=False): # For S_node or KCN
+    return ast_to_str(get_code_ast(n,force_special_kwargs))
 
-def full_code(n): # For S_node or KCN
+def full_code(n,force_special_kwargs=False): # For S_node or KCN
     # This function is a way to produce what the final
     # code will look like (including detach). But it's
     # never used in RK, the translator isn't that simple.
     mt = n.main_target
-    mc = make_str_assign(n.main_code,prefix="_")
-    ic = make_str_list_assign(n.inplace_code)
-    bc = make_str_list_assign(n.body_code)
+    mc = make_str_assign(n.main_code,prefix="_",
+        force_special_kwargs=force_special_kwargs)
+    ic = make_str_list_assign(n.inplace_code,
+        force_special_kwargs=force_special_kwargs)
+    bc = make_str_list_assign(n.body_code,
+        force_special_kwargs=force_special_kwargs)
     if mc == "":
         return bc
     else:

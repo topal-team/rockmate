@@ -24,7 +24,9 @@ def generate_our_global(sg,model,device):
 def generate_tmp_local(sn,sg,our_global,device,tmp_local=None):
     if tmp_local is None:
         tmp_local = dict()
-        exec(sg.init_node.get_code(),our_global,tmp_local)
+        exec(
+            sg.init_node.get_code(force_special_kwargs=True),
+            our_global,tmp_local)
     for req_sn in sn.deps.keys():
         if (not (req_sn is sg.init_node)
         and req_sn.main_target not in tmp_local):
@@ -42,7 +44,9 @@ def generate_tmp_local(sn,sg,our_global,device,tmp_local=None):
                         req_req_info = sg.dict_info[req_req_tar]
                         tmp_local[req_req_tar] = (
                             def_info.generate_val(req_req_info,device))
-            exec(ast_add_on.make_str_list_assign(req_sn.body_code),
+            exec(ast_add_on.make_str_list_assign(
+                    req_sn.body_code,
+                    force_special_kwargs=True),
                 our_global,tmp_local)
     return tmp_local
 
@@ -51,7 +55,9 @@ def generate_deep_tmp_local(sn,sg,our_global,device):
     for req_sn in sn.deps.keys():
         generate_tmp_local(
             req_sn,sg,our_global,device,tmp_local=tmp_local)
-        exec(req_sn.get_code(), our_global, tmp_local)
+        exec(
+            req_sn.get_code(force_special_kwargs=True),
+            our_global, tmp_local)
     return tmp_local
 
 # ======================
@@ -72,7 +78,9 @@ def get_useful_vars(sn,sg,our_global,device):
     dict_info = sg.dict_info
     # tmp_local = generate_deep_tmp_local(sn,sg,our_global,device)
     tmp_local = generate_tmp_local(sn,sg,our_global,device)
-    exec(sn.get_code(), our_global, tmp_local)
+    exec(
+        sn.get_code(force_special_kwargs=True), 
+        our_global, tmp_local)
     mt = sn.main_target
     fn = tmp_local[mt].grad_fn
     explicit_vars  = set() # set of Tensors
@@ -216,7 +224,7 @@ class inspector():
     # -- measure forward --
     def measure_fwd(self,only_run=False):
         def fct_run_fwd():
-            self.code_run_fwd = self.sn.get_code()
+            self.code_run_fwd = self.sn.get_code(force_special_kwargs=True)
             exec(self.code_run_fwd, self.our_global, self.tmp_local)
 
         def fct_fgt_fwd():
@@ -261,7 +269,7 @@ class inspector():
     def fct_prepare_bwd(self):
         self.tmp_local = generate_tmp_local(
             self.sn,self.sg,self.our_global,self.device)
-        self.code_run_fwd = self.sn.get_code()
+        #self.code_run_fwd = self.sn.get_code(force_special_kwargs=True)
         exec(self.code_run_fwd, self.our_global, self.tmp_local)
         self.tmp_local[self.sn.main_target].grad = (
             def_info.generate_val(self.info,self.device))

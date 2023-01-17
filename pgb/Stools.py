@@ -83,11 +83,10 @@ class S_node():
     # -> /!\ /!\ doing set/dict of S_nodes is dangereous /!\ /!\ 
     # but I'm doing this to avoid undeterminism
 
-    def get_code(self):
-        return shared_methods.get_code(self)
-    def full_code(self):
-        return shared_methods.full_code(self)
-
+    def get_code(self,*args, **kwargs):
+        return shared_methods.get_code(self,*args, **kwargs)
+    def full_code(self,*args, **kwargs):
+        return shared_methods.full_code(self,*args, **kwargs)
 
     # -----
     def insert_code(self,aux_sn,sg):

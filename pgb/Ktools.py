@@ -108,12 +108,13 @@ class K_C_node():
     def __hash__(self):
         return self.unique_id
 
-    def get_main_code(self):
-        return ast_add_on.make_str_assign(self.main_code)
-    def get_code(self):
-        return shared_methods.get_code(self)
-    def full_code(self):
-        return shared_methods.full_code(self)
+    def get_main_code(self,force_special_kwargs):
+        return ast_add_on.make_str_assign(
+            self.main_code,force_special_kwargs)
+    def get_code(self,*args, **kwargs):
+        return shared_methods.get_code(self,*args, **kwargs)
+    def full_code(self,*args, **kwargs):
+        return shared_methods.full_code(self,*args, **kwargs)
 
 
 # ************

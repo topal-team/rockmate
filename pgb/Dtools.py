@@ -105,7 +105,9 @@ def generate_deep_tmp_local(g,dict_info,bn,our_global):
         if not req_bn.is_input:
             generate_tmp_local(
                 g,dict_info,req_bn,our_global,tmp_local=tmp_local)
-            exec(req_bn.get_code(), our_global, tmp_local)
+            exec(
+                req_bn.get_code(force_special_kwargs=True), 
+                our_global, tmp_local)
     generate_tmp_local(
         g,dict_info,bn,our_global,tmp_local=tmp_local)
     # to generate the missing inputs
@@ -164,7 +166,9 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
             dict_info[bn.target] = def_info.Var_info()
         elif not bn.is_input:
             tmp_local = generate_deep_tmp_local(dg,dict_info,bn,our_global)
-            exec(bn.get_code(), our_global, tmp_local)
+            exec(
+                bn.get_code(force_special_kwargs=True), 
+                our_global, tmp_local)
             # - detect inplace operation -
             bn_value = tmp_local[bn.target]
             is_view    = False # by default
@@ -286,7 +290,9 @@ def test_fw_code(dg : D_graph,model,dict_inputs : dict):
             code = ast_add_on.make_str_assign(req_rd,dg.dict_rand[req_rd])
             exec(code,globals(),loc_dict)
         if not dn.is_input:
-            exec(dn.get_code(), globals(), loc_dict)
+            exec(
+                dn.get_code(force_special_kwargs=True), 
+                globals(), loc_dict)
     return loc_dict[dg.output]
 
 # ==========================

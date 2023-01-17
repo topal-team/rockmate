@@ -42,8 +42,9 @@ class B_node:
         global all_nodes
         all_nodes.append(self)
 
-    def get_code(self):
-        return ast_add_on.make_str_assign((self.target, self.ast_code))
+    def get_code(self,force_special_kwargs=False):
+        return ast_add_on.make_str_assign((self.target, self.ast_code),
+            force_special_kwargs=force_special_kwargs)
 
 
 class B_var:
