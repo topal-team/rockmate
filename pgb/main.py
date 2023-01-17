@@ -174,6 +174,18 @@ def make_all_graphs(model,
     device = small_fcts.get_device_and_check_all_same_device(
         model,dict_inputs)
 
+    # -- protect original module from impact on eval mode --
+    # -> save running stats
+    saved_running_stats = dict()
+    for m in model.modules():
+        for batch_fct in global_vars.list_batch_fct:
+            if isinstance(m,batch_fct):
+                r_mean = m.running_mean
+                r_var  = m.running_var
+                saved_running_stats[m] = (
+                    r_mean.clone() if r_mean is not None else None,
+                    r_var.clone() if r_var is not None else None,
+                )
 
     # -- the whole module --
     if bool_bg:
@@ -195,6 +207,12 @@ def make_all_graphs(model,
         cc,list_kg,list_ano_S = Atools.S_list_to_K_list_eco(
             list_sg,model,device=device)
     else: list_kg = None ; cc = None ; list_ano_S = None
+
+    # -- restore running_stats --
+    for (m,(r_mean,r_var)) in saved_running_stats.items():
+        m.running_mean = r_mean
+        m.running_var  = r_var
+
 
     return all_graphs(bg,dg,sg,kg,list_sg,list_kg,cc,list_ano_S)
 

@@ -99,13 +99,25 @@ list_view_fct = [
 ]
 #  list imported from https://pytorch.org/docs/stable/tensor_view.html
 
+list_batch_fct = [
+    torch.nn.BatchNorm1d,
+    torch.nn.BatchNorm2d,
+    torch.nn.BatchNorm3d,
+    torch.nn.SyncBatchNorm,
+    torch.nn.InstanceNorm1d,
+    torch.nn.InstanceNorm2d,
+    torch.nn.InstanceNorm3d,
+]
+
+
 int_dtype = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
 bool_dtype = [torch.bool]
 
 default_forced_kwargs = dict(
     [
         # (("torch.batch_norm",[("training",5,False)]))
-        (("torch.batch_norm", [("momentum", 6, 0)]))
+        (("torch.batch_norm", [("momentum", 6, 0)])),
+        (("torch.instance_norm", [("momentum", 6, 0)])),
     ]
 )
 # This dict is used by default when force_special_kwargs=True
