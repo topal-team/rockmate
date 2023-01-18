@@ -100,6 +100,17 @@ class Translator:  # to execute Op
             out_target = op_sched.output_size[0]
             code_list[-1] += f"\n{out_target}.requires_grad_();"
             code_list[-1] += f"shapes['{out_target}'] = {out_target}.shape;"
+            # if first:
+            #     out_op = [
+            #         op for op in op_sched.op_list if out_target in op.name
+            #     ][0]
+            #     for target in out_op.tensor_targets:
+            #         if "loss" not in target:
+            #             code_list[-1] += f"shapes['{target}'] = {target}.shape;"
+            #     for phantom_name in out_op.phantom_names:
+            #         code_list[
+            #             -1
+            #         ] += f"shapes['{phantom_name}'] = _{phantom_name}.shape;"
             return code_list
 
         def _is_alive(kdn_name, i):
@@ -112,15 +123,33 @@ class Translator:  # to execute Op
             else:
                 return True
 
-        def _is_phantom_alive(kdn_target, i):
+        def _is_proxy_alive(kdn_target, i):
+            # if op_sched.is_fwd:
+            #     count = 0
+            #     for op_name in op_name_list[:i]:
+            #         if f"fwd_{kdn_target}" in op_name:
+            #             count += 1
+            #         if f"del {kdn_target}" in op_name:
+            #             count -= 1
+
+            # pass
+            if f"bwd_{kdn_target}" in op_name_list[:i]:
+                return False
             if f"{kdn_target} phantoms" in op_sched.kdn_names:
                 return op_sched.alive_list[i][
                     op_sched.kdn_names.index(f"{kdn_target} phantoms")
                 ]
-            else:  # phantom kdn does not exist, need to check fwd/bwd
-                return ("fwd_{kdn_target}" in op_name_list[:i]) and (
-                    "bwd_{kdn_target}" in op_name_list[i + 1 :]
-                )
+            else:  # phantom kdn does not exist, need to check data kdn
+                return op_sched.alive_list[i][
+                    op_sched.kdn_names.index(f"{kdn_target} data")
+                ]
+            #     if op_sched.is_fwd:
+            #         if kdn_target == op_sched.input_size[0]:
+            #             # input was generated previously
+            #             return True
+            #         return f"fwd_{kdn_target}" in op_name_list[:i]
+            #     else:
+            #         return f"bwd_{kdn_target}" in op_name_list[i:]
 
         def _generate_fake_data(kdn, i, is_self=False):
             # return code for generate the target fake tensor (only for data/grad)
@@ -133,17 +162,15 @@ class Translator:  # to execute Op
                 self.info_global if self.aggressive else op_sched.kdn_info
             )
 
-            target_tensor = (
-                f"metensor.clone().expand(np.prod(shapes['{mt}']))"
-            )
-            prep_code += (
-                f"{mt}.data = {target_tensor}.view(shapes['{mt}']);"
-            )
+            target_tensor = f"metensor.clone().expand(np.prod(shapes['{mt}']))"
+            prep_code += f"{mt}.data = {target_tensor}.view(shapes['{mt}']);"
 
             for v in kdn.tensor_targets:
                 after_code += f"{v}.data = torch.empty(0,device=device); "
             if is_self:
-                prep_code += f"_{mt}.data = {mt}.grad;"
+                prep_code += (
+                    f"_{mt}.data = {target_tensor}.view(shapes['{mt}']);"
+                )
                 after_code += f"_{mt}.data = torch.empty(0,device=device);"
             return prep_code, after_code
 
@@ -196,8 +223,9 @@ class Translator:  # to execute Op
                         )
                         + "\n"
                     )
+                rec = (i > op_sched.op_list.index(op)) or (not op_sched.is_fwd)
                 for user, tensor, phantom_name in op.alias_in_users_phantoms:
-                    if rec and _is_phantom_alive(user, i):
+                    if rec and _is_proxy_alive(user, i):
                         code += f"_{phantom_name}.data = {tensor}.view(shapes['{phantom_name}']);"
 
                 if not rec:
@@ -247,7 +275,7 @@ class Translator:  # to execute Op
             code = ""
             if op.kdn_type == "data":
                 for user, tensor, phantom_name in op.alias_in_users_phantoms:
-                    if _is_phantom_alive(user, i):
+                    if _is_proxy_alive(user, i):
                         code += f"_{phantom_name}.data = torch.empty(0,device=device); "
                 if (
                     op.info is not None
@@ -256,8 +284,13 @@ class Translator:  # to execute Op
                     and op.proxy
                 ):
                     code += f"_{op.main_target}.data = torch.empty(0,device=device);"
+                    for inp in op.inplace_targets:
+                        # code += f"_{inp}.data = torch.empty(0,device=device);"
+                        code += f"del _{inp};"
+
                     if op.includes_phantoms:
                         code += f"del _{op.main_target};"
+
                 for v in op.tensor_targets:
                     code += f"{v}.data = torch.empty(0,device=device); "
 

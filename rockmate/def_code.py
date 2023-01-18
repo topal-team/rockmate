@@ -85,6 +85,7 @@ class DelOp:
         self.tensor_targets = kdn.tensor_targets
         self.all_targets = kdn.all_targets
         self.container_targets = kdn.container_targets
+        self.inplace_targets = kdn.inplace_targets
         # self.code = kn.get_code()
         # self.requires_grad = kdn.info.requires_grad
         self.info = kdn.info

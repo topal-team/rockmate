@@ -95,10 +95,6 @@ def sanity_check(module, input, mem_limit=None):
         print("Same evaluation obtained!")
     else:
         print("Unequal evaluation")
-    if torch.allclose(module(input), _module(_input)):
-        print("Same evaluation obtained!")
-    else:
-        print("Unequal evaluation")
 
 
 def test_pgb(module, input):
@@ -143,6 +139,7 @@ def test_pgb(module, input):
 def throughput_exp(module, input, batch_sizes, mem_limit=None):
     throughput = {}
     original_batch = input.shape[0]
+    original_input = input[0:1]
     # print(torch.cuda.memory_allocated())
     seq_length = input.shape[1]
 
@@ -178,8 +175,8 @@ def throughput_exp(module, input, batch_sizes, mem_limit=None):
     # print(torch.cuda.memory_allocated())
 
     def rockmate(batch_size):
-        input = torch.randint(0, 600, [batch_size, seq_length]).to(device)
-
+        # input = torch.randint(0, 600, [batch_size, seq_length]).to(device)
+        input = original_input.expand([batch_size, *original_input.shape[1:]])
         # batch_size = input.shape[0]
         try:
 
