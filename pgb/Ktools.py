@@ -372,7 +372,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             (explicit_deps,
             data_ptr_only_ph_deps,
             valid_view_ph_deps,
-            exist_phs) = (
+            exist_phs,
+            original_phs) = (
                 def_inspection.get_useful_vars(sn,sg,our_global,device))
             all_deps_mt = set(explicit_deps).union(
                 set(data_ptr_only_ph_deps.values()).union(
@@ -422,7 +423,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                 kcn_bwd.deps_impossible_to_restore.add((used_kdn,ph_name))
             kcn_fwd.phantom_names = (
                 list(valid_view_ph_deps.keys())
-                + list(data_ptr_only_ph_deps.keys()))
+                + list(data_ptr_only_ph_deps.keys())
+                + original_phs)
 
 
             # -> KDN(phantoms)

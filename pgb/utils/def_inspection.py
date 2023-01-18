@@ -149,16 +149,24 @@ def get_useful_vars(sn,sg,our_global,device):
     
     # == check for the presence of original phantoms ==
     exist_phs = False
+    original_phs = []
     for ph_val,ph_name in phs_found:
         if ph_name not in data_ptr_ph_deps:
             exist_phs = True
+            original_phs.append(ph_name)
             print_debug(f"{ph_name} is an original ph of {mt}")
 
     # == clean data_ptr_ph_deps ==
     for ph_name in valid_view_ph_deps:
         del data_ptr_ph_deps[ph_name]
 
-    return (explicit_deps,data_ptr_ph_deps,valid_view_ph_deps,exist_phs)
+    return (
+        explicit_deps,
+        data_ptr_ph_deps,
+        valid_view_ph_deps,
+        exist_phs,
+        original_phs,
+    )
 
 # ======================
 
