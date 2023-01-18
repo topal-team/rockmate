@@ -14,6 +14,7 @@ class K_C_node():
             target="/!\\ No target /!\\",
             all_targets       = None,
             tensor_targets    = None,
+            inplace_targets   = None,
             container_targets = None,
             is_fwd  = True,
             is_rand = False,
@@ -28,9 +29,11 @@ class K_C_node():
         self.main_target = mt = target
         atars = all_targets
         ttars = tensor_targets
+        itars = inplace_targets
         ctars = container_targets
         self.all_targets       = atars if atars else [mt]
         self.tensor_targets    = ttars if ttars else [mt]
+        self.inplace_targets   = itars if itars else []
         self.container_targets = ctars if ctars else []
         self.name        = f"fwd_{mt}" if is_fwd else f"bwd_{mt}"
         self.is_fwd      = is_fwd
@@ -70,8 +73,9 @@ class K_C_node():
         kcn1 = self
         b = (
         small_fcts.check_attr(kcn1,kcn2,
-            ["name","main_target","is_fwd","all_targets",
-             "tensor_targets","container_targets",
+            ["name","main_target","is_fwd",
+             "all_targets","container_targets",
+             "tensor_targets","inplace_targets",
              "is_rand","overhead","phantom_names",
              "alias_in_users_phantoms"],
             raise_exception=raise_exception)
@@ -127,6 +131,7 @@ class K_D_node():
             target   = "/!\\ No target /!\\",
             all_targets       = None,
             tensor_targets    = None,
+            inplace_targets   = None,
             container_targets = None,
             info        = None,
             deps        = None,
@@ -136,9 +141,11 @@ class K_D_node():
         self.main_target = mt = target
         atars = all_targets
         ttars = tensor_targets
+        itars = inplace_targets
         ctars = container_targets
         self.all_targets       = atars if atars else [mt]
         self.tensor_targets    = ttars if ttars else [mt]
+        self.inplace_targets   = itars if itars else []
         self.container_targets = ctars if ctars else []
         self.name        = f"{mt} {self.kdn_type}"
         self.mem         = rotor_MemSize(0)
@@ -165,9 +172,9 @@ class K_D_node():
     def __eq__(self,kdn2,force_order=False,raise_exception=False):
         kdn1 = self
         b = small_fcts.check_attr(kdn1,kdn2,
-            ["name","mem","kdn_type",
-             "main_target","container_targets",
-             "tensor_targets","all_targets",
+            ["name","mem","kdn_type","main_target",
+             "all_targets","container_targets",
+             "tensor_targets","inplace_targets",
              "alias_in_users_phantoms"],
             raise_exception=raise_exception)
         # ** deps/users **
@@ -342,6 +349,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             target       = mt,
             all_targets       = sn.all_targets,
             tensor_targets    = sn.tensor_targets,
+            inplace_targets   = sn.inplace_targets,
             container_targets = sn.container_targets,
             is_fwd       = True,
             is_rand      = sn.is_rand,
@@ -359,6 +367,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             target      = mt,
             all_targets       = sn.all_targets,
             tensor_targets    = sn.tensor_targets,
+            inplace_targets   = sn.inplace_targets,
             container_targets = sn.container_targets,
             info        = info,
             deps        = set([kcn_fwd]),
@@ -399,6 +408,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                 deps_fake = kcn_bwd_deps_fake,
                 all_targets       = sn.all_targets,
                 tensor_targets    = sn.tensor_targets,
+                inplace_targets   = sn.inplace_targets,
                 container_targets = sn.container_targets,
                 unique_id_generator = unique_id_generator)
             dict_KCN_bwd[mt] = kcn_bwd
@@ -436,6 +446,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                     deps        = set([kcn_fwd]),
                     all_targets       = sn.all_targets,
                     tensor_targets    = sn.tensor_targets,
+                    inplace_targets   = sn.inplace_targets,
                     container_targets = sn.container_targets,
                     unique_id_generator = unique_id_generator)
                 dict_KDN_phantoms[mt] = kdn_phantoms
@@ -450,6 +461,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                 target      = mt,
                 all_targets       = sn.all_targets,
                 tensor_targets    = sn.tensor_targets,
+                inplace_targets   = sn.inplace_targets,
                 container_targets = sn.container_targets,
                 unique_id_generator = unique_id_generator)
             dict_KDN_grad[mt] = kdn_grad
@@ -623,6 +635,7 @@ def copy_K_C_node(kcn : K_C_node):
     new_kcn.main_target  = kcn.main_target
     new_kcn.all_targets       = list(kcn.all_targets)
     new_kcn.tensor_targets    = list(kcn.tensor_targets)
+    new_kcn.inplace_targets   = list(kcn.inplace_targets)
     new_kcn.container_targets = list(kcn.container_targets)
     new_kcn.name         = kcn.name
     new_kcn.is_fwd       = kcn.is_fwd
@@ -646,6 +659,7 @@ def copy_K_D_node(kdn : K_D_node):
     new_kdn.main_target = kdn.main_target
     new_kdn.all_targets       = list(kdn.all_targets)
     new_kdn.tensor_targets    = list(kdn.tensor_targets)
+    new_kdn.inplace_targets   = list(kdn.inplace_targets)
     new_kdn.container_targets = list(kdn.container_targets)
     new_kdn.name        = kdn.name
     new_kdn.mem         = kdn.mem

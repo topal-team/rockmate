@@ -4,7 +4,6 @@
 
 # A way to recognize similar blocks
 # for instance for GPT2 -> Transformer blocks
-import re
 from pgb.utils import *
 from pgb import Stools
 from pgb import Ktools
@@ -92,15 +91,6 @@ class Graph_Translator():
             if model:
                 for param_full_name in all_real_params: # strings
                     # -> e.g. param_full_name = "self.layer1.weight"
-                    """
-                    path_from_self = re.split(
-                            '\.|\[|\]',param_full_name)[1:]
-                    param = model
-                    for attr in path_from_self:
-                        if attr == "": continue
-                        try: param = param[int(attr)]
-                        except: param = getattr(param, attr)
-                    """
                     param = eval(param_full_name,{"self":model},{})
                     info_param = def_info.Var_info(param)
                     nb_param += 1
@@ -192,6 +182,7 @@ class Graph_Translator():
             x.main_target = translate(x.main_target)
             x.all_targets       = translate(x.all_targets)
             x.tensor_targets    = translate(x.tensor_targets)
+            x.inplace_targets   = translate(x.inplace_targets)
             x.container_targets = translate(x.container_targets)
             # Since S_node.__hash__ isn't changed, we change dict inplace
             for req_sn,st in x.deps.items():
@@ -206,16 +197,9 @@ class Graph_Translator():
                 "main_code","inplace_code","body_code",
                 "main_target","container_targets",
                 "tensor_targets","all_targets",
-                "alias_in_users_phantoms",
-                "phantom_names"]:
+                "inplace_targets","phantom_names",
+                "alias_in_users_phantoms"]:
                 setattr(x,attr,translate(getattr(x,attr)))
-                # x.main_code   = translate(x.main_code)
-                # x.inplace_code= translate(x.inplace_code)
-                # x.body_code   = translate(x.body_code)
-                # x.main_target = mt = translate(x.main_target)
-                # x.all_targets       = translate(x.all_targets)
-                # x.tensor_targets    = translate(x.tensor_targets)
-                # x.container_targets = translate(x.container_targets)
             mt = x.main_target
             x.name = f"fwd_{mt}" if x.is_fwd else f"bwd_{mt}"
             return ()
@@ -224,7 +208,7 @@ class Graph_Translator():
         elif isinstance(x,Ktools.K_D_node): # /!\ inplace like S_node /!\
             for attr in [
                 "main_target","container_targets",
-                "tensor_targets","all_targets",
+                "tensor_targets","all_targets","inplace_targets",
                 "alias_in_users_phantoms"]:
                 setattr(x,attr,translate(getattr(x,attr)))
             mt = x.main_target
