@@ -183,7 +183,7 @@ class CheckpointedModule(torch.nn.Module):
             list_kdn,
         )
 
-    def get_code(self, aggressive=True):
+    def get_code(self, aggressive=False):
         self.storage = RK_Storage(self.device, self.original_mod)
         self.storage.gd["rng_state"] = RngState()
         self.storage.gd["shapes"] = {}
@@ -242,6 +242,9 @@ class CheckpointedModule(torch.nn.Module):
             exec("\n".join(code_list), self.storage.gd, self.storage.ld)
 
     def forward(self, input, record_mem=False, compiled=True):
+        if not self.training:
+            self.original_mod.eval()
+            return self.original_mod(input)
         # self.storage.add_val("src", input)  #  hardcoded
         dict_inputs = make_inputs(self.original_mod, input, None)
         for k, v in dict_inputs.items():

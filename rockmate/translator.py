@@ -132,37 +132,18 @@ class Translator:  # to execute Op
             dict_info = (
                 self.info_global if self.aggressive else op_sched.kdn_info
             )
-            # for name, info in dict_info.items():
-            #     if "data" not in name or info is None:
-            #         continue
-            #     if np.prod(info.tsize) == np.prod(req_shape) and _is_alive(
-            #         name, i
-            #     ):
-            #         target_tensor = name.split(" ")[0]  # main_target
-            if is_self:
-                target_tensor = f"{mt}.grad"
-            if (target_tensor is None) or not self.aggressive:
-                # No available live tensor to use
-                # target_tensor = f"torch.empty(shapes['{mt}'],device=device)"
-                target_tensor = (
-                    f"metensor.clone().expand(np.prod(shapes['{mt}']))"
-                )
-                prep_code += f"{mt}.data = {target_tensor};"
-            else:
-                prep_code += (
-                    f"{mt}.data = {target_tensor}.view(shapes['{mt}']);"
-                )
-            # prep_code += (
-            #     ";".join(
-            #         [make_str_assign(bc) for bc in list(kdn.deps)[0].body_code]
-            #     )
-            #     + "\n"
-            # )
-            # after_code += f"{mt}.data = torch.empty(0,device=device);"
+
+            target_tensor = (
+                f"metensor.clone().expand(np.prod(shapes['{mt}']))"
+            )
+            prep_code += (
+                f"{mt}.data = {target_tensor}.view(shapes['{mt}']);"
+            )
+
             for v in kdn.tensor_targets:
                 after_code += f"{v}.data = torch.empty(0,device=device); "
             if is_self:
-                prep_code += f"_{mt}.data = {target_tensor};"
+                prep_code += f"_{mt}.data = {mt}.grad;"
                 after_code += f"_{mt}.data = torch.empty(0,device=device);"
             return prep_code, after_code
 

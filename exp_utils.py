@@ -88,7 +88,13 @@ def sanity_check(module, input, mem_limit=None):
         print("Same grad obtained!")
 
     module.eval()
-    _module.eval()
+    newmod.reinit()
+    newmod.eval()
+    # _module.eval()
+    if torch.allclose(module(input), newmod(_input)):
+        print("Same evaluation obtained!")
+    else:
+        print("Unequal evaluation")
     if torch.allclose(module(input), _module(_input)):
         print("Same evaluation obtained!")
     else:
