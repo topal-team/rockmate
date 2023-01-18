@@ -71,23 +71,13 @@ def generate_deep_tmp_local(sn,sg,our_global,device):
 # -> PHANTOMS
 # ======================
 
-def get_useful_vars(sn,sg,our_global,device):
-    params = dict(our_global['self'].named_parameters())
-    print_debug(f"Try to open {sn.main_target}'s grad_fn")
-    # == INIT ==
-    dict_info = sg.dict_info
-    # tmp_local = generate_deep_tmp_local(sn,sg,our_global,device)
-    tmp_local = generate_tmp_local(sn,sg,our_global,device)
-    exec(
-        sn.get_code(force_special_kwargs=True), 
-        our_global, tmp_local)
-    mt = sn.main_target
-    fn = tmp_local[mt].grad_fn
+# -> aux function for "get_useful_vars" below
+def trace_grad_fn(grad_fn,main_target="var",params=None,our_global=None):
+    if params is None: params = dict()
+    if our_global is None: our_global = dict()
     explicit_vars  = set() # set of Tensors
-    phs_found = set() # set of Tensors
-
-    # == SEARCH THROUGH GRAD_FN == 
-    def trace_gradfn(f,path):
+    phs_found = set() # set of (ph_val * ph_name)
+    def aux(f,path):
         if hasattr(f,"variable"):
             explicit_vars.add(f.variable)
         for attr in dir(f):
@@ -101,14 +91,33 @@ def get_useful_vars(sn,sg,our_global,device):
                 if not is_para and not is_input:
                     path_str = [f".next_functions[{k}][0]" for k in path]
                     ph_name = (
-                        f"{sn.main_target}.grad_fn" 
+                        f"{main_target}.grad_fn" 
                         + "".join(path_str)
                         + "." + attr)
                     phs_found.add((x,ph_name))
         if hasattr(f,"next_functions"):
             for k,t in enumerate(f.next_functions):
-                trace_gradfn(t[0],path+[k])
-    trace_gradfn(fn,[])
+                aux(t[0],path+[k])
+    aux(grad_fn,[])
+    return explicit_vars,phs_found
+
+def get_useful_vars(sn,sg,our_global,device):
+    params = dict(our_global['self'].named_parameters())
+    print_debug(f"Try to open {sn.main_target}'s grad_fn")
+    # == INIT ==
+    dict_info = sg.dict_info
+    # tmp_local = generate_deep_tmp_local(sn,sg,our_global,device)
+    tmp_local = generate_tmp_local(sn,sg,our_global,device)
+    exec(
+        sn.get_code(force_special_kwargs=True), 
+        our_global, tmp_local)
+
+    # == SEARCH THROUGH GRAD_FN == 
+    mt = sn.main_target
+    grad_fn = tmp_local[mt].grad_fn
+    (explicit_vars,phs_found) = trace_grad_fn(
+        grad_fn,sn.main_target,params,our_global
+    )
 
     # == recognize which var are concerned ==
     explicit_deps = []
