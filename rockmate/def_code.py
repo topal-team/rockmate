@@ -127,6 +127,7 @@ class OpSchedule:
             output_kdn_data.main_target,
             output_kdn_data.mem.v,
         )
+        self.kdn_dict = {kdn.name:kdn for kdn in list_kdn}
 
         # save the del_input op in case needed
         input_kdn = input_kdn_data

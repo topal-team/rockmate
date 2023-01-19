@@ -124,25 +124,29 @@ class Translator:  # to execute Op
                 return True
 
         def _is_proxy_alive(kdn_target, i):
-            # if op_sched.is_fwd:
-            #     count = 0
-            #     for op_name in op_name_list[:i]:
-            #         if f"fwd_{kdn_target}" in op_name:
-            #             count += 1
-            #         if f"del {kdn_target}" in op_name:
-            #             count -= 1
+            includes_phantoms = op_sched.kdn_dict[
+                f"{kdn_target} data"
+            ].includes_phantoms
 
-            # pass
             if f"bwd_{kdn_target}" in op_name_list[:i]:
                 return False
+            if f"bwd_{kdn_target}" in op_name_list[i]:
+                return True
             if f"{kdn_target} phantoms" in op_sched.kdn_names:
                 return op_sched.alive_list[i][
                     op_sched.kdn_names.index(f"{kdn_target} phantoms")
                 ]
-            else:  # phantom kdn does not exist, need to check data kdn
+            elif (
+                includes_phantoms
+            ):  # phantom kdn does not exist, need to check data kdn
+                #  op_sched.op_list
                 return op_sched.alive_list[i][
                     op_sched.kdn_names.index(f"{kdn_target} data")
                 ]
+            else:
+                return f"fwd_{kdn_target}" in op_name_list[:i] or (
+                    not op_sched.is_fwd
+                )
             #     if op_sched.is_fwd:
             #         if kdn_target == op_sched.input_size[0]:
             #             # input was generated previously
@@ -180,8 +184,13 @@ class Translator:  # to execute Op
             if "fwd" in op.name:
                 rec = (i > op_sched.op_list.index(op)) or (not op_sched.is_fwd)
                 force = rec or not first
+                suffix = ""
+                if rec and not op.proxy and "loss" not in op.name:
+                    suffix = ".data"
                 code = (
-                    make_str_assign(op.main_code, force_special_kwargs=force)
+                    make_str_assign(
+                        op.main_code, suffix=suffix, force_special_kwargs=force
+                    )
                     + "\n"
                 )
 
