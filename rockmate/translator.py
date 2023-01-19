@@ -270,7 +270,7 @@ class Translator:  # to execute Op
                     rec_list = []
                     for kdn in op.users_global:
                         if DelOp(kdn) in op_sched.op_list[prev_i:i]:
-                            rec_list += kdn.tensor_targets
+                            rec_list += [kdn.main_target]  # kdn.tensor_targets
                     inputs = ",".join(rec_list)
                     code = f"_{mt}.backward({mt}.grad, inputs=[{inputs}], retain_graph={not last})"
                 else:
@@ -310,6 +310,8 @@ class Translator:  # to execute Op
                 code += f"{op.main_target}.grad = None;"
             if op.kdn_type == "phantoms":
                 code += f"del _{op.main_target};"
+                # for inp in op_sched.kdn_dict[f"{op.main_target} phantoms"].inplace_targets:
+                #     code += f"del _{inp};"
             return code
 
         code_list = []
