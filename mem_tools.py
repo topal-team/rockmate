@@ -16,8 +16,10 @@ if torch.cuda.is_available():
     device = torch.device("cuda")
 else:
     device = torch.device("cpu")
-from example_modules import GPT2
 
+# from example_modules import GPT2
+# from transformers import GPT2Tokenizer
+from models.GPT import GPT2
 
 def analyze_mem(i, newmod, code=True, diff=False):
     print(f"allo memory: {newmod.allo_mem[i]}")
