@@ -1,6 +1,7 @@
 __all__ = [
-    "Btools","Dtools","Stools","Ktools","Atools"
-    "print_inputs","make_all_graphs","print_all_graphs"]
+    "Btools","Dtools","Stools","Ktools","Atools",
+    "print_inputs","make_all_graphs","print_all_graphs",
+    "print_graph","print_graph_list"]
 
 from . import Btools
 from . import Dtools

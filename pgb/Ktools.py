@@ -112,7 +112,7 @@ class K_C_node():
     def __hash__(self):
         return self.unique_id
 
-    def get_main_code(self,force_special_kwargs):
+    def get_main_code(self,force_special_kwargs=False):
         return ast_add_on.make_str_assign(
             self.main_code,force_special_kwargs)
     def get_code(self,*args, **kwargs):

@@ -2,7 +2,6 @@ import torch
 import math
 import copy
 import torch.nn as nn
-import torch.nn as nn
 import pgb
 from pgb.utils import *
 import rockmate as rk
@@ -18,7 +17,6 @@ if torch.cuda.is_available():
 else:
     device = torch.device("cpu")
 from example_modules import GPT2
-from transformers import GPT2Tokenizer
 
 
 def analyze_mem(i, newmod, code=True, diff=False):
