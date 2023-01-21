@@ -305,14 +305,18 @@ class S_graph():
     def refresh_info_data_name(self):
         dict_info = self.dict_info
         # First we need to know where each var is :
-        dict_node_name = dict() 
+        dict_nodes = dict() # any target -> main_target
         for sn in self.nodes:
-            mt = sn.main_target
             for tar in sn.all_targets:
-                dict_node_name[tar] = mt
+                dict_nodes[tar] = sn
         for name,info in dict_info.items():
-            if name in dict_node_name:
-                info.data_owner_name = dict_node_name[info.data_owner_name]
+            if name in dict_nodes:
+                owner_sn = dict_nodes[info.data_owner_name]
+                if owner_sn.is_artefact:
+                    info.data_owner_name = "PARAM"
+                else:
+                    info.data_owner_name = owner_sn.main_target
+
 
     def assert_ready(self):
         # check if ready to be given to S_to_K
@@ -497,6 +501,7 @@ def simplify_size(sg : S_graph):
 # === remove view nodes ====
 # ==========================
 
+"""
 def get_all_real_deps(sn):
     candidates = set(sn.deps.keys())
     deps = set()
@@ -508,6 +513,12 @@ def get_all_real_deps(sn):
             else:
                 candidates.update(req_sn.deps.keys())
     return deps
+"""
+def get_all_real_deps(sn):
+    return set(
+        req_sn for req_sn in sn.deps.keys() 
+        if not req_sn.is_artefact)
+
 
 def get_direct_real_deps(sn):
     deps = get_all_real_deps(sn)
@@ -534,12 +545,14 @@ def simplify_view(sg):
             if len(real_deps)==1:
                 req_sn = real_deps.pop()
                 req_sn.insert(sn,strong=True,sg=sg)
+                req_sn.clear_children_artefact()
                 req_sn.clear_siblings_artefact()
             elif len(real_deps) > 1:
                 if not sn_info.is_inplace: print(
                     f"Warning : {sn.main_target} is a view op (not "\
                     f"inplace), with several tensor deps, thus it's "\
-                    f"impossible to simplify it, very dangerous...",
+                    f"impossible to simplify it, very dangerous...\n"\
+                    f"deps are : {[req_sn.main_target for req_sn in real_deps]}",
                     file = sys.stderr)
                 else:
                     inplace_real_node = None

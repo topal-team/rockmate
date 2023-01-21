@@ -137,6 +137,7 @@ def get_useful_vars(sn,sg,our_global,device):
                 data_owner_name = name
             else:
                 data_owner_name = dict_info[name].data_owner_name
+            if data_owner_name == "PARAM": continue
             for explicit_var in explicit_vars:
                 if val is explicit_var:
                     explicit_deps.append(data_owner_name)

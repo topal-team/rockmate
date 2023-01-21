@@ -25,7 +25,7 @@ class B_node:
         .is_input : bool : input vars are represented by nodes with dummy code
         .is_rand  : bool : whether .fct involves randomness
         .deps      : B_node set : required nodes to run .ast_code
-        .deps_rand : B_node set : requires random nodes
+        .deps_rand : str set : required random targets
         """
         self.target = target
         if not code:
@@ -76,7 +76,7 @@ class B_var:
         if self.has_node:
             calling_node.deps.add(self.node)
         elif self.is_rand:
-            calling_node.deps_rand.add(self.val)
+            calling_node.deps_rand.add(self.val.id)
         return self.val
 
     def inherits(self, parent, l_attr):  # for a getattr
@@ -482,7 +482,7 @@ def make_B(model, ex_inputs, verbose=None, impose_device=True, device=None):
 
     # device :
     if not device:
-        device = get_device_and_check_all_same_device(model, ex_inputs)
+        device = small_fcts.get_device_and_check_all_same_device(model, ex_inputs)
 
     # -- ex_inputs -- # for previous versions compatibility
     if isinstance(ex_inputs, dict):

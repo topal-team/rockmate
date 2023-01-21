@@ -127,8 +127,10 @@ def sort_based_on_deps(origin_node): # used on B, S and K
         to_explore.discard(n)
         sorted_list.append(n)
         for req_n in get_deps(n):
-            if req_n in sorted_list:
-                raise Exception("Cycle in the graph => no toposort")
+            if req_n in sorted_list: raise Exception(
+                f"Cycle in the graph ! (found while trying to "\
+                f"toposort), {get_target(req_n)} and "\
+                f"{get_target(n)} are members of this cycle.")
             d = degree[req_n]
             if d == 1:
                 to_explore.add(req_n)

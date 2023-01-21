@@ -15,7 +15,7 @@ class D_node(B_node):
         .is_input  : bool : inputs are represented by nodes wth dummy code
         .is_rand   : bool : ? .fct involves randomness
         .deps      : D_node set : required nodes to run .ast_code
-        .deps_rand : D_node set : required random nodes
+        .deps_rand : str set : required random targets
         .users     : D_node set : reciprocal of .deps
         .protected : bool : ? self is a 1-separator of the graph
         """
@@ -83,7 +83,7 @@ def sort_nodes(g : B_graph): # -> B_node list
     if not o_var.has_node: return []
     else: return shared_methods.sort_based_on_deps(o_var.node)
 
-
+"""
 def generate_tmp_local(g,dict_info,bn,our_global,tmp_local=None):
     if tmp_local is None: tmp_local = dict()
     for req_bn in bn.deps:
@@ -93,26 +93,59 @@ def generate_tmp_local(g,dict_info,bn,our_global,tmp_local=None):
             if isinstance(req_x,torch.Tensor):
                 req_x = req_x.clone()
             tmp_local[req_bn.target] = req_x
-    for req_rd in bn.deps_rand:
-        code = ast_add_on.make_str_assign(req_rd,g.dict_rand[req_rd])
-        exec(code,our_global,tmp_local)
+    return tmp_local
+"""
+
+def generate_deep_tmp_local(bg,dict_info,bn,our_global):
+    tmp_local = dict()
+    done = set()
+    ready = set()
+    todo = list(bn.deps)
+    while todo != []:
+        req_bn = todo[-1]
+        req_tar = req_bn.target
+        if req_tar in done:
+            todo.pop()
+        else:
+            req_info = dict_info[req_tar]
+            if (req_info.is_inplace 
+            or  req_info.is_view
+            or  req_bn.fct == "getattr"):
+                if req_tar in ready:
+                    for req_rd in req_bn.deps_rand:
+                        if not req_rd in done:
+                            code = ast_add_on.make_str_assign(
+                                (req_rd,bg.dict_rand[req_rd]))
+                            exec(code,our_global,tmp_local)
+                            done.add(req_rd)
+                    exec(req_bn.get_code(),our_global,tmp_local)
+                    done.add(req_tar)
+                    todo.pop()
+                else:
+                    todo.extend(list(req_bn.deps))
+                    ready.add(req_tar)
+            else:
+                req_x = def_info.generate_val(req_info,our_global["device"])
+                if isinstance(req_x,torch.Tensor):
+                    req_x = req_x.clone()
+                tmp_local[req_tar] = req_x
+                done.add(req_tar)
+                todo.pop()
     return tmp_local
 
-def generate_deep_tmp_local(g,dict_info,bn,our_global):
-    tmp_local = dict()
-    already_done = set()
+"""
     for req_bn in bn.deps:
         if not req_bn.is_input:
             generate_tmp_local(
-                g,dict_info,req_bn,our_global,tmp_local=tmp_local)
+                bg,dict_info,req_bn,our_global,tmp_local=tmp_local)
             exec(
                 req_bn.get_code(force_special_kwargs=True), 
                 our_global, tmp_local)
     generate_tmp_local(
-        g,dict_info,bn,our_global,tmp_local=tmp_local)
+        bg,dict_info,bn,our_global,tmp_local=tmp_local)
     # to generate the missing inputs
     return tmp_local
-
+"""
 
 # ==========================
 
@@ -287,7 +320,7 @@ def test_fw_code(dg : D_graph,model,dict_inputs : dict):
         exec(code, globals(), loc_dict)
     for dn in dg.nodes:
         for req_rd in dn.deps_rand:
-            code = ast_add_on.make_str_assign(req_rd,dg.dict_rand[req_rd])
+            code = ast_add_on.make_str_assign((req_rd,dg.dict_rand[req_rd]))
             exec(code,globals(),loc_dict)
         if not dn.is_input:
             exec(

@@ -333,7 +333,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
 
         # -> handle artefact deps :
         kcn_deps_art_kcn = set()
-        for req_sn in sn_deps:
+        sn_deps_copy = set(sn_deps)
+        for req_sn in sn_deps_copy:
             if req_sn.is_artefact:
                 sn_deps.discard(req_sn)
                 req_real_sn = list(req_sn.deps.keys())[0] # art's parent
@@ -416,7 +417,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             # -> phantom deps
             for ph_name,(used_name,owner_name) in valid_view_ph_deps.items():
                 if owner_name not in dict_KDN_data: raise Exception(
-                    f"Warning : {ph_name}'s owner is {owner_name}"\
+                    f"Warning : {ph_name}'s owner is {owner_name} "\
                     f"but we cannot find it's KDN_data node ??"\
                     f"its used name is {used_name}")
                 used_kdn = dict_KDN_data[owner_name]
