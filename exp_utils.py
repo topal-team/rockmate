@@ -4,8 +4,98 @@ import rockmate as rk
 from copy import deepcopy
 from rotor import timing
 import numpy as np
+import pickle
+import time
 
 device = torch.device("cuda")
+
+
+def copy_run(model, x, repeat=10):
+    try:
+        _model = deepcopy(model).to(device)
+        for n, p in _model.named_parameters():
+            if p.grad is None:
+                p.grad = torch.zeros_like(p)
+        _x = deepcopy(x).to(device)
+        torch.cuda.reset_peak_memory_stats()
+        max_before = torch.cuda.max_memory_allocated()
+        timer = timing.make_timer(device)
+        times = []
+        for _ in range(repeat):
+            timer.start()
+            y = _model(_x)
+            loss = y.mean()
+            loss.backward()
+            timer.end()
+            times.append(timer.elapsed())
+        peak_mem = torch.cuda.max_memory_allocated() - max_before
+        _model.to("cpu")
+        _x.to("cpu")
+        res = {"input_size": x.size(), "peak_mem": peak_mem, "times": times}
+    except:
+        res = {"input_size": 0, "peak_mem": 0, "times": 0}
+    return res
+
+
+def copy_run_rk(model, x, mbudget, repeat=10, nbar=10, nall=10):
+    results = []
+    budgets = mbudget if hasattr(budget, "__iter__") else [mbudget]
+    for budget in budgets:
+        res = {}
+        res["nb_budget_abar"] = nbar
+        res["nb_budget_all"] = nall
+        res["input_size"] = x.size()
+        try:
+            _model = deepcopy(model).to(device)
+            for n, p in _model.named_parameters():
+                if p.grad is None:
+                    p.grad = torch.zeros_like(p)
+            _x = deepcopy(x).to(device)
+            start = time.time()
+            newmod = rk.CheckpointedModule(
+                _model,
+                _x,
+                mem_limit=budget,
+                nb_budget_abar=nbar,
+                nb_budget_all=nall,
+            )
+            end = time.time()
+            res["feasible"] = True
+            res["solve time"] = end - start
+        except:
+            res["feasible"] = False
+            return None
+        torch.cuda.reset_peak_memory_stats()
+        max_before = torch.cuda.max_memory_allocated()
+        timer = timing.make_timer(device)
+        times = []
+        try:
+            for _ in range(repeat):
+                timer.start()
+                torch.random.manual_seed(0)
+                y = newmod(_x)
+                loss = y.mean()
+                loss.backward()
+                newmod.backward()
+                timer.end()
+                times.append(timer.elapsed())
+            peak_mem = torch.cuda.max_memory_allocated() - max_before
+            _model.to("cpu")
+            _x.to("cpu")
+            res["peak_mem"] = peak_mem
+
+        except:
+            res["peak_mem"] = 0
+        res["times"] = times
+        results.append(res)
+    return results
+
+
+def exp(model, x, budget, run_original=False, repeat=10):
+    if run_original:
+        orig_res = copy_run(model, x, repeat=repeat)
+    rk_res = copy_run_rk(model, x, budget)
+    return rk_res
 
 
 def sanity_check(module, input, mem_limit=None):
@@ -155,18 +245,20 @@ def throughput_exp(module, input, batch_sizes, mem_limit=None):
         torch.cuda.reset_peak_memory_stats()
         max_before = torch.cuda.max_memory_allocated()
         timer = timing.make_timer(device)
-        timer.start()
+        times = []
         for _ in range(10):
+            timer.start()
             y = module(input)
             loss = y.mean()
             loss.backward()
-        timer.end()
+            timer.end()
+            times.append(timer.elapsed())
         peak_mem = torch.cuda.max_memory_allocated() - max_before
         print(f"original module peak memory {peak_mem}")
-        print("original module time: %.4f" % (timer.elapsed() / 10))
+        print("original module time: %.4f" % (np.mean(times)))
         print(f"batch size {original_batch}")
-        print(f"throughput: {original_batch / timer.elapsed()*10}")
-        throughput["original"] = original_batch / timer.elapsed() * 10
+        print(f"throughput: {original_batch / np.mean(times)}")
+        throughput[0] = times
 
         y.grad = None
         y.data = torch.empty(0)
@@ -197,33 +289,38 @@ def throughput_exp(module, input, batch_sizes, mem_limit=None):
         y.data = torch.empty(0)
         timer = timing.make_timer(device)
         times = []
-        for _ in range(repeat):
-            # print(torch.cuda.memory_allocated())
-            newmod.reinit()
+        try:
+            for _ in range(repeat):
+                # print(torch.cuda.memory_allocated())
+                # newmod.reinit()
 
-            torch.cuda.reset_peak_memory_stats()
-            max_before = torch.cuda.max_memory_allocated()
-            timer.start()
-            torch.random.manual_seed(0)
+                torch.cuda.reset_peak_memory_stats()
+                max_before = torch.cuda.max_memory_allocated()
+                timer.start()
+                torch.random.manual_seed(0)
 
-            y = newmod.forward(input)
-            loss = y.mean()
-            loss.backward()
-            newmod.backward()
-            timer.end()
+                y = newmod.forward(input)
+                loss = y.mean()
+                loss.backward()
+                newmod.backward()
+                timer.end()
 
-            peak_mem = torch.cuda.max_memory_allocated() - max_before
-            del y
-            del loss
-            input.grad = None
-            times.append(timer.elapsed())
-
+                peak_mem = torch.cuda.max_memory_allocated() - max_before
+                del y
+                del loss
+                input.grad = None
+                times.append(timer.elapsed())
+        except:
+            # print(newmod.full_code)
+            with open("bug.pkl", "wb") as f:
+                pickle.dump(newmod.full_code, f)
+            raise Exception("failed execution")
         print(f"rockmate module peak memory {peak_mem}")
         print(f"rockmate module budget {newmod.mem_limit}")
         print("rockmate module time: %.4f" % np.mean(times))
         print(f"batch size {batch_size}")
         print(f"throughput: {batch_size / np.mean(times)}\n")
-        throughput[batch_size] = batch_size / np.mean(times)
+        throughput[batch_size] = times  # batch_size / np.mean(times)
 
     for batch_size in batch_sizes:
         repeat = 10
