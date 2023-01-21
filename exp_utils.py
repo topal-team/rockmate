@@ -98,15 +98,22 @@ def exp(model, x, budget, run_original=False, repeat=10):
     return rk_res
 
 
-def sanity_check(module, input, mem_limit=None):
+def sanity_check(module, inputs, dict_kwargs=None, mem_limit=None):
     for n, p in module.named_parameters():
         if p.grad is None:
             p.grad = torch.zeros_like(p)
 
-    _input = input.clone()
+    # copy model, inputs and dict_kwargs
+    dict_inputs = pgb.make_inputs(module,inputs,dict_kwargs)
+    _dict_inputs = dict()
+    for k,v in dict_inputs.items():
+        if isinstance(v,torch.Tensor):
+            _dict_inputs[k] = v.clone()
+        else: _dict_inputs[k] = deepcopy(v)
     _module = deepcopy(module)
+
     # To warm up
-    y = module(input)
+    y = module(**dict_inputs)
     loss = y.mean()
     loss.backward()
 
@@ -116,7 +123,7 @@ def sanity_check(module, input, mem_limit=None):
     timer = timing.make_timer(device)
     timer.start()
     torch.random.manual_seed(0)
-    y = module(input)
+    y = module(**dict_inputs)
     loss = y.mean()
     loss.backward()
     timer.end()
@@ -124,14 +131,14 @@ def sanity_check(module, input, mem_limit=None):
     print(f"original module peak memory {peak_mem}")
     print("original module time: %.4f" % timer.elapsed())
 
-    newmod = rk.CheckpointedModule(_module, _input, mem_limit=mem_limit)
+    newmod = rk.CheckpointedModule(_module, _dict_inputs, mem_limit=mem_limit)
     # for n, m in newmod.original_mod.named_modules():
     #     if isinstance(m, torch.nn.BatchNorm2d):
     #         m.running_mean[:] = 0.0
     #         m.running_var[:] = 1.0
 
     torch.random.manual_seed(0)
-    _y = newmod(_input)
+    _y = newmod(**_dict_inputs)
     _loss = _y.mean()
     _loss.backward()
     newmod.backward()
@@ -142,7 +149,7 @@ def sanity_check(module, input, mem_limit=None):
     timer = timing.make_timer(device)
     timer.start()
     torch.random.manual_seed(0)
-    _y = newmod(_input)
+    _y = newmod(**_dict_inputs)
     _loss = _y.mean()
     _loss.backward()
     newmod.backward()
@@ -181,7 +188,7 @@ def sanity_check(module, input, mem_limit=None):
     newmod.reinit()
     newmod.eval()
     # _module.eval()
-    if torch.allclose(module(input), newmod(_input)):
+    if torch.allclose(module(**dict_inputs), newmod(**_dict_inputs)):
         print("Same evaluation obtained!")
     else:
         print("Unequal evaluation")

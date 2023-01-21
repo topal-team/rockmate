@@ -241,12 +241,12 @@ class CheckpointedModule(torch.nn.Module):
         else:
             exec("\n".join(code_list), self.storage.gd, self.storage.ld)
 
-    def forward(self, input, record_mem=False, compiled=True):
+    def forward(self, *args, record_mem=False, compiled=True, **kwargs):
         if not self.training:
             self.original_mod.eval()
-            return self.original_mod(input)
+            return self.original_mod(*args,**kwargs)
         # self.storage.add_val("src", input)  #  hardcoded
-        dict_inputs = make_inputs(self.original_mod, input, None)
+        dict_inputs = make_inputs(self.original_mod, args, kwargs)
         for k, v in dict_inputs.items():
             self.storage.add_val(k, v)
         exec(self.init_code, self.storage.gd, self.storage.ld)
