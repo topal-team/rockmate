@@ -286,6 +286,13 @@ class ModelGurobi:
                         self.U[(t, k)], GRB.LESS_EQUAL, self.save_budget
                     )
 
+    def add_abar_constraint(self, save_budget):
+        T = len(self.kg.list_kcn)
+        self.save_budget = save_budget / self.gcd
+        for k in range(T):
+            t = T // 2
+            self.md.addLConstr(self.U[(t, k)], GRB.LESS_EQUAL, self.save_budget)
+
     def solve(self):
 
         self.md.message("\n\nRestarting solve\n\n")
@@ -315,7 +322,7 @@ class ModelGurobi:
         alive_status[-1] = 1  # input_data_kdn
         for t in range(T):
             for k in range(T):
-                if self.R[t, k].X==1:
+                if self.R[t, k].X == 1:
                     kcn = kg.list_kcn[k]
                     if "loss" in kcn.name:
                         op_list.append(RunOp(kcn))
@@ -323,7 +330,7 @@ class ModelGurobi:
                         alive_status[kg.list_kdn.index(kg.output_kdn_grad)] = 1
                         # alive_status[kg.list_kdn.index(kg.output_kdn_data)] = 0
                     for eidx, (k_, i) in enumerate(self.create_list):
-                        if k == k_ and self.create[t, eidx].X==1:
+                        if k == k_ and self.create[t, eidx].X == 1:
                             alive_status[i] = 1
                     op_list.append(RunOp(kcn))
                     alive_list.append(alive_status.copy())
@@ -331,16 +338,16 @@ class ModelGurobi:
                     #     if self.alive[(t,k,i)].getValue():
                     #         alive_list[-1][i] = 1
                 for eidx, (k_, i) in enumerate(self.delete_list):
-                    if k == k_ and self.delete[t, eidx].X==1:
+                    if k == k_ and self.delete[t, eidx].X == 1:
                         kdn = kg.list_kdn[i]
-                        if  "phantom" in kdn.name:
+                        if "phantom" in kdn.name:
                             alive_status[i] = 0
                             op_list.append(DelOp(kdn))
                             alive_list.append(alive_status.copy())
                 for eidx, (k_, i) in enumerate(self.delete_list):
-                    if k == k_ and self.delete[t, eidx].X==1:
+                    if k == k_ and self.delete[t, eidx].X == 1:
                         kdn = kg.list_kdn[i]
-                        if  "phantom" not in kdn.name:
+                        if "phantom" not in kdn.name:
                             alive_status[i] = 0
                             op_list.append(DelOp(kdn))
                             alive_list.append(alive_status.copy())
@@ -375,7 +382,7 @@ class ModelGurobi:
             kg.input_kdn_data,
             kg.input_kdn_grad,
             kg.output_kdn_data,
-            kg.list_kdn
+            kg.list_kdn,
         )
         # fwd_sched.del_input(kg)
         return fwd_sched, bwd_sched

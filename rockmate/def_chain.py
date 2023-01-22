@@ -14,7 +14,7 @@ import math
 # ==========================
 
 
-def get_rk_solution(list_kg, budget_abar, budget_all):
+def get_rk_solution(list_kg, l_bd_abar, budget_all):
     param_dict = {
         "LogToConsole": 0,
         "IntegralityFocus": 1,
@@ -22,18 +22,26 @@ def get_rk_solution(list_kg, budget_abar, budget_all):
     gurobi_md = ModelGurobi(
         list_kg[0],
         budget_all,
-        budget_abar,
+        # budget_abar,
+        max(l_bd_abar),
         gcd=10000,
         gurobi_params=param_dict,
     )
-    gurobi_md.solve()
-    if not gurobi_md.feasible:
-        return False
-    list_sols = []
-    for kg in list_kg:
-        fwd_sched, bwd_sched = gurobi_md.schedule(kg)
-        list_sols.append(RK_Block_Solution(fwd_sched, bwd_sched))
-    return list_sols
+    list_list_sols = []
+    for bd_abar in np.sort(l_bd_abar)[::-1]:
+        gurobi_md.add_abar_constraint(bd_abar)
+        gurobi_md.solve()
+
+        if not gurobi_md.feasible:
+            list_list_sols.append(False)
+            continue
+            # return False
+        list_sols = []
+        for kg in list_kg:
+            fwd_sched, bwd_sched = gurobi_md.schedule(kg)
+            list_sols.append(RK_Block_Solution(fwd_sched, bwd_sched))
+        list_list_sols.append(list_sols)
+    return list_list_sols
 
 
 class RK_Block_Solution:
@@ -63,20 +71,21 @@ def get_rk_block(list_kg, nb_bdg_abar, nb_bdg_all):
     uniq_sols = set()
     for bd_all in l_bd_all:
         l_bd_abar = np.linspace(kg.output_kdn_data.mem.v, bd_all, nb_bdg_abar)
-        for bd_abar in l_bd_abar:
-            if bd_all >= bd_abar:
-                sol = get_rk_solution(list_kg, bd_abar, bd_all)
-                if sol:
-                    t = (
-                        sol[0].size_a_bar,
-                        sol[0].overhead_fwd,
-                        sol[0].overhead_bwd,
-                    )
-                    if not (t in uniq_sols):
-                        uniq_sols.add(t)
-                        sols.append(sol)
-                        for s, block in zip(sol, list_blocks):
-                            block.sols.append(s)
+        # for bd_abar in l_bd_abar:
+        #     if bd_all >= bd_abar:
+        list_sols = get_rk_solution(list_kg, l_bd_abar, bd_all)
+        for sol in list_sols:
+            if sol:
+                t = (
+                    sol[0].size_a_bar,
+                    sol[0].overhead_fwd,
+                    sol[0].overhead_bwd,
+                )
+                if not (t in uniq_sols):
+                    uniq_sols.add(t)
+                    sols.append(sol)
+                    for s, block in zip(sol, list_blocks):
+                        block.sols.append(s)
     return list_blocks
 
 
