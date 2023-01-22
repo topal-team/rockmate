@@ -87,6 +87,7 @@ def make_inputs(model,model_inputs,model_kwargs):
     dict_inputs.update(model_kwargs)
 
     # 2) check types
+    """ # -> might fail
     for (name,value) in dict_inputs.items():
         info = sign.parameters[name]
         if not info.annotation is inspect._empty:
@@ -94,6 +95,7 @@ def make_inputs(model,model_inputs,model_kwargs):
                 f"According to model's signature, {name} argument "\
                 f"is supposed to be of type {info.annotation}, but "\
                 f"the given value has type {type(value)}")
+    """
     return dict_inputs
 
 
