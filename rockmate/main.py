@@ -183,6 +183,14 @@ class CheckpointedModule(torch.nn.Module):
             list_kdn,
         )
 
+        self.simulation_time = sum(op.time for op in self.fwd_op_list) + sum(
+            op.time for op in self.bwd_op_list
+        )
+
+        self.simulation_overhead = self.simulation_time / sum(
+            [kcn.time for kg in self.list_kg for kcn in kg.list_kcn]
+        )
+
     def get_code(self, aggressive=False):
         self.storage = RK_Storage(self.device, self.original_mod)
         self.storage.gd["rng_state"] = RngState()
@@ -244,7 +252,7 @@ class CheckpointedModule(torch.nn.Module):
     def forward(self, *args, record_mem=False, compiled=True, **kwargs):
         if not self.training:
             self.original_mod.eval()
-            return self.original_mod(*args,**kwargs)
+            return self.original_mod(*args, **kwargs)
         # self.storage.add_val("src", input)  #  hardcoded
         dict_inputs = make_inputs(self.original_mod, args, kwargs)
         for k, v in dict_inputs.items():

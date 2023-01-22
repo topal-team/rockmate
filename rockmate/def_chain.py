@@ -17,12 +17,13 @@ import math
 def get_rk_solution(list_kg, budget_abar, budget_all):
     param_dict = {
         "LogToConsole": 0,
+        "IntegralityFocus": 1,
     }
     gurobi_md = ModelGurobi(
         list_kg[0],
         budget_all,
         budget_abar,
-        gcd=100000,
+        gcd=10000,
         gurobi_params=param_dict,
     )
     gurobi_md.solve()

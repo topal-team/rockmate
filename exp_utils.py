@@ -6,6 +6,10 @@ from rotor import timing
 import numpy as np
 import pickle
 import time
+import sys
+import dill
+
+sys.setrecursionlimit(30000)
 
 device = torch.device("cuda")
 
@@ -39,37 +43,50 @@ def copy_run(model, x, repeat=10):
 
 def copy_run_rk(model, x, mbudget, repeat=10, nbar=10, nall=10):
     results = []
-    budgets = mbudget if hasattr(budget, "__iter__") else [mbudget]
+    budgets = mbudget if hasattr(mbudget, "__iter__") else [mbudget]
+    _model = deepcopy(model).to(device)
+    _x = deepcopy(x).to(device)
+    start = time.time()
+    newmod = rk.CheckpointedModule(
+        _model,
+        _x,
+        mem_limit=max(budgets),
+        nb_budget_abar=nbar,
+        nb_budget_all=nall,
+        get_sequence=False,
+        get_code=False,
+    )
+    end = time.time()
+    ilp_time = end - start
     for budget in budgets:
         res = {}
+        res["ILP solve time"] = ilp_time
         res["nb_budget_abar"] = nbar
         res["nb_budget_all"] = nall
         res["input_size"] = x.size()
+        res["budget"] = budget
         try:
-            _model = deepcopy(model).to(device)
             for n, p in _model.named_parameters():
                 if p.grad is None:
                     p.grad = torch.zeros_like(p)
-            _x = deepcopy(x).to(device)
             start = time.time()
-            newmod = rk.CheckpointedModule(
-                _model,
-                _x,
-                mem_limit=budget,
-                nb_budget_abar=nbar,
-                nb_budget_all=nall,
-            )
+            newmod.get_sequence(budget)
             end = time.time()
             res["feasible"] = True
-            res["solve time"] = end - start
+            res["DP solve time"] = end - start
+            res["simulation overhead"] = newmod.simulation_overhead
+            newmod.get_code()
         except:
             res["feasible"] = False
-            return None
+            results.append(res)
+            continue
+            # return results
         torch.cuda.reset_peak_memory_stats()
         max_before = torch.cuda.max_memory_allocated()
         timer = timing.make_timer(device)
         times = []
         try:
+            _x = deepcopy(x).to(device)
             for _ in range(repeat):
                 timer.start()
                 torch.random.manual_seed(0)
@@ -80,14 +97,20 @@ def copy_run_rk(model, x, mbudget, repeat=10, nbar=10, nall=10):
                 timer.end()
                 times.append(timer.elapsed())
             peak_mem = torch.cuda.max_memory_allocated() - max_before
-            _model.to("cpu")
-            _x.to("cpu")
+
             res["peak_mem"] = peak_mem
 
-        except:
+        except Exception as e:
             res["peak_mem"] = 0
+            res["Error"] = f"caught {type(e)}: {e}"
+            if type(e) != torch.cuda.OutOfMemoryError:
+                res["src_code"] = newmod.full_code
+                with open("rk_mod.pkl", "wb") as f:
+                    torch.save(newmod, f, pickle_module=dill)
         res["times"] = times
         results.append(res)
+    _model.to("cpu")
+    _x.to("cpu")
     return results
 
 
@@ -103,13 +126,14 @@ def sanity_check(module, inputs, dict_kwargs=None, mem_limit=None):
         if p.grad is None:
             p.grad = torch.zeros_like(p)
 
-    # copy model, inputs and dict_kwargs
-    dict_inputs = pgb.make_inputs(module,inputs,dict_kwargs)
+    #  copy model, inputs and dict_kwargs
+    dict_inputs = pgb.make_inputs(module, inputs, dict_kwargs)
     _dict_inputs = dict()
-    for k,v in dict_inputs.items():
-        if isinstance(v,torch.Tensor):
+    for k, v in dict_inputs.items():
+        if isinstance(v, torch.Tensor):
             _dict_inputs[k] = v.clone()
-        else: _dict_inputs[k] = deepcopy(v)
+        else:
+            _dict_inputs[k] = deepcopy(v)
     _module = deepcopy(module)
 
     # To warm up
