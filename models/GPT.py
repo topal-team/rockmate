@@ -157,6 +157,8 @@ class GPT2(nn.Module):
         self.out = nn.Linear(d_model, vcb_sz, bias=False)
         self.loss_fn = nn.CrossEntropyLoss()
         self.init_weights()
+        self.n_head = n_head
+        self.d_model = d_model
 
     def init_weights(self):
         self.out.weight = self.wte.weight
@@ -186,6 +188,97 @@ class GPT2(nn.Module):
             return inp
         for i in range(self.nlayers):
             inp = self.h[i](inp)
+        inp = self.ln_f(inp)
+        logits = self.out(inp)
+        outputs = (logits,) + (inp,)
+
+        if labels is not None:
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            loss = self.loss_fn(
+                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_labels.view(-1),
+            )
+            outputs = (loss,) + outputs
+            return outputs
+        return logits
+
+
+class GPT2_input(nn.Module):
+    def __init__(self, n_ctx=1024, d_model=768, vcb_sz=50257, dropout=0.1):
+        super(GPT2_input, self).__init__()
+        block = TransformerBlock(d_model=d_model, n_head=12, dropout=dropout)
+        # self.h = _get_clones(block, nlayers)
+        self.wte = nn.Embedding(vcb_sz, d_model)
+        self.wpe = nn.Embedding(n_ctx, d_model)
+        self.drop = nn.Dropout(dropout)
+        # self.drop = nn.Identity()
+        self.ln_f = LayerNorm(d_model)
+        self.out = nn.Linear(d_model, vcb_sz, bias=False)
+        self.loss_fn = nn.CrossEntropyLoss()
+        self.init_weights()
+
+    def init_weights(self):
+        self.out.weight = self.wte.weight
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        if isinstance(module, (nn.Linear, nn.Embedding, Conv1D)):
+            module.weight.data.normal_(mean=0.0, std=0.02)
+            if (
+                isinstance(module, (nn.Linear, Conv1D))
+                and module.bias is not None
+            ):
+                module.bias.data.zero_()
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
+
+    def forward(
+        self, src, labels=None, pos_ids=None, return_inp=False, dropout=0.1
+    ):
+        if pos_ids is None:
+            pos_ids = torch.arange(
+                0, src.size(-1), dtype=torch.long, device=self.wpe.weight.device
+            ).unsqueeze(0)
+        inp = self.drop((self.wte(src) + self.wpe(pos_ids)))
+        return inp
+
+
+class GPT2_output(nn.Module):
+    def __init__(self, d_model=768, vcb_sz=50257, dropout=0.1):
+        super(GPT2_output, self).__init__()
+        # self.nlayers = nlayers
+        # block = TransformerBlock(d_model=d_model, n_head=12, dropout=dropout)
+        # self.h = _get_clones(block, nlayers)
+        self.wte = nn.Embedding(vcb_sz, d_model)
+        # self.wpe = nn.Embedding(n_ctx, d_model)
+        self.drop = nn.Dropout(dropout)
+        # self.drop    = nn.Identity()
+        self.ln_f = LayerNorm(d_model)
+        self.out = nn.Linear(d_model, vcb_sz, bias=False)
+        self.loss_fn = nn.CrossEntropyLoss()
+        self.init_weights()
+
+    def init_weights(self):
+        self.out.weight = self.wte.weight
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        if isinstance(module, (nn.Linear, nn.Embedding, Conv1D)):
+            module.weight.data.normal_(mean=0.0, std=0.02)
+            if (
+                isinstance(module, (nn.Linear, Conv1D))
+                and module.bias is not None
+            ):
+                module.bias.data.zero_()
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
+
+    def forward(
+        self, inp, labels=None, pos_ids=None, return_inp=False, dropout=0.1
+    ):
         inp = self.ln_f(inp)
         logits = self.out(inp)
         outputs = (logits,) + (inp,)
