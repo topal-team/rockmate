@@ -124,6 +124,9 @@ class Translator:  # to execute Op
                 return True
 
         def _is_proxy_alive(kdn_target, i):
+            if f"{kdn_target} data" not in op_sched.kdn_dict:
+                # belong to the next block, or del_input
+                return False
             includes_phantoms = op_sched.kdn_dict[
                 f"{kdn_target} data"
             ].includes_phantoms
