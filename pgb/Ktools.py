@@ -150,6 +150,7 @@ class K_D_node():
         self.name        = f"{mt} {self.kdn_type}"
         self.mem         = rotor_MemSize(0)
         self.info        = info
+        self.includes_base = False
         self.includes_phantoms = False
         if unique_id_generator is None: self.unique_id = id(self)
         else:
@@ -175,6 +176,8 @@ class K_D_node():
             ["name","mem","kdn_type","main_target",
              "all_targets","container_targets",
              "tensor_targets","inplace_targets",
+             "includes_phantoms",
+             "includes_base",
              "alias_in_users_phantoms"],
             raise_exception=raise_exception)
         # ** deps/users **
@@ -383,7 +386,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             data_ptr_only_ph_deps,
             valid_view_ph_deps,
             exist_phs,
-            original_phs) = (
+            original_phs,
+            hasattr_base) = (
                 def_inspection.get_useful_vars(sn,sg,our_global,device))
             all_deps_mt = set(explicit_deps).union(
                 set(data_ptr_only_ph_deps.values()).union(
@@ -397,6 +401,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             if mt in all_deps_mt:
                 kcn_bwd_deps_real.add(kdn_data)
                 data_includes_phantoms = kdn_data.includes_phantoms = True
+                kdn_data.includes_base = hasattr_base
             else:
                 kcn_bwd_deps_fake.add(kdn_data)
                 data_includes_phantoms = False
@@ -665,6 +670,7 @@ def copy_K_D_node(kdn : K_D_node):
     new_kdn.name        = kdn.name
     new_kdn.mem         = kdn.mem
     new_kdn.info        = kdn.info
+    new_kdn.includes_base = kdn.includes_base
     new_kdn.includes_phantoms = kdn.includes_phantoms
     new_kdn.alias_in_users_phantoms = list(kdn.alias_in_users_phantoms)
     new_kdn.unique_id   = kdn.unique_id

@@ -106,15 +106,17 @@ def get_useful_vars(sn,sg,our_global,device):
     print_debug(f"Try to open {sn.main_target}'s grad_fn")
     # == INIT ==
     dict_info = sg.dict_info
+    mt = sn.main_target
     # tmp_local = generate_deep_tmp_local(sn,sg,our_global,device)
     tmp_local = generate_tmp_local(sn,sg,our_global,device)
     exec(
         sn.get_code(force_special_kwargs=True), 
         our_global, tmp_local)
+    sn_val = tmp_local[mt]
+    hasattr_base = sn_val._base is not None
 
     # == SEARCH THROUGH GRAD_FN == 
-    mt = sn.main_target
-    grad_fn = tmp_local[mt].grad_fn
+    grad_fn = sn_val.grad_fn
     (explicit_vars,phs_found) = trace_grad_fn(
         grad_fn,sn.main_target,params,our_global
     )
@@ -176,6 +178,7 @@ def get_useful_vars(sn,sg,our_global,device):
         valid_view_ph_deps,
         exist_phs,
         original_phs,
+        hasattr_base,
     )
 
 # ======================
@@ -247,7 +250,11 @@ class inspector():
 
         def fct_fgt_fwd():
             for tar in self.sn.tensor_targets:
-                self.tmp_local[tar].data = torch.zeros(0,device=self.device)
+                val = self.tmp_local[tar]
+                val.data = torch.zeros(0,device=self.device)
+                if val._base is not None:
+                    val._base.data = torch.empty(0,device=self.device)
+                
 
         def fct_del_fwd():
             code = ""
