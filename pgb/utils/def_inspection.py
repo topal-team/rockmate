@@ -113,7 +113,7 @@ def get_useful_vars(sn,sg,our_global,device):
         sn.get_code(force_special_kwargs=True), 
         our_global, tmp_local)
     sn_val = tmp_local[mt]
-    hasattr_base = sn_val._base is not None
+    hasattr_base = not (sn_val._base is None)
 
     # == SEARCH THROUGH GRAD_FN == 
     grad_fn = sn_val.grad_fn

@@ -398,10 +398,10 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                 dict_KDN_data[mt] for mt in bwd_deps_real_mt)
             kcn_bwd_deps_fake = (
                 kcn_fwd_deps - kcn_bwd_deps_real)
+            kdn_data.includes_base = hasattr_base
             if mt in all_deps_mt:
                 kcn_bwd_deps_real.add(kdn_data)
                 data_includes_phantoms = kdn_data.includes_phantoms = True
-                kdn_data.includes_base = hasattr_base
             else:
                 kcn_bwd_deps_fake.add(kdn_data)
                 data_includes_phantoms = False
