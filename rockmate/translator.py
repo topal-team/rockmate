@@ -88,7 +88,10 @@ class Translator:  # to execute Op
                             code += (
                                 f"{target}.data = torch.empty(0,device=device);"
                             )
-                            # code += f"del {target};"
+                    if op.includes_base:
+                        code += f"{op.main_target}._base.data = torch.empty(0,device=device);"
+
+                        # code += f"del {target};"
                     code_list.append(code)
                 else:
                     code_list.append("")
@@ -302,6 +305,11 @@ class Translator:  # to execute Op
 
                     if op.includes_phantoms:
                         code += f"del _{op.main_target};"
+                    if op.includes_base:
+                        if op.proxy:
+                            code += f"_{op.main_target}._base.data = torch.empty(0,device=device);"
+                        else:
+                            code += f"{op.main_target}._base.data = torch.empty(0,device=device);"
 
                 for v in op.tensor_targets:
                     code += f"{v}.data = torch.empty(0,device=device); "

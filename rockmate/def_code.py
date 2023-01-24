@@ -93,6 +93,7 @@ class DelOp:
         self.op_type = "Del"
         self.proxy = proxy
         self.includes_phantoms = kdn.includes_phantoms
+        self.includes_base = kdn.includes_base
         self.alias_in_users_phantoms = kdn.alias_in_users_phantoms
 
     def __eq__(self, op2):
@@ -127,7 +128,7 @@ class OpSchedule:
             output_kdn_data.main_target,
             output_kdn_data.mem.v,
         )
-        self.kdn_dict = {kdn.name:kdn for kdn in list_kdn}
+        self.kdn_dict = {kdn.name: kdn for kdn in list_kdn}
 
         # save the del_input op in case needed
         input_kdn = input_kdn_data
