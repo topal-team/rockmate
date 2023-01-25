@@ -20,7 +20,7 @@ from rockmate.def_sequence import (
 # ==========================
 
 
-def solve_dp_functionnal(chain: RK_Chain, mmax):
+def solve_dp_functionnal(chain: RK_Chain, mmax, opt_table=({}, {})):
     """Returns the optimal table:
     Opt[m][lmin][lmax] : int matrix
         with lmin = 0...chain.length
@@ -44,8 +44,9 @@ def solve_dp_functionnal(chain: RK_Chain, mmax):
     ff_fw = chain.ff_fw
     nb_sol = chain.nb_sol
 
-    opt = dict()
-    what = dict()
+    opt, what = opt_table
+    # opt = dict()
+    # what = dict()
 
     def opt_add(m, a, b, time):
         if not m in opt:
@@ -164,12 +165,12 @@ def solve_dp_functionnal(chain: RK_Chain, mmax):
 # ==========================
 
 
-def seq_builder(chain: RK_Chain, memory_limit):
+def seq_builder(chain: RK_Chain, memory_limit, opt_table=({}, {})):
     # returns :
     # - the optimal sequence of computation using mem-persistent algo
     mmax = memory_limit - chain.cw[0]
-    opt, what = solve_dp_functionnal(chain, mmax)
-
+    # opt, what = solve_dp_functionnal(chain, mmax, *opt_table)
+    opt, what = opt_table
     #  ~~~~~~~~~~~~~~~~~~
     def seq_builder_rec(lmin, lmax, cmem):
         seq = RK_Sequence()

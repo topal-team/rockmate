@@ -102,6 +102,58 @@ class Attention(nn.Module):
         return out
 
 
+# class TransformerBlock(nn.Module):
+#     def __init__(self, d_model=768, n_head=12, dropout=0.1):
+#         super(TransformerBlock, self).__init__()
+#         self.attn = Attention(
+#             d_model=d_model,
+#             n_head=n_head,
+#             d_head=64,
+#             n_ctx=1024,
+#             bias=True,
+#             scale=False,
+#             dropout=dropout,
+#         )
+#         self.feedforward = FeedForward(
+#             dropout=dropout, d_model=d_model, nx=d_model * 4
+#         )
+#         self.ln_1 = LayerNorm(d_model)
+#         self.ln_2 = LayerNorm(d_model)
+
+#     def forward(self, x):
+#         x1 = self.ln_1(x)
+#         x2 = self.ln_2(x)
+#         x = x + self.attn(x1)
+#         x = x + self.feedforward(x2)
+#         return x
+
+
+class Residual(nn.Module):
+    def __init__(self, layer1, layer2):
+        super(Residual, self).__init__()
+        self.layer1 = layer1
+        self.layer2 = layer2
+
+    def forward(self, x):
+        return x + self.layer2(self.layer1(x))
+
+
+def getTransformer(d_model=768, n_head=12, dropout=0.1):
+    attn = Attention(
+        d_model=d_model,
+        n_head=n_head,
+        d_head=64,
+        n_ctx=1024,
+        bias=True,
+        scale=False,
+        dropout=dropout,
+    )
+    feedforward = FeedForward(dropout=dropout, d_model=d_model, nx=d_model * 4)
+    ln1 = LayerNorm(d_model)
+    ln2 = LayerNorm(d_model)
+    return nn.Sequential(*[Residual(ln1, attn), Residual(ln2, feedforward)])
+
+
 class TransformerBlock(nn.Module):
     def __init__(self, d_model=768, n_head=12, dropout=0.1):
         super(TransformerBlock, self).__init__()
@@ -144,9 +196,10 @@ class GPT2(nn.Module):
     ):
         super(GPT2, self).__init__()
         self.nlayers = nlayers
-        block = TransformerBlock(
-            d_model=d_model, n_head=n_head, dropout=dropout
-        )
+        # block = TransformerBlock(
+        #     d_model=d_model, n_head=n_head, dropout=dropout
+        # )
+        block = getTransformer(d_model=d_model, n_head=n_head, dropout=dropout)
         self.h = _get_clones(block, nlayers)
         self.wte = nn.Embedding(vcb_sz, d_model)
         self.wpe = nn.Embedding(n_ctx, d_model)

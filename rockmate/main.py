@@ -19,7 +19,7 @@ from rockmate.def_sequence import (
     SeqBlockFn,
     SeqBlockFe,
 )
-from rockmate.rotor_solver import seq_builder
+from rockmate.rotor_solver import seq_builder, solve_dp_functionnal
 from rockmate.translator import Translator, RngState
 import torch
 import ast
@@ -69,12 +69,13 @@ class CheckpointedModule(torch.nn.Module):
         self.list_kg = self.pgb_res.K_graph_list
         self.init_code = ast_to_str(self.list_kg[0].init_code)
         self.output = self.list_kg[-1].output_kdn_data
+        self.mem_limit = mem_limit
         if get_chain:
             self.get_chain(nb_budget_abar, nb_budget_all)
-        if get_sequence:
-            self.get_sequence(mem_limit)
-        if get_code:
-            self.get_code()
+            if get_sequence:
+                self.get_sequence(mem_limit)
+                if get_code:
+                    self.get_code()
 
     def get_chain(self, nb_budget_abar=10, nb_budget_all=5):
         start = time.time()
@@ -88,8 +89,10 @@ class CheckpointedModule(torch.nn.Module):
         )
         end = time.time()
         self.ILP_solve_time = end - start
+            
+        self.opt_table = ({},{})
 
-    def get_sequence(self, mem_limit):
+    def get_sequence(self, mem_limit, use_opt_table=False):
         for n, p in self.original_mod.named_parameters():
             if p.grad is None:
                 p.grad = torch.zeros_like(p)
@@ -120,7 +123,9 @@ class CheckpointedModule(torch.nn.Module):
         print_debug("mem_limit", self.mem_limit)
         # -- solve the chain like rotor --
         start = time.time()
-        self.seq = seq_builder(self.rk_chain, self.mem_limit // self.mem_unit)
+        mmax = self.mem_limit // self.mem_unit - self.rk_chain.cw[0]
+        self.opt_table = solve_dp_functionnal(self.rk_chain, mmax, self.opt_table)
+        self.seq = seq_builder(self.rk_chain, self.mem_limit // self.mem_unit, self.opt_table)
         end = time.time()
         self.DP_solve_time = end - start
 

@@ -1,6 +1,7 @@
 import torch
 import pgb
 import rockmate as rk
+from rotor_exp.rotor import Checkpointable
 from copy import deepcopy
 from rotor import timing
 import numpy as np
@@ -8,6 +9,8 @@ import pickle
 import time
 import sys
 import dill
+from models.GPT import *
+from rotor.inspection import tensorMsize
 
 sys.setrecursionlimit(30000)
 
@@ -36,8 +39,13 @@ def copy_run(model, x, repeat=10):
         _model.to("cpu")
         _x.to("cpu")
         res = {"input_size": x.size(), "peak_mem": peak_mem, "times": times}
-    except:
-        res = {"input_size": 0, "peak_mem": 0, "times": 0}
+    except Exception as e:
+        res = {}
+        res["peak_mem"] = 0
+        res["Error"] = f"caught {type(e)}: {e}"
+        # if type(e) != torch.cuda.OutOfMemoryError:
+        #     res["src_code"] = newmod.full_code
+        # res = {"input_size": 0, "peak_mem": 0, "times": 0}
     return res
 
 
@@ -76,8 +84,9 @@ def copy_run_rk(model, x, mbudget, repeat=10, nbar=10, nall=10):
             res["DP solve time"] = end - start
             res["simulation overhead"] = newmod.simulation_overhead
             newmod.get_code()
-        except:
+        except Exception as e:
             res["feasible"] = False
+            res["Error"] = f"caught {type(e)}: {e}"
             results.append(res)
             continue
             # return results
@@ -114,11 +123,182 @@ def copy_run_rk(model, x, mbudget, repeat=10, nbar=10, nall=10):
     return results
 
 
-def exp(model, x, budget, run_original=False, repeat=10):
+def copy_run_rt(model, x, mbudget, repeat=10):
+    x_rotor = x.clone().to(device).requires_grad_()
+    model_rotor = deepcopy(model).to(device)
+    results = []
+    budgets = mbudget if hasattr(mbudget, "__iter__") else [mbudget]
+    # _model = deepcopy(model).to(device)
+    # _x = deepcopy(x).to(device)
+
+    start = time.time()
+    chk = Checkpointable(model_rotor, verbosity=0)
+    for n, p in model_rotor.named_parameters():
+        if p.grad is None:
+            p.grad = torch.zeros_like(p)
+    chk.measure(x_rotor)
+    end = time.time()
+    measure_time = end - start
+    for budget in budgets:
+        res = {}
+        res["measure time"] = measure_time
+        res["input_size"] = x_rotor.size()
+        res["budget"] = budget
+
+        try:
+            start = time.time()
+            chk.compute_sequence(budget)
+            end = time.time()
+            res["expect_peak"] = chk.get_expected_memory()
+            res["expect_time"] = chk.get_expected_makespan()
+            res["feasible"] = True
+            res["DP solve time"] = end - start
+
+        except:
+            res["feasible"] = False
+            results.append(res)
+            continue
+        timer = timing.make_timer(device)
+        times = []
+        try:
+            torch.cuda.reset_peak_memory_stats()
+            max_before = torch.cuda.max_memory_allocated()
+            for _ in range(repeat):
+                _x_rotor = x_rotor.clone().to(device)
+                timer.start()
+                torch.random.manual_seed(0)
+                output = chk(_x_rotor)
+                loss = output.mean()
+                del output
+                loss.backward()
+                timer.end()
+                times.append(timer.elapsed())
+                del loss
+
+            peak_mem = torch.cuda.max_memory_allocated() - max_before
+            res["peak_mem"] = peak_mem
+        except Exception as e:
+            res["peak_mem"] = 0
+            res["Error"] = f"caught {type(e)}: {e}"
+            if type(e) == torch.cuda.OutOfMemoryError:
+                print("OOM")
+        res["times"] = times
+        results.append(res)
+    model_rotor.to("cpu")
+    return results
+
+
+def copy_run_rt_GPT(model, x, mbudget, repeat=10):
+    results = []
+    budgets = mbudget if hasattr(mbudget, "__iter__") else [mbudget]
+    # _model = deepcopy(model).to(device)
+    _x = deepcopy(x).to(device)
+
+    nlayers = model.nlayers
+    GPT2_0 = GPT2_input(d_model=model.d_model).to(device)
+    GPT2_1 = GPT2_output(d_model=model.d_model)
+    h = [
+        getTransformer(d_model=model.d_model, n_head=model.n_head)
+        for _ in range(nlayers)
+    ]
+    # h = [
+    #     TransformerBlock(d_model=model.d_model, n_head=model.n_head)
+    #     for _ in range(nlayers)
+    # ]
+    model_rotor = nn.Sequential(*h + [GPT2_1]).to(device)
+    allo_before = torch.cuda.memory_allocated()
+    x_rotor = GPT2_0(x.clone().to(device)).requires_grad_()
+    abar = torch.cuda.memory_allocated() - allo_before - tensorMsize(x_rotor)
+    start = time.time()
+    chk = Checkpointable(model_rotor, verbosity=0)
+    for n, p in model_rotor.named_parameters():
+        if p.grad is None:
+            p.grad = torch.zeros_like(p)
+    chk.measure(x_rotor)
+    end = time.time()
+    measure_time = end - start
+    for budget in budgets:
+        res = {}
+        res["measure time"] = measure_time
+        res["input_size"] = x.size()
+        res["budget"] = budget
+
+        try:
+            start = time.time()
+            chk.compute_sequence(budget - abar)
+            end = time.time()
+            res["expect_peak"] = chk.get_expected_memory()
+            res["expect_time"] = chk.get_expected_makespan()
+            res["abar"] = abar
+            res["feasible"] = True
+            res["DP solve time"] = end - start
+            # res["simulation overhead"] = newmod.simulation_overhead
+
+        except:
+            res["feasible"] = False
+            results.append(res)
+            continue
+        timer = timing.make_timer(device)
+        times = []
+        try:
+            _x = deepcopy(x).to(device)
+            torch.cuda.reset_peak_memory_stats()
+            max_before = torch.cuda.max_memory_allocated()
+            for _ in range(repeat):
+                timer.start()
+                torch.random.manual_seed(0)
+                _x_rotor = GPT2_0(_x).requires_grad_()
+                output = chk(_x_rotor)
+                # output_grad = torch.ones_like(output.data).to(device)
+                # output.backward(output_grad)
+                loss = output.mean()
+                del output
+                loss.backward()
+                timer.end()
+                times.append(timer.elapsed())
+                # del output_grad
+                del loss
+                # output.grad = None
+                # _x_rotor.grad = None
+                # _x_rotor.data = torch.empty(0)
+                # output.data = torch.empty(0)
+                del _x_rotor
+
+            peak_mem = torch.cuda.max_memory_allocated() - max_before
+            res["peak_mem"] = peak_mem
+        except Exception as e:
+            res["peak_mem"] = 0
+            res["Error"] = f"caught {type(e)}: {e}"
+            if type(e) == torch.cuda.OutOfMemoryError:
+                print("OOM")
+        res["times"] = times
+        results.append(res)
+    model_rotor.to("cpu")
+    _x.to("cpu")
+    return results
+
+
+def exp(
+    model,
+    x,
+    budget,
+    run_original=True,
+    run_rotor=False,
+    repeat=10,
+    rotor_model=None,
+):
+    results = {}
     if run_original:
         orig_res = copy_run(model, x, repeat=repeat)
+        results["original"] = orig_res
     rk_res = copy_run_rk(model, x, budget)
-    return rk_res
+    if run_rotor:
+        if rotor_model is None:
+            rotor_model = model
+        rt_res = copy_run_rt(rotor_model, x, budget)
+        results["rotor"] = rt_res
+    results["rockmate"] = rk_res
+    return results
 
 
 def sanity_check(module, inputs, dict_kwargs=None, mem_limit=None):
@@ -257,107 +437,119 @@ def test_pgb(module, input):
     return pgb_res
 
 
-def throughput_exp(module, input, batch_sizes, mem_limit=None):
-    throughput = {}
-    original_batch = input.shape[0]
-    original_input = input[0:1]
-    # print(torch.cuda.memory_allocated())
-    seq_length = input.shape[1]
+def get_rotor_GPT(model):
+    nlayers = model.nlayers
+    GPT2_0 = GPT2_input(d_model=model.d_model)
+    GPT2_1 = GPT2_output(d_model=model.d_model)
+    h = [
+        TransformerBlock(d_model=model.d_model, n_head=model.n_head)
+        for _ in range(nlayers)
+    ]
+    model_rotor = nn.Sequential(*h + [GPT2_1])
+    return GPT2_0, model_rotor
 
-    def original():
 
-        y = module(input)
-        loss = y.mean()
-        loss.backward()
-        y.grad = None
-        y.data = torch.empty(0)
-        module.zero_grad()
+# def throughput_exp(module, input, batch_sizes, mem_limit=None):
+#     throughput = {}
+#     original_batch = input.shape[0]
+#     original_input = input[0:1]
+#     # print(torch.cuda.memory_allocated())
+#     seq_length = input.shape[1]
 
-        torch.cuda.reset_peak_memory_stats()
-        max_before = torch.cuda.max_memory_allocated()
-        timer = timing.make_timer(device)
-        times = []
-        for _ in range(10):
-            timer.start()
-            y = module(input)
-            loss = y.mean()
-            loss.backward()
-            timer.end()
-            times.append(timer.elapsed())
-        peak_mem = torch.cuda.max_memory_allocated() - max_before
-        print(f"original module peak memory {peak_mem}")
-        print("original module time: %.4f" % (np.mean(times)))
-        print(f"batch size {original_batch}")
-        print(f"throughput: {original_batch / np.mean(times)}")
-        throughput[0] = times
+#     def original():
 
-        y.grad = None
-        y.data = torch.empty(0)
+#         y = module(input)
+#         loss = y.mean()
+#         loss.backward()
+#         y.grad = None
+#         y.data = torch.empty(0)
+#         module.zero_grad()
 
-    original()
-    # print(torch.cuda.memory_allocated())
+#         torch.cuda.reset_peak_memory_stats()
+#         max_before = torch.cuda.max_memory_allocated()
+#         timer = timing.make_timer(device)
+#         times = []
+#         for _ in range(10):
+#             timer.start()
+#             y = module(input)
+#             loss = y.mean()
+#             loss.backward()
+#             timer.end()
+#             times.append(timer.elapsed())
+#         peak_mem = torch.cuda.max_memory_allocated() - max_before
+#         print(f"original module peak memory {peak_mem}")
+#         print("original module time: %.4f" % (np.mean(times)))
+#         print(f"batch size {original_batch}")
+#         print(f"throughput: {original_batch / np.mean(times)}")
+#         throughput[0] = times
 
-    def rockmate(batch_size):
-        # input = torch.randint(0, 600, [batch_size, seq_length]).to(device)
-        input = original_input.expand([batch_size, *original_input.shape[1:]])
-        # batch_size = input.shape[0]
-        try:
+#         y.grad = None
+#         y.data = torch.empty(0)
 
-            newmod = rk.CheckpointedModule(module, input, mem_limit=mem_limit)
-            # newmod.get_sequence(mem_limit)
-        except:
-            throughput[batch_size] = "infeasible"
-            return None
-        newmod.get_code()
-        for n, p in newmod.original_mod.named_parameters():
-            if p.grad is None:
-                p.grad = torch.zeros_like(p)
-        y = newmod(input)
-        loss = y.mean()
-        loss.backward()
-        newmod.backward()
-        y.grad = None
-        y.data = torch.empty(0)
-        timer = timing.make_timer(device)
-        times = []
-        try:
-            for _ in range(repeat):
-                # print(torch.cuda.memory_allocated())
-                # newmod.reinit()
+#     original()
+#     # print(torch.cuda.memory_allocated())
 
-                torch.cuda.reset_peak_memory_stats()
-                max_before = torch.cuda.max_memory_allocated()
-                timer.start()
-                torch.random.manual_seed(0)
+#     def rockmate(batch_size):
+#         # input = torch.randint(0, 600, [batch_size, seq_length]).to(device)
+#         input = original_input.expand([batch_size, *original_input.shape[1:]])
+#         # batch_size = input.shape[0]
+#         try:
 
-                y = newmod.forward(input)
-                loss = y.mean()
-                loss.backward()
-                newmod.backward()
-                timer.end()
+#             newmod = rk.CheckpointedModule(module, input, mem_limit=mem_limit)
+#             # newmod.get_sequence(mem_limit)
+#         except:
+#             throughput[batch_size] = "infeasible"
+#             return None
+#         newmod.get_code()
+#         for n, p in newmod.original_mod.named_parameters():
+#             if p.grad is None:
+#                 p.grad = torch.zeros_like(p)
+#         y = newmod(input)
+#         loss = y.mean()
+#         loss.backward()
+#         newmod.backward()
+#         y.grad = None
+#         y.data = torch.empty(0)
+#         timer = timing.make_timer(device)
+#         times = []
+#         try:
+#             for _ in range(repeat):
+#                 # print(torch.cuda.memory_allocated())
+#                 # newmod.reinit()
 
-                peak_mem = torch.cuda.max_memory_allocated() - max_before
-                del y
-                del loss
-                input.grad = None
-                times.append(timer.elapsed())
-        except:
-            # print(newmod.full_code)
-            with open("bug.pkl", "wb") as f:
-                pickle.dump(newmod.full_code, f)
-            raise Exception("failed execution")
-        print(f"rockmate module peak memory {peak_mem}")
-        print(f"rockmate module budget {newmod.mem_limit}")
-        print("rockmate module time: %.4f" % np.mean(times))
-        print(f"batch size {batch_size}")
-        print(f"throughput: {batch_size / np.mean(times)}\n")
-        throughput[batch_size] = times  # batch_size / np.mean(times)
+#                 torch.cuda.reset_peak_memory_stats()
+#                 max_before = torch.cuda.max_memory_allocated()
+#                 timer.start()
+#                 torch.random.manual_seed(0)
 
-    for batch_size in batch_sizes:
-        repeat = 10
+#                 y = newmod.forward(input)
+#                 loss = y.mean()
+#                 loss.backward()
+#                 newmod.backward()
+#                 timer.end()
 
-        rockmate(batch_size)
-        # input.data = torch.empty(0)
-        input.grad = None
-        module.zero_grad()
-    return throughput
+#                 peak_mem = torch.cuda.max_memory_allocated() - max_before
+#                 del y
+#                 del loss
+#                 input.grad = None
+#                 times.append(timer.elapsed())
+#         except:
+#             # print(newmod.full_code)
+#             with open("bug.pkl", "wb") as f:
+#                 pickle.dump(newmod.full_code, f)
+#             raise Exception("failed execution")
+#         print(f"rockmate module peak memory {peak_mem}")
+#         print(f"rockmate module budget {newmod.mem_limit}")
+#         print("rockmate module time: %.4f" % np.mean(times))
+#         print(f"batch size {batch_size}")
+#         print(f"throughput: {batch_size / np.mean(times)}\n")
+#         throughput[batch_size] = times  # batch_size / np.mean(times)
+
+#     for batch_size in batch_sizes:
+#         repeat = 10
+
+#         rockmate(batch_size)
+#         # input.data = torch.empty(0)
+#         input.grad = None
+#         module.zero_grad()
+#     return throughput
