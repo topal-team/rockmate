@@ -92,7 +92,7 @@ class CheckpointedModule(torch.nn.Module):
             
         self.opt_table = ({},{})
 
-    def get_sequence(self, mem_limit, use_opt_table=False):
+    def get_sequence(self, mem_limit):
         for n, p in self.original_mod.named_parameters():
             if p.grad is None:
                 p.grad = torch.zeros_like(p)

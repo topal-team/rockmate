@@ -49,7 +49,7 @@ def copy_run(model, x, repeat=10):
     return res
 
 
-def copy_run_rk(model, x, mbudget, repeat=10, nbar=10, nall=10):
+def copy_run_rk(model, x, mbudget, repeat=10, nbar=20, nall=20):
     results = []
     budgets = mbudget if hasattr(mbudget, "__iter__") else [mbudget]
     _model = deepcopy(model).to(device)

@@ -21,6 +21,16 @@ else:
 # from transformers import GPT2Tokenizer
 from models.GPT import GPT2
 
+
+def get_kdn(target_n, newmod, kdn_type=""):
+    kdn_list = []
+    for kg in newmod.list_kg:
+        for kdn in kg.list_kdn:
+            if target_n in kdn.name and kdn_type in kdn.name:
+                kdn_list.append(kdn)
+    return kdn_list
+
+
 def analyze_mem(i, newmod, code=True, diff=False):
     print(f"allo memory: {newmod.allo_mem[i]}")
     print(f"expt memory: {newmod.expect_mem()[i] - newmod.expect_mem()[i - 1]}")
