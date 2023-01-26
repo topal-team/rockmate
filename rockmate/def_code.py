@@ -1,9 +1,9 @@
 # ==========================
-#  everything about codes, how
+# everything about codes, how
 # we exec it and how we store things
 # -> to replace rotor/Checkpointable.functions
 # ==========================
-from pgb.utils.small_fcts import check_attr
+from rkgb.utils.small_fcts import check_attr
 import numpy as np
 import torch
 

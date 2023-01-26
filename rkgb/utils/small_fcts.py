@@ -1,7 +1,7 @@
 # ==========================
 # ==== Useful functions ====
 # ==========================
-from pgb.utils.imports import *
+from rkgb.utils.imports import *
 import inspect
 
 # -> to raise exceptions with lambda functions
@@ -23,9 +23,6 @@ def remove_suffix(text, suffix):
     if text.endswith(suffix):
         return text[:-len(suffix)]
     return text
-
-# -> negative of rotor_MemSize 
-minus_mem = lambda m : rotor_MemSize(- m.v)
 
 # -> for unique_num of each node
 def copy_generator(gen):

@@ -1,10 +1,10 @@
 # ========================================
-# = Useful functions for PGB's graphs
+# = Useful functions for rk-GB's graphs
 # = for instance methods with similar code
 # ========================================
-from pgb.utils.imports import *
-from pgb.utils.global_vars import print_debug
-from pgb.utils.ast_add_on import (
+from rkgb.utils.imports import *
+from rkgb.utils.global_vars import print_debug
+from rkgb.utils.ast_add_on import (
     make_str_assign, 
     make_str_list_assign,
     make_ast_list_assign,

@@ -1,10 +1,10 @@
 # =======================================
 # = CONVERT K_GRAPH TO A GRAPH ON WHICH =
-# = WE CAN APPLY ORIGINAL CHECKMATE     =
+# =   WE CAN APPLY ORIGINAL CHECKMATE   =
 # =======================================
 
-from pgb.utils import *
-from pgb import Ktools
+from rkgb.utils import *
+from rkgb import Ktools
 
 class CHK_node():
     def __init__(self,kcn : Ktools.K_C_node):
@@ -62,8 +62,8 @@ class CHK_graph():
             list_CHK_nodes.append(CHK_n)
             dict_CHK_nodes[CHK_n.name] = CHK_n
             # -- buid mem attrs and info attr --
-            mem_d  = rotor_MemSize(0)
-            mem_ph = rotor_MemSize(0)
+            mem_d  = irotor.MemSize(0)
+            mem_ph = irotor.MemSize(0)
             for kdn in kcn.users:
                 if kdn.kdn_type == "data":
                     mem_d = kdn.mem

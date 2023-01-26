@@ -1,18 +1,22 @@
-# ------------------------------------
-# --------- read trace code ----------
+# =====================================
+# = EXTRACT TRACE CODE TO BUILD THE   =
+# = GROUNDWORK OF BASIC FORWARD GRAPH =
+# =====================================
+
 # Use AST functions to extract information from jit_trace.code
 # Do some simplifications :
 # -> Remove some useless getattr
-# -> Decompose operations (a = f(g(b)))
+# -> Inline ALL operations
 # -> Remove TorchScript's operations (e.g. ops.prim.NumToTensor)
-# The code given is an AST obj
-# mostly "target = fct_name(*(const / var name / sub_obj))
-# ------------------------------------
 
-from pgb.utils import *
+# Each node consist of one assignment:
+# one target obtained with a primitive operation
+# .code attributes are AST objects
+
+from rkgb.utils import *
 
 # ==========================
-#  ====== B structure =======
+# ====== B structure =======
 # ==========================
 
 
@@ -199,8 +203,10 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
 
     def handle_attr(expr: ast.Attribute, target: str):
         l_name = ast_add_on.open_attr_until_name(expr)
-        assert l_name[0] in dict_vars
-        # -> else raise "Unknown variable, global ?"
+        if l_name[0] not in dict_vars:
+            raise Exception(
+                f"Unknown global variable mentioned in the code "\
+                f"extracted by jit {l_name[0]}.")
         parent_var = dict_vars[l_name[0]]
         attr = ".".join(l_name[1:])
         format_fct = lambda pv: ast.Name(pv.id + "." + attr)
@@ -211,7 +217,7 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
     # -- open list of targets e.g. tuple --
     # -> so that each node has only one target
-    # (e.g. l = ... ; a = l[0] ; b = l[1])
+    # (e.g. l = fct() ; a = l[0] ; b = l[1] instead of a,b=fct())
     def init_targets(list_tg):
         if len(list_tg) == 1:
             return make_unique(list_tg[0])
@@ -242,8 +248,8 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
         if len(l_name) == 1 and l_name[0] == "getattr":
             assert len(args) == 2
             assert ast_add_on.is_constant(args[1])
-            # assert(isinstance(args[1],ast.Constant))
-            # -> otherwise handle_expr ?
+            # If fail: Why is there an expression to 
+            # refer to the attr we want to take ?!
             parent_var = handle_expr(args[0])
             attr = args[1].value
             if attr.isdigit():
@@ -261,7 +267,7 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
             # might create one node
 
         # == torchscript's functions ==
-        # -> must be removed because some refer to TS global var
+        # -> must be removed because some refer to TorchScript global var
         elif l_name[0] == "ops":
             assert len(args) == 1
             return handle_expr(args[0], target)
@@ -350,7 +356,7 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
                         (
                             (kw.arg == "dtype" or kw.arg == "layout")
                             and ast_add_on.is_constant(kw.value)
-                            and isinstance(kw.value.value, int)
+                            and isinstance(kw.value.value, int) # WTF
                         )
                         or (kw.arg == "layout" and kw.value.value is None)
                     ):

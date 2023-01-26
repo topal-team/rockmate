@@ -1,7 +1,7 @@
 import time
 from exp_utils import *
 import torch
-import pgb
+import rkgb
 import rockmate as rk
 from copy import deepcopy
 from rotor import timing

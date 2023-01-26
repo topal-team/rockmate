@@ -4,7 +4,7 @@
 #  based on rotor/algorithms/parameters.py
 # ==========================
 
-from ILP.gurobi_solver import ModelGurobi
+from rockmate.ILP_gurobi_solver import ModelGurobi
 import numpy as np
 from rockmate.def_code import RunOp, DelOp, OpSchedule
 import math
@@ -246,7 +246,7 @@ class RK_Block:
 #         self.mem_out = kg.output_kdn_data.mem.v if kg.output_kdn_data.mem else 0
 
 #         # == build fast_forward code ==
-#         # fwd_nodes = sort_based_on_req(kg.loss_kcn)[:-1] # from pgb/utils
+#         # fwd_nodes = sort_based_on_req(kg.loss_kcn)[:-1] # from rkgb/utils
 #         # #fwd_nodes should contains only the nodes from the current Kgraph
 #         # code_ff = []
 #         # op_list_fc = []

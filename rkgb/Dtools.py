@@ -1,5 +1,5 @@
-from pgb.utils import *
-from pgb.Btools import B_node,B_graph
+from rkgb.utils import *
+from rkgb.Btools import B_node,B_graph
 
 # ==========================
 # ====== D structure =======
@@ -13,11 +13,11 @@ class D_node(B_node):
         .ast_code  : AST  : right part of the assigning code
         .fct       : str  : the function used in .ast_code
         .is_input  : bool : inputs are represented by nodes wth dummy code
-        .is_rand   : bool : ? .fct involves randomness
+        .is_rand   : bool : whether .fct involves randomness
         .deps      : D_node set : required nodes to run .ast_code
         .deps_rand : str set : required random targets
         .users     : D_node set : reciprocal of .deps
-        .protected : bool : ? self is a 1-separator of the graph
+        .protected : bool : whether self is a 1-separator of the graph
         """
         super().__init__(target,code,fct)
         self.is_rand = is_rand
@@ -83,19 +83,6 @@ def sort_nodes(g : B_graph): # -> B_node list
     if not o_var.has_node: return []
     else: return shared_methods.sort_based_on_deps(o_var.node)
 
-"""
-def generate_tmp_local(g,dict_info,bn,our_global,tmp_local=None):
-    if tmp_local is None: tmp_local = dict()
-    for req_bn in bn.deps:
-        if req_bn.target not in tmp_local:
-            req_bn_info = dict_info[req_bn.target]
-            req_x = def_info.generate_val(req_bn_info,our_global["device"])
-            if isinstance(req_x,torch.Tensor):
-                req_x = req_x.clone()
-            tmp_local[req_bn.target] = req_x
-    return tmp_local
-"""
-
 def generate_deep_tmp_local(bg,dict_info,bn,our_global):
     tmp_local = dict()
     done = set()
@@ -132,20 +119,6 @@ def generate_deep_tmp_local(bg,dict_info,bn,our_global):
                 done.add(req_tar)
                 todo.pop()
     return tmp_local
-
-"""
-    for req_bn in bn.deps:
-        if not req_bn.is_input:
-            generate_tmp_local(
-                bg,dict_info,req_bn,our_global,tmp_local=tmp_local)
-            exec(
-                req_bn.get_code(force_special_kwargs=True), 
-                our_global, tmp_local)
-    generate_tmp_local(
-        bg,dict_info,bn,our_global,tmp_local=tmp_local)
-    # to generate the missing inputs
-    return tmp_local
-"""
 
 # ==========================
 
@@ -289,7 +262,7 @@ def print_fw_code(dg : D_graph):
 def print_D_graph(dg : D_graph,name=None,open=True,render_format="svg"):
     print(len(dg.nodes))
     if name is None:
-        name = "forward D-graph"
+        name = "Forward_graph"
     dot = graphviz.Digraph(name,comment="D_graph = forward graph")
     for dn in dg.nodes:
         if dn.is_input:
@@ -300,12 +273,12 @@ def print_D_graph(dg : D_graph,name=None,open=True,render_format="svg"):
     for dn in dg.nodes:
         for req_dn in dn.deps:
             dot.edge(req_dn.target,dn.target)
-    small_fcts.graph_render(dot,open,"D",render_format) # from utils.py
+    small_fcts.graph_render(dot,open,"D",render_format)
 
 # ==========================
 
 
-
+""" NOT maintained
 # ==========================
 # === test forward code ====
 # ==========================
@@ -329,4 +302,4 @@ def test_fw_code(dg : D_graph,model,dict_inputs : dict):
     return loc_dict[dg.output]
 
 # ==========================
-
+"""

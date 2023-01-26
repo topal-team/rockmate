@@ -2,8 +2,8 @@
 # ====== K structure =======
 # ==========================
 
-from pgb.utils import *
-from pgb.Stools import S_node,S_graph
+from rkgb.utils import *
+from rkgb.Stools import S_node,S_graph
 
 # ************
 # * K_C_node *
@@ -148,7 +148,7 @@ class K_D_node():
         self.inplace_targets   = itars if itars else []
         self.container_targets = ctars if ctars else []
         self.name        = f"{mt} {self.kdn_type}"
-        self.mem         = rotor_MemSize(0)
+        self.mem         = irotor.MemSize(0)
         self.info        = info
         self.includes_base = False
         self.includes_phantoms = False
@@ -224,7 +224,7 @@ class K_graph():
         # -> random op have been inserted at the end of Simplification
         self.unique_id_generator = unique_id_generator
         # -> to generate K_node.__hash__
-        self.sg = sg # TO REMOVE
+        self.sg = sg
 
     def make_users(self):
         for kcn in self.list_kcn:
@@ -482,26 +482,14 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
 
 
         # *** inspection ***
-        if device == torch.device("cpu"):
+        if (device == torch.device("cpu")
+        or "torch.split_with_sizes" in sn.get_code()):
             res = def_inspection.Inspection_result()
         else:
-            ins1 = def_inspection.inspector(sn,sg,our_global,device)
-            ins1.measure_fwd()
-            ins1.measure_bwd()
-            res = ins1.ret
-            """
-            our_global = def_inspection.generate_our_global(sg,model,device)
-            ins1 = def_inspection.inspector(sn,sg,our_global,device)
-            our_global = def_inspection.generate_our_global(sg,model,device)
-            ins2 = def_inspection.inspector(sn,sg,our_global,device)
-            setattr(kcn_fwd,"inspector",ins1)
-            ins1.measure_fwd()
-            ins1.measure_bwd()
-            ins2.measure_fwd()
-            ins2.measure_bwd()
-            ins1.ret.__eq__(ins2.ret,raise_exception=True)
-            res = ins1.ret
-            """
+            ins = def_inspection.inspector(sn,sg,our_global,device)
+            ins.measure_fwd()
+            ins.measure_bwd()
+            res = ins.ret
 
         # -> fwd ins
         kcn_fwd.overhead = res.overhead_fwd
@@ -511,13 +499,6 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
             kdn_data.mem = res.mem_run_fwd
         else:
             kdn_data.mem = res.mem_fgt_fwd
-        """
-        if res.relevant: 
-            tMs = info.memsize
-            mff = res.mem_fgt_fwd
-            if tMs.v != mff.v:
-                print(f'For {mt}, tensorMsize is {tMs} but mem_fgt_fwd is {mff}')
-        """
 
         # -> bwd ins
         if info.requires_grad:
@@ -533,10 +514,9 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
                           f"and detection {exist_phs}")
 
             if exist_phs and not data_includes_phantoms:
-                kdn_phantoms.mem = rotor_MemSize(
+                kdn_phantoms.mem = irotor.MemSize(
                     res.mem_run_fwd.v - res.mem_fgt_fwd.v)
 
-        # ins.tmp_local.clear()
     # ============ 
 
 
@@ -553,7 +533,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
         deps_real = set([output_kdn_data]),
         unique_id_generator = unique_id_generator)
     loss_kcn.time     = 0
-    loss_kcn.overhead = rotor_MemSize(0)
+    loss_kcn.overhead = irotor.MemSize(0)
     dict_KCN_fwd[loss_kcn.main_target] = loss_kcn
     output_kdn_grad.deps.add(loss_kcn)
 
@@ -681,7 +661,7 @@ def copy_K_D_node(kdn : K_D_node):
 
 
 def copy_K_graph(kg : K_graph):
-    new_kg = K_graph(kg.sg) # TO CHANGE
+    new_kg = K_graph(kg.sg)
     new_kg.dict_info = dict(kg.dict_info)
     new_kg.init_code = kg.init_code
     new_kg.unique_id_generator = small_fcts.copy_generator(
@@ -801,18 +781,18 @@ def aux_print_graph(dot,kg,uniq_num):
 
 
 def print_K_graph(kg : K_graph,name=None,open=True,render_format="svg"):
-    if name is None: name = "complet K-graph"
+    if name is None: name = "Fwd_and_bwd_graph"
     print(
         f"Forward + Backward graph with Computation and "\
         f"Data nodes: {len(kg.list_kcn)} + {len(kg.list_kdn)}")
     dot = graphviz.Digraph(name,
         comment="K_graph = Forward + Backward with Comp and Data nodes")
     aux_print_graph(dot,kg,0)
-    small_fcts.graph_render(dot,open,"K",render_format) # from utils.py
+    small_fcts.graph_render(dot,open,"K",render_format)
 
 
 def print_K_graph_list(list_kg,name=None,open=True,render_format="svg"):
-    if name is None: name = "seq K-graphs"
+    if name is None: name = "Sequentialized_Fwd_Bwd_graph"
     list_nb_kcn = [len(kg.list_kcn) for kg in list_kg]
     list_nb_kdn = [len(kg.list_kdn) for kg in list_kg]
     tot_nb_kcn = sum(list_nb_kcn)
@@ -826,10 +806,10 @@ def print_K_graph_list(list_kg,name=None,open=True,render_format="svg"):
         f"=> total of {tot_nb_kcn + tot_nb_kdn} nodes")
     dot = graphviz.Digraph(
         name,
-        comment="K_graph list : cut fwd+bwd with Comp and Data nodes")
+        comment="K_graph list : sequentialized fwd+bwd with Comp and Data nodes")
     for i in range(len(list_kg)):
         aux_print_graph(dot,list_kg[i],i)
-    small_fcts.graph_render(dot,open,"K",render_format) # from utils.py
+    small_fcts.graph_render(dot,open,"K",render_format)
 
 # ==========================
 

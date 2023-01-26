@@ -1,6 +1,6 @@
-from pgb.utils import *
-from pgb.utils.complement_for_Stools import *
-from pgb.Dtools import D_node,D_graph
+from rkgb.utils import *
+from rkgb.utils.complement_for_Stools import *
+from rkgb.Dtools import D_node,D_graph
 
 # ==========================
 # ====== S structure =======
@@ -20,8 +20,8 @@ class S_node():
         .all_targets : str list
             -> names of all the vars defined
             -> (including .main_target)
-        .tensor_targets : str list
-            -> all_targets which are tensors
+        .tensor_targets / .inplace_targets / .container_targets : str list
+            -> part of all_targets
             -> (done by s_graph.make_targets_attrs)
         .main_code  : tar*AST :
             -> .main_target * AST right part of the assigning code of it
@@ -29,13 +29,12 @@ class S_node():
             -> every assigns needed before the last inplace op
         .body_code  : tar*AST list
             -> for every tar except main_target:
-            -> target name * AST value of the assign
-            -> in case of inplace op: "a = b.relu_" -> "a = b"
+            -> in case of inplace op: "a = b.relu_" -> "a = b" in body_code
         .main_fct   : str  : fct used in .main_code
         .protected  : bool : see Doc (1-separator of the graph)
         .is_artefact: bool : see Doc (useful size node)
         .deps       : (S_node,str set) dict = dict_edges
-            -> required nodes with the vars needed per node.
+            -> required nodes with the list of vars needed per node.
         .users      : dict_edges : reciprocal of .deps
         .is_rand    : bool
         .deps_rand  : str set : because we don't want random src nodes here
@@ -232,7 +231,9 @@ class S_graph():
         # -> to generate S_node.__hash__
     def __eq__(self,sg2,raise_exception=False):
         return small_fcts.check_attr(self,sg2,[
-            # "direct_inputs","hidden_inputs", TODO TODO
+            # "direct_inputs","hidden_inputs", 
+            # Intentionally not included -> its not because their previous
+            # blocks are different that sg1 and sg2 aren't equivalent
             "direct_outputs","hidden_output","dict_info","nodes"],
             raise_exception=raise_exception)
 
@@ -258,7 +259,6 @@ class S_graph():
                       f"len(deps)={len(sn.deps)} (should be 1)")
                 req_sn = list(sn.deps.keys())[0]
                 if dict_edges_is_subset(sn.users,req_sn.users):
-                    # if sn.users <= (req_sn.users | set([sn])): TO REMOVE
                     print(f"{sn.main_target} is a useless "\
                           f"artefact of {req_sn.main_target}")
 
@@ -804,12 +804,12 @@ def aux_print_graph(dot,sg,uniq_num):
 
 def print_S_graph(sg : S_graph,name=None,open=True,render_format="svg"):
     print(f"Simplified forward graph : {len(sg.nodes)} nodes")
-    if name is None: name = "forward S-graph"
+    if name is None: name = "Simplified_forward_graph"
     dot = graphviz.Digraph(
         name,
         comment="S_graph = Simplified forward graph")
     aux_print_graph(dot,sg,0)
-    small_fcts.graph_render(dot,open,"S",render_format) # from utils.py
+    small_fcts.graph_render(dot,open,"S",render_format)
 
 
 def print_S_graph_list(list_sg,name=None,open=True,render_format="svg"):
@@ -817,13 +817,13 @@ def print_S_graph_list(list_sg,name=None,open=True,render_format="svg"):
     print(
         f"{len(list_sg)} blocs of S_graph, with {s} = "\
         f"{sum([len(sg.nodes) for sg in list_sg])} nodes")
-    if name is None: name = "cut forward S-graph"
+    if name is None: name = "Sequentialized_Simplified_Forward_graph"
     dot = graphviz.Digraph(
         name,
-        comment="S_graph list : cut simplified forward graph")
+        comment="S_graph_list: sequentialized simplified forward graph")
     for i in range(len(list_sg)):
         aux_print_graph(dot,list_sg[i],i)
-    small_fcts.graph_render(dot,open,"S",render_format) # from utils.py
+    small_fcts.graph_render(dot,open,"S",render_format)
 
 # ==========================
 

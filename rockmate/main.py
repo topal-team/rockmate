@@ -1,16 +1,13 @@
-# from rockmate.utils import (
-#     print_debug,
-#     get_device,
-#     pgb,
-#     np,
-#     ast_to_str,
-# )
-import pgb
-from pgb.main import make_inputs
-from pgb.utils import print_debug, np, rotor_tensorMsize
-from pgb.utils.global_vars import ref_verbose
-from pgb.utils.small_fcts import get_device
-from pgb.utils.ast_add_on import ast_to_str
+# ============
+# = ROCKMATE =
+# ============
+
+import rkgb
+from rkgb.main import make_inputs
+from rkgb.utils import print_debug, np, irotor
+from rkgb.utils.global_vars import ref_verbose
+from rkgb.utils.small_fcts import get_device
+from rkgb.utils.ast_add_on import ast_to_str
 from rockmate.def_code import RK_Storage, DelOp, OpSchedule
 from rockmate.def_chain import RK_Chain
 from rockmate.def_sequence import (
@@ -63,10 +60,10 @@ class CheckpointedModule(torch.nn.Module):
         #     self.register_parameter(k,v)
         self.mem_unit = mem_unit if mem_unit else 1024 ** 2
         # -- use pytorch graph builder to get the list of K_graphs --
-        self.pgb_res = pgb.make_all_graphs(
+        self.rkgb_res = rkgb.make_all_graphs(
             original_mod, dict_inputs, verbose=verbose, bool_kg=False
         )  # we don't need the whole K_graph
-        self.list_kg = self.pgb_res.K_graph_list
+        self.list_kg = self.rkgb_res.K_graph_list
         self.init_code = ast_to_str(self.list_kg[0].init_code)
         self.output = self.list_kg[-1].output_kdn_data
         self.mem_limit = mem_limit
@@ -82,7 +79,7 @@ class CheckpointedModule(torch.nn.Module):
         #  -- use checkmate to solve all the blocks --
         self.rk_chain = RK_Chain(
             self.list_kg,
-            self.pgb_res.equivalent_classes,
+            self.rkgb_res.equivalent_classes,
             nb_budget_abar,
             nb_budget_all,
             mem_unit=self.mem_unit,
@@ -300,7 +297,7 @@ class CheckpointedModule(torch.nn.Module):
 
     def backward(self, record_mem=False, add_output_grad=True, compiled=True):
         if record_mem:
-            self.output_size = rotor_tensorMsize(
+            self.output_size = irotor.tensorMsize(
                 self.storage.ld[self.output.main_target]
             )
             # self.allo_mem[-1] += self.output.info.memsize.v

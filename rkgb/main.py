@@ -1,9 +1,9 @@
-from pgb.utils import *
-from pgb import Btools
-from pgb import Dtools
-from pgb import Stools
-from pgb import Ktools
-from pgb import Atools
+from rkgb.utils import *
+from rkgb import Btools
+from rkgb import Dtools
+from rkgb import Stools
+from rkgb import Ktools
+from rkgb import Atools
 import inspect
 
 
@@ -77,11 +77,11 @@ def make_inputs(model,model_inputs,model_kwargs):
         if nb_given < nb_asked_pos: raise Exception(
             f"To few values given in model_inputs "\
             f"({nb_asked_pos - nb_given} missing).\n"\
-            f"You can use \"pgb.print_inputs(<model>)\" to help you.")
+            f"You can use \"rkgb.print_inputs(<model>)\" to help you.")
         if nb_given > nb_asked_tot: raise Exception(
             f"To much values given in model_inputs "\
             f"({nb_given - nb_asked_tot} too many, including kwargs).\n"\
-            f"You can use \"pgb.print_inputs(<model>)\" to help you.")
+            f"You can use \"rkgb.print_inputs(<model>)\" to help you.")
         dict_inputs = dict(zip(not_kw_params,inputs))
 
     dict_inputs.update(model_kwargs)
@@ -113,7 +113,7 @@ def print_cuda_warning_msg(things_not_on_cuda):
         f"/!\\/!\\=======================================/!\\/!\\\n"\
         f"/!\\/!\\= WARNING : {main_line}\n"\
         f"/!\\/!\\=======================================/!\\/!\\\n\n"\
-        f"/!\\You ask PGB to measure the time and memory used by all\n"\
+        f"/!\\You ask rk-GB to measure the time and memory used by all\n"\
         f"/!\\the computation nodes. But measuring memory can only\n"\
         f"/!\\be done with cuda, therefore model and inputs' devices\n"\
         f"/!\\should be cuda to get relevant results. You can use the \n"\
@@ -138,7 +138,7 @@ def make_all_graphs(model,
      -> .B_graph, .D_graph, .S_graph and .K_graph of the whole module
      -> .S_graph_list and .K_graph_list of the sequentialized module
     on which you can use :
-    pgb.print_graph and pgb.print_graph_list or pgb.print_all_graphs
+    rkgb.print_graph and rkgb.print_graph_list or rkgb.print_all_graphs
 
     ***** args *****
      -> model must be a torch.nn.Module
@@ -229,14 +229,16 @@ def make_all_graphs(model,
 def print_graph(g,name=None,open=True,render_format="svg"):
     r"""To visualize D, S or K graph.
     This function creates a .gv file, and using
-    graphviz's dot function builds a .pdf file.
+    Graphviz's dot function builds a .pdf file.
     They are stored in "graphviz_dir" sub-directory.
     inputs:
     name (string):
         To name .gv and .pdf files.
         By default named after the type of the graph.
+    render_format (string):
+        Render format wanted for the output file
     open (boolean):
-        To automatically open the .pdf with the default reader.
+        To automatically open the file with the default reader.
     """
     if g is None: pass
     elif isinstance(g,Dtools.D_graph):
@@ -246,14 +248,14 @@ def print_graph(g,name=None,open=True,render_format="svg"):
     elif isinstance(g,Ktools.K_graph):
         Ktools.print_K_graph(g,name,open,render_format)
     else: raise Exception(
-        "g is neither of type D_graph, S_graph or K_graph")
+        "The graph given is neither of type D_graph, S_graph nor K_graph")
 
 def print_graph_list(gl,name=None,open=True,render_format="svg"):
-    r"""The equivalent of pgb.print_graph for a list of graph.
+    r"""The equivalent of rkgb.print_graph for a list of graph.
     Generates all graphs next to each other in a single pdf.
     Note:
          Originally intented to visualize a sequentialized graph :
-         i.e. one graph cut by PGB in blocks
+         i.e. one graph cut by rkgb in blocks
          i.e. S_graph_list of K_graph_list
     """
     if gl is None: pass
@@ -269,15 +271,15 @@ def print_graph_list(gl,name=None,open=True,render_format="svg"):
         elif t == Ktools.K_graph:
             Ktools.print_K_graph_list(gl,name,open,render_format)
         else: raise Exception(
-            "gl is neither a S_graph list or K_graph list")
+            "The list given is neither a S_graph list nor K_graph list")
 
 def print_all_graphs(a,name="",open=True,render_format="svg"):
     print_graph(a.D_graph,f"{name}_D_graph",open,render_format)
     print_graph(a.S_graph,f"{name}_S_graph",open,render_format)
     print_graph(a.K_graph,f"{name}_K_graph",open,render_format)
-    print_graph_list(a.S_graph_list,f"{name}_S_cut_graph",
+    print_graph_list(a.S_graph_list,f"{name}_seq_S_graph",
         open,render_format)
-    print_graph_list(a.K_graph_list,f"{name}_K_cut_graph",
+    print_graph_list(a.K_graph_list,f"{name}_seq_K_graph",
         open,render_format)
 
 # ==========================

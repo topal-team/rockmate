@@ -1,34 +1,23 @@
 # ==========================
 # definition file of RK_Sequence
-#  based on rotor/algorithms/sequence.py
+# based on rotor/algorithms/sequence.py
 # ==========================
 
-from rockmate.utils import ref_print_atoms
 from rockmate.def_code import OpSchedule
+ref_print_atoms = [True]
 
 # ==========================
 #  ====== Seq Atom Op =======
 # ==========================
-# -> Attributes : .name(str) ; .mem(int) ; .time(int)
-# -> Methods    : __str__
 class SeqAtomOp:
     def __init__(self, op):
-        # lvars = list(op.all_targets)
-        # try: lvars.remove(op.main_var)
-        # except: pass
         header = f"{op.op_type} {op.main_target}"
-        # if lvars == list():
         self.name = header
-        # else:
-        # s = ",".join(lvars)
-        # self.name = f"{header} ({s})"
         self.time = op.time
-        # self.mem  = op.mem
         self.op = op
 
     def __str__(self):
         return self.name
-
 
 # ==========================
 
@@ -36,12 +25,8 @@ class SeqAtomOp:
 # ==========================
 # ========= Seq Op =========
 # ==========================
-# -> Attributes : .name ; .mem/time
-# -> Methods    : __str__
-# -> Subclasses : Loss,BlockOp
 class SeqOp:
     pass
-
 
 class SeqLoss(SeqOp):
     def __init__(self):
@@ -51,21 +36,12 @@ class SeqLoss(SeqOp):
     def __str__(self):
         return "Loss"
 
-
-# ==========================
-
-
-# ==========================
-# ====== Seq Block Op ======
-# ==========================
-# -> Attributes : .body(SeqAtomOp list) ; .name ; .var ; .mem/time
-# -> Methods    : __str__
+# ** Seq Block Op **
 # -> Subclasses : Fn,Fc,Fe,Bwd
 class SeqBlockOp(SeqOp):
     def __init__(self, name, index, op_sched: OpSchedule):
         self.name = name
         self.index = index
-        # body = self.body = [SeqAtomOp(o) for o in op_block.body]
         self.op_sched = op_sched
         self.time = self.op_sched.time  # sum(o.time for o in body)
         self.mem = self.op_sched.save[-1]  # sum(o.mem  for o in body)
@@ -106,9 +82,7 @@ class SeqBlockBwd(SeqBlockOp):
 # ==========================
 # ======== Sequence ========
 # ==========================
-# -> Attributes : seq (SeqOp list)
-# -> Methods    : insert ; insert_seq ;
-#                 __str__ ; plot_mem ; compute_time
+
 class RK_Sequence:
     def __init__(self, l=None):
         if l:
@@ -125,21 +99,6 @@ class RK_Sequence:
     def insert_seq(self, sub_seq):
         self.seq.extend(sub_seq.seq)
 
-    # def plot_mem(self):
-    #     mem=0 ; l = [mem]
-    #     if ref_print_atoms[0]:
-    #         for blockop in self.seq:
-    #             if not (isinstance(blockop,SeqLoss)):
-    #                 for o in blockop.body:
-    #                     mem+=o.mem
-    #                     l.append(mem)
-    #     else:
-    #         for blockop in self.seq:
-    #             mem+=blockop.mem
-    #             l.append(mem)
-    #     plt.plot(l)
-    #     plt.title("Theoretical : memory used over time")
-    #     plt.show()
     def compute_time(self):
         return sum([o.time for o in self.seq])
 
@@ -152,6 +111,5 @@ class RK_Sequence:
                     RK_Sequence(list(self.seq[(i + 1) :])),
                 )
         raise Exception("Can't cut a Sequence which doesn't have SeqLoss")
-
 
 # ==========================

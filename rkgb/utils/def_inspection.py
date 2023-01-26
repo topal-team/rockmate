@@ -2,9 +2,9 @@
 # = INSPECTION OF KCN =
 # =====================
 
-from pgb.utils.imports import *
-from pgb.utils import def_info,ast_add_on,small_fcts,global_vars
-from pgb.utils.global_vars import print_debug
+from rkgb.utils.imports import *
+from rkgb.utils import def_info,ast_add_on,small_fcts,global_vars
+from rkgb.utils.global_vars import print_debug
 import gc
 
 # ======================
@@ -22,6 +22,7 @@ def generate_our_global(sg,model,device):
     return our_global
 
 def generate_tmp_local(sn,sg,our_global,device,tmp_local=None):
+    # TO REMOVE arg tmp_local
     if tmp_local is None:
         tmp_local = dict()
         exec(
@@ -50,6 +51,7 @@ def generate_tmp_local(sn,sg,our_global,device,tmp_local=None):
                 our_global,tmp_local)
     return tmp_local
 
+""" TO REMOVE
 def generate_deep_tmp_local(sn,sg,our_global,device):
     tmp_local = dict()
     for req_sn in sn.deps.keys():
@@ -59,6 +61,7 @@ def generate_deep_tmp_local(sn,sg,our_global,device):
             req_sn.get_code(force_special_kwargs=True),
             our_global, tmp_local)
     return tmp_local
+"""
 
 # ======================
 
@@ -107,7 +110,6 @@ def get_useful_vars(sn,sg,our_global,device):
     # == INIT ==
     dict_info = sg.dict_info
     mt = sn.main_target
-    # tmp_local = generate_deep_tmp_local(sn,sg,our_global,device)
     tmp_local = generate_tmp_local(sn,sg,our_global,device)
     exec(
         sn.get_code(force_special_kwargs=True), 
@@ -192,13 +194,13 @@ def get_useful_vars(sn,sg,our_global,device):
 class Inspection_result():
     def __init__(self):
         self.relevant     = False # -> turn True if result of inspection
-        self.mem_del_fwd  = rotor_MemSize(0)
-        self.overhead_fwd = rotor_MemSize(0)
-        self.overhead_bwd = rotor_MemSize(0)
-        self.mem_run_fwd  = rotor_MemSize(0)
-        self.mem_run_bwd  = rotor_MemSize(0)
-        self.mem_fgt_fwd  = rotor_MemSize(0)
-        self.mem_fgt_bwd  = rotor_MemSize(0)
+        self.mem_del_fwd  = irotor.MemSize(0)
+        self.overhead_fwd = irotor.MemSize(0)
+        self.overhead_bwd = irotor.MemSize(0)
+        self.mem_run_fwd  = irotor.MemSize(0)
+        self.mem_run_bwd  = irotor.MemSize(0)
+        self.mem_fgt_fwd  = irotor.MemSize(0)
+        self.mem_fgt_bwd  = irotor.MemSize(0)
         self.time_run_fwd = 0
         self.time_run_bwd = 0
     def __eq__(self,res2,raise_exception=False):
@@ -208,15 +210,16 @@ class Inspection_result():
             "mem_fgt_fwd","mem_fgt_bwd"],
             raise_exception=raise_exception)
 
-# TODO : clean the following 100 lines
 class inspector():
+    # -> We define a inspector class to save every intermediate 
+    # -> information used during inspection, very helpful to debug.
     def __init__(self,sn,sg,our_global,device):
         self.sn = sn
         self.sg = sg
         self.mt = sn.main_target
         self.info = sg.dict_info[self.mt]
-        self.timer = rotor.timing.make_timer(device)
-        self.memUsage = rotor.memory.MeasureMemory(device)
+        self.timer = irotor.make_timer(device)
+        self.memUsage = irotor.MeasureMemory(device)
         self.our_global = our_global
         self.tmp_local = generate_tmp_local(sn,sg,our_global,device)
         self.ret = Inspection_result()
@@ -225,13 +228,13 @@ class inspector():
 
     # -- aux --
     def measure_time(self, fct, inter_fct=None):
-        t = self.timer.measure_median(fct,samples=1)
+        t = self.timer.measure(fct)
         nb_repeat = 1
         measures = [t] ; tot = t
         while (tot < global_vars.time_min_duration
         or nb_repeat < global_vars.time_min_repeat):
             if inter_fct: inter_fct()
-            t = self.timer.measure_median(fct,samples=1)
+            t = self.timer.measure(fct)
             measures.append(t)
             tot += t ; nb_repeat += 1
         if len(measures)>2:
@@ -255,27 +258,27 @@ class inspector():
                 if val._base is not None:
                     val._base.data = torch.empty(0,device=self.device)
                 
-
         def fct_del_fwd():
             code = ""
             for tar in self.sn.tensor_targets:
                 code += f"del {tar};"
             self.code_del_fwd = code
             exec(self.code_del_fwd, self.our_global, self.tmp_local)
+
         gc.disable()
+        # -> We don't want the gc to disterb the memory measurement
         _ , mem_run_fwd , peak_fwd = self.memUsage.measure(fct_run_fwd)
         overhead_fwd = peak_fwd - mem_run_fwd
         self.ret.overhead_fwd = overhead_fwd
         self.ret.mem_run_fwd = mem_run_fwd
         if not only_run:
             _ , mem_del_fwd , _ = self.memUsage.measure(fct_del_fwd)
-            self.ret.mem_del_fwd = small_fcts.minus_mem(mem_del_fwd)
-            #_ , _ , _ = self.memUsage.measure(fct_run_fwd)
+            self.ret.mem_del_fwd = - mem_del_fwd
             fct_run_fwd()
 
             _ , mem_fgt_fwd , _ = self.memUsage.measure(fct_fgt_fwd)
             time_run_fwd = self.measure_time(fct_run_fwd)
-            self.ret.mem_fgt_fwd = small_fcts.minus_mem(mem_fgt_fwd)
+            self.ret.mem_fgt_fwd = - mem_fgt_fwd
             self.ret.time_run_fwd = time_run_fwd
         gc.enable()
     # ===============
@@ -294,7 +297,6 @@ class inspector():
     def fct_prepare_bwd(self):
         self.tmp_local = generate_tmp_local(
             self.sn,self.sg,self.our_global,self.device)
-        #self.code_run_fwd = self.sn.get_code(force_special_kwargs=True)
         exec(self.code_run_fwd, self.our_global, self.tmp_local)
         self.tmp_local[self.sn.main_target].grad = (
             def_info.generate_val(self.info,self.device))
@@ -302,7 +304,7 @@ class inspector():
     # measure
     def measure_bwd(self):
         if self.info.requires_grad:
-            gc.disable()
+            gc.disable() 
             self.fct_prepare_bwd()
             _ , mem_run_bwd , peak_bwd = (
                 self.memUsage.measure(self.fct_run_bwd))
@@ -316,7 +318,7 @@ class inspector():
             gc.enable()
             self.ret.overhead_bwd = overhead_bwd
             self.ret.mem_run_bwd  = mem_run_bwd
-            self.ret.mem_fgt_bwd  = small_fcts.minus_mem(mem_fgt_bwd)
+            self.ret.mem_fgt_bwd  = - mem_fgt_bwd
             self.ret.time_run_bwd = time_run_bwd
     
             self.tmp_local.clear()

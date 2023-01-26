@@ -4,7 +4,7 @@
 # and translate it from checkmate's R and S
 # ==========================
 import torch
-import pgb
+import rkgb
 
 # from pgb.utils import * # /!\
 from rockmate.def_code import RunOp, DelOp
@@ -52,7 +52,7 @@ import pickle
 
 
 def make_sched(
-    kg: pgb.Ktools.K_graph,
+    kg: rkgb.Ktools.K_graph,
     budget,
     plot_sched=False,
     solver="SCIPY",
@@ -158,7 +158,7 @@ for n in np.arange(2, 12, 2):
     model = GPT2(nlayers=n, d_model=1600, n_head=25).to(device)
     x = torch.randint(0, 600, [2, 256]).to(device)
     max_budget = 150 + 100 * n
-    pgb_res = pgb.make_all_graphs(model, x)
+    pgb_res = rkgb.make_all_graphs(model, x)
     kg = pgb_res.K_graph
     o_train_time = sum([kcn.time for kcn in kg.list_kcn])
     CHK_g = CHK_graph(kg)

@@ -2,9 +2,9 @@
 # ====== Tensor INFO =======
 # ==========================
 
-from pgb.utils.imports import *
-from pgb.utils import small_fcts
-from pgb.utils import global_vars
+from rkgb.utils.imports import *
+from rkgb.utils import small_fcts
+from rkgb.utils import global_vars
 
 # -> all the info concerning a variable/tensor which might be useful
 # -> e.g. to regenerate it, using def_info.generate_val(info,device)
@@ -21,7 +21,8 @@ class Var_info(): # everything needed to randomly regenerate a var
         is_view=False,
         is_inplace=False,
         data_owner_name=None,
-        data_direct_parent_name=None):
+        data_direct_parent_name=None
+    ):
         self.is_view    = is_view
         self.is_inplace = is_inplace
         self.data_owner_name = data_owner_name
@@ -45,7 +46,7 @@ class Var_info(): # everything needed to randomly regenerate a var
                 self.dtype = value.dtype
                 self.requires_grad = value.requires_grad
                 self.memsize = (
-                    rotor_MemSize(int(rotor_tensorMsize(value))))
+                    irotor.MemSize(int(irotor.tensorMsize(value))))
             elif tt==tuple or tt==list:
                 self.sub_info = [Var_info(y) for y in value]
             else:

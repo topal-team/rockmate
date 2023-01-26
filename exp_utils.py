@@ -1,5 +1,5 @@
 import torch
-import pgb
+import rkgb
 import rockmate as rk
 from rotor_exp.rotor import Checkpointable
 from copy import deepcopy
@@ -307,7 +307,7 @@ def sanity_check(module, inputs, dict_kwargs=None, mem_limit=None):
             p.grad = torch.zeros_like(p)
 
     #  copy model, inputs and dict_kwargs
-    dict_inputs = pgb.make_inputs(module, inputs, dict_kwargs)
+    dict_inputs = rkgb.make_inputs(module, inputs, dict_kwargs)
     _dict_inputs = dict()
     for k, v in dict_inputs.items():
         if isinstance(v, torch.Tensor):
@@ -398,14 +398,14 @@ def sanity_check(module, inputs, dict_kwargs=None, mem_limit=None):
         print("Unequal evaluation")
 
 
-def test_pgb(module, input):
-    pgb_res = pgb.make_all_graphs(module, input)
-    list_kg = pgb_res.K_graph_list
-    kg = pgb_res.K_graph
+def test_rkgb(module, input):
+    rkgb_res = rkgb.make_all_graphs(module, input)
+    list_kg = rkgb_res.K_graph_list
+    kg = rkgb_res.K_graph
     print("Generated all the graphs !\n")
-    print(f"Equiv classes are : {pgb_res.equivalent_classes}")
+    print(f"Equiv classes are : {rkgb_res.equivalent_classes}")
     print(
-        f"So we have only {len(pgb_res.equivalent_classes)} "
+        f"So we have only {len(rkgb_res.equivalent_classes)} "
         f"blocks to solve ILP on, instead of {len(list_kg)}\n"
     )
     print("CONCERNING K_graph_list :")
@@ -434,7 +434,7 @@ def test_pgb(module, input):
             for kdn, ph_name in deps_ips:
                 print(f"deps on {kdn} through {ph_name}")
     print(f"Total nb of special phantoms :  {nb_ips}")
-    return pgb_res
+    return rkgb_res
 
 
 def get_rotor_GPT(model):

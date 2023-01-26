@@ -2,8 +2,8 @@ import torch
 import math
 import copy
 import torch.nn as nn
-import pgb
-from pgb.utils import *
+import rkgb
+from rkgb.utils import *
 import rockmate as rk
 import numpy as np
 import random

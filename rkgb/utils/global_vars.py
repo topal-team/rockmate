@@ -1,7 +1,7 @@
 # ====================
 # = global variables =
 # ====================
-from pgb.utils.imports import torch
+from rkgb.utils.imports import torch
 
 time_min_duration = 0
 time_min_repeat = 5
@@ -32,8 +32,16 @@ ref_test_phantoms_detection = [False]
 #  === LISTS OF FUNCTIONS ===
 # ==========================
 
-list_rand_fct = ["torch.randn", "torch.dropout", "torch.rand", "torch.randint"]
-# TODO : complete this list
+list_rand_fct = [
+    "torch.randn",
+    "torch.dropout",
+    "torch.rand",
+    "torch.randint",
+    "torch.randperm",
+    "torch.empty",
+    "torch.rrelu"]
+# -> ONLY used for root nodes
+# -> ie nodes without depedencies
 
 list_cheap_fct = [
     "torch.add",
@@ -42,10 +50,10 @@ list_cheap_fct = [
     "torch.div",
     "torch.floor_divide",
 ]
+# -> OPTIONAL
 
-# TODO : complete this list
 list_cheap_fct.extend(["list constructor", "tuple constructor"])
-# because I treat them in the same way
+# because we treat them in the same way
 
 list_view_fct = [
     "torch.adjoint",
@@ -109,17 +117,17 @@ list_batch_fct = [
     torch.nn.InstanceNorm3d,
 ]
 
-
 int_dtype = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
 bool_dtype = [torch.bool]
 
 default_forced_kwargs = dict(
     [
-        # (("torch.batch_norm",[("training",5,False)]))
         (("torch.batch_norm", [("momentum", 6, 0)])),
         (("torch.instance_norm", [("momentum", 6, 0)])),
     ]
 )
 # This dict is used by default when force_special_kwargs=True
 # -> dict of : fct_name -> (arg_name,arg_value) list to inforce
+# We change some kwargs in the code to avoid changing values
+# due to recomputation. For instance batchnorm statistics.
 # ==========================

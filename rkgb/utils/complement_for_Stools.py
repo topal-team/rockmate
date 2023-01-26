@@ -1,8 +1,8 @@
 # ==========================
 # ==== OP OVER S EDGES =====
 # ==========================
-from pgb.utils.imports import *
-from pgb.utils import shared_methods
+from rkgb.utils.imports import *
+from rkgb.utils import shared_methods
 
 # S edges (ie S_nodes.deps/users) are (S_node -> str set) dict
 

@@ -3,10 +3,10 @@
 # =======================
 
 # A way to recognize similar blocks
-# for instance for GPT2 -> Transformer blocks
-from pgb.utils import *
-from pgb import Stools
-from pgb import Ktools
+# e.g. for GPT2 -> Transformer blocks
+from rkgb.utils import *
+from rkgb import Stools
+from rkgb import Ktools
 
 # Note : to handle parameters anonymization :
 # 1) I need to check "info" equality, -> I need the model
@@ -64,11 +64,6 @@ class Graph_Translator():
                 elif hasattr(a,"__iter__"):
                     for sub_a in a: search_through(sub_a)
 
-            """for attr in [
-                "direct_inputs","hidden_inputs",
-                "direct_outputs","hidden_output"]:
-                search_through(getattr(sg,attr))"""
-            # search_through(getattr(sg,"direct_inputs")) # TO REMOVE
             snodes = [sg.init_node] + sg.nodes
             for sn in snodes:
                 search_through(sn.main_code)

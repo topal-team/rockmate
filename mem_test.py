@@ -3,8 +3,8 @@ import math
 import copy
 import torch.nn as nn
 import torch.nn as nn
-import pgb
-from pgb.utils import *
+import rkgb
+from rkgb.utils import *
 import rockmate as rk
 import numpy as np
 #from rockmate.defs import RK_block_solution
@@ -30,8 +30,8 @@ for p in model2.parameters():
     p.grad = torch.zeros_like(p)
 
 
-GPT2_graphs = pgb.make_all_graphs(model2,{"src":context1},impose_device=True)
-pgb.print_all_graphs(GPT2_graphs,"GPT2",False)
+GPT2_graphs = rkgb.make_all_graphs(model2,{"src":context1},impose_device=True)
+rkgb.print_all_graphs(GPT2_graphs,"GPT2",False)
 GPT2_Kg = GPT2_graphs.K_graph
 for k,n in GPT2_Kg.dict_nodes.items():
     if n.run_mem.v!=n.fgt_mem.v:
