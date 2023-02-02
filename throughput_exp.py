@@ -1,11 +1,11 @@
 import torch
 import rockmate as rk
-from models.GPT import get_GPT
+from models.GPT import *
 import pickle
 from torchvision.models import regnet_y_1_6gf, resnet18
 from mlp_mixer_pytorch import MLPMixer
 
-from exp_utils import sanity_check, throughput_exp
+from exp_utils import *
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -18,10 +18,21 @@ import numpy as np
 tmp = torch.ones(14, 1024, 1024, 256, device=device)
 del tmp
 
-# throughput_res = {}
-file_name = "throughput_v100_b_4.pkl"
-with open(file_name, "rb") as f:
-    throughput_res = pickle.load(f)
+
+def throughput_exp(model, x, batch_sizes, mem_limit=None):
+    original_x = x[0:1]
+    results = {}
+    results["original"] = copy_run(model, x)
+    for b in batch_sizes:
+        _x = original_x.expand([b, *original_x.shape[1:]])
+        results[f"batch {b}"] = copy_run_rk(model, _x, mem_limit)
+    return results
+
+
+throughput_res = {}
+file_name = "throughput_v100.pkl"
+# with open(file_name, "rb") as f:
+#     throughput_res = pickle.load(f)
 
 
 # name = "MLPMixer"
@@ -61,18 +72,18 @@ with open(file_name, "rb") as f:
 # x = torch.randint(0, 600, input_size).to(device)
 
 
-# name = "GPT2-large"
-# input_size = [4, 332]
-# batch_sizes = np.arange(4, 17, 1)
-# budget = 7.5e9
-# model = get_GPT(name).to(device)
-# x = torch.randint(0, 600, input_size).to(device)
+name = "GPT2-large"
+input_size = [4, 332]
+batch_sizes = np.arange(4, 17, 1)
+budget = 7.5e9
+model = get_GPT(name)  # .to(device)
+x = torch.randint(0, 600, input_size)  # .to(device)
 
 
-# throughput_res[name] = throughput_exp(model, x, batch_sizes, mem_limit=budget)
+throughput_res[name] = throughput_exp(model, x, batch_sizes, mem_limit=budget)
 
-# with open(file_name, "wb") as f:
-#     pickle.dump(throughput_res, f)
+with open(file_name, "wb") as f:
+    pickle.dump(throughput_res, f)
 
 # # name = "GPT2-medium"
 # # input_size = [6, 512]
@@ -81,17 +92,31 @@ with open(file_name, "rb") as f:
 # # model = get_GPT(name).to(device)
 # # x = torch.randint(0, 600, input_size).to(device)
 
-name = "GPT2-medium"
-input_size = [4, 640]
+# name = "GPT2-medium"
+# input_size = [4, 640]
+# batch_sizes = np.arange(4, 17, 1)
+# budget = 10.8e9
+# model = get_GPT(name).to(device)
+# x = torch.randint(0, 600, input_size).to(device)
+
+# throughput_res[name] = throughput_exp(model, x, batch_sizes, mem_limit=budget)
+
+# with open(file_name, "wb") as f:
+#     pickle.dump(throughput_res, f)
+
+
+name = "GPT2-xl single"
+input_size = [4, 72]
 batch_sizes = np.arange(4, 17, 1)
-budget = 10.8e9
-model = get_GPT(name).to(device)
-x = torch.randint(0, 600, input_size).to(device)
+budget = 2.02e9
+model = GPT2(nlayers=1, d_model=1600, n_head=25)
+x = torch.randint(0, 600, input_size)
 
 throughput_res[name] = throughput_exp(model, x, batch_sizes, mem_limit=budget)
 
 with open(file_name, "wb") as f:
     pickle.dump(throughput_res, f)
+
 
 # name = "GPT2-xl"
 # input_size = [1, 256]
@@ -101,16 +126,16 @@ with open(file_name, "wb") as f:
 # x = torch.randint(0, 600, input_size).to(device)
 
 
-# name = "GPT2-xl"
-# input_size = [4, 72]
-# batch_sizes = np.arange(4, 17, 1)
-# budget = 2.02e9
-# model = get_GPT(name).to(device)
-# x = torch.randint(0, 600, input_size).to(device)
+name = "GPT2-xl"
+input_size = [4, 72]
+batch_sizes = np.arange(4, 17, 1)
+budget = 2.02e9
+model = get_GPT(name)  # .to(device)
+x = torch.randint(0, 600, input_size)  # .to(device)
 
-# throughput_res[name] = throughput_exp(model, x, batch_sizes, mem_limit=budget)
+throughput_res[name] = throughput_exp(model, x, batch_sizes, mem_limit=budget)
 
 
-# with open(file_name, "wb") as f:
-#     pickle.dump(throughput_res, f)
+with open(file_name, "wb") as f:
+    pickle.dump(throughput_res, f)
 
