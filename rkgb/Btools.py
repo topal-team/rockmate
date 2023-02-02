@@ -10,8 +10,8 @@
 # -> Remove TorchScript's operations (e.g. ops.prim.NumToTensor)
 
 # Each node consist of one assignment:
-# one target obtained with a primitive operation
-# .code attributes are AST objects
+#  one target obtained with a primitive operation
+#  .code attributes are AST objects
 
 from rkgb.utils import *
 
@@ -41,14 +41,16 @@ class B_node:
         else:
             self.deps = deps
         self.is_input = is_input
-        self.is_rand  = bool(fct in global_vars.list_rand_fct)
+        self.is_rand = bool(fct in global_vars.list_rand_fct)
         self.deps_rand = set()
         global all_nodes
         all_nodes.append(self)
 
-    def get_code(self,force_special_kwargs=False):
-        return ast_add_on.make_str_assign((self.target, self.ast_code),
-            force_special_kwargs=force_special_kwargs)
+    def get_code(self, force_special_kwargs=False):
+        return ast_add_on.make_str_assign(
+            (self.target, self.ast_code),
+            force_special_kwargs=force_special_kwargs,
+        )
 
 
 class B_var:
@@ -63,8 +65,8 @@ class B_var:
         self.is_attr_of_self = is_attr_of_self
         self.path_from_self = path_from_self
         self.val = val
-        self.has_node = False # by default
-        self.is_rand  = False # by default
+        self.has_node = False  # by default
+        self.is_rand = False  # by default
         if node:
             if node.deps == set() and not node.is_input:
                 if node.is_rand:
@@ -205,8 +207,9 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
         l_name = ast_add_on.open_attr_until_name(expr)
         if l_name[0] not in dict_vars:
             raise Exception(
-                f"Unknown global variable mentioned in the code "\
-                f"extracted by jit {l_name[0]}.")
+                f"Unknown global variable mentioned in the code "
+                f"extracted by jit {l_name[0]}."
+            )
         parent_var = dict_vars[l_name[0]]
         attr = ".".join(l_name[1:])
         format_fct = lambda pv: ast.Name(pv.id + "." + attr)
@@ -232,7 +235,8 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
             assert isinstance(main_val, ast.Name)
             # else : to much simplifications :/
             new_node.ast_code = ast.Subscript(
-                main_val, ast_add_on.make_ast_constant(i))
+                main_val, ast_add_on.make_ast_constant(i)
+            )
             new_var = B_var(ast.Name(new_tg_id), node=new_node)
             dict_vars[tg] = new_var
 
@@ -248,14 +252,13 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
         if len(l_name) == 1 and l_name[0] == "getattr":
             assert len(args) == 2
             assert ast_add_on.is_constant(args[1])
-            # If fail: Why is there an expression to 
+            # If fail: Why is there an expression to
             # refer to the attr we want to take ?!
             parent_var = handle_expr(args[0])
             attr = args[1].value
             if attr.isdigit():
                 format_fct = lambda pv: ast.Subscript(
-                    value=pv,
-                    slice=ast_add_on.make_ast_constant(int(attr))
+                    value=pv, slice=ast_add_on.make_ast_constant(int(attr))
                 )
             else:
                 format_fct = lambda pv: ast.Call(
@@ -309,35 +312,56 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
                         exec(f"torch.{l_name[1]}")
                         fct_name = f"torch.{l_name[1]}"
                         bool_found = True
-                    except: pass
+                    except:
+                        pass
                     if not bool_found:
                         try:
                             exec(f"torch.nn.functional.{l_name[1]}")
                             fct_name = f"torch.nn.functional.{l_name[1]}"
                             bool_found = True
-                        except: pass
+                        except:
+                            pass
                     if not bool_found:
                         try:
                             exec(f"torch.Tensor.{l_name[1]}")
                             fct_name = f"torch.Tensor.{l_name[1]}"
                             bool_found = True
-                        except: pass
+                        except:
+                            pass
                     if not bool_found:
                         try:
                             exec(f"torch._C._nn.{l_name[1]}")
                             fct_name = f"torch._C._nn.{l_name[1]}"
                             bool_found = True
-                        except: pass
-                    if not bool_found: raise Exception(
-                        f"jit translate any torch function has: "\
-                        f"torch.<function name>, for instance here:\n"\
-                        f"torch.{l_name[1]}.\nSo we need to find the "\
-                        f"submodule where the function belongs to, but "\
-                        f"here neither:\n torch.{l_name[1]} nor "\
-                        f"torch.nn.functional{l_name[1]} nor "\
-                        f"torch.Tensor.{l_name[1]} nor "\
-                        f"torch._C._nn.{l_name[1]} exist.\n"\
-                        f"So we cannot do anything...")
+                        except:
+                            pass
+                    if not bool_found:
+                        try:
+                            exec(f"torch._C._fft.{l_name[1]}")
+                            fct_name = f"torch._C._fft.{l_name[1]}"
+                            bool_found = True
+                        except:
+                            pass
+                    if not bool_found:
+                        try:
+                            exec(f"torch.ops.aten.{l_name[1]}")
+                            fct_name = f"torch.ops.aten.{l_name[1]}"
+                            bool_found = True
+                        except:
+                            pass
+
+                    if not bool_found:
+                        raise Exception(
+                            f"jit translate any torch function has: "
+                            f"torch.<function name>, for instance here:\n"
+                            f"torch.{l_name[1]}.\nSo we need to find the "
+                            f"submodule where the function belongs to, but "
+                            f"here neither:\n torch.{l_name[1]} nor "
+                            f"torch.nn.functional{l_name[1]} nor "
+                            f"torch.Tensor.{l_name[1]} nor "
+                            f"torch._C._nn.{l_name[1]} exist.\n"
+                            f"So we cannot do anything..."
+                        )
                 else:
                     fct_name = ".".join(l_name)
 
@@ -356,7 +380,7 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
                         (
                             (kw.arg == "dtype" or kw.arg == "layout")
                             and ast_add_on.is_constant(kw.value)
-                            and isinstance(kw.value.value, int) # WTF
+                            and isinstance(kw.value.value, int)  # WTF
                         )
                         or (kw.arg == "layout" and kw.value.value is None)
                     ):
@@ -488,7 +512,9 @@ def make_B(model, ex_inputs, verbose=None, impose_device=True, device=None):
 
     # device :
     if not device:
-        device = small_fcts.get_device_and_check_all_same_device(model, ex_inputs)
+        device = small_fcts.get_device_and_check_all_same_device(
+            model, ex_inputs
+        )
 
     # -- ex_inputs -- # for previous versions compatibility
     if isinstance(ex_inputs, dict):
