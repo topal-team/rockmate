@@ -243,6 +243,7 @@ tbl_index(int m, int a, int b, int ln) {
   return (m)*(ln+1)*(ln+1) + (a) * (ln+1) + (b);
 }
 
+// First version: compute all values in the table
 static int*
 compute_table(rk_chain* chain, int mmax)
 {
@@ -351,6 +352,8 @@ compute_table(rk_chain* chain, int mmax)
   return tbl_what;
 }
 
+// Second version: compute only necessary values. The table is still
+// large enough to contain all values.
 
 static double
 compute_table_base(rk_chain* chain, double* tbl_opt, int* tbl_what,
