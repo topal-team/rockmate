@@ -225,3 +225,29 @@ def seq_builder(chain: RK_Chain, memory_limit, opt_table=({}, {})):
 
     seq = seq_builder_rec(0, chain.ln, mmax)
     return seq
+
+
+# ===================================
+# =====  interface to C version =====
+# ===================================
+
+# The C version produces 'csequence' SeqOps, we have to convert them
+import rockmate.csequence as cs
+import rockmate_csolver as rs
+
+def convert_sequence_from_C(chain: RK_Chain, original_sequence):
+    def convert_op(op):
+        if isinstance(op, cs.SeqLoss): return SeqLoss()
+        body = chain.body[op.index]
+        if isinstance(op, cs.SeqBlockFn): return SeqBlockFn(op.index, body.Fn_sched)
+        if isinstance(op, cs.SeqBlockFc): return SeqBlockFc(op.index, body.Fc_sched)
+        if isinstance(op, cs.SeqBlockFe): return SeqBlockFe(op.index, body.sols[op.option].fwd_sched)
+        if isinstance(op, cs.SeqBlockBwd): return SeqBlockBwd(op.index, body.sols[op.option].bwd_sched)
+    result = RK_Sequence(convert_op(op) for op in original_sequence.seq)
+
+def csolve_dp_functionnal(chain: RK_Chain, mmax):
+    return rs.RkTable(chain, mmax)
+
+def cseq_builder(chain: RK_Chain, memory_limit, opt_table):
+    result = opt_table.build_sequence(memory_limit - chain.cw[0])
+    return convert_sequence_from_C(chain, result)
