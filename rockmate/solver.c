@@ -372,7 +372,7 @@ compute_table_base(rk_chain* chain, double* tbl_opt, int* tbl_what,
 }
 
 static void
-compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what,
+compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what, int* mmin_values,
 		  double* partial_sums_ff_fw,
 		  int mmax, int m, int a, int b) {
   int ln = chain->ln;
@@ -389,11 +389,15 @@ compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what,
     return;
   }
 
-  int mmin = chain->cw[a+1] + chain->ff_fwd_tmp[a];
-  for (int j = a+1; j < b; ++j) {
-    mmin = fmax(mmin, chain->cw[j] + chain->cw[j+1] + chain->ff_fwd_tmp[j]);
+  int mmin = mmin_values[a * ln + b];
+  if (mmin == 0) {
+    mmin = chain->cw[a+1] + chain->ff_fwd_tmp[a];
+    for (int j = a+1; j < b; ++j) {
+      mmin = fmax(mmin, chain->cw[j] + chain->cw[j+1] + chain->ff_fwd_tmp[j]);
+    }
+    mmin += chain->cw[b+1];
+    mmin_values[a * ln + b] = mmin;
   }
-  mmin += chain->cw[b+1];
 
   //Unfeasible below mmin
   if (m < mmin) {
@@ -406,10 +410,10 @@ compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what,
   int best_later_k = -1;
   for (int j = a+1; j <= b; ++j)
     if (m >= chain->cw[j]) {
-      compute_table_rec(chain, tbl_opt, tbl_what,
+      compute_table_rec(chain, tbl_opt, tbl_what, mmin_values,
 			partial_sums_ff_fw,
 			mmax, m - chain->cw[j], j, b);
-      compute_table_rec(chain, tbl_opt, tbl_what,
+      compute_table_rec(chain, tbl_opt, tbl_what, mmin_values,
 			partial_sums_ff_fw,
 			mmax, m, a, j-1);
       double val = partial_sums_ff_fw[j] - partial_sums_ff_fw[a]
@@ -427,7 +431,7 @@ compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what,
   for (int k = 0; k < chain->nb_sol[a]; ++k) {
     if ( (m >= chain->cw[a+1] + chain->cbw[a+1][k] + chain->fwd_tmp[a][k])
 	 && (m >= chain->cw[a] + chain->cbw[a+1][k] + chain->bwd_tmp[a][k]) ) {
-      compute_table_rec(chain, tbl_opt, tbl_what,
+      compute_table_rec(chain, tbl_opt, tbl_what, mmin_values,
 			partial_sums_ff_fw,
 			mmax, m - chain->cbw[a+1][k], a+1, b);
       double val = chain->fw[a][k] + chain->bw[a][k]
@@ -469,12 +473,16 @@ compute_table_v2(rk_chain* chain, int mmax)
   }
   partial_sums_ff_fw[ln] = total;
 
-  compute_table_rec(chain, tbl_opt, tbl_what,
+  // Avoid recomputing mmin if already done
+  int* mmin_values = calloc((ln+1) * (ln+1), sizeof(int));
+
+  compute_table_rec(chain, tbl_opt, tbl_what, mmin_values,
 		    partial_sums_ff_fw,
 		    mmax, mmax, 0, ln);
 
   free(partial_sums_ff_fw);
   free(tbl_opt);
+  free(mmin_values);
   return tbl_what;
 }
 
