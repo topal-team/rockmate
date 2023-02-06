@@ -351,6 +351,134 @@ compute_table(rk_chain* chain, int mmax)
   return tbl_what;
 }
 
+
+static double
+compute_table_base(rk_chain* chain, double* tbl_opt, int* tbl_what,
+		   int mmax, int m, int i) {
+  int best_k = -1;
+  double best_k_value = INFINITY;
+  for (int k = 0; k < chain->nb_sol[i]; ++k)
+    if ( (m >= chain->cw[i] + chain->cbw[i+1][k] + chain->bwd_tmp[i][k]) // No cw[i+1] ??
+	 && (m >= chain->cw[i+1] + chain->cbw[i+1][k] + chain->fwd_tmp[i][k]) )
+      if (chain->fw[i][k] + chain->bw[i][k] < best_k_value) {
+	best_k_value = chain->fw[i][k] + chain->bw[i][k];
+	best_k = k;
+      }
+
+  // Also correct if best_k == -1 and best_k_value == INFINITY
+  tbl_opt[tbl_index(m, i, i, chain->ln)] = best_k_value;
+  tbl_what[tbl_index(m, i, i, chain->ln)] = 1 + best_k;
+  return best_k_value;
+}
+
+static void
+compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what,
+		  double* partial_sums_ff_fw,
+		  int mmax, int m, int a, int b) {
+  int ln = chain->ln;
+  assert (m >= 0 && m <= mmax && a <= 0 && a <= ln && b <= 0 && b <= ln);
+  // Nothing to do if value was computed already. Maybe inline this at some point ?
+  if (tbl_opt[tbl_index(m, a, b, ln)] != 0)
+    return;
+
+  assert (tbl_what[tbl_index(m, a, b, ln)] == 0);
+
+  if (a == b) {
+    compute_table_base(chain, tbl_opt, tbl_what,
+		       mmax, m, a);
+    return;
+  }
+
+  int mmin = chain->cw[a+1] + chain->ff_fwd_tmp[a];
+  for (int j = a+1; j < b; ++j) {
+    mmin = fmax(mmin, chain->cw[j] + chain->cw[j+1] + chain->ff_fwd_tmp[j]);
+  }
+  mmin += chain->cw[b+1];
+
+  //Unfeasible below mmin
+  if (m < mmin) {
+    tbl_opt[tbl_index(m, a, b, ln)] = INFINITY;
+    return;
+  }
+
+  // Solution 1
+  double best_later_value = INFINITY;
+  int best_later_k = -1;
+  for (int j = a+1; j <= b; ++j)
+    if (m >= chain->cw[j]) {
+      compute_table_rec(chain, tbl_opt, tbl_what,
+			partial_sums_ff_fw,
+			mmax, m - chain->cw[j], j, b);
+      compute_table_rec(chain, tbl_opt, tbl_what,
+			partial_sums_ff_fw,
+			mmax, m, a, j-1);
+      double val = partial_sums_ff_fw[j] - partial_sums_ff_fw[a]
+	+ tbl_opt[tbl_index(m - chain->cw[j], j, b, ln)]
+	+ tbl_opt[tbl_index(m, a, j-1, ln)];
+      if (val < best_later_value) {
+	best_later_value = val;
+	best_later_k = j;
+      }
+    }
+
+  // Solution 2
+  double best_now_value = INFINITY;
+  int best_now_k = -1;
+  for (int k = 0; k < chain->nb_sol[a]; ++k) {
+    if ( (m >= chain->cw[a+1] + chain->cbw[a+1][k] + chain->fwd_tmp[a][k])
+	 && (m >= chain->cw[a] + chain->cbw[a+1][k] + chain->bwd_tmp[a][k]) ) {
+      compute_table_rec(chain, tbl_opt, tbl_what,
+			partial_sums_ff_fw,
+			mmax, m - chain->cbw[a+1][k], a+1, b);
+      double val = chain->fw[a][k] + chain->bw[a][k]
+	+ tbl_opt[tbl_index(m - chain->cbw[a+1][k], a+1, b, ln)];
+      if (val < best_now_value) {
+	best_now_value = val;
+	best_now_k = k;
+      }
+    }
+  }
+  // Best of both solutions
+  if (best_now_value < best_later_value) {
+    tbl_opt[tbl_index(m, a, b, ln)] = best_now_value;
+    tbl_what[tbl_index(m, a, b, ln)] = 1 + best_now_k;
+  } else {
+    tbl_opt[tbl_index(m, a, b, ln)] = best_later_value;
+    tbl_what[tbl_index(m, a, b, ln)] = - best_later_k - 1;
+  }
+}
+
+
+static int*
+compute_table_v2(rk_chain* chain, int mmax)
+{
+  int ln = chain->ln;
+  double* tbl_opt = calloc((1+mmax) * (ln+1) * (ln+1), sizeof(double));
+  int* tbl_what = calloc((1+mmax) * (ln+1) * (ln+1), sizeof(int));
+  // WHAT table: 0 means unfeasible
+  //             v > 0 means (True, v-1)
+  //             v < 0 means (False, -v-1)
+
+  // Compute partial sums
+  //  partial_sums_ff_fw[i] = sum(ff_fw[0:i])
+  double* partial_sums_ff_fw = calloc(ln + 1, sizeof(double));
+  double total = 0;
+  for(long i = 0; i < ln; ++i) {
+    partial_sums_ff_fw[i] = total;
+    total += chain->ff_fw[i];
+  }
+  partial_sums_ff_fw[ln] = total;
+
+  compute_table_rec(chain, tbl_opt, tbl_what,
+		    partial_sums_ff_fw,
+		    mmax, mmax, 0, ln);
+
+  free(partial_sums_ff_fw);
+  free(tbl_opt);
+  return tbl_what;
+}
+
+
 /************** Actual DynProg: Building the sequence *******/
 
 static int
@@ -428,7 +556,7 @@ RkTable_init(RkTable* self, PyObject* args, PyObject* kwds) {
     return -1;
 
   self->mmax = mmax;
-  self->what = compute_table(&self->chain, mmax);
+  self->what = compute_table_v2(&self->chain, mmax);
   return 0;
 }
 
