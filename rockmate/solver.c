@@ -372,16 +372,27 @@ compute_table_base(rk_chain* chain, double* tbl_opt, int* tbl_what,
 }
 
 static void
+do_compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what, int* mmin_values,
+		     double* partial_sums_ff_fw,
+		     int mmax, int m, int a, int b);
+
+static inline void
 compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what, int* mmin_values,
 		  double* partial_sums_ff_fw,
 		  int mmax, int m, int a, int b) {
-  int ln = chain->ln;
-  assert (m >= 0 && m <= mmax && a <= 0 && a <= ln && b <= 0 && b <= ln);
-  // Nothing to do if value was computed already. Maybe inline this at some point ?
-  if (tbl_opt[tbl_index(m, a, b, ln)] != 0)
+  // Nothing to do if value was computed already.
+  if (tbl_opt[tbl_index(m, a, b, chain->ln)] != 0)
     return;
+  do_compute_table_rec(chain, tbl_opt, tbl_what, mmin_values,
+		       partial_sums_ff_fw,
+		       mmax, m, a, b);
+}
 
-  assert (tbl_what[tbl_index(m, a, b, ln)] == 0);
+static void
+do_compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what, int* mmin_values,
+		     double* partial_sums_ff_fw,
+		     int mmax, int m, int a, int b) {
+  int ln = chain->ln;
 
   if (a == b) {
     compute_table_base(chain, tbl_opt, tbl_what,
