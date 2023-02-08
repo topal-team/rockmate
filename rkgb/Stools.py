@@ -762,6 +762,8 @@ def cut(sg : S_graph): # -> list of S_graph
                 dict_edges_discard_inplace(user_sn.deps,inp_node)
                 dict_edges_add_inplace(user_sn.deps,ino,str_set)
                 dict_edges_add_inplace(ino.users,user_sn,str_set)
+                if user_sn.is_artefact:
+                    ino.insert(user_sn,strong=True,sg=main_sg)
             inp_node.users = dict() # previous bloc's output node
         # -- output --
         new_sg.output_node    = out_node

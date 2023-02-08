@@ -308,59 +308,22 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
                 # == torch.nn.functional / torch.Tensor == quick.fix
                 if l_name[0] == "torch" and len(l_name) == 2:
                     bool_found = False
-                    try:
-                        exec(f"torch.{l_name[1]}")
-                        fct_name = f"torch.{l_name[1]}"
-                        bool_found = True
-                    except:
-                        pass
-                    if not bool_found:
+                    for module_name in global_vars.list_python_modules:
                         try:
-                            exec(f"torch.nn.functional.{l_name[1]}")
-                            fct_name = f"torch.nn.functional.{l_name[1]}"
+                            exec(f"{module_name}.{l_name[1]}")
+                            fct_name = f"{module_name}.{l_name[1]}"
                             bool_found = True
                         except:
                             pass
-                    if not bool_found:
-                        try:
-                            exec(f"torch.Tensor.{l_name[1]}")
-                            fct_name = f"torch.Tensor.{l_name[1]}"
-                            bool_found = True
-                        except:
-                            pass
-                    if not bool_found:
-                        try:
-                            exec(f"torch._C._nn.{l_name[1]}")
-                            fct_name = f"torch._C._nn.{l_name[1]}"
-                            bool_found = True
-                        except:
-                            pass
-                    if not bool_found:
-                        try:
-                            exec(f"torch._C._fft.{l_name[1]}")
-                            fct_name = f"torch._C._fft.{l_name[1]}"
-                            bool_found = True
-                        except:
-                            pass
-                    if not bool_found:
-                        try:
-                            exec(f"torch.ops.aten.{l_name[1]}")
-                            fct_name = f"torch.ops.aten.{l_name[1]}"
-                            bool_found = True
-                        except:
-                            pass
+                        if bool_found: break
 
                     if not bool_found:
                         raise Exception(
-                            f"jit translate any torch function has: "
-                            f"torch.<function name>, for instance here:\n"
-                            f"torch.{l_name[1]}.\nSo we need to find the "
-                            f"submodule where the function belongs to, but "
-                            f"here neither:\n torch.{l_name[1]} nor "
-                            f"torch.nn.functional{l_name[1]} nor "
-                            f"torch.Tensor.{l_name[1]} nor "
-                            f"torch._C._nn.{l_name[1]} exist.\n"
-                            f"So we cannot do anything..."
+                            f"jit translate any torch function has: "\
+                            f"torch.<function name>, for instance here:\n"\
+                            f"torch.{l_name[1]}.\nSo we need to find the "\
+                            f"submodule where the function belongs to, "\
+                            f"we will tryed : {global_vars.list_python_modules}"
                         )
                 else:
                     fct_name = ".".join(l_name)
@@ -375,6 +338,14 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
                     if var_impose_device and kw.arg == "device":
                         kwds_ast.append(
                             ast.keyword("device", ast.Name("device"))
+                        )
+                    elif kw.arg == "dtype" and ast_add_on.is_constant(kw.value):
+                        kwds_ast.append(
+                            ast.keyword(
+                                "dtype",
+                                ast_add_on.make_ast_constant(
+                                    global_vars.get_torchscript_dtype(kw.value.value)
+                                ))
                         )
                     elif not (
                         (
