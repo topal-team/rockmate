@@ -19,6 +19,7 @@ from rockmate.def_sequence import (
 from rockmate.rotor_solver import seq_builder, solve_dp_functionnal
 from rockmate.translator import Translator, RngState
 import torch
+from torch import tensor
 import ast
 import time
 import warnings

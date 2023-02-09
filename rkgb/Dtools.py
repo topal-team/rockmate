@@ -172,9 +172,41 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
             dict_info[bn.target] = def_info.Var_info()
         elif not bn.is_input:
             tmp_local = generate_deep_tmp_local(dg,dict_info,bn,our_global)
-            exec(
-                bn.get_code(force_special_kwargs=True), 
-                our_global, tmp_local)
+            try:
+                exec(
+                    bn.get_code(force_special_kwargs=True), 
+                    our_global, tmp_local)
+            except:
+                # Something bad happened on jit.trace's Python code
+                # -> for instance a dtype has been replaced by an integer 
+                # we will try to fix this
+                fixed = [False]
+                def try_to_fix(sub_code):
+                    if isinstance(sub_code,ast.Call):
+                        args_ast = list(sub_code.args)
+                        for i,arg in enumerate(args_ast):
+                            if (ast_add_on.is_constant(arg)
+                            and isinstance(arg.value,int)):
+                                save_value = arg.value
+                                sub_code.args[i] = (
+                                    ast_add_on.make_ast_constant(
+                                    global_vars.get_torchscript_dtype(arg.value)
+                                ) )
+                                try:
+                                    exec(bn.get_code(), our_global, tmp_local)
+                                    fixed[0] = True
+                                    break
+                                except:
+                                    sub_code.args[i] = save_value
+                            else: try_to_fix(arg)
+                code = bn.ast_code
+                try_to_fix(code)
+                if not fixed[0]: raise Exception(
+                    f"Sorry there are some errors in the code generated :"\
+                    f"using jit which make it impossible to exec, the code "\
+                    f"is : {ast_add_on.ast_to_str(code)}"
+                )
+                
             # - detect inplace operation -
             bn_value = tmp_local[bn.target]
             is_view    = False # by default
