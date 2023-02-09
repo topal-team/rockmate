@@ -1,8 +1,6 @@
 import rockmate_csolver as rs
 import time
 import pickle 
-with open("./test_csolver/example_DP_chain.pkl", "rb") as f: 
-    inp = pickle.load(f)
 
 
 from rockmate import rotor_solver
@@ -19,10 +17,6 @@ from pgb.utils.global_vars import ref_verbose
 class FakeChain:
     def __init__(self, d):
         self.__dict__.update(d)
-
-ch = FakeChain(inp)
-target = 700
-
 
 def fake_seq_builder(chain, memory_limit, opt_table=({}, {})):
     # returns :
@@ -96,7 +90,7 @@ def compare_seqs(sa, sb):
     return all(compare_ops(a, b) for (a, b) in zip(sa.seq, sb.seq))
 
 
-def one_test(target):
+def one_test(ch, target):
     mmax = target - ch.cw[0]
 
     start = time.time()
@@ -110,7 +104,7 @@ def one_test(target):
     py_dur = time.time() - start
 
     start = time.time()
-    result = rs.RkTable(ch, target)
+    result = rs.RkTable(ch, mmax)
     try:
         cseq = RK_Sequence(result.build_sequence(target))
     except ValueError:
@@ -118,5 +112,30 @@ def one_test(target):
     c_dur = time.time() - start
     print(target, py_dur, c_dur, compare_seqs(pyseq, cseq))
 
-for v in range(500, 1500, 50):
-    one_test(v)
+def one_test_conly(ch, target):
+    mmax = target - ch.cw[0]
+
+    start = time.time()
+    result = rs.RkTable(ch, mmax)
+    try:
+        cseq = RK_Sequence(result.build_sequence(target))
+    except ValueError:
+        cseq = None
+    c_dur = time.time() - start
+    print(target, c_dur)
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser("test_csolver")
+    parser.add_argument("pkl_file", help="PKL file to open")
+    parser.add_argument("--c-only", action="store_true", help="input is large, only solve with C")
+    args = parser.parse_args()
+    with open(args.pkl_file, "rb") as f:  ## "./test_csolver/example_DP_chain_large.pkl"
+        inp = pickle.load(f)
+    ch = FakeChain(inp)
+    if args.c_only:
+        for v in range(1000, 3000, 100):
+            one_test_conly(ch, v)
+    else:
+        for v in range(500, 800, 50):
+            one_test(ch, v)
