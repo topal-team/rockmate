@@ -71,46 +71,58 @@ class K_C_node():
 
     def __eq__(self,kcn2,force_order=False,raise_exception=False):
         kcn1 = self
-        b = (
-        small_fcts.check_attr(kcn1,kcn2,
-            ["name","main_target","is_fwd",
-             "all_targets","container_targets",
-             "tensor_targets","inplace_targets",
-             "is_rand","overhead","phantom_names",
-             "alias_in_users_phantoms"],
-            raise_exception=raise_exception)
-        and kcn1.full_code() == kcn2.full_code())
-        if not b and raise_exception: raise Exception(
-            f"{kcn1.main_target} and {kcn2.main_target} KCN differ on "\
-            f"code : {kcn1.full_code()}\n===\n{kcn2.full_code()}")
+        try:
+            b = (
+            small_fcts.check_attr(kcn1,kcn2,
+                ["name","main_target","is_fwd",
+                "all_targets","container_targets",
+                "tensor_targets","inplace_targets",
+                "is_rand","overhead","phantom_names",
+                "alias_in_users_phantoms"],
+                raise_exception=raise_exception)
+            and kcn1.full_code() == kcn2.full_code())
+            if not b and raise_exception: raise Exception(
+                f"{kcn1.main_target} and {kcn2.main_target} KCN differ on "\
+                f"code : {kcn1.full_code()}\n===\n{kcn2.full_code()}")
 
-        # ** deps/users **
-        mmt = lambda nl : [rn.main_target for rn in nl]
-        s = shared_methods.sort_nodes if force_order else (lambda s : s)
+            # ** deps/users **
+            mmt = lambda nl : [rn.main_target for rn in nl]
+            s = shared_methods.sort_nodes if force_order else (lambda s : s)
+            for attr in ["deps_real","deps_fake","deps_global",
+                "users","users_global","deps_through_size_artefacts"]:
+                c = mmt(s(getattr(kcn1,attr))) == mmt(s(getattr(kcn2,attr)))
+                b *= c
+                if not c and raise_exception:
+                    raise Exception(f"kcns differ on attr {attr}")
+            mmt2 = lambda nl : [(r[0].main_target,r[1]) for r in nl]
+            b *= small_fcts.clean__eq__(
+                mmt2(kcn1.deps_impossible_to_restore),
+                mmt2(kcn2.deps_impossible_to_restore),
+                raise_exception=raise_exception)
+
+            # ** time **
+            t1 = kcn1.time
+            t2 = kcn2.time
+            r = global_vars.ref_reasonable_rate[0]
+            if not (((t1 == t2)
+                or (isinstance(t1,float) and isinstance(t2,float)
+                and (abs(t1 - t2) < (r * max(t1,t2)))))):return False
+            if not b and raise_exception:
+                raise Exception("kcns differ on attr .time")
+            return bool(b)
+        except AttributeError as a: return kcn1.__hash__() == kcn2.__hash__()
+    def __hash__(self):
+        if hasattr(self,"unique_id"): return self.unique_id
+        else: return id(self)
+    def clean_hash_in_sets(self):
         for attr in ["deps_real","deps_fake","deps_global",
             "users","users_global","deps_through_size_artefacts"]:
-            c = mmt(s(getattr(kcn1,attr))) == mmt(s(getattr(kcn2,attr)))
-            b *= c
-            if not c and raise_exception:
-                raise Exception(f"kcns differ on attr {attr}")
-        mmt2 = lambda nl : [(r[0].main_target,r[1]) for r in nl]
-        b *= small_fcts.clean__eq__(
-            mmt2(kcn1.deps_impossible_to_restore),
-            mmt2(kcn2.deps_impossible_to_restore),
-            raise_exception=raise_exception)
+            s1 = getattr(self,attr)
+            s2 = set()
+            for x in s1:
+                s2.add(x)
+            setattr(self,attr,s2)
 
-        # ** time **
-        t1 = kcn1.time
-        t2 = kcn2.time
-        r = global_vars.ref_reasonable_rate[0]
-        if not (((t1 == t2)
-            or (isinstance(t1,float) and isinstance(t2,float)
-            and (abs(t1 - t2) < (r * max(t1,t2)))))):return False
-        if not b and raise_exception:
-            raise Exception("kcns differ on attr .time")
-        return bool(b)
-    def __hash__(self):
-        return self.unique_id
 
     def get_main_code(self,force_special_kwargs=False):
         return ast_add_on.make_str_assign(
@@ -172,31 +184,42 @@ class K_D_node():
 
     def __eq__(self,kdn2,force_order=False,raise_exception=False):
         kdn1 = self
-        b = small_fcts.check_attr(kdn1,kdn2,
-            ["name","mem","kdn_type","main_target",
-             "all_targets","container_targets",
-             "tensor_targets","inplace_targets",
-             "includes_phantoms",
-             "includes_base",
-             "alias_in_users_phantoms"],
-            raise_exception=raise_exception)
-        # ** deps/users **
-        mt = lambda nl : [rn.main_target for rn in nl]
-        s = shared_methods.sort_nodes if force_order else (lambda s : s)
+        try:
+            b = small_fcts.check_attr(kdn1,kdn2,
+                ["name","mem","kdn_type","main_target",
+                "all_targets","container_targets",
+                "tensor_targets","inplace_targets",
+                "includes_phantoms",
+                "includes_base",
+                "alias_in_users_phantoms"],
+                raise_exception=raise_exception)
+            # ** deps/users **
+            mt = lambda nl : [rn.main_target for rn in nl]
+            s = shared_methods.sort_nodes if force_order else (lambda s : s)
+            for attr in ["users_real","users_fake",
+                "deps","users_global","deps_global"]:
+                c = mt(s(getattr(kdn1,attr))) == mt(s(getattr(kdn2,attr)))
+                b *= c
+                if not c and raise_exception:
+                    raise Exception(f"kdns differ on attr {attr}")
+            mmt2 = lambda nl : [(r[0].main_target,r[1]) for r in nl]
+            b *= small_fcts.clean__eq__(
+                mmt2(kdn1.users_impossible_to_restore),
+                mmt2(kdn2.users_impossible_to_restore),
+                raise_exception=raise_exception)
+            return bool(b)
+        except AttributeError as a: return kdn1.__hash__() == kdn2.__hash__()
+    def __hash__(self):
+        if hasattr(self,"unique_id"): return self.unique_id
+        else: return id(self)
+    def clean_hash_in_sets(self):
         for attr in ["users_real","users_fake",
             "deps","users_global","deps_global"]:
-            c = mt(s(getattr(kdn1,attr))) == mt(s(getattr(kdn2,attr)))
-            b *= c
-            if not c and raise_exception:
-                raise Exception(f"kdns differ on attr {attr}")
-        mmt2 = lambda nl : [(r[0].main_target,r[1]) for r in nl]
-        b *= small_fcts.clean__eq__(
-            mmt2(kdn1.users_impossible_to_restore),
-            mmt2(kdn2.users_impossible_to_restore),
-            raise_exception=raise_exception)
-        return bool(b)
-    def __hash__(self):
-        return self.unique_id
+            s1 = getattr(self,attr)
+            s2 = set()
+            for x in s1:
+                s2.add(x)
+            setattr(self,attr,s2)
 
 
 # ***********
@@ -284,6 +307,12 @@ class K_graph():
         return bool(b)
     def __hash__(self):
         return id(self)
+    def clean_hash_in_sets(self):
+        for attr in ["input_kdn_grad","output_kdn_grad",
+            "loss_kcn","input_kdn_data","output_kdn_data"]:
+            getattr(self,attr).clean_hash_in_sets()
+        for kn in self.list_kcn + self.list_kdn:
+            kn.clean_hash_in_sets()
 
 # ==========================
 

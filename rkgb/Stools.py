@@ -61,25 +61,28 @@ class S_node():
             unique_id_generator[0] = u+1
     def __eq__(self,sn2,raise_exception=False):
         sn1 = self
-        b = small_fcts.check_attr(sn1,sn2,[
-            "is_artefact","main_fct",
-            "is_rand","deps_rand",
-            "main_target","all_targets",
-            "inplace_targets","container_targets",
-            "tensor_targets","protected"],
-            raise_exception=raise_exception)
-        b = (b
-            and dict_edges_eq(sn1.deps,sn2.deps,
+        try:
+            b = small_fcts.check_attr(sn1,sn2,[
+                "is_artefact","main_fct",
+                "is_rand","deps_rand",
+                "main_target","all_targets",
+                "inplace_targets","container_targets",
+                "tensor_targets","protected"],
                 raise_exception=raise_exception)
-            and dict_edges_eq(sn1.users,sn2.users,
-                raise_exception=raise_exception)
-            and (sn1.full_code() == sn2.full_code()))
-        if not b and raise_exception: raise Exception(
-            f"Node diff : code diff : \n {sn1.full_code()}\n"\
-            f"==== DIFFERENT ==== \n {sn2.full_code()}")
-        return b
+            b = (b
+                and dict_edges_eq(sn1.deps,sn2.deps,
+                    raise_exception=raise_exception)
+                and dict_edges_eq(sn1.users,sn2.users,
+                    raise_exception=raise_exception)
+                and (sn1.full_code() == sn2.full_code()))
+            if not b and raise_exception: raise Exception(
+                f"Node diff : code diff : \n {sn1.full_code()}\n"\
+                f"==== DIFFERENT ==== \n {sn2.full_code()}")
+            return b
+        except AttributeError as a: return sn1.__hash__() == sn2.__hash__()
     def __hash__(self):
-        return self.unique_id
+        if hasattr(self,"unique_id"): return self.unique_id
+        else: return id(self)
     # -> /!\ /!\ doing set/dict of S_nodes is dangereous /!\ /!\ 
     # but I'm doing this to avoid undeterminism
 
