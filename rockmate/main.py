@@ -5,7 +5,7 @@
 import rkgb
 from rkgb.main import make_inputs
 from rkgb.utils import print_debug, np, irotor
-from rkgb.utils.global_vars import ref_verbose
+from rkgb.utils.global_vars import ref_verbose, solver_name
 from rkgb.utils.small_fcts import get_device
 from rkgb.utils.ast_add_on import ast_to_str
 from rockmate.def_code import RK_Storage, DelOp, OpSchedule
@@ -21,6 +21,8 @@ from rockmate.translator import Translator, RngState
 import torch
 import ast
 import time
+import warnings
+from os import environ
 
 
 def print_memsizes(list_kg):
@@ -51,9 +53,11 @@ class CheckpointedModule(torch.nn.Module):
         get_code=True,
         nb_budget_abar=10,
         nb_budget_all=5,
+        ilp_solver="gurobi",
     ):
         super(CheckpointedModule, self).__init__()
         ref_verbose[0] = verbose
+        solver_name[0] = ilp_solver
         self.device = get_device()
         self.original_mod = original_mod
         # for k,v in original_mod.state_dict().items():
@@ -86,8 +90,8 @@ class CheckpointedModule(torch.nn.Module):
         )
         end = time.time()
         self.ILP_solve_time = end - start
-            
-        self.opt_table = ({},{})
+
+        self.opt_table = ({}, {})
 
     def get_sequence(self, mem_limit, use_opt_table=False):
         for n, p in self.original_mod.named_parameters():
@@ -121,8 +125,12 @@ class CheckpointedModule(torch.nn.Module):
         # -- solve the chain like rotor --
         start = time.time()
         mmax = self.mem_limit // self.mem_unit - self.rk_chain.cw[0]
-        self.opt_table = solve_dp_functionnal(self.rk_chain, mmax, self.opt_table)
-        self.seq = seq_builder(self.rk_chain, self.mem_limit // self.mem_unit, self.opt_table)
+        self.opt_table = solve_dp_functionnal(
+            self.rk_chain, mmax, self.opt_table
+        )
+        self.seq = seq_builder(
+            self.rk_chain, self.mem_limit // self.mem_unit, self.opt_table
+        )
         end = time.time()
         self.DP_solve_time = end - start
 
@@ -268,6 +276,11 @@ class CheckpointedModule(torch.nn.Module):
         for k, v in dict_inputs.items():
             self.storage.add_val(k, v)
         exec(self.init_code, self.storage.gd, self.storage.ld)
+        for kg in self.list_kg:
+            for t in kg.list_kdn:
+                self.storage.ld[t.main_target] = torch.empty(
+                    0, device=self.device, requires_grad=True
+                )
 
         self.max_mem = []
         self.allo_mem = []

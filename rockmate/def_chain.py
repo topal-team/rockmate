@@ -3,7 +3,8 @@
 # also contains RK_Chain builder -> depends on use_chk.py
 #  based on rotor/algorithms/parameters.py
 # ==========================
-
+from rkgb.utils.global_vars import solver_name
+from rockmate.ILP_MIP import ModelMIP
 from rockmate.ILP_gurobi_solver import ModelGurobi
 import numpy as np
 from rockmate.def_code import RunOp, DelOp, OpSchedule
@@ -15,30 +16,35 @@ import math
 
 
 def get_rk_solution(list_kg, l_bd_abar, budget_all):
-    param_dict = {
-        "LogToConsole": 0,
-        "IntegralityFocus": 1,
-    }
-    gurobi_md = ModelGurobi(
-        list_kg[0],
-        budget_all,
-        # budget_abar,
-        max(l_bd_abar),
-        gcd=10000,
-        gurobi_params=param_dict,
-    )
+
+    if solver_name[0] == "gurobi":
+        param_dict = {
+            "LogToConsole": 0,
+            "IntegralityFocus": 1,
+        }
+        md = ModelGurobi(
+            list_kg[0],
+            budget_all,
+            max(l_bd_abar),
+            gcd=10000,
+            gurobi_params=param_dict,
+        )
+
+    else:
+        md = ModelMIP(list_kg[0], budget_all, max(l_bd_abar), gcd=10000,)
+        md.md.verbose = 0
     list_list_sols = []
     for bd_abar in np.sort(l_bd_abar)[::-1]:
-        gurobi_md.add_abar_constraint(bd_abar)
-        gurobi_md.solve()
+        md.add_abar_constraint(bd_abar)
+        md.solve()
 
-        if not gurobi_md.feasible:
+        if not md.feasible:
             list_list_sols.append(False)
             continue
             # return False
         list_sols = []
         for kg in list_kg:
-            fwd_sched, bwd_sched = gurobi_md.schedule(kg)
+            fwd_sched, bwd_sched = md.schedule(kg)
             list_sols.append(RK_Block_Solution(fwd_sched, bwd_sched))
         list_list_sols.append(list_sols)
     return list_list_sols
