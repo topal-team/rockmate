@@ -27,9 +27,9 @@ class SeqBlockOp(SeqOp):
         self.option = option
 
     def __str__(self):
-        header = f"{self.name} Block {self.index} with {self.option}"
-        return header
-
+        if self.option is None:
+            return f"{self.name}_{self.index}"
+        return f"{self.name}_{self.index}_{self.option}"
 
 class SeqBlockFn(SeqBlockOp):
     def __init__(self, *args):
@@ -58,7 +58,7 @@ class RK_Sequence:
             self.seq = []
 
     def __str__(self):
-        return "\n".join([str(o) for o in self.seq])
+        return ", ".join([str(o) for o in self.seq])
 
     def insert(self, op: SeqOp):
         self.seq.append(op)
