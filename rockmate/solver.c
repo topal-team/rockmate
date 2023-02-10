@@ -594,7 +594,7 @@ RkTable_build_sequence(RkTable* self, PyObject* args) {
   PyObject* sequence[self->chain.ln * self->chain.ln];
   size_t sequence_length = 0;
   
-  if (build_sequence(&self->chain, self->what, memory_limit - self->chain.cw[0],
+  if (build_sequence(&self->chain, self->what, memory_limit,
 		     0, self->chain.ln,
 		     sequence, &sequence_length))
     return NULL;

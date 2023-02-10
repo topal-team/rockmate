@@ -106,7 +106,7 @@ def one_test(ch, target):
     start = time.time()
     result = rs.RkTable(ch, mmax)
     try:
-        cseq = RK_Sequence(result.build_sequence(target))
+        cseq = RK_Sequence(result.build_sequence(mmax))
     except ValueError:
         cseq = None
     c_dur = time.time() - start
@@ -118,7 +118,7 @@ def one_test_conly(ch, target):
     start = time.time()
     result = rs.RkTable(ch, mmax)
     try:
-        cseq = RK_Sequence(result.build_sequence(target))
+        cseq = RK_Sequence(result.build_sequence(mmax))
     except ValueError:
         cseq = None
     c_dur = time.time() - start
