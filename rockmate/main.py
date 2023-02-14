@@ -202,6 +202,15 @@ class CheckpointedModule(torch.nn.Module):
             list_kdn,
         )
 
+        self.op_sched = OpSchedule(
+            self.fwd_op_list + self.bwd_op_list,
+            self.fwd_alive_list + self.bwd_alive_list,
+            self.list_kg[0].input_kdn_data,
+            self.list_kg[0].input_kdn_grad,
+            self.output,
+            list_kdn,
+        )
+
         self.simulation_time = sum(op.time for op in self.fwd_op_list) + sum(
             op.time for op in self.bwd_op_list
         )

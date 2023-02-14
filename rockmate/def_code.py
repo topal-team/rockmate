@@ -116,6 +116,7 @@ class OpSchedule:
         no_grad=False,
     ):
         self.op_list = op_list
+        self.op_name_list = [op.name for op in self.op_list]
         self.alive_list = alive_list
         L = len(op_list)
 
