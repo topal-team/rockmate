@@ -85,7 +85,6 @@ class Compiler:
                             ),
                             x,
                         )
-                    # return x.detach().clone()
                     return (
                         c,
                         x.shape,
@@ -102,37 +101,6 @@ class Compiler:
             if isinstance(x, tuple):
                 return self.storage.ld[x[0]].data.as_strided_(*x[1:4])
 
-                # print(
-                #     x[0], self.storage.ld[x[0]].data.as_strided_(*x[1:]).shape
-                # )
-                # if (
-                #     self.storage.ld[no_save_list[x[0]]].data.as_strided_(*x[1:])
-                #     == None
-                # ):
-                #     print(f"warning: {no_save_list[x[0]]} is None")
-                # with torch.no_grad():
-                #     y = self.storage.ld[x[0]].detach().as_strided_(*x[1:]).clone()
-                # print(y.grad_fn)
-                # return y.detach()
-                # if self.storage.ld[x[0]]
-                # return self.storage.ld[x[0]].as_strided_(*x[1:])
-                # if not torch.equal(
-                #     self.storage.ld[x[0]].data.as_strided_(*x[1:4]), x[4],
-                # ):
-
-                #     print(
-                #         x[0],
-                #         torch.sum(
-                #             abs(
-                #                 self.storage.ld[x[0]].data.as_strided_(*x[1:4])
-                #                 - x[4]
-                #             )
-                #         ),
-                #     )  # .data.as_strided_(*x[1:4]))
-                # print(x[4])
-                # return x[4]
-                # return self.storage.ld[x[0]].data.as_strided_(*x[1:4])
-            # print(x.shape)
             return x
 
         return unpack
@@ -283,6 +251,21 @@ class Compiler:
             else:
                 l.append(self.restore_rng_state(op.name))
 
+        # compile inplace code
+        inplace_code = make_str_list_assign(
+            op.inplace_code, force_special_kwargs=rec
+        )
+        # compile body code
+        body_code = ""
+        for bc in op.body_code:
+            suffix = ""
+            if rec and (bc[0] in op.tensor_targets):
+                suffix = ".data"
+            body_code += (
+                make_str_assign(bc, suffix=suffix, force_special_kwargs=rec)
+                + "\n"
+            )
+
         if not last_before_bwd:
 
             suffix = ".data"
@@ -292,40 +275,31 @@ class Compiler:
                 )
                 + "\n"
             )
-
-            # compile inplace code
-            inplace_code = make_str_list_assign(
-                op.inplace_code, force_special_kwargs=rec
-            )
-            # compile body code
-            body_code = ""
-            for bc in op.body_code:
-                suffix = ""
-                if rec and (bc[0] in op.tensor_targets):
-                    suffix = ".data"
-                body_code += (
-                    make_str_assign(bc, suffix=suffix, force_special_kwargs=rec)
-                    + "\n"
-                )
-            ff_code = main_code + inplace_code + "\n" + body_code
             l.append(
                 self.run_forward_no_grad(
-                    ff_code.replace("self", "original_mod")
+                    main_code.replace("self", "original_mod")
                 )
             )
-            for target in op.tensor_targets:
-                l.append(self.requires_grad(target))
+
+            l.append(
+                self.run_forward_with_grad(
+                                inplace_code + "\n" + body_code
+                .replace("self", "original_mod")
+                )
+            )
+            if op.proxy:
+                for target in op.tensor_targets:
+                    l.append(self.requires_grad(target))
             l.append(self.assign_proxy(op.main_target))
 
         else:
             no_save_list = []
             candidates = list(op.deps_global)  # + list(op.users_global)
             for kdn in candidates:
-                # if (
-                #     f"{kdn.main_target} data"
-                #     in self.op_sched.op_name_list[i:next_bwd_idx]
-                # ):
-                if True:
+                if (
+                    f"{kdn.main_target} data"
+                    in self.op_sched.op_name_list[i:next_bwd_idx]
+                ):
                     no_save_list.append(kdn.main_target)
             # no_save_list = []
 
@@ -339,23 +313,8 @@ class Compiler:
             )
             main_code = main_code.replace(op.main_target, f"_{op.main_target}")
 
-            # compile inplace code
-            inplace_code = make_str_list_assign(
-                op.inplace_code, force_special_kwargs=rec
-            )
             for target in op.tensor_targets:
                 inplace_code = inplace_code.replace(target, "_" + target)
-
-            # compile body code
-            body_code = ""
-            for bc in op.body_code:
-                suffix = ""
-                if rec and (bc[0] in op.tensor_targets):
-                    suffix = ".data"
-                body_code += (
-                    make_str_assign(bc, suffix=suffix, force_special_kwargs=rec)
-                    + "\n"
-                )
 
             l.append(
                 self.run_forward_with_grad(
@@ -384,7 +343,7 @@ class Compiler:
 
     def get_bwd(self, op, i):
         rec = op.name in self.op_sched.op_name_list[:i]
-        last = False  # not (op.name in self.op_sched.op_name_list[i + 1 :])
+        last = not (op.name in self.op_sched.op_name_list[i + 1 :])
         l = []
         l2 = []
 
