@@ -79,17 +79,19 @@ class Compiler:
             for i, c in enumerate(no_save_list):
                 if self.storage.ld[c].data_ptr() == x.data_ptr():
                     if sanity_check:
-                        assert torch.allclose(
+                        assert torch.equal(
                             self.storage.ld[c].data.as_strided_(
                                 x.shape, x.stride(), x.storage_offset()
                             ),
                             x,
                         )
+                    # return x.detach().clone()
                     return (
-                        i,
-                        self.storage.ld[c].shape,
-                        self.storage.ld[c].stride(),
-                        self.storage.ld[c].storage_offset(),
+                        c,
+                        x.shape,
+                        x.stride(),
+                        x.storage_offset(),
+                        # x.clone(),
                     )
             return x
 
@@ -98,14 +100,39 @@ class Compiler:
     def get_unpack(self, no_save_list):
         def unpack(x):
             if isinstance(x, tuple):
-                if (
-                    self.storage.ld[no_save_list[x[0]]].data.as_strided_(*x[1:])
-                    == None
-                ):
-                    print(f"warning: {no_save_list[x[0]]} is None")
-                return self.storage.ld[no_save_list[x[0]]].data.as_strided_(
-                    *x[1:]
-                )
+                return self.storage.ld[x[0]].data.as_strided_(*x[1:4])
+
+                # print(
+                #     x[0], self.storage.ld[x[0]].data.as_strided_(*x[1:]).shape
+                # )
+                # if (
+                #     self.storage.ld[no_save_list[x[0]]].data.as_strided_(*x[1:])
+                #     == None
+                # ):
+                #     print(f"warning: {no_save_list[x[0]]} is None")
+                # with torch.no_grad():
+                #     y = self.storage.ld[x[0]].detach().as_strided_(*x[1:]).clone()
+                # print(y.grad_fn)
+                # return y.detach()
+                # if self.storage.ld[x[0]]
+                # return self.storage.ld[x[0]].as_strided_(*x[1:])
+                # if not torch.equal(
+                #     self.storage.ld[x[0]].data.as_strided_(*x[1:4]), x[4],
+                # ):
+
+                #     print(
+                #         x[0],
+                #         torch.sum(
+                #             abs(
+                #                 self.storage.ld[x[0]].data.as_strided_(*x[1:4])
+                #                 - x[4]
+                #             )
+                #         ),
+                #     )  # .data.as_strided_(*x[1:4]))
+                # print(x[4])
+                # return x[4]
+                # return self.storage.ld[x[0]].data.as_strided_(*x[1:4])
+            # print(x.shape)
             return x
 
         return unpack
@@ -215,7 +242,7 @@ class Compiler:
 
     def del_tensor_base(self, tensor_name):
         def fct():
-            self.storage.ld[tensor_name]._base.data = torch.empty(0)
+            self.storage.ld[f"_{tensor_name}"]._base.data = torch.empty(0)
 
         return fct
 
@@ -239,12 +266,15 @@ class Compiler:
         if "loss" in op.main_target:
             return [self.run_forward_no_grad("")]
         rec = op.name in self.op_sched.op_name_list[:i]
-        next_bwd_idx = i + self.op_sched.op_name_list[i:].index(
-            op.name.replace("fwd", "bwd")
-        )
-        last_before_bwd = not (
-            op.name in self.op_sched.op_name_list[i + 1 : next_bwd_idx]
-        )
+        if not op.proxy:
+            last_before_bwd = False
+        else:
+            next_bwd_idx = i + self.op_sched.op_name_list[i:].index(
+                op.name.replace("fwd", "bwd")
+            )
+            last_before_bwd = not (
+                op.name in self.op_sched.op_name_list[i + 1 : next_bwd_idx]
+            )
         l = []
 
         if op.is_rand:
@@ -254,9 +284,33 @@ class Compiler:
                 l.append(self.restore_rng_state(op.name))
 
         if not last_before_bwd:
+
+            suffix = ".data"
+            main_code = (
+                make_str_assign(
+                    op.main_code, suffix=suffix, force_special_kwargs=rec
+                )
+                + "\n"
+            )
+
+            # compile inplace code
+            inplace_code = make_str_list_assign(
+                op.inplace_code, force_special_kwargs=rec
+            )
+            # compile body code
+            body_code = ""
+            for bc in op.body_code:
+                suffix = ""
+                if rec and (bc[0] in op.tensor_targets):
+                    suffix = ".data"
+                body_code += (
+                    make_str_assign(bc, suffix=suffix, force_special_kwargs=rec)
+                    + "\n"
+                )
+            ff_code = main_code + inplace_code + "\n" + body_code
             l.append(
                 self.run_forward_no_grad(
-                    op.ff_code.replace("self.", "original_mod.")
+                    ff_code.replace("self", "original_mod")
                 )
             )
             for target in op.tensor_targets:
@@ -265,13 +319,15 @@ class Compiler:
 
         else:
             no_save_list = []
-            candidates = list(op.deps_global) + [op.main_target]
-            for tensor_name in candidates:
-                if (
-                    f"del {tensor_name} data"
-                    in self.op_sched.op_name_list[i:next_bwd_idx]
-                ):
-                    no_save_list.append(tensor_name)
+            candidates = list(op.deps_global)  # + list(op.users_global)
+            for kdn in candidates:
+                # if (
+                #     f"{kdn.main_target} data"
+                #     in self.op_sched.op_name_list[i:next_bwd_idx]
+                # ):
+                if True:
+                    no_save_list.append(kdn.main_target)
+            # no_save_list = []
 
             # compile main code
             suffix = ""
@@ -303,19 +359,19 @@ class Compiler:
 
             l.append(
                 self.run_forward_with_grad(
-                    main_code.replace("self.", "original_mod."),
+                    main_code.replace("self", "original_mod"),
                     no_save_list=no_save_list,
                 )
             )
             l.append(
                 self.run_forward_with_grad(
-                    inplace_code.replace("self.", "original_mod."),
+                    inplace_code.replace("self", "original_mod"),
                 )
             )
             l.append(self.run_detach(op.main_target))
             l.append(
                 self.run_forward_with_grad(
-                    body_code.replace("self.", "original_mod.")
+                    body_code.replace("self", "original_mod")
                 )
             )
 
@@ -328,7 +384,7 @@ class Compiler:
 
     def get_bwd(self, op, i):
         rec = op.name in self.op_sched.op_name_list[:i]
-        last = not (op.name in self.op_sched.op_name_list[i + 1 :])
+        last = False  # not (op.name in self.op_sched.op_name_list[i + 1 :])
         l = []
         l2 = []
 
