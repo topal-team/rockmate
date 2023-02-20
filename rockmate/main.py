@@ -52,7 +52,7 @@ class CheckpointedModule(torch.nn.Module):
         verbose=False,
         get_chain=True,
         get_sequence=True,
-        get_code=True,
+        get_compiled_fct=True,
         nb_budget_abar=10,
         nb_budget_all=2,
         ilp_solver="gurobi",
@@ -62,8 +62,6 @@ class CheckpointedModule(torch.nn.Module):
         solver_name[0] = ilp_solver
         self.device = get_device()
         self.original_mod = original_mod
-        # for k,v in original_mod.state_dict().items():
-        #     self.register_parameter(k,v)
         self.mem_unit = mem_unit if mem_unit else 1024 ** 2
         # -- use pytorch graph builder to get the list of K_graphs --
         rkgb_res = rkgb.make_all_graphs(
@@ -78,8 +76,8 @@ class CheckpointedModule(torch.nn.Module):
             self.get_chain(nb_budget_abar, nb_budget_all)
             if get_sequence:
                 self.get_sequence(mem_limit)
-                if get_code:
-                    self.get_code()
+                if get_compiled_fct:
+                    self.get_compiled_fct()
 
     def get_chain(self, nb_budget_abar=10, nb_budget_all=5):
         start = time.time()
@@ -144,13 +142,6 @@ class CheckpointedModule(torch.nn.Module):
             if isinstance(s, SeqBlockBwd):
                 if not enable[s.index - 1]:
                     s.op_sched.del_input()
-                    # s.op_sched.op_list.append(s.op_sched.del_input_op)
-                    # s.op_sched.alive_list.append(s.op_sched.alive_list[-1])
-                    # s.op_sched.alive_list[-1][-1] = 0
-                    # s.op_sched.save = np.append(
-                    #     s.op_sched.save, s.op_sched.save[-1]
-                    # )
-
         self.fwd_seq, self.bwd_seq = self.seq.cut_fwd_bwd()
         self.fwd_op_sched_list = [seq.op_sched for seq in self.fwd_seq.seq]
         self.bwd_op_sched_list = [seq.op_sched for seq in self.bwd_seq.seq]
@@ -220,43 +211,7 @@ class CheckpointedModule(torch.nn.Module):
         self.simulation_overhead = self.simulation_time / sum(
             [kcn.time for kg in self.list_kg for kcn in kg.list_kcn]
         )
-
-    def get_code(self, aggressive=False):
         self.storage = RK_Storage(self.device, self.original_mod)
-        self.get_compiled_fct()
-
-        # self.translator = Translator(self.storage, aggressive=aggressive)
-        # seen = []
-        # fwd_code = []
-        # for seq_block in self.fwd_seq.seq:
-        #     fwd_code.append(
-        #         self.translator.translate(
-        #             seq_block.op_sched,
-        #             True,
-        #             first=(seq_block.index not in seen),
-        #         )
-        #     )
-        #     seen.append(seq_block.index)
-        # bwd_code = []
-        # for seq_block in self.bwd_seq.seq:
-        #     bwd_code.append(
-        #         self.translator.translate(seq_block.op_sched, False, first=True)
-        #     )
-        # self.fwd_code = fwd_code
-        # self.bwd_code = bwd_code
-        # self.full_code = []
-        # self.fwd_compile_code = []
-        # self.bwd_compile_code = []
-        # for code_list in fwd_code:
-        #     self.fwd_compile_code.append(
-        #         compile(ast.parse("\n".join(code_list)), "", "exec")
-        #     )
-        #     self.full_code += code_list
-        # for code_list in bwd_code:
-        #     self.bwd_compile_code.append(
-        #         compile(ast.parse("\n".join(code_list)), "", "exec")
-        #     )
-        #     self.full_code += code_list
 
     def get_compiled_fct(self):
         self.compiler = Compiler(self.storage)
@@ -265,39 +220,27 @@ class CheckpointedModule(torch.nn.Module):
         self.fwd_fct_list = self.fct_list[:loss_idx]
         self.bwd_fct_list = self.fct_list[loss_idx:]
 
-    def _exec(self, code_list, record_mem=False, compiled=False):
+    def _exec(self, fct_list, record_mem=False, compiled=False):
         if not compiled:
             warnings.warn("Translator is no longer used!")
         if record_mem:
             torch.cuda.reset_peak_memory_stats()
             self.mem_before = torch.cuda.memory_allocated()
             self.max_before = torch.cuda.max_memory_allocated()
-            for code in code_list:
-
-                try:
-                    if compiled:
-                        code()
-                    # else:
-                    #     exec(code, self.storage.gd, self.storage.ld)
-                except Exception as e:
-                    print(f"Failed to execute code:\n {code}")
-                    raise (e)
+            for fct in fct_list:
+                fct()
             allo_mem = torch.cuda.memory_allocated() - self.mem_before
             peak_mem = torch.cuda.max_memory_allocated() - self.max_before
             self.max_mem.append(peak_mem - allo_mem)
             self.allo_mem.append(allo_mem)
         else:
-            if compiled:
-                for code in code_list:
-                    code()
-            # else:
-            #     exec("\n".join(code_list), self.storage.gd, self.storage.ld)
+            for fct in fct_list:
+                fct()
 
     def forward(self, *args, record_mem=False, compiled=True, **kwargs):
         if not self.training:
             self.original_mod.eval()
             return self.original_mod(*args, **kwargs)
-        # self.storage.add_val("src", input)  #  hardcoded
         dict_inputs = make_inputs(self.original_mod, args, kwargs)
         for k, v in dict_inputs.items():
             self.storage.add_val(k, v)
@@ -312,31 +255,7 @@ class CheckpointedModule(torch.nn.Module):
         if compiled:
             for l in self.fwd_fct_list:
                 self._exec(l, record_mem, compiled=compiled)
-                # for f in l:
-                #     f()
             return self.storage.get_val(self.output.main_target)
-
-        # for i, seq in enumerate(self.fwd_seq.seq):
-        #     if seq.op_sched.no_grad:
-        #         with torch.no_grad():
-        #             if compiled:
-        #                 exec(
-        #                     self.fwd_compile_code[i],
-        #                     self.storage.gd,
-        #                     self.storage.ld,
-        #                 )
-        #             else:
-        #                 self._exec(self.fwd_code[i], record_mem)
-        #     else:
-        #         with torch.enable_grad():
-        #             if compiled:
-        #                 exec(
-        #                     self.fwd_compile_code[i],
-        #                     self.storage.gd,
-        #                     self.storage.ld,
-        #                 )
-        #             else:
-        #                 self._exec(self.fwd_code[i], record_mem)
 
         return self.storage.get_val(self.output.main_target)
 
@@ -351,29 +270,7 @@ class CheckpointedModule(torch.nn.Module):
         if compiled:
             for l in self.bwd_fct_list:
                 self._exec(l, record_mem, compiled=compiled)
-                # for f in l:
-                #     f()
-        # for i, seq in enumerate(self.bwd_seq.seq):
-        #     if seq.op_sched.no_grad:
-        #         with torch.no_grad():
-        #             if compiled:
-        #                 exec(
-        #                     self.bwd_compile_code[i],
-        #                     self.storage.gd,
-        #                     self.storage.ld,
-        #                 )
-        #             else:
-        #                 self._exec(self.bwd_code[i], record_mem)
-        #     else:
-        #         with torch.enable_grad():
-        #             if compiled:
-        #                 exec(
-        #                     self.bwd_compile_code[i],
-        #                     self.storage.gd,
-        #                     self.storage.ld,
-        #                 )
-        #             else:
-        #                 self._exec(self.bwd_code[i], record_mem)
+
         if record_mem and add_output_grad:
             self.allo_mem[loss_idx] += self.output_size
 

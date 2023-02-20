@@ -100,7 +100,7 @@ def fct_run_detach(storage, tensor_name):
 
 def fct_assign_proxy(storage, tensor_name):
     def fct():
-        storage.ld[f"_{tensor_name}"] = storage.ld[tensor_name].data
+        storage.ld[f"_{tensor_name}"] = storage.ld[tensor_name]
 
     return fct
 
@@ -277,32 +277,67 @@ class Compiler:
             )
 
         if not last_before_bwd:
-
-            suffix = ".data"
+            # compile main code
+            suffix = ""
             main_code = (
                 make_str_assign(
                     op.main_code, suffix=suffix, force_special_kwargs=rec
                 )
                 + "\n"
             )
+            main_code = main_code.replace(op.main_target, f"_{op.main_target}")
+            inplace_code = inplace_code.replace(
+                op.main_target, f"_{op.main_target}"
+            )
+            # body_code = body_code.replace(op.main_target, f"_{op.main_target}")
+
+            # for target in op.tensor_targets:
+            #     inplace_code = inplace_code.replace(target, "_" + target)
+
             l.append(
                 fct_run_forward_no_grad(
-                    self.storage, main_code.replace("self", "original_mod")
+                    self.storage, main_code.replace("self", "original_mod"),
                 )
             )
+            l.append(
+                fct_run_forward_with_grad(
+                    self.storage, inplace_code.replace("self", "original_mod"),
+                )
+            )
+            l.append(fct_run_detach(self.storage, op.main_target))
+            # l.append(fct_assign_proxy(self.storage, op.main_target))
 
             l.append(
                 fct_run_forward_with_grad(
-                    self.storage,
-                    inplace_code
-                    + "\n"
-                    + body_code.replace("self", "original_mod"),
+                    self.storage, body_code.replace("self", "original_mod")
                 )
             )
-            if op.proxy:
-                for target in op.tensor_targets:
-                    l.append(fct_requires_grad(self.storage, target))
-            l.append(fct_assign_proxy(self.storage, op.main_target))
+
+            # suffix = ".data"
+            # main_code = (
+            #     make_str_assign(
+            #         op.main_code, suffix=suffix, force_special_kwargs=rec
+            #     )
+            #     + "\n"
+            # )
+            # l.append(
+            #     fct_run_forward_no_grad(
+            #         self.storage, main_code.replace("self", "original_mod")
+            #     )
+            # )
+
+            # l.append(
+            #     fct_run_forward_with_grad(
+            #         self.storage,
+            #         inplace_code.replace("self", "original_mod")
+            #         + "\n"
+            #         + body_code.replace("self", "original_mod"),
+            #     )
+            # )
+            # if op.proxy:
+            #     for target in op.tensor_targets:
+            #         l.append(fct_requires_grad(self.storage, target))
+            # l.append(fct_assign_proxy(self.storage, op.main_target))
 
         else:
             no_save_list = []
@@ -377,10 +412,7 @@ class Compiler:
             prev_i = i - self.op_sched.op_name_list[:i][::-1].index(op.name) - 1
             input_names = []
             for kdn_name in op.users_global:
-                if (
-                    f"del {kdn_name}"
-                    in self.op_sched.op_name_list[prev_i:i]
-                ):
+                if f"del {kdn_name}" in self.op_sched.op_name_list[prev_i:i]:
                     input_names.append(kdn_name.split(" ")[0])
             l.append(
                 fct_run_backward_with_inputs(
@@ -402,7 +434,7 @@ class Compiler:
     def get_del_data(self, op, i):
         l = []
         l.append(fct_del_tensor_data(self.storage, op.main_target))
-        if op.proxy:
+        if op.info is not None and op.info.requires_grad:
             l.append(fct_del_tensor_data(self.storage, f"_{op.main_target}"))
         if op.includes_base:
             l.append(fct_del_tensor_base(self.storage, op.main_target))
@@ -410,6 +442,8 @@ class Compiler:
             l.append(fct_del_tensor_data(self.storage, v))
         for v in op.container_targets:
             l.append(fct_del_var(self.storage, v))
+        # l.append(fct_del_var(self.storage, f"_{op.main_target}"))
+
         return l
 
     def get_del_grad(self, op, i):

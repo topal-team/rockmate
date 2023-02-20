@@ -163,8 +163,8 @@ class OpSchedule:
                 if "bwd" in op.name:
                     self.is_fwd = False
                     # rotor assumes the space for input data but not input grad
-                    for kdn in op.users_global:
-                        if not input_grad and self.input_size[0] in kdn.name:
+                    for kdn_name in op.users_global:
+                        if not input_grad and self.input_size[0] in kdn_name:
                             self.tmp[i:] += self.input_size[1]
                             input_grad = True
 
@@ -187,9 +187,9 @@ class OpSchedule:
         This method is to find the idx where input is no longer needed.
         Should only used for Fn
         """
-        input_kdn = kg.input_kdn_data
+        input_kdn_name = kg.input_kdn_data.name
         for i, op in enumerate(self.op_list):
-            if isinstance(op, RunOp) and input_kdn in op.deps_global:
+            if isinstance(op, RunOp) and input_kdn_name in op.deps_global:
                 self.del_input_idx = i + 1
 
     def del_input(self):
@@ -208,21 +208,21 @@ class OpSchedule:
         # self.overhead = max(self.save + self.tmp) - self.save[-1]
 
 
-class RK_Function:
-    def __init__(self, code_fe, code_fn, code_fc, code_bwd):
-        self.code_fe = code_fe
-        self.code_fn = code_fn
-        self.code_fc = code_fc
-        self.code_bwd = code_bwd
+# class RK_Function:
+#     def __init__(self, code_fe, code_fn, code_fc, code_bwd):
+#         self.code_fe = code_fe
+#         self.code_fn = code_fn
+#         self.code_fc = code_fc
+#         self.code_bwd = code_bwd
 
-    def exec_fe(self, storage: RK_Storage):
-        self.code_fe.exec(storage)
+#     def exec_fe(self, storage: RK_Storage):
+#         self.code_fe.exec(storage)
 
-    def exec_fn(self, storage: RK_Storage):
-        self.code_fn.exec(storage)
+#     def exec_fn(self, storage: RK_Storage):
+#         self.code_fn.exec(storage)
 
-    def exec_fc(self, storage: RK_Storage):
-        self.code_fc.exec(storage)
+#     def exec_fc(self, storage: RK_Storage):
+#         self.code_fc.exec(storage)
 
-    def exec_bwd(self, storage: RK_Storage):
-        self.code_bwd.exec(storage)
+#     def exec_bwd(self, storage: RK_Storage):
+#         self.code_bwd.exec(storage)
