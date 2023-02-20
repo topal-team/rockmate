@@ -37,7 +37,7 @@ class RK_Storage:
 
 
 class RunOp:
-    def __init__(self, kcn, keep_kcn=True):
+    def __init__(self, kcn, keep_kcn=False):
         self.name = kcn.name
         self.time = kcn.time
         self.overhead = kcn.overhead.v
@@ -48,13 +48,14 @@ class RunOp:
         self.body_code = kcn.body_code
         self.inplace_code = kcn.inplace_code
         self.ff_code = kcn.get_code(force_special_kwargs=True)
-        # self.deps_fake = [kdn.name for kdn in kcn.deps_fake]
-        # self.deps_global = [kdn.name for kdn in kcn.deps_global]
-        self.deps_global = kcn.deps_global
-        self.deps_fake = kcn.deps_fake
-        self.users_global = kcn.users_global
-        self.alias_in_users_phantoms = kcn.alias_in_users_phantoms
-        self.phantom_names = kcn.phantom_names
+        self.deps_fake = [kdn.name for kdn in kcn.deps_fake]
+        self.deps_global = [kdn.name for kdn in kcn.deps_global]
+        self.users_global = [kdn.name for kdn in kcn.users_global]
+        # self.deps_global = kcn.deps_global
+        # self.deps_fake = kcn.deps_fake
+        # self.users_global = kcn.users_global
+        # self.alias_in_users_phantoms = kcn.alias_in_users_phantoms
+        # self.phantom_names = kcn.phantom_names
         if keep_kcn:
             self.kcn = kcn
         self.is_fgt = False
@@ -68,7 +69,7 @@ class RunOp:
         self.is_rand = kcn.is_rand
 
     def __eq__(self, op2):
-        return check_attr(self, op2, ["name", "kcn"])
+        return check_attr(self, op2, ["name"])
 
     def __str__(self):
         return f"Run {self.name}"
@@ -95,7 +96,7 @@ class DelOp:
         self.proxy = proxy
         self.includes_phantoms = kdn.includes_phantoms
         self.includes_base = kdn.includes_base
-        self.alias_in_users_phantoms = kdn.alias_in_users_phantoms
+        # self.alias_in_users_phantoms = kdn.alias_in_users_phantoms
 
     def __eq__(self, op2):
         return check_attr(self, op2, ["name"])

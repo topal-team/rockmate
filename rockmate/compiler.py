@@ -307,12 +307,9 @@ class Compiler:
         else:
             no_save_list = []
             candidates = list(op.deps_global) + list(op.users_global)
-            for kdn in candidates:
-                if (
-                    f"{kdn.main_target} data"
-                    in self.op_sched.op_name_list[i:next_bwd_idx]
-                ):
-                    no_save_list.append(kdn.main_target)
+            for kdn_name in candidates:
+                if kdn_name in self.op_sched.op_name_list[i:next_bwd_idx]:
+                    no_save_list.append(kdn_name.split(" ")[0])
             # no_save_list = []
 
             # compile main code
@@ -367,9 +364,9 @@ class Compiler:
                 l.append(fct_restore_rng_state(self.storage, op.name))
 
         temporary_tensor_names = [
-            kdn.main_target
-            for kdn in op.deps_fake
-            if not self._is_alive(kdn.name, i)
+            kdn_name.split(" ")[0]
+            for kdn_name in op.deps_fake
+            if not self._is_alive(kdn_name, i)
         ]
         if op.main_target in temporary_tensor_names:
             temporary_tensor_names.append(f"_{op.main_target}")
@@ -379,12 +376,12 @@ class Compiler:
         if rec:
             prev_i = i - self.op_sched.op_name_list[:i][::-1].index(op.name) - 1
             input_names = []
-            for kdn in op.users_global:
+            for kdn_name in op.users_global:
                 if (
-                    f"del {kdn.main_target} data"
+                    f"del {kdn_name}"
                     in self.op_sched.op_name_list[prev_i:i]
                 ):
-                    input_names.append(kdn.main_target)
+                    input_names.append(kdn_name.split(" ")[0])
             l.append(
                 fct_run_backward_with_inputs(
                     self.storage,

@@ -223,43 +223,40 @@ class CheckpointedModule(torch.nn.Module):
 
     def get_code(self, aggressive=False):
         self.storage = RK_Storage(self.device, self.original_mod)
-        self.storage.gd["rng_state"] = RngState()
-        self.storage.gd["shapes"] = {}
-        self.storage.gd["metensor"] = torch.ones(1, device=self.device)
-
-        self.translator = Translator(self.storage, aggressive=aggressive)
-        seen = []
-        fwd_code = []
-        for seq_block in self.fwd_seq.seq:
-            fwd_code.append(
-                self.translator.translate(
-                    seq_block.op_sched,
-                    True,
-                    first=(seq_block.index not in seen),
-                )
-            )
-            seen.append(seq_block.index)
-        bwd_code = []
-        for seq_block in self.bwd_seq.seq:
-            bwd_code.append(
-                self.translator.translate(seq_block.op_sched, False, first=True)
-            )
-        self.fwd_code = fwd_code
-        self.bwd_code = bwd_code
-        self.full_code = []
-        self.fwd_compile_code = []
-        self.bwd_compile_code = []
-        for code_list in fwd_code:
-            self.fwd_compile_code.append(
-                compile(ast.parse("\n".join(code_list)), "", "exec")
-            )
-            self.full_code += code_list
-        for code_list in bwd_code:
-            self.bwd_compile_code.append(
-                compile(ast.parse("\n".join(code_list)), "", "exec")
-            )
-            self.full_code += code_list
         self.get_compiled_fct()
+
+        # self.translator = Translator(self.storage, aggressive=aggressive)
+        # seen = []
+        # fwd_code = []
+        # for seq_block in self.fwd_seq.seq:
+        #     fwd_code.append(
+        #         self.translator.translate(
+        #             seq_block.op_sched,
+        #             True,
+        #             first=(seq_block.index not in seen),
+        #         )
+        #     )
+        #     seen.append(seq_block.index)
+        # bwd_code = []
+        # for seq_block in self.bwd_seq.seq:
+        #     bwd_code.append(
+        #         self.translator.translate(seq_block.op_sched, False, first=True)
+        #     )
+        # self.fwd_code = fwd_code
+        # self.bwd_code = bwd_code
+        # self.full_code = []
+        # self.fwd_compile_code = []
+        # self.bwd_compile_code = []
+        # for code_list in fwd_code:
+        #     self.fwd_compile_code.append(
+        #         compile(ast.parse("\n".join(code_list)), "", "exec")
+        #     )
+        #     self.full_code += code_list
+        # for code_list in bwd_code:
+        #     self.bwd_compile_code.append(
+        #         compile(ast.parse("\n".join(code_list)), "", "exec")
+        #     )
+        #     self.full_code += code_list
 
     def get_compiled_fct(self):
         self.compiler = Compiler(self.storage)
@@ -269,6 +266,8 @@ class CheckpointedModule(torch.nn.Module):
         self.bwd_fct_list = self.fct_list[loss_idx:]
 
     def _exec(self, code_list, record_mem=False, compiled=False):
+        if not compiled:
+            warnings.warn("Translator is no longer used!")
         if record_mem:
             torch.cuda.reset_peak_memory_stats()
             self.mem_before = torch.cuda.memory_allocated()
@@ -278,8 +277,8 @@ class CheckpointedModule(torch.nn.Module):
                 try:
                     if compiled:
                         code()
-                    else:
-                        exec(code, self.storage.gd, self.storage.ld)
+                    # else:
+                    #     exec(code, self.storage.gd, self.storage.ld)
                 except Exception as e:
                     print(f"Failed to execute code:\n {code}")
                     raise (e)
@@ -291,8 +290,8 @@ class CheckpointedModule(torch.nn.Module):
             if compiled:
                 for code in code_list:
                     code()
-            else:
-                exec("\n".join(code_list), self.storage.gd, self.storage.ld)
+            # else:
+            #     exec("\n".join(code_list), self.storage.gd, self.storage.ld)
 
     def forward(self, *args, record_mem=False, compiled=True, **kwargs):
         if not self.training:
