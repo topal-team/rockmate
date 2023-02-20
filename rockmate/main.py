@@ -8,7 +8,7 @@ from rkgb.utils import print_debug, np, irotor
 from rkgb.utils.global_vars import ref_verbose, solver_name
 from rkgb.utils.small_fcts import get_device
 from rkgb.utils.ast_add_on import ast_to_str
-from rockmate.def_code import RK_Storage, DelOp, OpSchedule
+from rockmate.def_code import DelOp, OpSchedule
 from rockmate.def_chain import RK_Chain
 from rockmate.def_sequence import (
     SeqBlockBwd,
@@ -54,7 +54,7 @@ class CheckpointedModule(torch.nn.Module):
         get_sequence=True,
         get_code=True,
         nb_budget_abar=10,
-        nb_budget_all=5,
+        nb_budget_all=2,
         ilp_solver="gurobi",
     ):
         super().__init__()
@@ -66,10 +66,11 @@ class CheckpointedModule(torch.nn.Module):
         #     self.register_parameter(k,v)
         self.mem_unit = mem_unit if mem_unit else 1024 ** 2
         # -- use pytorch graph builder to get the list of K_graphs --
-        self.rkgb_res = rkgb.make_all_graphs(
+        rkgb_res = rkgb.make_all_graphs(
             original_mod, dict_inputs, verbose=verbose, bool_kg=False
         )  # we don't need the whole K_graph
-        self.list_kg = self.rkgb_res.K_graph_list
+        self.list_kg = rkgb_res.K_graph_list
+        self.eq_classes = rkgb_res.equivalent_classes
         self.init_code = ast_to_str(self.list_kg[0].init_code)
         self.output = self.list_kg[-1].output_kdn_data
         self.mem_limit = mem_limit
@@ -85,7 +86,7 @@ class CheckpointedModule(torch.nn.Module):
         #  -- use checkmate to solve all the blocks --
         self.rk_chain = RK_Chain(
             self.list_kg,
-            self.rkgb_res.equivalent_classes,
+            self.eq_classes,
             nb_budget_abar,
             nb_budget_all,
             mem_unit=self.mem_unit,
@@ -261,7 +262,7 @@ class CheckpointedModule(torch.nn.Module):
         self.get_compiled_fct()
 
     def get_compiled_fct(self):
-        self.compiler = Compiler(self.storage, RngState())
+        self.compiler = Compiler(self.storage)
         self.fct_list = self.compiler.compile(self.op_sched)
         loss_idx = len(self.fwd_op_list)
         self.fwd_fct_list = self.fct_list[:loss_idx]
