@@ -59,7 +59,7 @@ class S_node():
             u = unique_id_generator[0]
             self.unique_id = u
             unique_id_generator[0] = u+1
-    def __eq__(self,sn2,raise_exception=False):
+    def __eq__(self,sn2,force_order=False,raise_exception=False):
         sn1 = self
         try:
             b = small_fcts.check_attr(sn1,sn2,[
@@ -232,14 +232,22 @@ class S_graph():
             self.dict_rand      = dg.dict_rand
         self.unique_id_generator = unique_id_generator
         # -> to generate S_node.__hash__
-    def __eq__(self,sg2,raise_exception=False):
-        return small_fcts.check_attr(self,sg2,[
-            # "direct_inputs","hidden_inputs", 
-            # Intentionally not included -> its not because their previous
-            # blocks are different that sg1 and sg2 aren't equivalent
+    def __eq__(self,sg2,force_order=False,raise_exception=False):
+        sg1 = self
+        return small_fcts.check_attr(sg1,sg2,[
+            # "direct_inputs","hidden_inputs",
+            # sg1 and sg2 equality shouldn't depend on their 
+            # previous block equality
             "direct_outputs","hidden_output","dict_info","nodes"],
             raise_exception=raise_exception)
-
+        mt = lambda l : [sn.main_target for sn in l]
+        b *= (mt(sg1.nodes) == mt(sg2.nodes))
+        if raise_exception and not b:
+            raise Exception("S_graphs' differ on nodes order or length")
+        if b:
+            for sn1,sn2 in zip(sg1.nodes,sg2.nodes):
+                b *= sn1.__eq__(sn2,force_order,raise_exception)
+        return b
     def __hash__(self):
         return id(self)
 

@@ -25,19 +25,22 @@ class D_node(B_node):
         self.users = set()
         self.protected = False
         self.num = shared_methods.get_num(self)
-    def __eq__(self,dn2):
+    def __eq__(self,dn2,force_order=False,raise_exception=False):
         dn1 = self
         b = small_fcts.check_attr(dn1,dn2,
-            ["protected","target","fct","is_rand","deps_rand"])
+            ["protected","target","fct","is_rand","deps_rand"],
+            raise_exception=raise_exception)
         mkstr = lambda nl : [rn.target for rn in nl]
+        s = shared_methods.sort_nodes if force_order else (lambda s : s)
         b = (b
-            and (mkstr(dn1.deps) == mkstr (dn2.deps))
-            and (mkstr(dn1.users) == mkstr (dn2.users))
+            and (mkstr(s(dn1.deps)) == mkstr(s(dn2.deps)))
+            and (mkstr(s(dn1.users)) == mkstr(s(dn2.users)))
             and (dn1.get_code() == dn2.get_code()))
         return b
     def __hash__(self):
-        return self.num
-        #return id(self) # __eq__ => need __hash__
+        if hasattr(self,"num"): return self.num
+        else: return id(self)
+        # __eq__ => need __hash__
 
 class D_graph():
     def __init__(self):
@@ -47,9 +50,19 @@ class D_graph():
         self.output_node = None # D_node
         self.dict_rand = {}
         self.dict_info = {} # target -> FWD_info
-    def __eq__(self,g2):
-        return small_fcts.check_attr(self,g2,
-            ["inputs","output","dict_info","nodes"])
+    def __eq__(self,g2,force_order=False,raise_exception=False):
+        g1 = self
+        b = small_fcts.check_attr(g1,g2,
+            ["inputs","output","dict_info"],
+            raise_exception=raise_exception)
+        mt = lambda l : [dn.target for dn in l]
+        b *= (mt(g1.nodes) == mt(g2.nodes))
+        if raise_exception and not b:
+            raise Exception("D_graphs' differ on nodes order or length")
+        if b:
+            for dn1,dn2 in zip(g1.nodes,g2.nodes):
+                b *= dn1.__eq__(dn2,force_order,raise_exception)
+        return b
     def __hash__(self):
         return id(self)
 

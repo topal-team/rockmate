@@ -77,8 +77,8 @@ class K_C_node():
                 ["name","main_target","is_fwd",
                 "all_targets","container_targets",
                 "tensor_targets","inplace_targets",
-                "is_rand","overhead","phantom_names",
-                "alias_in_users_phantoms"],
+                "is_rand","overhead",],#"phantom_names",
+                #"alias_in_users_phantoms"],
                 raise_exception=raise_exception)
             and kcn1.full_code() == kcn2.full_code())
             if not b and raise_exception: raise Exception(
@@ -168,6 +168,7 @@ class K_D_node():
         else:
             u = unique_id_generator[0]
             self.unique_id = u
+            unique_id_generator[0] = u+1
 
         # ** deps/used_by **
         self.users_real   = set() # KCN set
@@ -190,8 +191,8 @@ class K_D_node():
                 "all_targets","container_targets",
                 "tensor_targets","inplace_targets",
                 "includes_phantoms",
-                "includes_base",
-                "alias_in_users_phantoms"],
+                "includes_base"],
+                #"alias_in_users_phantoms"],
                 raise_exception=raise_exception)
             # ** deps/users **
             mt = lambda nl : [rn.main_target for rn in nl]
@@ -212,6 +213,7 @@ class K_D_node():
     def __hash__(self):
         if hasattr(self,"unique_id"): return self.unique_id
         else: return id(self)
+    """ USELESS
     def clean_hash_in_sets(self):
         for attr in ["users_real","users_fake",
             "deps","users_global","deps_global"]:
@@ -220,6 +222,7 @@ class K_D_node():
             for x in s1:
                 s2.add(x)
             setattr(self,attr,s2)
+    """
 
 
 # ***********
