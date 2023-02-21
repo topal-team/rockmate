@@ -1,6 +1,6 @@
 from rkgb.utils.ast_add_on import make_str_assign, make_str_list_assign
 from rkgb.utils import np, torch
-from rockmate.def_code import DelOp
+from rockmate.def_op import DelOp
 
 
 class RngState:

@@ -3,7 +3,8 @@
 # based on rotor/algorithms/sequence.py
 # ==========================
 
-from rockmate.def_code import OpSchedule
+from rockmate.def_op import OpSchedule
+
 ref_print_atoms = [True]
 
 # ==========================
@@ -19,6 +20,7 @@ class SeqAtomOp:
     def __str__(self):
         return self.name
 
+
 # ==========================
 
 
@@ -28,6 +30,7 @@ class SeqAtomOp:
 class SeqOp:
     pass
 
+
 class SeqLoss(SeqOp):
     def __init__(self):
         self.time = 0
@@ -35,6 +38,7 @@ class SeqLoss(SeqOp):
 
     def __str__(self):
         return "Loss"
+
 
 # ** Seq Block Op **
 # -> Subclasses : Fn,Fc,Fe,Bwd
@@ -83,6 +87,7 @@ class SeqBlockBwd(SeqBlockOp):
 # ======== Sequence ========
 # ==========================
 
+
 class RK_Sequence:
     def __init__(self, l=None):
         if l:
@@ -111,5 +116,6 @@ class RK_Sequence:
                     RK_Sequence(list(self.seq[(i + 1) :])),
                 )
         raise Exception("Can't cut a Sequence which doesn't have SeqLoss")
+
 
 # ==========================

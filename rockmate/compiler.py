@@ -1,6 +1,6 @@
 from rkgb.utils.ast_add_on import make_str_assign, make_str_list_assign
 from rkgb.utils import np, torch
-from rockmate.def_code import DelOp
+from rockmate.def_op import DelOp
 
 # region Define Register Hooks
 def fct_get_pack(storage, no_save_list, sanity_check=False):
@@ -276,86 +276,32 @@ class Compiler:
                 + "\n"
             )
 
-        if not last_before_bwd:
-            # compile main code
-            suffix = ""
-            main_code = (
-                make_str_assign(
-                    op.main_code, suffix=suffix, force_special_kwargs=rec
-                )
-                + "\n"
+        # compile main code
+        suffix = ""
+        main_code = (
+            make_str_assign(
+                op.main_code, suffix=suffix, force_special_kwargs=rec
             )
-            main_code = main_code.replace(op.main_target, f"_{op.main_target}")
+            + "\n"
+        )
+        main_code = main_code.replace(op.main_target, f"_{op.main_target}")
+
+        if not last_before_bwd:
+
             inplace_code = inplace_code.replace(
                 op.main_target, f"_{op.main_target}"
             )
-            # body_code = body_code.replace(op.main_target, f"_{op.main_target}")
-
-            # for target in op.tensor_targets:
-            #     inplace_code = inplace_code.replace(target, "_" + target)
-
             l.append(
                 fct_run_forward_no_grad(
                     self.storage, main_code.replace("self", "original_mod"),
                 )
             )
-            l.append(
-                fct_run_forward_with_grad(
-                    self.storage, inplace_code.replace("self", "original_mod"),
-                )
-            )
-            l.append(fct_run_detach(self.storage, op.main_target))
-            # l.append(fct_assign_proxy(self.storage, op.main_target))
-
-            l.append(
-                fct_run_forward_with_grad(
-                    self.storage, body_code.replace("self", "original_mod")
-                )
-            )
-
-            # suffix = ".data"
-            # main_code = (
-            #     make_str_assign(
-            #         op.main_code, suffix=suffix, force_special_kwargs=rec
-            #     )
-            #     + "\n"
-            # )
-            # l.append(
-            #     fct_run_forward_no_grad(
-            #         self.storage, main_code.replace("self", "original_mod")
-            #     )
-            # )
-
-            # l.append(
-            #     fct_run_forward_with_grad(
-            #         self.storage,
-            #         inplace_code.replace("self", "original_mod")
-            #         + "\n"
-            #         + body_code.replace("self", "original_mod"),
-            #     )
-            # )
-            # if op.proxy:
-            #     for target in op.tensor_targets:
-            #         l.append(fct_requires_grad(self.storage, target))
-            # l.append(fct_assign_proxy(self.storage, op.main_target))
-
         else:
             no_save_list = []
             candidates = list(op.deps_global) + list(op.users_global)
             for kdn_name in candidates:
                 if kdn_name in self.op_sched.op_name_list[i:next_bwd_idx]:
                     no_save_list.append(kdn_name.split(" ")[0])
-            # no_save_list = []
-
-            # compile main code
-            suffix = ""
-            main_code = (
-                make_str_assign(
-                    op.main_code, suffix=suffix, force_special_kwargs=rec
-                )
-                + "\n"
-            )
-            main_code = main_code.replace(op.main_target, f"_{op.main_target}")
 
             for target in op.tensor_targets:
                 inplace_code = inplace_code.replace(target, "_" + target)
@@ -367,17 +313,17 @@ class Compiler:
                     no_save_list=no_save_list,
                 )
             )
-            l.append(
-                fct_run_forward_with_grad(
-                    self.storage, inplace_code.replace("self", "original_mod"),
-                )
+        l.append(
+            fct_run_forward_with_grad(
+                self.storage, inplace_code.replace("self", "original_mod"),
             )
-            l.append(fct_run_detach(self.storage, op.main_target))
-            l.append(
-                fct_run_forward_with_grad(
-                    self.storage, body_code.replace("self", "original_mod")
-                )
+        )
+        l.append(fct_run_detach(self.storage, op.main_target))
+        l.append(
+            fct_run_forward_with_grad(
+                self.storage, body_code.replace("self", "original_mod")
             )
+        )
 
         # get the shape of tensors
         if not rec:

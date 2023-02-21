@@ -7,7 +7,7 @@ from rkgb.utils.global_vars import solver_name
 from rockmate.ILP_MIP import ModelMIP
 from rockmate.ILP_gurobi_solver import ModelGurobi
 import numpy as np
-from rockmate.def_code import RunOp, DelOp, OpSchedule
+from rockmate.def_op import RunOp, DelOp, OpSchedule
 import math
 
 # ==========================

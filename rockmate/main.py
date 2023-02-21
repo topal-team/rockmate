@@ -8,7 +8,7 @@ from rkgb.utils import print_debug, np, irotor
 from rkgb.utils.global_vars import ref_verbose, solver_name
 from rkgb.utils.small_fcts import get_device
 from rkgb.utils.ast_add_on import ast_to_str
-from rockmate.def_code import DelOp, OpSchedule
+from rockmate.def_op import DelOp, OpSchedule
 from rockmate.def_chain import RK_Chain
 from rockmate.def_sequence import (
     SeqBlockBwd,

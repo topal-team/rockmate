@@ -2,7 +2,7 @@
 # import math
 from typing import Dict, Any
 import numpy as np
-from rockmate.def_code import RunOp, DelOp, OpSchedule
+from rockmate.def_op import RunOp, DelOp, OpSchedule
 from mip import Model, xsum, maximize, BINARY, minimize, OptimizationStatus
 from rkgb.utils.global_vars import solver_name
 
@@ -39,7 +39,9 @@ class ModelMIP:
         T = len(self.kg.list_kcn)
         I = len(self.kg.list_kdn)
 
-        self.md = Model(f"rockmateMILP_{T}_{budget}", solver_name=solver_name[0])
+        self.md = Model(
+            f"rockmateMILP_{T}_{budget}", solver_name=solver_name[0]
+        )
         if gurobi_params is not None:
             for k, v in gurobi_params.items():
                 setattr(self.md.Params, k, v)

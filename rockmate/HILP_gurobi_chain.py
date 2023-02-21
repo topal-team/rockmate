@@ -3,7 +3,7 @@
 from typing import Dict, Any
 import numpy as np
 from gurobipy import GRB, Model, quicksum
-from rockmate.def_code import RunOp, DelOp, OpSchedule
+from rockmate.def_op import RunOp, DelOp, OpSchedule
 
 
 class ModelGurobi:

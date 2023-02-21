@@ -7,34 +7,6 @@ from rkgb.utils.small_fcts import check_attr
 import numpy as np
 import torch
 
-# ==========================
-# ===== CODE EXECUTOR ======
-# ==========================
-#  -> TODO RK_Storage should help to handle random states
-class RK_Storage:
-    def __init__(self, device, nn_mod):
-        self.gd = {
-            **globals(),
-            "self": nn_mod,
-            "device": device,
-            "torch": torch,
-            "tensor": torch.tensor,
-            "np": np,
-        }
-        self.ld = dict()
-
-    def add_val(self, val, x):
-        self.ld[val] = x
-
-    def get_val(self, val):
-        try:
-            return self.ld[val]
-        except:
-            try:
-                return self.gd[val]
-            except:
-                raise Exception(f"{val} not in the storage")
-
 
 class RunOp:
     def __init__(self, kcn, keep_kcn=False):
