@@ -1,6 +1,13 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+static inline int
+imax(int a, int b) {
+  if (a > b)
+    return a;
+  return b;
+}
+
 /**** Conversion from Python to C ******/
 
 long* PySequenceToLongArray(PyObject* pylist) {
@@ -292,7 +299,7 @@ compute_table(rk_chain* chain, int mmax)
       // Keep chain->cw[b+1] out of the max
       int mmin = chain->cw[a+1] + chain->ff_fwd_tmp[a];
       for (int j = a+1; j < b; ++j) {
-	mmin = fmax(mmin, chain->cw[j] + chain->cw[j+1] + chain->ff_fwd_tmp[j]);
+	mmin = imax(mmin, chain->cw[j] + chain->cw[j+1] + chain->ff_fwd_tmp[j]);
       }
       mmin += chain->cw[b+1];
 
@@ -352,54 +359,68 @@ compute_table(rk_chain* chain, int mmax)
   return tbl_what;
 }
 
+/********** RkTable: Python object representing the result of 
+ **********  	     computation  **************/
+
+
+typedef struct {
+  PyObject_HEAD
+  rk_chain chain;
+  int* what;
+  double* opt;
+  int mmax;
+} RkTable;
+
 // Second version: compute only necessary values. The table is still
 // large enough to contain all values.
 
 static double
-compute_table_base(rk_chain* chain, double* tbl_opt, int* tbl_what,
+compute_table_base(rk_chain* chain, RkTable* tbl,
 		   int mmax, int m, int i) {
   int best_k = -1;
   double best_k_value = INFINITY;
-  for (int k = 0; k < chain->nb_sol[i]; ++k)
-    if ( (m >= chain->cw[i] + chain->cbw[i+1][k] + chain->bwd_tmp[i][k]) // No cw[i+1] ??
-	 && (m >= chain->cw[i+1] + chain->cbw[i+1][k] + chain->fwd_tmp[i][k]) )
+  int best_limit = 0;
+  for (int k = 0; k < chain->nb_sol[i]; ++k) {
+    int limit = imax(chain->cw[i] + chain->cbw[i+1][k] + chain->bwd_tmp[i][k],  // No cw[i+1] ??
+		     chain->cw[i] + chain->cbw[i+1][k] + chain->fwd_tmp[i][k]);
+    if (m >= limit)
       if (chain->fw[i][k] + chain->bw[i][k] < best_k_value) {
 	best_k_value = chain->fw[i][k] + chain->bw[i][k];
 	best_k = k;
+	best_limit = limit;
       }
-
+  }
   // Also correct if best_k == -1 and best_k_value == INFINITY
-  tbl_opt[tbl_index(m, i, i, chain->ln)] = best_k_value;
-  tbl_what[tbl_index(m, i, i, chain->ln)] = 1 + best_k;
+  tbl->opt[tbl_index(m, i, i, chain->ln)] = best_k_value;
+  tbl->what[tbl_index(m, i, i, chain->ln)] = 1 + best_k;
   return best_k_value;
 }
 
 static void
-do_compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what, int* mmin_values,
+do_compute_table_rec(rk_chain* chain, RkTable* tbl, int* mmin_values,
 		     double* partial_sums_ff_fw,
 		     int mmax, int m, int a, int b);
 
 static inline void
-compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what, int* mmin_values,
+compute_table_rec(rk_chain* chain, RkTable* tbl, int* mmin_values,
 		  double* partial_sums_ff_fw,
 		  int mmax, int m, int a, int b) {
   // Nothing to do if value was computed already.
-  if (tbl_opt[tbl_index(m, a, b, chain->ln)] != 0)
+  if (tbl->opt[tbl_index(m, a, b, chain->ln)] != 0)
     return;
-  do_compute_table_rec(chain, tbl_opt, tbl_what, mmin_values,
+  do_compute_table_rec(chain, tbl, mmin_values,
 		       partial_sums_ff_fw,
 		       mmax, m, a, b);
 }
 
 static void
-do_compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what, int* mmin_values,
+do_compute_table_rec(rk_chain* chain, RkTable* tbl, int* mmin_values,
 		     double* partial_sums_ff_fw,
 		     int mmax, int m, int a, int b) {
   int ln = chain->ln;
 
   if (a == b) {
-    compute_table_base(chain, tbl_opt, tbl_what,
-		       mmax, m, a);
+    compute_table_base(chain, tbl, mmax, m, a);
     return;
   }
 
@@ -407,7 +428,7 @@ do_compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what, int* mmin_
   if (mmin == 0) {
     mmin = chain->cw[a+1] + chain->ff_fwd_tmp[a];
     for (int j = a+1; j < b; ++j) {
-      mmin = fmax(mmin, chain->cw[j] + chain->cw[j+1] + chain->ff_fwd_tmp[j]);
+      mmin = imax(mmin, chain->cw[j] + chain->cw[j+1] + chain->ff_fwd_tmp[j]);
     }
     mmin += chain->cw[b+1];
     mmin_values[a * ln + b] = mmin;
@@ -415,7 +436,7 @@ do_compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what, int* mmin_
 
   //Unfeasible below mmin
   if (m < mmin) {
-    tbl_opt[tbl_index(m, a, b, ln)] = INFINITY;
+    tbl->opt[tbl_index(m, a, b, ln)] = INFINITY;
     return;
   }
 
@@ -424,15 +445,15 @@ do_compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what, int* mmin_
   int best_later_k = -1;
   for (int j = a+1; j <= b; ++j)
     if (m >= chain->cw[j]) {
-      compute_table_rec(chain, tbl_opt, tbl_what, mmin_values,
+      compute_table_rec(chain, tbl, mmin_values,
 			partial_sums_ff_fw,
 			mmax, m - chain->cw[j], j, b);
-      compute_table_rec(chain, tbl_opt, tbl_what, mmin_values,
+      compute_table_rec(chain, tbl, mmin_values,
 			partial_sums_ff_fw,
 			mmax, m, a, j-1);
       double val = partial_sums_ff_fw[j] - partial_sums_ff_fw[a]
-	+ tbl_opt[tbl_index(m - chain->cw[j], j, b, ln)]
-	+ tbl_opt[tbl_index(m, a, j-1, ln)];
+	+ tbl->opt[tbl_index(m - chain->cw[j], j, b, ln)]
+	+ tbl->opt[tbl_index(m, a, j-1, ln)];
       if (val < best_later_value) {
 	best_later_value = val;
 	best_later_k = j;
@@ -443,13 +464,14 @@ do_compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what, int* mmin_
   double best_now_value = INFINITY;
   int best_now_k = -1;
   for (int k = 0; k < chain->nb_sol[a]; ++k) {
-    if ( (m >= chain->cw[a+1] + chain->cbw[a+1][k] + chain->fwd_tmp[a][k])
-	 && (m >= chain->cw[a] + chain->cbw[a+1][k] + chain->bwd_tmp[a][k]) ) {
-      compute_table_rec(chain, tbl_opt, tbl_what, mmin_values,
+    int limit = imax(chain->cw[a+1] + chain->cbw[a+1][k] + chain->fwd_tmp[a][k],
+		    chain->cw[a] + chain->cbw[a+1][k] + chain->bwd_tmp[a][k]);
+    if (m >= limit) {
+      compute_table_rec(chain, tbl, mmin_values,
 			partial_sums_ff_fw,
 			mmax, m - chain->cbw[a+1][k], a+1, b);
       double val = chain->fw[a][k] + chain->bw[a][k]
-	+ tbl_opt[tbl_index(m - chain->cbw[a+1][k], a+1, b, ln)];
+	+ tbl->opt[tbl_index(m - chain->cbw[a+1][k], a+1, b, ln)];
       if (val < best_now_value) {
 	best_now_value = val;
 	best_now_k = k;
@@ -458,21 +480,19 @@ do_compute_table_rec(rk_chain* chain, double* tbl_opt, int* tbl_what, int* mmin_
   }
   // Best of both solutions
   if (best_now_value < best_later_value) {
-    tbl_opt[tbl_index(m, a, b, ln)] = best_now_value;
-    tbl_what[tbl_index(m, a, b, ln)] = 1 + best_now_k;
+    tbl->opt[tbl_index(m, a, b, ln)] = best_now_value;
+    tbl->what[tbl_index(m, a, b, ln)] = 1 + best_now_k;
   } else {
-    tbl_opt[tbl_index(m, a, b, ln)] = best_later_value;
-    tbl_what[tbl_index(m, a, b, ln)] = - best_later_k - 1;
+    tbl->opt[tbl_index(m, a, b, ln)] = best_later_value;
+    tbl->what[tbl_index(m, a, b, ln)] = - best_later_k - 1;
   }
 }
 
 
-static int*
-compute_table_v2(rk_chain* chain, int mmax)
+static void
+compute_table_v2(rk_chain* chain, RkTable* tbl, int mmax)
 {
   int ln = chain->ln;
-  double* tbl_opt = calloc((1+mmax) * (ln+1) * (ln+1), sizeof(double));
-  int* tbl_what = calloc((1+mmax) * (ln+1) * (ln+1), sizeof(int));
   // WHAT table: 0 means unfeasible
   //             v > 0 means (True, v-1)
   //             v < 0 means (False, -v-1)
@@ -490,14 +510,12 @@ compute_table_v2(rk_chain* chain, int mmax)
   // Avoid recomputing mmin if already done
   int* mmin_values = calloc((ln+1) * (ln+1), sizeof(int));
 
-  compute_table_rec(chain, tbl_opt, tbl_what, mmin_values,
+  compute_table_rec(chain, tbl, mmin_values,
 		    partial_sums_ff_fw,
 		    mmax, mmax, 0, ln);
 
   free(partial_sums_ff_fw);
-  free(tbl_opt);
   free(mmin_values);
-  return tbl_what;
 }
 
 
@@ -547,21 +565,14 @@ build_sequence(rk_chain* chain, int* what, int cmem,
 }
 
 
-/********** RkTable: Python object representing the result of 
- **********  	     computation  **************/
-
-
-typedef struct {
-  PyObject_HEAD
-  rk_chain chain;
-  int* what;
-  int mmax;
-} RkTable;
 
 static void
 RkTable_dealloc(RkTable *self)
 {
   rk_chain_free(&self->chain);
+  if(self->opt) free(self->opt);
+  if(self->what) free(self->what);
+
   Py_TYPE(self)->tp_free((PyObject *) self);
 }
 
@@ -570,25 +581,57 @@ static int
 RkTable_init(RkTable* self, PyObject* args, PyObject* kwds) {
   PyObject* rk_chain_param;
   int mmax;
-  
+
+  self->opt = NULL;
+  self->what = NULL;
+
   if (!PyArg_ParseTuple(args, "Oi", &rk_chain_param, & mmax))
     return -1;
 
   if (get_rk_chain(rk_chain_param, &self->chain))
     return -1;
+  int ln = (self->chain).ln;
 
+  self->opt = calloc((1+mmax) * (ln+1) * (ln+1), sizeof(double));
+  self->what = calloc((1+mmax) * (ln+1) * (ln+1), sizeof(int));
   self->mmax = mmax;
-  self->what = compute_table_v2(&self->chain, mmax);
+  if (!self->opt || !self->what) {
+    PyErr_NoMemory();
+    return -1;
+  }
+
   return 0;
 }
 
 
 static PyObject*
-RkTable_build_sequence(RkTable* self, PyObject* args) {
+RkTable_get_opt(RkTable* self, PyObject* args) {
   int memory_limit;
-  
+
   if (!PyArg_ParseTuple(args, "i", & memory_limit))
     return NULL;
+  if (memory_limit < 0 || memory_limit > self->mmax) {
+    return PyErr_Format(PyExc_ValueError, "Can not solve with limit %d, this table has mmax=%d", memory_limit, self->mmax);
+  }
+
+  compute_table_v2(&self->chain, self, memory_limit);
+  double result = self->opt[tbl_index(memory_limit, 0, self->chain.ln, self->chain.ln)];
+  PyObject* pyresult = PyFloat_FromDouble(result);
+  return pyresult;
+}
+
+static PyObject*
+RkTable_build_sequence(RkTable* self, PyObject* args) {
+  int memory_limit;
+
+  if (!PyArg_ParseTuple(args, "i", & memory_limit))
+    return NULL;
+
+  if (memory_limit < 0 || memory_limit > self->mmax) {
+    return PyErr_Format(PyExc_ValueError, "Can not solve with limit %d, this table has mmax=%d", memory_limit, self->mmax);
+  }
+
+  compute_table_v2(&self->chain, self, memory_limit);
 
   // Make sure that the array is large enough
   PyObject* sequence[self->chain.ln * self->chain.ln];
@@ -611,6 +654,9 @@ RkTable_build_sequence(RkTable* self, PyObject* args) {
 static PyMethodDef RkTable_methods[] = {
     {"build_sequence", (PyCFunction) RkTable_build_sequence, METH_VARARGS,
      "Build a sequence from the table, given a memory limit."
+    },
+    {"get_opt", (PyCFunction) RkTable_get_opt, METH_VARARGS,
+     "get optimal duration of the sequence, given a memory limit."
     },
     {NULL}  /* Sentinel */
 };

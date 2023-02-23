@@ -129,6 +129,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("test_csolver")
     parser.add_argument("pkl_file", help="PKL file to open")
     parser.add_argument("--c-only", action="store_true", help="input is large, only solve with C")
+    parser.add_argument("--target", default=750, type=int, help="memory limit value")
     args = parser.parse_args()
     with open(args.pkl_file, "rb") as f:  ## "./test_csolver/example_DP_chain_large.pkl"
         inp = pickle.load(f)
