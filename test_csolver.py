@@ -124,19 +124,59 @@ def one_test_conly(ch, target):
     c_dur = time.time() - start
     print(target, c_dur)
 
+def all_tests(ch, targets, c_only=False):
+    opt_table = None
+    rktable = None
+    def compute_one(target):
+        nonlocal opt_table, rktable
+        mmax = target - ch.cw[0]
+        if c_only:
+            pyseq = None
+            py_dur = 0
+        else:
+            start = time.time()
+            opt_table = rotor_solver.psolve_dp_functionnal(ch, mmax, opt_table)
+            try:
+                pyseq = fake_seq_builder(ch, target, opt_table)
+            except ValueError:
+                pyseq = None
+            py_dur = time.time() - start
+
+        start = time.time()
+        if rktable is None:
+            rktable = rs.RkTable(ch, mmax)
+        try:
+            cseq = RK_Sequence(rktable.build_sequence(mmax))
+        except ValueError:
+            cseq = None
+        c_dur = time.time() - start
+        print(target, py_dur, c_dur, compare_seqs(pyseq, cseq))
+
+    highest = max(targets)
+    compute_one(highest)
+    for target in targets:
+        if target != highest:
+            compute_one(target)
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser("test_csolver")
     parser.add_argument("pkl_file", help="PKL file to open")
     parser.add_argument("--c-only", action="store_true", help="input is large, only solve with C")
-    parser.add_argument("--target", default=750, type=int, help="memory limit value")
+    parser.add_argument("--targets", default=list(range(500, 800, 50)), nargs='+',
+                        type=int, help="memory limit value")
+    parser.add_argument("--incremental", action="store_true", help="perform incremental solving")
     args = parser.parse_args()
     with open(args.pkl_file, "rb") as f:  ## "./test_csolver/example_DP_chain_large.pkl"
         inp = pickle.load(f)
     ch = FakeChain(inp)
-    if args.c_only:
-        for v in range(1000, 3000, 100):
-            one_test_conly(ch, v)
+    if args.incremental:
+        all_tests(ch, args.targets, args.c_only)
     else:
-        for v in range(500, 800, 50):
-            one_test(ch, v)
+        if args.c_only:
+            for v in args.targets:
+                one_test_conly(ch, v)
+        else:
+            for v in args.targets:
+                one_test(ch, v)
