@@ -20,7 +20,7 @@ from rockmate.def_sequence import (
 # ==========================
 
 
-def solve_dp_functionnal(chain: RK_Chain, mmax, opt_table=({}, {})):
+def psolve_dp_functionnal(chain, mmax, opt_table=None):
     """Returns the optimal table:
     Opt[m][lmin][lmax] : int matrix
         with lmin = 0...chain.length
@@ -44,7 +44,7 @@ def solve_dp_functionnal(chain: RK_Chain, mmax, opt_table=({}, {})):
     ff_fw = chain.ff_fw
     nb_sol = chain.nb_sol
 
-    opt, what = opt_table
+    opt, what = opt_table if opt_table is not None else ({}, {})
     # opt = dict()
     # what = dict()
 
@@ -165,7 +165,7 @@ def solve_dp_functionnal(chain: RK_Chain, mmax, opt_table=({}, {})):
 # ==========================
 
 
-def seq_builder(chain: RK_Chain, memory_limit, opt_table=({}, {})):
+def pseq_builder(chain, memory_limit, opt_table):
     # returns :
     # - the optimal sequence of computation using mem-persistent algo
     mmax = memory_limit - chain.cw[0]
@@ -233,7 +233,11 @@ def seq_builder(chain: RK_Chain, memory_limit, opt_table=({}, {})):
 
 # The C version produces 'csequence' SeqOps, we have to convert them
 import rockmate.csequence as cs
-import rockmate_csolver as rs
+try:
+    import rockmate_csolver as rs
+    csolver_present = True
+except:
+    csolver_present = False
 
 def convert_sequence_from_C(chain: RK_Chain, original_sequence):
     def convert_op(op):
@@ -245,9 +249,32 @@ def convert_sequence_from_C(chain: RK_Chain, original_sequence):
         if isinstance(op, cs.SeqBlockBwd): return SeqBlockBwd(op.index, body.sols[op.option].bwd_sched)
     result = RK_Sequence(convert_op(op) for op in original_sequence.seq)
 
-def csolve_dp_functionnal(chain: RK_Chain, mmax):
-    return rs.RkTable(chain, mmax)
+def csolve_dp_functionnal(chain: RK_Chain, mmax, opt_table=None):
+    if opt_table is None: ## TODO? if opt_table.mmax < mmax, create new table
+        result = rs.RkTable(chain, mmax)
+    else:
+        result = opt_table
+    result.get_opt(mmax)
+    return result
 
-def cseq_builder(chain: RK_Chain, memory_limit, opt_table):
-    result = opt_table.build_sequence(memory_limit - chain.cw[0])
+def cseq_builder(chain: RK_Chain, mmax, opt_table):
+    result = opt_table.build_sequence(mmax)
     return convert_sequence_from_C(chain, result)
+
+
+# ===============================================
+# =====  generic interface, selects version =====
+# ===============================================
+
+def solve_dp_functionnal(chain, mmax, opt_table=None, force_python=False):
+    if force_python or not csolver_present:
+        return psolve_dp_functionnal(chain, mmax, opt_table)
+    else:
+        return csolve_dp_functionnal(chain, mmax, opt_table)
+
+def seq_builder(chain, mmax, opt_table):
+    if isinstance(opt_table, RkTable):
+        return cseq_builder(chain, mmax, opt_table)
+    else:
+        return pseq_builder(chain, mmax, opt_table)
+

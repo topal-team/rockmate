@@ -95,7 +95,7 @@ def one_test(ch, target):
 
     start = time.time()
     ## ref_verbose[0] = True
-    opt_table = rotor_solver.solve_dp_functionnal(ch, mmax)
+    opt_table = rotor_solver.psolve_dp_functionnal(ch, mmax)
     ## ref_verbose[0] = False
     try:
         pyseq = fake_seq_builder(ch, target, opt_table)
