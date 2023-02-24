@@ -207,6 +207,8 @@ def compare_model(model, inputs, budgets, dict_kwargs=None, repeat=10):
     )
     mod = res_og["module"].to(device)
     for res in res_rk:
+        if not res["feasible"]:
+            print(res["Error"])
         rkmod = res["module"].to(device)
         same_train, same_eval, same_grad = sanity_check(
             rkmod, mod, inputs, dict_kwargs=dict_kwargs, device=device

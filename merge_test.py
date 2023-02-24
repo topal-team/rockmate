@@ -13,4 +13,3 @@ model = get_GPT("GPT2-small")
 x = torch.randint(0, 600, [2, 64])
 for budget in np.arange(2, 6) * 100 * 1024 ** 2:
     compare_model(model, x, budget)
-

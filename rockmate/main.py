@@ -92,9 +92,9 @@ class CheckpointedModule(torch.nn.Module):
         end = time.time()
         self.ILP_solve_time = end - start
 
-        self.opt_table = ({}, {})
+        self.opt_table = None
 
-    def get_sequence(self, mem_limit, use_opt_table=False):
+    def get_sequence(self, mem_limit):
         for n, p in self.original_mod.named_parameters():
             if p.grad is None:
                 p.grad = torch.zeros_like(p)

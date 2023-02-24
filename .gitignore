@@ -6,3 +6,10 @@ __pycache__
 graphviz_dir/
 trash/
 *jupyter.*
+rockmate/build/*
+rockmate/dist/*
+results/*
+*.pkl
+*.sh
+*.egg-info*
+*.out
