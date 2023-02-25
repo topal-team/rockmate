@@ -287,7 +287,7 @@ def solve_dp_functionnal(chain, mmax, opt_table=None, force_python=False):
 
 
 def seq_builder(chain, mmax, opt_table):
-    if isinstance(opt_table, rs.RkTable):
+    if csolver_present and isinstance(opt_table, rs.RkTable):
         return cseq_builder(chain, int(mmax), opt_table)
     else:
         return pseq_builder(chain, mmax, opt_table)
