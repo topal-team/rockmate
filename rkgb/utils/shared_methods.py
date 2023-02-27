@@ -64,6 +64,7 @@ def get_target(n):
 def get_num_tar(tar):
     try:    return int(tar.split('_')[2])
     except: return (-1)
+get_num_cst = get_num_tar
 def get_num_name(name): # for KCN or KDN's name
     if (name.startswith("fwd_")
     or  name.startswith("bwd_")):

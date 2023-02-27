@@ -191,9 +191,10 @@ class RngState:
 
 
 class RK_Storage:
-    def __init__(self, device, nn_mod):
+    def __init__(self, device, nn_mod, dict_constants):
         self.gd = {
             **globals(),
+            **dict_constants,
             "original_mod": nn_mod,
             "device": device,
             "torch": torch,

@@ -32,7 +32,9 @@ class Graph_Translator():
             self.reverse_translator = rev = reverse_translator
             self.main_dict  = md = dict()
             self.param_dict = pd = dict()
+            self.const_dict = cd = dict()
             for s1,s2 in rev.main_dict.items(): md[s2] = s1
+            for s1,s2 in rev.const_dict.items(): cd[s2] = s1
             for s1,(s2,info) in rev.param_dict.items():
                 pd[s2] = (s1,info)
         elif not sg is None:
@@ -42,6 +44,7 @@ class Graph_Translator():
 
             ########## FIRST PART ########## 
             all_real_vars   = []
+            all_real_csts   = []
             all_real_params = []
             def handle_str(real_str):
                 if (real_str[:2] == "__"
@@ -52,6 +55,9 @@ class Graph_Translator():
                 or real_str[:13] == "getattr(self."
                 and not real_str in all_real_params):
                     all_real_params.append(real_str)
+                elif (real_str[:5] == "_cst_"
+                and not real_str in all_real_csts):
+                    all_real_csts.append(real_str)
             def search_through(a):
                 if isinstance(a,ast.AST):
                     if isinstance(a,ast.Name):
@@ -80,6 +86,16 @@ class Graph_Translator():
                 ano_name = f"__{nb_var}_ano"
                 r_to_a[real_name] = ano_name
 
+            # Same for "all_real_csts", ie constants
+            all_real_csts = sorted(
+                all_real_csts,key = shared_methods.get_num_cst)
+            self.const_dict = cst_r_to_a = dict()
+            nb_cst = 0
+            for real_name in all_real_csts:
+                nb_cst += 1
+                ano_name = f"_cst_{nb_cst}_ano"
+                cst_r_to_a[real_name] = ano_name
+
             # Try to anonymize parameters:
             self.param_dict = param_dict = dict()
             nb_param = 0
@@ -97,6 +113,7 @@ class Graph_Translator():
         else:
             self.main_dict = dict()
             self.param_dict = dict()
+            self.const_dict = dict()
             self.reverse_translator = self
 
 # ==================
@@ -122,6 +139,8 @@ class Graph_Translator():
         if isinstance(x,str):
             if x[:2] == "__" and x in self.main_dict:
                 return self.main_dict[x]
+            elif x[:5] == "_cst_" and x in self.const_dict:
+                return self.const_dict[x]
             elif (x[:5] == "self." 
             or x[:5] == "self["
             or x[:13] == "getattr(self."
@@ -230,9 +249,14 @@ class Graph_Translator():
                         info.is_inplace = False
                         info.is_view = False
             for attr in [
-                "direct_inputs","dict_info","dict_rand",
+                "direct_inputs","dict_info",
+                "dict_rand",
                 "hidden_output","direct_outputs"]:
                 setattr(sg,attr,translate(getattr(sg,attr)))
+            new_dict_constants = dict()
+            for old,new in self.const_dict.items():
+                new_dict_constants[new] = x.dict_constants[old]
+            sg.dict_constants = new_dict_constants
             # -> I do NOT translate hidden/direct_inputs 
             return sg
 
@@ -251,6 +275,10 @@ class Graph_Translator():
                     if k not in self.main_dict: del kg.dict_info[k]
             for attr in ["init_code","dict_info"]:
                 setattr(kg,attr,translate(getattr(kg,attr)))
+            new_dict_constants = dict()
+            for old,new in self.const_dict.items():
+                new_dict_constants[new] = x.dict_constants[old]
+            kg.dict_constants = new_dict_constants
             for kdn in kg.list_kdn:
                 kdn.info = kg.dict_info[kdn.main_target]
                 new_set = set()
@@ -317,8 +345,6 @@ def S_list_to_K_list_eco(
             cc_num_to_repr_sg_num.append(sg_num)
         sg_num_to_cc_num[sg_num] = cc_num
 
-    # return tab_S_repr_cc,list_translator
-
     # 1') Compute and print connexe components
     nb_cc = len(tab_S_repr_cc)
     cc = [[] for _ in range(nb_cc)]
@@ -334,6 +360,7 @@ def S_list_to_K_list_eco(
     # 2) move anonymized graphs from S to K
     # -> /!\ attention to params /!\
     dict_info_global = list_sg[0].dict_info # we lost some global info
+    dict_constants_global = list_sg[0].dict_constants
     Ktools.aux_init_S_to_K(model,verbose,device)
     tab_K_repr_cc = []
     for cc_num,ano_sg in enumerate(tab_S_repr_cc):
@@ -343,16 +370,20 @@ def S_list_to_K_list_eco(
         tmp_trans_to_handle_params.reverse_translator = (
             Graph_Translator(
                 reverse_translator=tmp_trans_to_handle_params))
+        save_dict_constants = ano_sg.dict_constants
         ano_sg = tmp_trans_to_handle_params.reverse_translate(ano_sg)
         ano_sg.dict_info.update(dict_info_global)
+        ano_sg.dict_constants = save_dict_constants
         ano_kg = Ktools.aux_build_S_to_K(ano_sg,model,None)
         ano_kg = tmp_trans_to_handle_params.translate(ano_kg)
+        ano_kg.dict_constants = save_dict_constants
         tab_K_repr_cc.append(ano_kg)
     list_kg = []
     for sg_num,cc_num in enumerate(sg_num_to_cc_num):
         ano_kg = tab_K_repr_cc[cc_num]
         real_kg = list_translator[sg_num].reverse_translate(ano_kg)
         real_kg.dict_info.update(dict_info_global)
+        real_kg.dict_constants.update(dict_constants_global)
         list_kg.append(real_kg)
 
     # 3) link the K blocks

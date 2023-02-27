@@ -48,8 +48,9 @@ class D_graph():
         self.nodes  = [] # D_node list -> topo sorted
         self.output = None # str
         self.output_node = None # D_node
-        self.dict_rand = {}
-        self.dict_info = {} # target -> FWD_info
+        self.dict_info = dict() # target -> FWD_info
+        self.dict_rand = dict()
+        self.dict_constants = dict()
     def __eq__(self,g2,force_order=False,raise_exception=False):
         g1 = self
         b = small_fcts.check_attr(g1,g2,
@@ -149,6 +150,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
     d_nodes      = dg.nodes
     dict_info    = dg.dict_info
     dg.dict_rand = bg.dict_rand
+    dg.dict_constants = bg.dict_constants
     dict_nodes   = dict()
     b_nodes      = sort_nodes(bg)
 
@@ -161,6 +163,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
     our_global = globals().copy()
     our_global["self"] = model
     our_global["device"] = device
+    our_global.update(bg.dict_constants)
 
     for bn in b_nodes:
         # -- translate B node to D --

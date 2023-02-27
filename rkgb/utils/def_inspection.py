@@ -13,6 +13,8 @@ import gc
 
 def generate_our_global(sg,model,device):
     our_global = globals().copy()
+    our_global.update(sg.dict_constants)
+    #print([s for s in our_global if s[:5]=="_cst_"])
     our_global["self"] = model
     our_global["device"] = device
     for inp in sg.direct_inputs:
