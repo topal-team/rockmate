@@ -6,6 +6,7 @@
 from rkgb.utils.small_fcts import check_attr
 import numpy as np
 import torch
+import warnings
 
 
 class RunOp:
@@ -119,6 +120,7 @@ class OpSchedule:
 
         self.is_fwd = True
         self.get_mem_time()
+        assert self.valid_sched()
 
     def get_mem_time(self):
         """
@@ -178,6 +180,18 @@ class OpSchedule:
         # #                     if kcn in self.op_list)
         # self.save[self.del_input_idx :] -= input_kdn.mem.v
         # self.overhead = max(self.save + self.tmp) - self.save[-1]
+
+    def valid_sched(self):
+        for i, op in enumerate(self.op_list[1:]):
+            if hasattr(op, "deps_global"):
+                for kdn_name in op.deps_global:
+                    if (
+                        not self.alive_list[i][self.kdn_names.index(kdn_name)]
+                        and kdn_name not in op.deps_fake
+                    ):
+                        print(f"{kdn_name} is not alive when {op.name}")
+                        return False
+        return True
 
 
 # class RK_Function:
