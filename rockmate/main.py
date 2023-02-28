@@ -163,8 +163,8 @@ class CheckpointedModule(torch.nn.Module):
         alive_status = np.zeros(len(list_kdn) + 2, dtype=bool)
         alive_status[-1] = 1
         kdn_names = [kdn.name for kdn in list_kdn] + [
-            self.list_kg[0].input_kdn_data.name,
             self.list_kg[0].input_kdn_grad.name,
+            self.list_kg[0].input_kdn_data.name,
         ]
         for op_sched in self.fwd_op_sched_list:
             index = [kdn_names.index(n) for n in op_sched.kdn_names]
