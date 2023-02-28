@@ -219,17 +219,20 @@ class S_graph():
         self.nodes          = []
         self.init_node      = None
         self.output_node    = None
-        self.hidden_inputs  = [] # str list
         self.direct_inputs  = [] # str list
         self.hidden_output  = "" # str
-        self.direct_outputs = [] # str list
-        self.dict_info      = dict()
-        self.dict_rand      = dict()
         if dg:
             self.hidden_inputs  = dg.inputs
             self.direct_outputs = [dg.output]
             self.dict_info      = dg.dict_info
             self.dict_rand      = dg.dict_rand
+            self.dict_constants = dg.dict_constants
+        else:
+            self.hidden_inputs  = []
+            self.direct_outputs = []
+            self.dict_info      = dict()
+            self.dict_rand      = dict()
+            self.dict_constants = dict()
         self.unique_id_generator = unique_id_generator
         # -> to generate S_node.__hash__
     def __eq__(self,sg2,force_order=False,raise_exception=False):
@@ -238,8 +241,10 @@ class S_graph():
             # "direct_inputs","hidden_inputs",
             # sg1 and sg2 equality shouldn't depend on their 
             # previous block equality
-            "direct_outputs","hidden_output","dict_info","nodes"],
+            "direct_outputs","hidden_output","dict_info",
+            "nodes","dict_constants"],
             raise_exception=raise_exception)
+        """ # TO REMOVE
         mt = lambda l : [sn.main_target for sn in l]
         b *= (mt(sg1.nodes) == mt(sg2.nodes))
         if raise_exception and not b:
@@ -248,6 +253,7 @@ class S_graph():
             for sn1,sn2 in zip(sg1.nodes,sg2.nodes):
                 b *= sn1.__eq__(sn2,force_order,raise_exception)
         return b
+        """
     def __hash__(self):
         return id(self)
 
@@ -645,6 +651,7 @@ def create_random_snodes_from_dict_rand(sg,model,device):
         # -> We need to generate ".info" from def_info.py
         # -> to do so we first need to generate the variable <name>
         our_global = globals().copy()
+        our_global.update(sg.dict_constants)
         if model: our_global["self"] = model
         if device: our_global["device"] = device
         dict_info[name] = def_info.Var_info(
@@ -715,6 +722,7 @@ def copy_S_graph(sg : S_graph):
     new_sg.direct_outputs = list(sg.direct_outputs)
     new_sg.dict_info      = dict(sg.dict_info)
     new_sg.dict_rand      = dict(sg.dict_rand)
+    new_sg.dict_constants = dict(sg.dict_constants)
     new_sg.unique_id_generator = small_fcts.copy_generator(
             sg.unique_id_generator)
     id_gen = sg.unique_id_generator
@@ -783,6 +791,7 @@ def cut(sg : S_graph): # -> list of S_graph
         # --
         new_sg.dict_info = main_sg.dict_info
         new_sg.dict_rand = main_sg.dict_rand
+        new_sg.dict_constants = main_sg.dict_constants
     return list_sg
 
 # ==========================

@@ -246,6 +246,7 @@ class K_graph():
 
         self.init_code = shared_methods.get_code_ast(sg.init_node)
         self.dict_info = sg.dict_info
+        self.dict_constants = sg.dict_constants
         # -> no more .dict_rand
         # -> random op have been inserted at the end of Simplification
         self.unique_id_generator = unique_id_generator
@@ -306,7 +307,8 @@ class K_graph():
             raise Exception("Kgraphs differ on dict_kn's keys (order?)")
         #for k in keys1:
         #    b *= eq_node(g1.dict_kn[k],g2.dict_kn[k])
-        b *= small_fcts.check_attr(g1,g2,["dict_info"],raise_exception)
+        b *= small_fcts.check_attr(g1,g2,
+            ["dict_info","dict_constants"],raise_exception)
         return bool(b)
     def __hash__(self):
         return id(self)
@@ -695,6 +697,7 @@ def copy_K_D_node(kdn : K_D_node):
 def copy_K_graph(kg : K_graph):
     new_kg = K_graph(kg.sg)
     new_kg.dict_info = dict(kg.dict_info)
+    new_kg.dict_constants = dict(kg.dict_constants)
     new_kg.init_code = kg.init_code
     new_kg.unique_id_generator = small_fcts.copy_generator(
             kg.unique_id_generator)

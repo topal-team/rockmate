@@ -96,7 +96,8 @@ class B_graph:
     def __init__(self):
         self.nodes = []  # tmp -> should not be trusted
         self.output = None  # B_var
-        self.dict_rand = dict_rand  # str -> ast code (not Ast.assign)
+        self.dict_rand = dict()  # str -> ast code (not Ast.assign)
+        self.constants = dict()
 
 
 # ==========================
@@ -106,10 +107,19 @@ class B_graph:
 #  ====== Make B graph ======
 # ==========================
 
-dict_rand = {}  # all random targets
+# We use global vars instead of passing 
+# these variables everywhere, just for simplicity
+dict_rand = dict()  # all random targets
+dict_constants = dict()
 all_nodes = []  # list of all the nodes generated
 fresh_var = 0  # count the number of vars used over all the prgm
 
+def clear_global_vars():
+    global fresh_var, dict_rand, dict_constants, all_nodes
+    all_nodes = []
+    dict_rand = dict()
+    dict_constants = dict()
+    fresh_var = 0
 
 def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
     # -> B_graph
@@ -160,12 +170,18 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
         global fresh_var
         fresh_var += 1
         return f"__{fresh_var}_{s}"
-
+    
     # -> In case we add new lines :
     def get_fresh_var():
         global fresh_var
         fresh_var += 1
         return f"__{fresh_var}_fv"
+    
+    # -> In case its an external constant
+    def get_constant(s):
+        global fresh_var
+        fresh_var += 1
+        return f"_cst_{fresh_var}_{s}"
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -407,7 +423,10 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
             and isinstance(expr.value, ast.Name)
             and expr.value.id == "CONSTANTS"
         ):
-            return B_var(ast_add_on.make_ast_constant(memory[expr.attr]))
+            s = get_constant(expr.attr)
+            dict_constants[s] = memory[expr.attr]
+            return B_var(ast.Name(s))
+            #return B_var(ast_add_on.make_ast_constant(memory[expr.attr]))
         elif isinstance(expr, ast.Attribute):
             return handle_attr(expr, target)  # may creates one node
         elif isinstance(expr, ast.Call):
@@ -468,15 +487,12 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
 
 #  ===== Main function ======
 
-
 def make_B(model, ex_inputs, verbose=None, impose_device=True, device=None):
     # main_model must be a instance of torch.nn.Module
     # ex_inputs can be either a tuple or a dict
     # -- global vars --
-    global fresh_var, var_impose_device, dict_rand, all_nodes
-    all_nodes = []
-    dict_rand = {}
-    fresh_var = 0
+    clear_global_vars()
+    global var_impose_device
     var_impose_device = impose_device
     if not (verbose is None):
         global_vars.ref_verbose[0] = verbose
@@ -500,5 +516,7 @@ def make_B(model, ex_inputs, verbose=None, impose_device=True, device=None):
     main_fct = "forward"
     main_g = open_sub_module(main_model, main_str, main_fct, [], is_main=True)
     main_g.nodes = all_nodes
-    all_nodes = []
+    main_g.dict_rand = dict_rand
+    main_g.dict_constants = dict_constants
+    clear_global_vars()
     return main_g

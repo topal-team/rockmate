@@ -68,6 +68,7 @@ class CheckpointedModule(torch.nn.Module):
             original_mod, dict_inputs, verbose=verbose, bool_kg=False
         )  # we don't need the whole K_graph
         self.list_kg = rkgb_res.K_graph_list
+        self.dict_constants = rkgb_res.K_graph_list[0].dict_constants
         self.eq_classes = rkgb_res.equivalent_classes
         self.init_code = ast_to_str(self.list_kg[0].init_code)
         self.output = self.list_kg[-1].output_kdn_data
@@ -211,7 +212,7 @@ class CheckpointedModule(torch.nn.Module):
         self.simulation_overhead = self.simulation_time / sum(
             [kcn.time for kg in self.list_kg for kcn in kg.list_kcn]
         )
-        self.storage = RK_Storage(self.device, self.original_mod)
+        self.storage = RK_Storage(self.device, self.original_mod, self.dict_constants)
 
     def get_compiled_fct(self):
         self.compiler = Compiler(self.storage)
