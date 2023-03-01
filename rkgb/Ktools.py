@@ -41,11 +41,7 @@ class K_C_node():
         self.main_code   = main_code # target * AST
         self.inplace_code= inplace_code if inplace_code else []
         self.body_code   = body_code if body_code else [] # (str*AST) list
-        if unique_id_generator is None: self.unique_id = id(self)
-        else:
-            u = unique_id_generator[0]
-            self.unique_id = u
-            unique_id_generator[0] = u+1
+        self.unique_id   = small_fcts.use_generator(unique_id_generator,self)
 
         # ** deps/used_by **
         self.deps_real    = deps_real if deps_real else set() # KDN set
@@ -164,12 +160,7 @@ class K_D_node():
         self.info        = info
         self.includes_base = False
         self.includes_phantoms = False
-        if unique_id_generator is None: self.unique_id = id(self)
-        else:
-            u = unique_id_generator[0]
-            self.unique_id = u
-            unique_id_generator[0] = u+1
-
+        self.unique_id   = small_fcts.use_generator(unique_id_generator,self)
         # ** deps/used_by **
         self.users_real   = set() # KCN set
         self.users_fake   = set() # KCN set

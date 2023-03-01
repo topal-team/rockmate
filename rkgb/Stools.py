@@ -1,10 +1,10 @@
-from rkgb.utils import *
-from rkgb.utils.complement_for_Stools import *
-from rkgb.Dtools import D_node,D_graph
-
 # ==========================
 # ====== S structure =======
 # ==========================
+
+from rkgb.utils import *
+from rkgb.utils.complement_for_Stools import *
+from rkgb.Dtools import D_node,D_graph
 
 class S_node():
     def __init__(self,
@@ -52,13 +52,9 @@ class S_node():
         self.deps = dict()
         self.users = dict()
         self.protected = protected
-        self.is_rand = is_rand
+        self.is_rand   = is_rand
         self.deps_rand = deps_rand if deps_rand else set()
-        if unique_id_generator is None: self.unique_id = id(self)
-        else:
-            u = unique_id_generator[0]
-            self.unique_id = u
-            unique_id_generator[0] = u+1
+        self.unique_id = small_fcts.use_generator(unique_id_generator,self)
     def __eq__(self,sn2,force_order=False,raise_exception=False):
         sn1 = self
         try:
@@ -214,11 +210,13 @@ class S_node():
         for req_sn in real_deps:
             req_sn.clear_children_artefact()
 
+
+
 class S_graph():
     def __init__(self,dg : D_graph = None,unique_id_generator=None):
         self.nodes          = []
-        self.init_node      = None
-        self.output_node    = None
+        self.init_node      = None # Shouldn't be in self.nodes
+        self.output_node    = None # Is in self.nodes
         self.direct_inputs  = [] # str list
         self.hidden_output  = "" # str
         if dg:

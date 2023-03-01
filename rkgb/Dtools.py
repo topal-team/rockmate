@@ -1,9 +1,9 @@
-from rkgb.utils import *
-from rkgb.Btools import B_node,B_graph
-
 # ==========================
 # ====== D structure =======
 # ==========================
+
+from rkgb.utils import *
+from rkgb.Btools import B_node,B_graph
 
 class D_node(B_node):
     def __init__(self,target="",code=None,fct="",

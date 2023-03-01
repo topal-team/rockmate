@@ -28,6 +28,13 @@ def remove_suffix(text, suffix):
 def copy_generator(gen):
     if gen is None: return None
     else: return [gen[0]]
+def use_generator(gen,obj):
+    if gen is None: return id(obj)
+    else:
+        u = gen[0]
+        gen[0] = u+1
+        return u
+
 
 # ==========================
 # ========= DEVICE ========= 

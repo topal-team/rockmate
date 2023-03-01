@@ -1,3 +1,7 @@
+# ==========================
+# ====== B structure =======
+# ==========================
+
 # =====================================
 # = EXTRACT TRACE CODE TO BUILD THE   =
 # = GROUNDWORK OF BASIC FORWARD GRAPH =
@@ -14,11 +18,6 @@
 #  .code attributes are AST objects
 
 from rkgb.utils import *
-
-# ==========================
-# ====== B structure =======
-# ==========================
-
 
 class B_node:
     def __init__(self, target="", code=None, fct="", deps=None, is_input=False):
