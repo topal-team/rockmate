@@ -12,9 +12,10 @@ from rkgb.utils import *
 
 class P_node():
     def __init__(self,
+            main_graph,
             subgraph    = None,
-            main_target = None,
-            unique_id_generator = None):
+            main_target = None):
+        self.main_graph  = main_graph
         self.subgraph    = sgp = subgraph
         self.main_target = mt  = main_target
         assert((mt is not None) != (sgp is not None))
@@ -28,10 +29,24 @@ class P_node():
             self.is_leaf     = True
         self.deps         = set()
         self.users        = set()
-        self.deps_only_global  = set()
-        self.users_only_global = set()
-        self.unique_id = small_fcts.use_generator(unique_id_generator,self)
+        self.deps_global  = set()
+        self.users_global = set()
+        # Global edges contain ALL the deps/users, of any depth
+        self.unique_id = small_fcts.use_generator(
+            main_graph.unique_id_generator,self)
 
+    def size(self):
+        if self.is_leaf:
+            return 1
+        else:
+            return len(self.subgraph.list_nodes)
+        
+    def deps_only_global(self):
+        return self.deps_global - self.deps
+    def users_only_global(self):
+        return self.users_global - self.users
+
+""" FOR FUTURE WORK, TO RECOGNIZE SIMILAR GRAPHS 
     def __eq__(self,pn2,force_order=False,raise_exception=False):
         pn1 = self
         b = small_fcts.check_attr(pn1,pn2,
@@ -39,7 +54,7 @@ class P_node():
             raise_exception)
         mmt = lambda nl : [pn.main_target for pn in nl]
         s = shared_methods.sort_nodes if force_order else (lambda s : s)
-        for attr in ["deps","users","deps_only_global","users_only_global"]:
+        for attr in ["deps","users",]:#"deps_global","users_global"]:
             b *= mmt(s(getattr(pn1,attr))) == mmt(s(getattr(pn2,attr)))
             if not b and raise_exception:
                 raise Exception(f"P_nodes differ on attr {attr}")
@@ -47,6 +62,7 @@ class P_node():
     def __hash__(self):
         if hasattr(self,"unique_id"): return self.unique_id
         else: return id(self)
+"""
 
 
 # ***********
@@ -56,6 +72,7 @@ class P_node():
 class P_graph():
     def __init__(self,graph_id,unique_id_generator):
         self.graph_id = graph_id
+        self.next_subgraph_id = 1 # for new sub_graphs' id
         self.unique_id_generator = unique_id_generator
         self.dict_leaf_node_address = dict() 
         # contains all the leaf nodes of self and sub graphs
@@ -64,6 +81,40 @@ class P_graph():
         self.input_nodes  = [] # do NOT belong to self -> NOT in list_nodes
         self.output_nodes = [] # do belong to self -> in list_nodes
 
+    def make_subgraph_id(self,new_graph_id):
+        self.graph_id = new_graph_id
+        next_id = 1
+        for pn in self.list_nodes:
+            if not pn.is_leaf:
+                new_sg_id = f"{new_graph_id}_{next_id}"
+                next_id  += 1
+                pn.subgraph.make_subgraph_id(new_sg_id)
+                pn.subgraph_id = new_sg_id
+                pn.name        = f"Subgraph_{new_sg_id}"
+        self.next_subgraph_id = next_id
+    
+    def make_dict_leaf_node_address(self):
+        dict_address = self.dict_leaf_node_address
+        for pn in self.list_nodes:
+            if pn.is_leaf:
+                dict_address[pn.main_target] = self.graph_id
+            else:
+                sub_pg = pn.subgraph
+                sub_pg.make_dict_leaf_node_address()
+                sub_dict = sub_pg.dict_leaf_node_address
+                dict_address.update(sub_dict)
+
+    def is_last_wrapping_graph(self):
+        return len(self.input_nodes) == 0
+    
+    def first_nodes(self): # -> users of at least one input
+        spn = set(self.list_nodes)
+        first_nodes = set()
+        for inp_pn in self.input_nodes:
+            first_nodes.update(spn.intersection(inp_pn.users_global))
+        return first_nodes
+
+""" FOR FUTURE WORK, TO RECOGNIZE SIMILAR GRAPHS 
     def __eq__(self,pg2,force_order=False,raise_exception=False):
         pg1 = self
         b = small_fcts.check_attr(pg1,pg2,
@@ -82,32 +133,205 @@ class P_graph():
             for pn1,pn2 in zip(pg1.list_nodes,pg2.list_nodes):
                 b *= pn1.__eq__(pn2,force_order,raise_exception)
         return bool(b)
-
-    
-    def make_dict_leaf_node_address(self):
-        dict_address = self.dict_leaf_node_address
-        for pn in self.list_nodes:
-            if pn.is_leaf:
-                dict_address[pn.main_target] = self.graph_id
-            else:
-                sub_pg = pn.subgraph
-                sub_pg.make_dict_leaf_node_address()
-                sub_dict = sub_pg.dict_leaf_node_address
-                dict_address.update(sub_dict)
+"""
 
 
 # ************
 # * P_config *
 # ************
 
+class merge_flow_option():
+    def __init__(self,group):
+        self.group = group
+        self.make_nb_nodes_and_nb_subnodes()
+        # -> self.nb_nodes
+        # -> self.nb_subnodes
+    def make_nb_nodes_and_nb_subnodes(self):
+        self.nb_nodes    = len(self.group)
+        self.nb_subnodes = sum(pn.size() for pn in self.group)
+
+
 class P_config():
     def __init__(self,
             min_nodes_per_graph = 3,
-            max_nodes_per_graph = 25):
+            max_nodes_per_graph = 20,
+            merge_flow_importance_nb_nodes = 1,
+            merge_flow_importance_nb_subnodes = -1/4,
+            merge_flow_constant_value = 5,
+            merge_flow_value_fct = None,
+            merge_flow_stop_condition = None,
+            ):
         self.min_nodes_per_graph = min_nodes_per_graph  
-        self.max_nodes_per_graph = max_nodes_per_graph  
+        self.max_nodes_per_graph = max_nodes_per_graph
+
+        # ** merge_flow **
+        if merge_flow_value_fct is None:
+            self.merge_flow_value_fct = lambda option : (
+                math.exp(
+                option.nb_nodes    * merge_flow_importance_nb_nodes 
+              + option.nb_subnodes * merge_flow_importance_nb_subnodes
+              + merge_flow_constant_value) )
+        else:
+            self.merge_flow_value_fct = merge_flow_value_fct
+        if merge_flow_stop_condition is None:
+            def merge_flow_stop_condition(pg,best_option):
+                # True -> stop
+                tot_nb_nodes = len(pg.list_nodes)
+                if tot_nb_nodes <= max_nodes_per_graph: return True
+                elif best_option.nb_subnodes > max_nodes_per_graph: return False
+                else:
+                    value = self.merge_flow_value_fct(best_option)
+                    return (value <= (math.sqrt(tot_nb_nodes) * math.sqrt(self.max_nodes_per_graph)))
+                    # -> no longer worth it to merge
+                    # -> no idea if its a good stop condition
+        self.merge_flow_stop_condition = merge_flow_stop_condition
 
 default_config = P_config()
+
+# =======================
+
+
+
+# ==============================
+# === WRAP, UNWRAP AND MERGE ===
+# ==============================
+
+# ********
+# * WRAP *
+# ********
+
+# wrap a 'group' of nodes, currently living in 'main_pg'
+# into a new node 'new_pn', adding one level of depth.
+def wrap(group : list,main_pg : P_graph):
+    group_nb = main_pg.next_subgraph_id
+    main_pg.next_subgraph_id += 1
+    new_pg = P_graph(
+        graph_id=f"{main_pg.graph_id}_{group_nb}",
+        unique_id_generator=main_pg.unique_id_generator
+    )
+    new_pg.list_nodes = group
+    new_pn = P_node(
+        main_graph = main_pg,
+        subgraph   = new_pg,
+    )
+    set_group = set(group)
+    input_nodes = set()
+    new_pg.output_nodes = output_nodes = []
+    for pn in group:
+        # ** link new_pn with global edges **
+        new_pn.deps_global.update(pn.deps_global)
+        new_pn.users_global.update(pn.users_global)
+        # -> reciprocal at the end
+
+        # ** inputs ** 
+        if not pn.deps.issubset(set_group):
+            input_nodes.update(pn.deps)# at the end : minus set_group
+            deps_outside = pn.deps - set_group
+            for req_pn in deps_outside:
+                req_pn.users.discard(pn)
+                req_pn.users.add(new_pn)
+                pn.deps.discard(req_pn)
+                new_pn.deps.add(req_pn)
+        
+        # ** outputs **
+        if (pn in main_pg.output_nodes
+        or (not pn.users.issubset(set_group))):
+            output_nodes.append(pn)
+            user_outside = pn.users - set_group
+            for user_pn in user_outside:
+                user_pn.deps.discard(pn)
+                user_pn.deps.add(new_pn)
+                pn.users.discard(user_pn)
+                new_pn.users.add(user_pn)
+
+    # ** reciprocal global edges **
+    for req_g_pn in new_pn.deps_global:
+        req_g_pn.users_global.add(new_pn)
+    for user_g_pn in new_pn.users_global:
+        user_g_pn.deps_global.add(new_pn)
+    
+    # ** input_nodes **
+    new_pg.input_nodes = list(input_nodes - set_group)
+
+    # ** update main_pg.list_nodes **
+    # I ASSUME that new_pn can take the place
+    # of any former node, I'm 95% confident
+    main_lpn = main_pg.list_nodes
+    main_lpn[main_lpn.index(group[0])] = new_pn
+    for pn in group[1:]:
+        main_lpn.remove(pn)
+
+    # ** update main_pg outputs **
+    set_outputs : set = set(main_pg.output_nodes)
+    if not set_outputs.isdisjoint(set_group):
+        set_outputs.add(new_pn)
+    main_pg.output_nodes = list(
+        set_outputs - set_group
+    )
+    return new_pn
+
+
+# **********
+# * UNWRAP *
+# **********
+
+# unwrap 'pn' in its main graph
+def unwrap(pn : P_node):
+    pg      : P_graph = pn.subgraph
+    main_pg : P_graph = pn.main_graph
+    if pn.is_leaf: return ()
+    if main_pg.is_last_wrapping_graph: return ()
+    group = pg.list_nodes
+
+    # ** unplug pn/pg **
+    # -> direct edges
+    for req_pn in pn.deps: req_pn.users.remove(pn)
+    for user_pn in pn.users: user_pn.deps.remove(pn)
+    # -> global edges
+    for req_g_pn in pn.deps_global: req_g_pn.users_global.remove(pn)
+    for user_g_pn in pn.users_global: user_g_pn.deps_global.remove(pn)
+
+    # ** plug back the group **
+    # -> fix main_pg.list_nodes
+    main_lpn = main_pg.list_nodes
+    i = main_lpn.index(pn)
+    main_pg.list_nodes = main_lpn[:i] + group + main_lpn[i+1:]    
+    # -> use the property : deps = deps_global inter list_nodes 
+    main_spn = set(main_pg.list_nodes)
+    for sub_pn in group:
+        sub_pn.deps  = sub_pn.deps_global.intersection(main_spn)
+        sub_pn.users = sub_pn.users_global.intersection(main_spn)
+        if sub_pn.users != sub_pn.users_global: # could just check the size
+            main_pg.output_nodes.append(sub_pn)
+
+    # ** update main_pg inputs/outputs **
+    main_pg.input_nodes = (
+        set(main_pg.input_nodes).union(
+        set(pg.input_nodes) - main_spn
+        ))
+    if pn in main_pg.output_nodes:
+        main_pg.output_nodes.remove(pn)
+    # -> We already added new outputs 8 lines above
+    return ()
+
+
+# *********
+# * MERGE *
+# *********
+
+# Merging replaces a group of nodes living in 'main_pg'
+# by one new node 'new_pn', with :
+# .list_nodes = \sum sub_pn.list_nodes for sub_pn in group
+# thus it creates one wrapper, but flats the first depth level
+# -> To do so, wrap and then unwrap each sub_node
+def merge(group : list, main_pg : P_graph):
+    new_pn = wrap(group,main_pg)
+    new_pg = new_pn.main_graph
+    original_lpn = new_pg.list_nodes
+    for sub_pn in original_lpn:
+        unwrap(sub_pn)
+    main_pg.make_subgraph_id(main_pg.graph_id)
+    return new_pn
 
 # ==========================
 
@@ -125,8 +349,8 @@ def S_to_P_init(sg):
     for sn in sg.nodes:
         mt = sn.main_target
         pn = P_node(
-            main_target=mt,
-            unique_id_generator=unique_id_generator)
+            main_graph  = pg,
+            main_target = mt)
         lpn.append(pn)
         dict_mt_to_pn[mt] = pn
         for req_sn in sn.deps.keys():
@@ -134,17 +358,22 @@ def S_to_P_init(sg):
                 req_pn = dict_mt_to_pn[req_sn.main_target]
                 pn.deps.add(req_pn)
                 req_pn.users.add(pn)
+    for pn in lpn:
+        pn.deps_global = set(pn.deps)
+        pn.users_global = set(pn.users)
 
     # ** input ** 
+    last_wrapping_graph = P_graph("-1",unique_id_generator)
     input_pn = P_node(
-        main_target="sources",
-        unique_id_generator=unique_id_generator
+        last_wrapping_graph,
+        main_target="sources"
     )
+    last_wrapping_graph.list_nodes = [input_pn]
     pg.input_nodes = [input_pn]
     for user_sn in sg.init_node.users:
         user_pn = dict_mt_to_pn[user_sn.main_target]
-        user_pn.deps_only_global.add(input_pn)
-        input_pn.users_only_global.add(user_pn)
+        user_pn.deps_global.add(input_pn)
+        input_pn.users_global.add(user_pn)
     
     # ** output **
     output_pn = dict_mt_to_pn[sg.output_node.main_target]
@@ -196,56 +425,12 @@ def rule_group_sequences(pg : P_graph,config : P_config = default_config):
                 for pn in sub_seq:
                     dict_seq_nb[pn.main_target] = sub_seq_nb
 
-    # ** Group the node **
+    # ** Group each sequence **
     for seq_nb,sequence in dict_sequences.items():
-        if len(sequence) < config.min_nodes_per_graph:
-            continue
-        sub_pg = P_graph(
-            graph_id=f"{pg.graph_id}_{seq_nb}",
-            unique_id_generator=pg.unique_id_generator
-        )
-        sub_pg.list_nodes = sequence
-        new_pn = P_node(
-            subgraph = sub_pg,
-            unique_id_generator=pg.unique_id_generator
-        )
-        # * unplug the first node *
-        first_pn = sequence[0]
-        sub_pg.input_nodes = list(first_pn.deps)
-        for req_g_pn in first_pn.deps_only_global:
-            # req_g_pn.users_only_global.discard(first_pn)
-            # req_g_pn.users_only_global.add(new_pn)
-            new_pn.deps_only_global.add(req_g_pn)
-        first_pn.deps_only_global = set()
-        for req_pn in first_pn.deps:
-            req_pn.users.discard(first_pn)
-            req_pn.users.add(new_pn)
-            new_pn.deps.add(req_pn)
-            # req_pn.users_only_global.add(first_pn)
-            first_pn.deps_only_global.add(req_pn)
-        first_pn.deps = set()
+        if len(sequence) >= config.min_nodes_per_graph:
+            new_pn = wrap(sequence,pg)
 
-        # * unplug the last node *
-        last_pn = sequence[-1]
-        sub_pg.output_nodes = [last_pn]
-        for user_g_pn in last_pn.users_only_global:
-            # user_g_pn.deps_only_global.discard(last_pn)
-            # user_g_pn.deps_only_global.add(new_pn)
-            new_pn.users_only_global.add(user_g_pn)
-        last_pn.users_only_global = set()
-        for user_pn in last_pn.users:
-            user_pn.deps.discard(last_pn)
-            user_pn.deps.add(new_pn)
-            new_pn.users.add(user_pn)
-            # user_pn.deps_only_global.add(last_pn)
-            last_pn.users_only_global.add(user_pn)
-        last_pn.users = set()
-
-        # * update the main_pg's list_nodes *
-        lpn = pg.list_nodes
-        lpn[lpn.index(first_pn)] = new_pn
-        for pn in sequence[1:]:
-            lpn.remove(pn)
+    pg.make_subgraph_id(pg.graph_id)
 
 # ==========================
 
@@ -267,6 +452,12 @@ def rule_merge_small_flows(pg : P_graph,config : P_config = default_config):
     # for a pn already visited -> its descendants in to_be_visited
     # if len(flow_size) = 0 => the flow converged
     # its a generalisation of "seen" in cut_based_on_deps
+    dict_total_flow = dict()
+    # when a node is popped out of to_be_visited, 
+    # its removed from dict_flow but dict_total_flow 
+    # is a record of all the nodes which were in the flow
+    # note that a node is in its own total_flow
+    # also, total_flow is a list, whereas the current_flow is a set
     dict_which_flow = dict()
     # for a pn in to_be_visited -> all the flows he is part of
     # ie a list of P_nodes, representing there flow
@@ -274,16 +465,27 @@ def rule_merge_small_flows(pg : P_graph,config : P_config = default_config):
     dict_end_of_flow = dict()
     # any pn -> where its flow converged back
     # this is what we want to build
+
+    # ** Add a temporary global source **
+    tmp_global_source_pn = P_node(main_graph=pg,main_target="tmp_source")
+    tmp_global_source_pn.users = first_nodes = pg.first_nodes()
+    for first_pn in first_nodes:
+        first_pn.deps.add(tmp_global_source_pn)
+    dict_nb_usages[tmp_global_source_pn] = len(first_nodes)
+
+    # ** init **
     for pn in pg.list_nodes:
         if len(pn.users) == 0:
             to_be_visited.append(pn)
             dict_which_flow[pn] = set()
 
+    # ** search **
     while to_be_visited != []:
         pn = to_be_visited.pop()
         current_flows = dict_which_flow[pn]
         continuing_flows = set([pn])
         dict_flow[pn] = set()
+        dict_total_flow[pn] = [pn]
         # * check if end of flows *
         for flow_pn in current_flows:
             flow = dict_flow[flow_pn]
@@ -297,8 +499,12 @@ def rule_merge_small_flows(pg : P_graph,config : P_config = default_config):
         for req_pn in pn.deps:
             # equivalent to seen.add(req_n) :
             for flow_pn in continuing_flows:
-                flow = dict_flow[flow_pn]
+                tot_flow = dict_total_flow[flow_pn]
+                flow     = dict_flow[flow_pn]
                 flow.add(req_pn)
+                if (not (req_pn is tmp_global_source_pn)
+                and not (req_pn in tot_flow)):
+                    tot_flow.append(req_pn)
             if req_pn in dict_which_flow:
                 dict_which_flow[req_pn].update(continuing_flows)
             else:
@@ -307,20 +513,77 @@ def rule_merge_small_flows(pg : P_graph,config : P_config = default_config):
             if dict_nb_usages[req_pn]==0:
                 to_be_visited.append(req_pn)
 
+    # ** remove the temporary global source **
+    for first_pn in first_nodes:
+        first_pn.deps.remove(tmp_global_source_pn)
+
     # === SECOND ===
     # For each flow we have 4 options :
     # -> include the source or not
     # -> include the sink or not
-    return dict_end_of_flow
-    
-            
+    # But I will consider only 2 :
+    # -> We always include the source
+    # ATTENTION here sink/source are taken from .deps
+    # relation perspective, e.g. outputs are sources.
+
+    # Note that its merging here, not grouping
 
 
+    all_options = set()
+    # merge_flow_option set
+    dict_options_pn_is_part_of = dict()
+    # P_node -> merge_flow_option set
+    # After each simplification, we actualize all 
+    # the options which use some of the simplified nodes
 
-        
-        
+    # ** init **
+    for source_pn,sink_pn in dict_end_of_flow.items():
+        flow = dict_total_flow[source_pn]
+        flow.reverse()
+        options = [merge_flow_option(flow)]
+        if (not (sink_pn is tmp_global_source_pn) and len(flow)>2):
+            flow_ = list(flow) ; flow_.remove(sink_pn)
+            options.append(merge_flow_option(flow_))
+        for opt in options:
+            if len(opt.group) <= 1: continue
+            all_options.add(opt)
+            for pn in opt.group:
+                if pn in dict_options_pn_is_part_of:
+                    dict_options_pn_is_part_of[pn].add(opt)
+                else:
+                    dict_options_pn_is_part_of[pn] = set([opt])
 
-            
+    # for opt in all_options:
+        # print(math.exp((config.merge_flow_value_fct(opt)+config.max_nodes_per_graph)/5))
+
+    # ** main loop **
+    while all_options != set():
+        best_option = max(all_options,key=config.merge_flow_value_fct)
+        all_options.remove(best_option)
+        if config.merge_flow_stop_condition(pg,best_option):
+            break
+        else:
+            best_group = list(best_option.group)
+            new_pn = merge(best_group,pg)
+            updated_opts = set()
+            for pn in best_group:
+                opts = list(dict_options_pn_is_part_of[pn])
+                for opt in opts:
+                    group = opt.group
+                    # Case 1: one element of this group has already been replaced
+                    if new_pn in group: 
+                        group.remove(pn)
+                        if len(group) < 2: # too small
+                            all_options.discard(opt)
+                    # Case 2: replace pn by new_pn
+                    else:
+                        group[group.index(pn)] = new_pn
+                    if opt in all_options: updated_opts.add(opt)
+                del dict_options_pn_is_part_of[pn]
+            dict_options_pn_is_part_of[new_pn] = updated_opts
+            for opt in updated_opts:
+                opt.make_nb_nodes_and_nb_subnodes()
+            print_debug(f"Successfully : {[ipn.name for ipn in best_group]} -> {new_pn.name}")
 
 
 
@@ -354,17 +617,18 @@ def print_P_graph(pg : P_graph,name=None,open=True,render_format="svg"):
             input_pn.name,
             f"INPUT {input_pn.main_target}",
             color=color_special, style="dashed")
+    set_input_nodes = pg.input_nodes
     for pn in pg.list_nodes:
         if pn.is_leaf:
             dot.node(pn.name,pn.name,color=color_leaf)
         else:
             dot.node(
                 pn.name,
-                f"{pn.name}\n{len(pn.subgraph.list_nodes)} nodes",
+                f"{pn.name}\n{pn.size()} nodes",
                 color=color_subgraph)
         for req_pn in pn.deps:
             dot.edge(req_pn.name,pn.name,color=color_edge)
-        for req_pn in pn.deps_only_global:
+        for req_pn in pn.deps_global.intersection(set_input_nodes):
             dot.edge(req_pn.name,pn.name,color=color_special)
     # ----- render -----
     small_fcts.graph_render(dot,open,"P",render_format)
