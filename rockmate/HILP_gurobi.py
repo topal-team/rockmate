@@ -8,48 +8,98 @@ from rockmate.def_op import RunOp, DelOp, OpSchedule
 
 class ModelGurobi:
     """
-    The Gurobi model will build the ILP model by given Kgraph and budget.
+    The Gurobi model will build the ILP model by given Hgraph and budget.
     RN this model will take a rk_chain to solve the solution.
     """
 
     def __init__(
         self,
-        rk_chain,
+        hgraph,
         budget: int,
         save_budget: int,
         gurobi_params: Dict[str, Any] = {},
         gcd=None,
     ):
         #############################
-        # TODO: read time/mem info from the graph API
-        self.chain = rk_chain
-        self.fwd_time = self.chain.ff_fw[:-1]
-        self.bwd_time = self.chain.bw[:-1][::-1]
-
-        self.ff_overhead = self.chain.ff_fwd_tmp[:-1]
-        self.fe_overhead = self.chain.fwd_tmp[:-1]
-        self.bwd_overhead = self.chain.bwd_tmp[:-1][::-1]
-
-        self.mem = self.chain.cw[1:-1] + self.chain.cw[1:-1][::-1]
-        self.saved_mem = [
-            [x - self.mem[i] for x in cb]
-            for i, cb in enumerate(self.chain.cbw[1:-1])
+        self.hgraph = hgraph
+        self.hcn2sub_g = []
+        self.sub_gs = []
+        self.nOpts = []
+        self.time = []
+        self.overhead = []
+        for i, hcn in enumerate(self.hgraph.list_hcn):
+            if "loss" in hcn.name:
+                self.loss_idx = i
+            if hcn.sub_graph is None:
+                # only when hcn is fwd with requires_grad=False
+                self.hcn2sub_g.append(None)
+                self.nOpts.append(1)
+                self.time.append([hcn.time])
+                self.overhead.append([hcn.overhead])
+            else:
+                if hcn.sub_graph not in self.sub_gs:
+                    self.sub_gs.append(hcn.sub_graph)
+                self.hcn2sub_g.append(self.sub_gs.index(hcn.sub_graph))
+                self.nOpts.append(
+                    len(hcn.sub_graph.list_opt) + (1 if hcn.is_fwd else 0)
+                )
+                if hcn.is_fwd:
+                    # add fast forward to the options
+                    self.time.append(
+                        [h_opt.fwd_time for h_opt in hcn.sub_graph.list_opt]
+                        + [hcn.time]
+                        if hcn.is_fwd
+                        else []
+                    )
+                    self.overhead.append(
+                        [h_opt.fwd_overhead for h_opt in hcn.sub_graph.list_opt]
+                        + [hcn.overhead]
+                    )
+                else:
+                    self.time.append(
+                        [h_opt.bwd_time for h_opt in hcn.sub_graph.list_opt]
+                    )
+                    self.overhead.append(
+                        [h_opt.bwd_overhead for h_opt in hcn.sub_graph.list_opt]
+                    )
+        self.sub_g2hcn = [[]] * len(self.sub_gs)
+        for i, j in enumerate(self.hcn2sub_g):
+            self.sub_g2hcn[j].append(i)
+        self.mem = [hdn.mem for hdn in self.hgraph.list_hdn]
+        self.save_mem = [
+            [h_opt.save_mem for h_opt in sub_g.list_opt]
+            for sub_g in self.sub_gs
         ]
-        T = 2 * len(self.fwd_time) + 1  # Fwd + Bwd + loss
-        I = len(self.mem)
-        self.loss_idx = len(self.fwd_time)
 
-        self.output_indices = [len(self.chain.cw)]
+        T = len(self.hgraph.list_hcn)
+        I = len(self.hgraph.list_hdn)
+        J = len(self.sub_gs)
+
         self.protected_indices = []
 
-        # TODO: read dependencies from the graph API
-        _deps_d = [[i] for i in range(I)]
-        _users_d = [[i + 1, T - 2 - i] for i in range(self.chain.ln)] + [
-            [i + 1] for i in range(self.chain.ln, I)
+        _deps_d = [
+            [
+                self.hgraph.list_hcn.index(hcn)
+                for hcn in self.hgraph.list_hdn[i].deps
+            ]
+            for i in range(I)
         ]
-        _users_c = [[i] for i in range(I)]
-        f_to_b = [self.chain.ln - 1 - i for i in range(self.chain.ln)]
-        nb_opt = [len(self.chain.cbw[1:-1][i]) for i in range(self.chain.ln)]
+        _users_d = [
+            [
+                self.hgraph.list_hcn.index(hcn)
+                for hcn in self.hgraph.list_hdn[i].users
+                if hcn in self.hgraph.list_hcn
+            ]
+            for i in range(I)
+        ]
+        _users_c = [
+            [
+                self.hgraph.list_hdn.index(hdn)
+                for hdn in self.hgraph.list_hcn[i].users
+            ]
+            for i in range(T)
+        ]
+
         ##############################
 
         self.gcd = gcd if gcd else 1
@@ -71,24 +121,31 @@ class ModelGurobi:
 
         Cr = len(self.create_list)
         De = len(self.delete_list)
-        print(Cr, De, I)
-        # ======build varaibles======
-        self.R = self.md.addVars(T, T, name="R", vtype=GRB.BINARY)
-        self.Save = [None] * self.chain.ln
-        for i in range(self.chain.ln):
-            self.Save[i] = self.md.addVars(
-                T + 1, nb_opt[i], name="Save", vtype=GRB.BINARY,
+        # print(Cr, De, I)
+        # ======build variables======
+        self.R = [
+            self.md.addVars(T, self.nOpts[i], name=f"R{i}", vtype=GRB.BINARY,)
+            for i in range(T)
+        ]
+        self.sumR = {}
+        for i in range(T):
+            for t in range(T):
+                self.sumR[(i, t)] = quicksum(
+                    self.R[i][t, o] for o in range(self.nOpts[i])
+                )
+        self.Sp = [
+            self.md.addVars(
+                T + 1, len(sub_g.list_opt), name=f"Sp{j}", vtype=GRB.BINARY,
             )
-        self.Fe = [None] * self.chain.ln
-        for i in range(self.chain.ln):
-            self.Fe[i] = self.md.addVars(
-                T, nb_opt[i], name="Fe", vtype=GRB.BINARY,
-            )
-        self.Bwd = [None] * self.chain.ln
-        for i in range(self.chain.ln):
-            self.Bwd[i] = self.md.addVars(
-                T, nb_opt[f_to_b[i]], name="Bwd", vtype=GRB.BINARY,
-            )
+            for j, sub_g in enumerate(self.sub_gs)
+        ]
+        self.sumSp = {}
+        for j in range(J):
+            for t in range(T + 1):
+                self.sumR[(j, t)] = quicksum(
+                    self.Sp[j][t, o]
+                    for o in range(len(self.sub_gs[j].list_opt))
+                )
 
         # to present whether one saved tensor can be inheritaged from the last stage
         self.S = self.md.addVars(T, Cr, name="S", vtype=GRB.BINARY)
@@ -99,28 +156,22 @@ class ModelGurobi:
         # define objective function
         self.md.setObjective(
             quicksum(
-                self.R[t, i] * self.fwd_time[i]
-                for i in range(self.chain.ln)
+                self.R[i][t, o] * self.time[i][o]
+                for i in range(T)
                 for t in range(T)
-            )
-            + quicksum(
-                self.Bwd[i][t, o] * self.bwd_time[i][o]
-                for i in range(self.chain.ln)
-                for o in range(nb_opt[f_to_b[i]])
-                for t in range(T)
-            )
-            # + quicksum(
-            #     self.delete[t, k] * (T - t) / T * 0.1 * max(self.time)
-            #     for t in range(T)
-            #     for k in range(De)
-            # )
-            ,
+                for o in range(self.nOpts[i])
+            ),
             GRB.MINIMIZE,
         )
 
-        # ======build constraints======
+        # ======boundary constraints======
         self.md.addLConstr(
-            quicksum(self.R[t, i] for t in range(T) for i in range(t + 1, T)),
+            quicksum(
+                self.R[i][t, o]
+                for t in range(T)
+                for i in range(t + 1, T)
+                for o in range(self.nOpts[i])
+            ),
             GRB.EQUAL,
             0,
         )
@@ -143,89 +194,27 @@ class ModelGurobi:
             0,
         )
 
-        for i in range(self.chain.ln):
-            self.md.addLConstr(
-                quicksum(self.Save[i][T, o] for o in range(nb_opt[i])),
-                GRB.EQUAL,
-                0,
-            )
-            self.md.addLConstr(
-                quicksum(self.Save[i][0, o] for o in range(nb_opt[i])),
-                GRB.EQUAL,
-                0,
-            )
-            for t in range(T):
-                # self.md.addLConstr(
-                #     quicksum(self.Save[i][t, o] for o in range(nb_opt[i])),
-                #     GRB.LESS_EQUAL,
-                #     1,
-                # )
-
-                self.md.addLConstr(
-                    quicksum(
-                        self.Bwd[i][t, o] for o in range(nb_opt[f_to_b[i]])
-                    ),
-                    GRB.LESS_EQUAL,
-                    1,
-                )
-                self.md.addLConstr(
-                    quicksum(
-                        self.Bwd[i][t, o] for o in range(nb_opt[f_to_b[i]])
-                    ),
-                    GRB.GREATER_EQUAL,
-                    self.R[t, i + self.chain.ln + 1],
-                )
-
-        for i in range(self.chain.ln):
+        # options don't conflict
+        for i in range(T):
             for t in range(T):
                 self.md.addLConstr(
-                    quicksum(self.Fe[i][t, o] for o in range(nb_opt[i])),
-                    GRB.LESS_EQUAL,
-                    self.R[t, i],
+                    self.sumR[(i, t)], GRB.LESS_EQUAL, 1,
                 )
-                for o in range(nb_opt[i]):
-                    self.md.addLConstr(
-                        self.Save[i][t, o]
-                        + self.R[t, i]
-                        - self.Bwd[f_to_b[i]][t, o],
-                        GRB.LESS_EQUAL,
-                        1,
-                    )
-                    self.md.addLConstr(
-                        self.Fe[i][t, o], GRB.LESS_EQUAL, 1 - self.Save[i][t, o]
-                    )
-                    self.md.addLConstr(
-                        self.Fe[i][t, o],
-                        GRB.GREATER_EQUAL,
-                        self.Save[i][t + 1, o] - self.Save[i][t, o],
-                    )
-                    self.md.addLConstr(
-                        self.Fe[i][t, o],
-                        GRB.GREATER_EQUAL,
-                        self.Bwd[f_to_b[i]][t, o] - self.Save[i][t, o],
-                    )
-                    self.md.addLConstr(
-                        self.Save[i][t, o] - self.Bwd[f_to_b[i]][t, o],
-                        GRB.GREATER_EQUAL,
-                        0,
-                    )
-                    self.md.addLConstr(
-                        self.Save[i][t + 1, o] + self.Bwd[f_to_b[i]][t, o],
-                        GRB.GREATER_EQUAL,
-                        self.Save[i][t, o],
-                    )
-                    self.md.addLConstr(
-                        self.Save[i][t + 1, o],
-                        GRB.LESS_EQUAL,
-                        self.R[t, i] + self.Save[i][t, o],
-                    )
+        for j in range(J):
+            for t in range(T + 1):
+                self.md.addLConstr(
+                    self.sumSp[(j, t)], GRB.LESS_EQUAL, 1,
+                )  # assuming no keeping two copies of saved tensors at the same time
 
+        # option-free constraints
         self.md.addLConstr(
-            quicksum(self.R[t, t] for t in range(T)), GRB.EQUAL, T
-        )
+            quicksum(self.sumR[(t, t)] for t in range(T)), GRB.EQUAL, T,
+        )  # diagonal should be executed
         self.md.addLConstr(
-            quicksum(self.R[t, self.loss_idx] for t in range(T)), GRB.EQUAL, 1
-        )  # fwd_loss can only run once
+            quicksum(self.sumR[(self.loss_idx, t)] for t in range(T)),
+            GRB.EQUAL,
+            1,
+        )  # loss should be executed exactly once
 
         for t in range(T):
             for j in range(Cr):
@@ -233,22 +222,39 @@ class ModelGurobi:
                     self.S[t, j],
                     GRB.LESS_EQUAL,
                     self.P[t, self.create_list[j][1]],
-                )
+                )  # one edge created, memory is occupied
         for t in range(T - 1):
             for i in range(Cr):
+                src_i = self.create_list[i][0]
                 self.md.addLConstr(
                     self.S[t + 1, i],
                     GRB.LESS_EQUAL,
-                    self.S[t, i] + self.R[t, self.create_list[i][0]],
+                    self.S[t, i] + self.sumR[(src_i, t)],
                 )
-        # ensure all computations are possible
         for t in range(T):
             for j, (k, i) in enumerate(self.create_list):
                 for k_ in _users_d[i]:
                     self.md.addLConstr(
-                        self.R[t, k_],
+                        self.sumR[(k_, t)],
                         GRB.LESS_EQUAL,
-                        self.R[t, k] + self.S[t, j],
+                        self.sumR[(k, t)] + self.S[t, j],
+                    )
+
+        # options-related constraints
+        for j in range(J):
+            fwd_i = min(self.sub_g2hcn[j])
+            bwd_i = max(self.sub_g2hcn[j])
+            for t in range(T):
+                for o in range(self.nOpts[fwd_i]):
+                    self.md.addLConstr(
+                        self.Sp[j][t + 1, o],
+                        GRB.LESS_EQUAL,
+                        self.Sp[j][t, o] + self.R[fwd_i][t, o],
+                    )
+                    self.md.addLConstr(
+                        self.R[bwd_i][t, o],
+                        GRB.LESS_EQUAL,
+                        self.Sp[j][t, o] + self.R[fwd_i][t, o],
                     )
 
         self.alive = {}
@@ -347,9 +353,9 @@ class ModelGurobi:
                     if k_ == 0
                 )
                 + quicksum(
-                    self.Save[i][t, o] * self.saved_mem[i][o]
-                    for i in range(self.chain.ln)
-                    for o in range(nb_opt[i])
+                    self.Sp[j][t, o] * save_mem
+                    for j in range(J)
+                    for o, save_mem in enumerate(self.save_mem[j])
                 )
                 # - quicksum(
                 #     self.Bwd[f_to_b[i]][t_, o] * self.saved_mem[i][o]
@@ -374,31 +380,31 @@ class ModelGurobi:
                         if k_ == k
                     )
                 )
-                if k < self.chain.ln:
+                if k < self.loss_idx:
                     self.U[(t, k)] += quicksum(
-                        self.Fe[k][t, o] * self.saved_mem[k][o]
-                        for o in range(nb_opt[k])
+                        self.R[k][t, o] * self.saved_mem[k][o]
+                        for o in range(self.nOpts[k])
                     )
-                if k > self.chain.ln:
+                if k > self.loss_idx:
+                    j = self.hcn2sub_g[k]
+                    fwd_i = min(self.sub_g2hcn[j])
                     self.U[(t, k)] += quicksum(
                         (
-                            self.Save[f_to_b[k - self.chain.ln - 1]][t + 1, o]
-                            - self.Fe[f_to_b[k - self.chain.ln - 1]][t, o]
-                            - self.Save[f_to_b[k - self.chain.ln - 1]][t, o]
+                            self.Sp[j][t + 1, o]
+                            - self.R[fwd_i][t, o]
+                            - self.Sp[j][t, o]
                         )
-                        * self.saved_mem[f_to_b[k - self.chain.ln - 1]][o]
-                        for o in range(nb_opt[f_to_b[k - self.chain.ln - 1]])
+                        * self.save_mem[j][o]
+                        for o in range(self.nOpts[k])
                     )
         for t in range(T):
-            for k in range(self.chain.ln):
+            for k in range(T):
                 self.md.addLConstr(self.U[(t, k)], GRB.GREATER_EQUAL, 0)
                 self.md.addLConstr(
                     self.U[(t, k)]
-                    + self.R[t, k] * self.ff_overhead[k]
                     + quicksum(
-                        self.Bwd[self.chain.ln - 1 - k][t, o]
-                        * self.fe_overhead[k][o]
-                        for o in range(nb_opt[k])
+                        self.R[k][t, o] * self.overhead[k][o]
+                        for o in range(self.nOpts[k])
                     )
                     + quicksum(
                         self.mem[i_] * self.delete[t, eidx_d]
@@ -408,60 +414,21 @@ class ModelGurobi:
                     GRB.LESS_EQUAL,
                     self.budget,
                 )
-                if t == T // 2 and self.save_budget:
-                    self.md.addLConstr(
-                        self.U[(t, k)], GRB.LESS_EQUAL, self.save_budget
-                    )
-            for k in range(self.chain.ln, T):
-                # self.md.addLConstr(self.U[(t, k)], GRB.GREATER_EQUAL, 0)
-                self.md.addLConstr(
-                    self.U[(t, k)]
-                    + (
-                        quicksum(
-                            self.Bwd[k - self.chain.ln - 1][t, o]
-                            * self.bwd_overhead[k - self.chain.ln - 1][o]
-                            for o in range(
-                                nb_opt[f_to_b[k - self.chain.ln - 1]]
-                            )
-                        )
-                        - quicksum(
-                            (
-                                self.Save[f_to_b[k - self.chain.ln - 1]][
-                                    t + 1, o
-                                ]
-                                - self.Fe[f_to_b[k - self.chain.ln - 1]][t, o]
-                                - self.Save[f_to_b[k - self.chain.ln - 1]][t, o]
-                            )
-                            * self.saved_mem[f_to_b[k - self.chain.ln - 1]][o]
-                            for o in range(
-                                nb_opt[f_to_b[k - self.chain.ln - 1]]
-                            )
-                        )
-                        if k > self.chain.ln
-                        else 0
-                    )
-                    + quicksum(
-                        self.mem[i_] * self.delete[t, eidx_d]
-                        for eidx_d, (k_, i_) in enumerate(self.delete_list)
-                        if k == k_
-                    ),
-                    GRB.LESS_EQUAL,
-                    self.budget,
-                )
-                if t == T // 2 and self.save_budget:
+                if t == self.loss_idx and self.save_budget:
                     self.md.addLConstr(
                         self.U[(t, k)], GRB.LESS_EQUAL, self.save_budget
                     )
 
     def add_abar_constraint(self, save_budget):
-        T = len(self.kg.list_kcn)
+        T = len(self.hgraph.list_hcn)
         self.save_budget = save_budget / self.gcd
         for k in range(T):
-            t = T // 2
-            self.md.addLConstr(self.U[(t, k)], GRB.LESS_EQUAL, self.save_budget)
+            self.md.addLConstr(
+                self.U[(self.loss_idx, k)], GRB.LESS_EQUAL, self.save_budget
+            )
 
     def solve(self):
-        self.md.message("\n\nRestarting solve\n\n")
+        # self.md.message("\n\nRestarting solve\n\n")
         self.md.optimize()
 
         infeasible = self.md.status == GRB.INFEASIBLE
@@ -476,79 +443,85 @@ class ModelGurobi:
                 )
             self.feasible = True
 
-    def schedule(self, kg=None):
-        kg = kg if kg else self.kg
+    def schedule(self, hgraph=None):
+        """ 
+        Given the solution from HILP, we want to translate the result
+        to a H_option that can be used in a higher level.
+        """
+        hgraph = hgraph if hgraph else self.hgraph
         assert self.feasible, "Cannot schedule an infeasible model!"
-        T = len(kg.list_kcn)
-        I = len(kg.list_kdn)
+        T = len(hgraph.list_hcn)
+        I = len(hgraph.list_hdn)
+        J = len(self.sub_gs)
 
         op_list = []
         alive_list = []
-        alive_status = np.zeros(I + 2, dtype=bool)
-        alive_status[-1] = 1  # input_data_kdn
+        # alive_status = np.zeros(I, dtype=bool)
+        alive_status = {
+            hdn.name: 1 * (hdn in hgraph.fwd_inputs) for hdn in hgraph.list_hdn
+        }
+        for sub_g in self.sub_gs:
+            alive_status[sub_g.name] = -1  # to represent phantom from sub_g
         for t in range(T):
             for k in range(T):
-                if self.R[t, k].X == 1:
-                    kcn = kg.list_kcn[k]
-                    if "loss" in kcn.name:
-                        op_list.append(RunOp(kcn))
-                        alive_list.append(alive_status.copy())
-                        alive_status[kg.list_kdn.index(kg.output_kdn_grad)] = 1
-                        # alive_status[kg.list_kdn.index(kg.output_kdn_data)] = 0
+                j = self.hcn2sub_g[k]
+                if self.sumR[(k, t)].getValue() == 1:
+                    for o in self.nOpts[k]:
+                        if self.R[k][t, o].X == 1:
+                            opt = o
+                            break
+
+                    hcn = hgraph.list_hcn[k]
                     for eidx, (k_, i) in enumerate(self.create_list):
                         if k == k_ and self.create[t, eidx].X == 1:
-                            alive_status[i] = 1
-                    op_list.append(RunOp(kcn))
-                    alive_list.append(alive_status.copy())
-                    # for i in range(I):
-                    #     if self.alive[(t,k,i)].getValue():
-                    #         alive_list[-1][i] = 1
-                for eidx, (k_, i) in enumerate(self.delete_list):
-                    if k == k_ and self.delete[t, eidx].X == 1:
-                        kdn = kg.list_kdn[i]
-                        if "phantom" in kdn.name:
-                            alive_status[i] = 0
-                            op_list.append(DelOp(kdn))
-                            alive_list.append(alive_status.copy())
-                for eidx, (k_, i) in enumerate(self.delete_list):
-                    if k == k_ and self.delete[t, eidx].X == 1:
-                        kdn = kg.list_kdn[i]
-                        if "phantom" not in kdn.name:
-                            alive_status[i] = 0
-                            op_list.append(DelOp(kdn))
-                            alive_list.append(alive_status.copy())
-        for i, op in enumerate(op_list):
-            if "loss" in op.name:
-                loss_i = i
-                break
+                            alive_status[hgraph.list_hdn[i].name] = 1
 
-        input_kdn = kg.input_kdn_data
-        # if "src" not in input_kdn.name:
-        #     del_input_op = DelOp(input_kdn)
-        #     del_input_idx = len(op_list)
-        #     for i, op in enumerate(op_list):
-        #         if isinstance(op, RunOp) and input_kdn in op.deps_global:
-        #             del_input_idx = i + 1
-        #     op_list.insert(del_input_idx, del_input_op)
-        #     alive_status = alive_list[del_input_idx - 1]
-        #     alive_status[-1] = 0
-        #     alive_list.insert(del_input_idx, alive_status)
+                    if hcn.is_fwd:
+                        alive_status[self.sub_gs[j].name] = opt
+                    elif self.sumSp[(j, t + 1)].getValue() == 0:
+                        op_list.append(
+                            (
+                                "Del",
+                                hcn.name,
+                                alive_status[self.sub_gs[j].name],
+                            )
+                        )  # del hcn.name means del phantom
+                        alive_status[self.sub_gs[j].name] = 0
+
+                    op_list.append(("Run", hcn.name, opt))
+                    alive_list.append(alive_status.copy())
+
+                for eidx, (k_, i) in enumerate(self.delete_list):
+                    if k == k_ and self.delete[t, eidx].X == 1:
+                        hdn = hgraph.list_hdn[i]
+                        alive_status[hdn.name] = 0
+                        op_list.append(("Del", hdn.name, 0))
+                        alive_list.append(alive_status.copy())
+            for j in range(J):
+                hcn = hgraph.list_hcn[self.sub_g2hcn[j]]
+                if (
+                    alive_status[self.sub_gs[j].name] >= 0
+                    and self.sumSp[(j, t + 1)].getValue() == 0
+                ):
+                    # del phantom happens either after bwd or at the end of stage
+                    op_list.append(
+                        (
+                            "Del",
+                            hcn.name,
+                            # self.sub_gs[j].name,
+                            alive_status[self.sub_gs[j].name],
+                        )
+                    )
 
         fwd_sched = OpSchedule(
-            op_list[: loss_i + 1],
-            alive_list[: loss_i + 1],
-            kg.input_kdn_data,
-            kg.input_kdn_grad,
-            kg.output_kdn_data,
-            kg.list_kdn,
+            op_list[: self.loss_idx + 1],
+            alive_list[: self.loss_idx + 1],
+            hgraph,
         )
         bwd_sched = OpSchedule(
-            op_list[loss_i + 1 :],
-            alive_list[loss_i + 1 :],
-            kg.input_kdn_data,
-            kg.input_kdn_grad,
-            kg.output_kdn_data,
-            kg.list_kdn,
+            op_list[self.loss_idx + 1 :],
+            alive_list[self.loss_idx + 1 :],
+            hgraph,
         )
-        # fwd_sched.del_input(kg)
+        # fwd_sched.del_input(hgraph)
         return fwd_sched, bwd_sched
