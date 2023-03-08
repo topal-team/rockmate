@@ -4,6 +4,7 @@ from typing import Dict, Any
 import numpy as np
 from gurobipy import GRB, Model, quicksum
 from rockmate.def_op import RunOp, DelOp, OpSchedule
+from rkgb.Htools import H_op
 
 
 class ModelGurobi:
@@ -67,8 +68,7 @@ class ModelGurobi:
             self.sub_g2hcn[j].append(i)
         self.mem = [hdn.mem for hdn in self.hgraph.list_hdn]
         self.save_mem = [
-            [h_opt.save_mem for h_opt in sub_g.list_opt]
-            for sub_g in self.sub_gs
+            [h_opt.mem for h_opt in sub_g.list_opt] for sub_g in self.sub_gs
         ]
 
         T = len(self.hgraph.list_hcn)
@@ -457,60 +457,68 @@ class ModelGurobi:
         op_list = []
         alive_list = []
         # alive_status = np.zeros(I, dtype=bool)
-        alive_status = {
-            hdn.name: 1 * (hdn in hgraph.fwd_inputs) for hdn in hgraph.list_hdn
-        }
+        alive_status = {}
+        for hdn in hgraph.list_hdn:
+            alive_status[hdn.name] = -1 if (hdn in hgraph.fwd_inputs) else 1
+
         for sub_g in self.sub_gs:
             alive_status[sub_g.name] = -1  # to represent phantom from sub_g
         for t in range(T):
             for k in range(T):
                 j = self.hcn2sub_g[k]
                 if self.sumR[(k, t)].getValue() == 1:
-                    for o in self.nOpts[k]:
+                    for o in range(self.nOpts[k]):
                         if self.R[k][t, o].X == 1:
                             opt = o
                             break
-
+                    if hcn.is_fwd and self.R[k][t, -1].X == 1:
+                        opt = -1
                     hcn = hgraph.list_hcn[k]
+                    h_obj = hcn.sub_graph.list_opt[opt] if opt > -1 else hcn
+
                     for eidx, (k_, i) in enumerate(self.create_list):
                         if k == k_ and self.create[t, eidx].X == 1:
                             alive_status[hgraph.list_hdn[i].name] = 1
 
+                    # phantoms will be created when not ff
                     if hcn.is_fwd:
                         alive_status[self.sub_gs[j].name] = opt
                     elif self.sumSp[(j, t + 1)].getValue() == 0:
                         op_list.append(
-                            (
-                                "Del",
-                                hcn.name,
-                                alive_status[self.sub_gs[j].name],
+                            H_op(
+                                "Del_" + hcn.sub_graph.name, h_obj, is_del=True,
                             )
                         )  # del hcn.name means del phantom
-                        alive_status[self.sub_gs[j].name] = 0
+                        alive_status[self.sub_gs[j].name] = -1
 
-                    op_list.append(("Run", hcn.name, opt))
+                    op_list.append(
+                        H_op(hcn.name, h_obj, is_fwd=hcn.is_fwd, is_del=False,)
+                    )
                     alive_list.append(alive_status.copy())
 
                 for eidx, (k_, i) in enumerate(self.delete_list):
                     if k == k_ and self.delete[t, eidx].X == 1:
                         hdn = hgraph.list_hdn[i]
                         alive_status[hdn.name] = 0
-                        op_list.append(("Del", hdn.name, 0))
+                        op_list.append(
+                            H_op("Del_" + hdn.name, hdn, is_del=True)
+                        )
                         alive_list.append(alive_status.copy())
+
+            # At the end of the stage
             for j in range(J):
                 hcn = hgraph.list_hcn[self.sub_g2hcn[j]]
+
                 if (
                     alive_status[self.sub_gs[j].name] >= 0
                     and self.sumSp[(j, t + 1)].getValue() == 0
                 ):
                     # del phantom happens either after bwd or at the end of stage
+                    h_obj = hcn.sub_graph.list_opt[
+                        alive_status[self.sub_gs[j].name]
+                    ]
                     op_list.append(
-                        (
-                            "Del",
-                            hcn.name,
-                            # self.sub_gs[j].name,
-                            alive_status[self.sub_gs[j].name],
-                        )
+                        H_op("Del_" + self.sub_gs[j].name, h_obj, is_del=True,)
                     )
 
         fwd_sched = OpSchedule(
