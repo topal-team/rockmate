@@ -35,8 +35,8 @@ class ModelGurobi:
                 # only when hcn is fwd with requires_grad=False
                 self.hcn2sub_g.append(None)
                 self.nOpts.append(1)
-                self.time.append([hcn.time])
-                self.overhead.append([hcn.overhead])
+                self.time.append([hcn.fwd_time])
+                self.overhead.append([hcn.fwd_overhead])
             else:
                 if hcn.sub_graph not in self.sub_gs:
                     self.sub_gs.append(hcn.sub_graph)
@@ -48,13 +48,13 @@ class ModelGurobi:
                     # add fast forward to the options
                     self.time.append(
                         [h_opt.fwd_time for h_opt in hcn.sub_graph.list_opt]
-                        + [hcn.time]
+                        + [hcn.fwd_time]
                         if hcn.is_fwd
                         else []
                     )
                     self.overhead.append(
                         [h_opt.fwd_overhead for h_opt in hcn.sub_graph.list_opt]
-                        + [hcn.overhead]
+                        + [hcn.fwd_overhead]
                     )
                 else:
                     self.time.append(
@@ -65,9 +65,11 @@ class ModelGurobi:
                     )
         self.sub_g2hcn = [[]] * len(self.sub_gs)
         for i, j in enumerate(self.hcn2sub_g):
+            if j is None:
+                continue
             self.sub_g2hcn[j].append(i)
         self.mem = [hdn.mem for hdn in self.hgraph.list_hdn]
-        self.save_mem = [
+        self.saved_mem = [
             [h_opt.mem for h_opt in sub_g.list_opt] for sub_g in self.sub_gs
         ]
 
@@ -114,7 +116,7 @@ class ModelGurobi:
             for k, v in gurobi_params.items():
                 setattr(self.md.Params, k, v)
 
-        self.create_list = [(k, i) for k in range(I) for i in _users_c[k]]
+        self.create_list = [(k, i) for k in range(T) for i in _users_c[k]]
         self.delete_list = [
             (k, i) for i in range(I) for k in _deps_d[i] + _users_d[i]
         ]
@@ -278,12 +280,12 @@ class ModelGurobi:
                     self.md.addLConstr(
                         self.alive[(t, k, i)] + self.delete[t, didx],
                         GRB.GREATER_EQUAL,
-                        self.R[t, k],
+                        self.sumR[(k, t)],
                     )
 
             for eidx, (k, i) in enumerate(self.create_list):
                 self.md.addLConstr(
-                    self.create[t, eidx], GRB.LESS_EQUAL, self.R[t, k]
+                    self.create[t, eidx], GRB.LESS_EQUAL, self.sumR[(k, t)]
                 )
             for i in range(I):
                 if t + 1 < T:
@@ -306,14 +308,14 @@ class ModelGurobi:
             if t + 1 < T:
                 return (
                     1
-                    - self.R[t, k]
+                    - self.sumR[(k, t)]
                     + self.P[t + 1, i]
-                    + quicksum(self.R[t, j] for j in _users_d[i] if j > k)
+                    + quicksum(self.sumR[(j, t)] for j in _users_d[i] if j > k)
                 )
             return (
                 1
-                - self.R[t, k]
-                + quicksum(self.R[t, j] for j in _users_d[i] if j > k)
+                - self.sumR[(k, t)]
+                + quicksum(self.sumR[(j, t)] for j in _users_d[i] if j > k)
             )
 
         def _max_num_hazards(t, i, k):
@@ -355,7 +357,7 @@ class ModelGurobi:
                 + quicksum(
                     self.Sp[j][t, o] * save_mem
                     for j in range(J)
-                    for o, save_mem in enumerate(self.save_mem[j])
+                    for o, save_mem in enumerate(self.saved_mem[j])
                 )
                 # - quicksum(
                 #     self.Bwd[f_to_b[i]][t_, o] * self.saved_mem[i][o]
@@ -380,13 +382,16 @@ class ModelGurobi:
                         if k_ == k
                     )
                 )
-                if k < self.loss_idx:
+                # if k < self.loss_idx:
+                if self.hgraph.list_hcn[k].is_fwd:
                     self.U[(t, k)] += quicksum(
                         self.R[k][t, o] * self.saved_mem[k][o]
-                        for o in range(self.nOpts[k])
+                        for o in range(self.nOpts[k] - 1)
                     )
-                if k > self.loss_idx:
+                else:
                     j = self.hcn2sub_g[k]
+                    if j is None:
+                        continue
                     fwd_i = min(self.sub_g2hcn[j])
                     self.U[(t, k)] += quicksum(
                         (
@@ -394,11 +399,13 @@ class ModelGurobi:
                             - self.R[fwd_i][t, o]
                             - self.Sp[j][t, o]
                         )
-                        * self.save_mem[j][o]
+                        * self.saved_mem[j][o]
                         for o in range(self.nOpts[k])
                     )
         for t in range(T):
             for k in range(T):
+                j = self.hcn2sub_g[k]
+
                 self.md.addLConstr(self.U[(t, k)], GRB.GREATER_EQUAL, 0)
                 self.md.addLConstr(
                     self.U[(t, k)]
