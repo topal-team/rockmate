@@ -3,6 +3,8 @@
 # ==========================
 
 from rkgb.utils import *
+from rkgb.Ptools import P_graph,P_node
+from rkgb.Ktools import K_graph,K_C_node,K_D_node
 from collections import namedtuple
 
 # The H_graph contains only forward part
@@ -33,11 +35,13 @@ class H_C_node:
 
 
 class H_D_node:
-    def __init__(self, name):
+    def __init__(self, name, main_target):
         self.name = name
+        self.main_target = main_target 
         self.deps = set()  # HCN set
         self.users = set()  # HCN set
         self.mem = 0
+        self.kdn = None # temporary attribute
 
 
 # ***********
@@ -59,10 +63,12 @@ class H_graph:
         self.list_hcn = []  #  toposorted
         self.list_hdn = []  #  including interface HDNs
         self.list_opt = []
-        self.fwd_inputs = set()  # HDN set
-        self.fwd_outputs = set()  # HDN set
-        self.bwd_inputs = set()  # HDN set
-        self.bwd_outputs = set()  # HDN set
+        self.fwd_inputs = set()  # HDN set # -> inputs' data
+        self.fwd_outputs = set()  # HDN set # -> outputs' data
+        self.bwd_inputs = set()  # HDN set # -> outputs' grad
+        self.bwd_outputs = set()  # HDN set # -> inputs' grad
+        self.loss_hcn = None # HCN
+        self.all_kcn_inside = set() # temporary attribute
 
     def add_option(self, option):
         pareto = True
@@ -79,6 +85,105 @@ class H_graph:
         for hn in self.dict_hn.values():
             for req_hn in hn.deps:
                 req_hn.users.add(hn)
+
+
+# TODO TODO add the compiling info
+def P_and_K_to_H(pg : P_graph, kg : K_graph):
+    # -> This function is recursive in 'pg'
+    hg = H_graph(f"Hg_{pg.graph_id}")
+
+    # ** useful dicts **
+    dict_hdn_to_kdn = dict()
+    dict_kcn_to_hcn = dict() 
+    # -> /!\ all kcn inside hdn, at any depth level /!\
+
+    # ** small functions to extract the info in kg **
+    dict_kn = kg.dict_kn
+    has_bwd      = lambda mt : f"bwd_{mt}" in dict_kn
+    has_phantoms = lambda mt : f"{mt} phantoms" in dict_kn
+    get_kcn_fwd  = lambda mt : dict_kn[f"fwd_{mt}"]
+    get_kcn_bwd  = lambda mt : dict_kn[f"bwd_{mt}"]
+    get_kdn_data = lambda mt : dict_kn[f"{mt} data"]
+    get_kdn_grad = lambda mt : dict_kn[f"{mt} grad"]
+    get_kdn_phantoms = lambda mt : dict_kn[f"{mt} phantoms"]
+
+    # ==* First, build the H_nodes *==
+    for pn in pg.list_nodes:
+        if pn.is_leaf:
+            # ** Bottom level **
+            mt = pn.main_target
+            hcn_fwd  = H_C_node(f"Fwd_{pn.name}")
+            hdn_data = H_D_node(f"Data_bottom_level_{mt}",mt)
+            kcn_fwd  = get_kcn_fwd(mt)
+            kdn_data = get_kdn_data(mt)
+            hcn_fwd.fwd_time     = kcn_fwd.time
+            hcn_fwd.fwd_overhead = kcn_fwd.overhead
+            hdn_data.mem         = kdn_data.mem
+            hdn_data.kdn         = kdn_data
+            hcns = [hcn_fwd]
+            hdns = [hdn_data]
+            # ** bwd part **
+            if has_bwd(mt):
+                hcn_bwd  = H_C_node(f"Bwd_{pn.name}")
+                hdn_grad = H_D_node(f"Grad_bottom_level_{mt}",mt)
+                kcn_bwd  = get_kcn_bwd(mt)
+                kdn_grad = get_kdn_grad(mt)
+                hcn_bwd.is_fwd       = False
+                hcn_bwd.fwd_time     = kcn_bwd.time
+                hcn_bwd.fwd_overhead = kcn_bwd.overhead
+                hdn_grad.mem         = kdn_grad.mem
+                hdn_grad.kdn         = kdn_grad
+                hcns.append(hcn_bwd)
+                hdns.append(hdn_grad)
+                # ** last level graph **
+                sub_hg = H_graph(f"Hg_{pn.name}")
+                # TODO TODO : add the bottom option
+                # -> use get_kdn_phantoms
+                hcn_fwd.sub_graph = hcn_bwd.sub_graph = sub_hg
+            else:
+                sub_hg   = None
+        else:
+            # ** Recursive **
+            sub_hg = P_and_K_to_H(pn.subgraph,kg)
+            hcn_fwd  = H_C_node(f"Fwd_{pn.name}")
+            hcn_bwd  = H_C_node(f"Bwd_{pn.name}")
+            hcn_fwd.sub_graph = hcn_bwd.sub_graph = sub_hg
+            hcn_bwd.is_fwd = False
+            # TODO : hcn_fwd.fwd_time
+            # TODO : hcn_fwd.fwd_overhead
+            # TODO : hcn_bwd.bwd_time
+            # TODO : hcn_bwd.bwd_overhead
+            hcns = [hcn_fwd,hcn_bwd]
+            hdns = []
+            for hdn_output_data_in_sub_hg in sub_hg.fwd_outputs:
+                mt  = hdn_output_data_in_sub_hg.main_target
+                mem = hdn_output_data_in_sub_hg.mem
+                hdn_data = H_D_node(f"Data_{mt}_in_{sub_hg.name}",mt)
+                hdn_data.mem = mem
+                hdns.append(hdn_data)
+            for hdn_output_grad_in_sub_hg in sub_hg.bwd_inputs:
+                mt  = hdn_output_grad_in_sub_hg.main_target
+                mem = hdn_output_grad_in_sub_hg.mem
+                hdn_grad = H_D_node(f"Grad_{mt}_in_{sub_hg.name}",mt)
+                hdn_grad.mem = mem
+                hdns.append(hdn_grad)
+
+        # * register everything *
+        for hn in hcns + hdns:
+            hg.dict_hn[hn.name] = hn
+        hg.list_hcn.extend(hcns)
+        hg.list_hdn.extend(hdns)
+        if not (sub_hg is None):
+            hg.dict_hg[sub_hg.name] = sub_hg
+
+    # ===* Second, build the edges *===
+
+    # /!\ build hg.all_kcn_inside
+
+
+
+
+
 
 
 # ***********

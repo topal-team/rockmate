@@ -2,6 +2,8 @@
 # ====== P structure =======
 # ==========================
 
+# TODO TODO ensure that a subgraph always requires_grad
+
 # ** Graph partitioning **
 
 from rkgb.utils import *
