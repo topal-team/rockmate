@@ -3,8 +3,8 @@
 # ==========================
 
 from rkgb.utils import *
-from rkgb.Ptools import P_graph,P_node
-from rkgb.Ktools import K_graph,K_C_node,K_D_node
+from rkgb.Ptools import P_graph, P_node
+from rkgb.Ktools import K_graph, K_C_node, K_D_node
 from collections import namedtuple
 
 # The H_graph contains only forward part
@@ -37,11 +37,11 @@ class H_C_node:
 class H_D_node:
     def __init__(self, name, main_target):
         self.name = name
-        self.main_target = main_target 
+        self.main_target = main_target
         self.deps = set()  # HCN set
         self.users = set()  # HCN set
         self.mem = 0
-        self.kdn = None # temporary attribute
+        self.kdn = None  # temporary attribute
 
 
 # ***********
@@ -67,8 +67,8 @@ class H_graph:
         self.fwd_outputs = set()  # HDN set # -> outputs' data
         self.bwd_inputs = set()  # HDN set # -> outputs' grad
         self.bwd_outputs = set()  # HDN set # -> inputs' grad
-        self.loss_hcn = None # HCN
-        self.all_kcn_inside = set() # temporary attribute
+        self.loss_hcn = None  #  HCN
+        self.all_kcn_inside = set()  # temporary attribute
 
     def add_option(self, option):
         pareto = True
@@ -88,83 +88,115 @@ class H_graph:
 
 
 # TODO TODO add the compiling info
-def P_and_K_to_H(pg : P_graph, kg : K_graph):
-    # -> This function is recursive in 'pg'
+def P_and_K_to_H(pg: P_graph, kg: K_graph):
+    #  -> This function is recursive in 'pg'
     hg = H_graph(f"Hg_{pg.graph_id}")
 
     # ** useful dicts **
     dict_hdn_to_kdn = dict()
-    dict_kcn_to_hcn = dict() 
-    # -> /!\ all kcn inside hdn, at any depth level /!\
+    dict_kcn_to_hcn = dict()
+    #  -> /!\ all kcn inside hdn, at any depth level /!\
 
-    # ** small functions to extract the info in kg **
+    #  ** small functions to extract the info in kg **
     dict_kn = kg.dict_kn
-    has_bwd      = lambda mt : f"bwd_{mt}" in dict_kn
-    has_phantoms = lambda mt : f"{mt} phantoms" in dict_kn
-    get_kcn_fwd  = lambda mt : dict_kn[f"fwd_{mt}"]
-    get_kcn_bwd  = lambda mt : dict_kn[f"bwd_{mt}"]
-    get_kdn_data = lambda mt : dict_kn[f"{mt} data"]
-    get_kdn_grad = lambda mt : dict_kn[f"{mt} grad"]
-    get_kdn_phantoms = lambda mt : dict_kn[f"{mt} phantoms"]
+    has_bwd = lambda mt: f"bwd_{mt}" in dict_kn
+    has_phantoms = lambda mt: f"{mt} phantoms" in dict_kn
+    get_kcn_fwd = lambda mt: dict_kn[f"fwd_{mt}"]
+    get_kcn_bwd = lambda mt: dict_kn[f"bwd_{mt}"]
+    get_kdn_data = lambda mt: dict_kn[f"{mt} data"]
+    get_kdn_grad = lambda mt: dict_kn[f"{mt} grad"]
+    get_kdn_phantoms = lambda mt: dict_kn[f"{mt} phantoms"]
 
     # ==* First, build the H_nodes *==
     for pn in pg.list_nodes:
         if pn.is_leaf:
             # ** Bottom level **
             mt = pn.main_target
-            hcn_fwd  = H_C_node(f"Fwd_{pn.name}")
-            hdn_data = H_D_node(f"Data_bottom_level_{mt}",mt)
-            kcn_fwd  = get_kcn_fwd(mt)
+            hcn_fwd = H_C_node(f"Fwd_{pn.name}")
+            hdn_data = H_D_node(f"Data_bottom_level_{mt}", mt)
+            kcn_fwd = get_kcn_fwd(mt)
             kdn_data = get_kdn_data(mt)
-            hcn_fwd.fwd_time     = kcn_fwd.time
+            hcn_fwd.fwd_time = kcn_fwd.time
             hcn_fwd.fwd_overhead = kcn_fwd.overhead
-            hdn_data.mem         = kdn_data.mem
-            hdn_data.kdn         = kdn_data
+            hdn_data.mem = kdn_data.mem
+            hdn_data.kdn = kdn_data
             hcns = [hcn_fwd]
             hdns = [hdn_data]
-            # ** bwd part **
+            #  ** bwd part **
             if has_bwd(mt):
-                hcn_bwd  = H_C_node(f"Bwd_{pn.name}")
-                hdn_grad = H_D_node(f"Grad_bottom_level_{mt}",mt)
-                kcn_bwd  = get_kcn_bwd(mt)
+                hcn_bwd = H_C_node(f"Bwd_{pn.name}")
+                hdn_grad = H_D_node(f"Grad_bottom_level_{mt}", mt)
+                kcn_bwd = get_kcn_bwd(mt)
                 kdn_grad = get_kdn_grad(mt)
-                hcn_bwd.is_fwd       = False
-                hcn_bwd.fwd_time     = kcn_bwd.time
+                hcn_bwd.is_fwd = False
+                hcn_bwd.fwd_time = kcn_bwd.time
                 hcn_bwd.fwd_overhead = kcn_bwd.overhead
-                hdn_grad.mem         = kdn_grad.mem
-                hdn_grad.kdn         = kdn_grad
+                hdn_grad.mem = kdn_grad.mem
+                hdn_grad.kdn = kdn_grad
                 hcns.append(hcn_bwd)
                 hdns.append(hdn_grad)
-                # ** last level graph **
+                #  ** last level graph **
                 sub_hg = H_graph(f"Hg_{pn.name}")
                 # TODO TODO : add the bottom option
                 # -> use get_kdn_phantoms
+                for kdn in kcn_fwd.users:
+                    if "phantom" in kdn.name:
+                        # there should be at most one phantom
+                        mem = kdn.mem
+                hopt = H_option(
+                    sub_hg,
+                    op_list=[],
+                    alive_list=[],
+                    direct_info={
+                        "fwd_time": hcn_fwd.time,
+                        "bwd_time": hcn_bwd.time,
+                        "mem": mem,
+                        "fwd_overhead": hcn_fwd.overhead,
+                        "bwd_overhead": hcn_bwd.overhead,
+                        "dep_inputs": [
+                            # TODO: if H_edges are done, should read from HDN
+                            kdn.name
+                            for kdn in kcn_fwd.deps_global
+                            if kdn in kcn_bwd.deps_global
+                        ],
+                    },
+                )
+                sub_hg.list_opt = [hopt]
                 hcn_fwd.sub_graph = hcn_bwd.sub_graph = sub_hg
             else:
-                sub_hg   = None
+                sub_hg = None
         else:
-            # ** Recursive **
-            sub_hg = P_and_K_to_H(pn.subgraph,kg)
-            hcn_fwd  = H_C_node(f"Fwd_{pn.name}")
-            hcn_bwd  = H_C_node(f"Bwd_{pn.name}")
+            #  ** Recursive **
+            sub_hg = P_and_K_to_H(pn.subgraph, kg)
+            hcn_fwd = H_C_node(f"Fwd_{pn.name}")
+            hcn_bwd = H_C_node(f"Bwd_{pn.name}")
             hcn_fwd.sub_graph = hcn_bwd.sub_graph = sub_hg
             hcn_bwd.is_fwd = False
+
             # TODO : hcn_fwd.fwd_time
             # TODO : hcn_fwd.fwd_overhead
             # TODO : hcn_bwd.bwd_time
             # TODO : hcn_bwd.bwd_overhead
-            hcns = [hcn_fwd,hcn_bwd]
+            hcn_fwd.fwd_time = sum(
+                sub_hcn.fwd_time for sub_hcn in sub_hg.list_hcn
+            )
+            hcn_fwd.fwd_overhead = sum(
+                sub_hdn.mem for sub_hdn in sub_hg.list_hdn  # if not interfaces
+            )
+            # fwd_time and overhead are for fast forward so bwd node has none
+
+            hcns = [hcn_fwd, hcn_bwd]
             hdns = []
             for hdn_output_data_in_sub_hg in sub_hg.fwd_outputs:
-                mt  = hdn_output_data_in_sub_hg.main_target
+                mt = hdn_output_data_in_sub_hg.main_target
                 mem = hdn_output_data_in_sub_hg.mem
-                hdn_data = H_D_node(f"Data_{mt}_in_{sub_hg.name}",mt)
+                hdn_data = H_D_node(f"Data_{mt}_in_{sub_hg.name}", mt)
                 hdn_data.mem = mem
                 hdns.append(hdn_data)
             for hdn_output_grad_in_sub_hg in sub_hg.bwd_inputs:
-                mt  = hdn_output_grad_in_sub_hg.main_target
+                mt = hdn_output_grad_in_sub_hg.main_target
                 mem = hdn_output_grad_in_sub_hg.mem
-                hdn_grad = H_D_node(f"Grad_{mt}_in_{sub_hg.name}",mt)
+                hdn_grad = H_D_node(f"Grad_{mt}_in_{sub_hg.name}", mt)
                 hdn_grad.mem = mem
                 hdns.append(hdn_grad)
 
@@ -176,14 +208,9 @@ def P_and_K_to_H(pg : P_graph, kg : K_graph):
         if not (sub_hg is None):
             hg.dict_hg[sub_hg.name] = sub_hg
 
-    # ===* Second, build the edges *===
+    #  ===* Second, build the edges *===
 
-    # /!\ build hg.all_kcn_inside
-
-
-
-
-
+    #  /!\ build hg.all_kcn_inside
 
 
 # ***********
@@ -197,6 +224,7 @@ class H_op:
         self.is_fwd = is_fwd
         self.is_del = is_del
         self.obj = h_obj
+
 
 # ***********
 # * H_option *
@@ -297,43 +325,43 @@ class H_option:
                             self.dep_inputs.append(hdn.name)
 
 
-def find_bkcn(fkcn, kg):
-    assert fkcn.is_fwd
-    if fkcn.name.replace("fwd", "bwd") in kg.dict_kn:
-        bkcn = kg.dict_kn[fkcn.name.replace("fwd", "bwd")]
-        return bkcn
-    else:
-        return False
+# def find_bkcn(fkcn, kg):
+#     assert fkcn.is_fwd
+#     if fkcn.name.replace("fwd", "bwd") in kg.dict_kn:
+#         bkcn = kg.dict_kn[fkcn.name.replace("fwd", "bwd")]
+#         return bkcn
+#     else:
+#         return False
 
 
-def kcn_to_hopt(fkcn, bkcn):
-    mem = 0
-    for kdn in fkcn.users:
-        if "phantom" in kdn.name:  # there should be at most one phantom
-            mem = kdn.mem
-    h_opt = H_option(
-        H_graph(fkcn.name.strip("fwd")),
-        op_list=[],
-        alive_list=[],
-        direct_info={
-            "fwd_time": fkcn.time,
-            "bwd_time": bkcn.time,
-            "mem": mem,
-            "fwd_overhead": fkcn.overhead,
-            "bwd_overhead": bkcn.overhead,
-            "dep_inputs": [
-                kdn.name for kdn in fkcn.deps_global if kdn in bkcn.deps_global
-            ],
-        },
-    )
-    return h_opt
+# def kcn_to_hopt(fkcn, bkcn):
+#     mem = 0
+#     for kdn in fkcn.users:
+#         if "phantom" in kdn.name:  # there should be at most one phantom
+#             mem = kdn.mem
+#     h_opt = H_option(
+#         H_graph(fkcn.name.strip("fwd")),
+#         op_list=[],
+#         alive_list=[],
+#         direct_info={
+#             "fwd_time": fkcn.time,
+#             "bwd_time": bkcn.time,
+#             "mem": mem,
+#             "fwd_overhead": fkcn.overhead,
+#             "bwd_overhead": bkcn.overhead,
+#             "dep_inputs": [
+#                 kdn.name for kdn in fkcn.deps_global if kdn in bkcn.deps_global
+#             ],
+#         },
+#     )
+#     return h_opt
 
 
-def get_dict_opt(kg):
-    dict_opt = {}
-    for kcn in kg.list_kcn:
-        if kcn.is_fwd:
-            bkcn = find_bkcn(kcn, kg)
-            if bkcn:
-                h_opt = kcn_to_hopt(kcn, bkcn)
-                dict_opt[h_opt.name] = h_opt
+# def get_dict_opt(kg):
+#     dict_opt = {}
+#     for kcn in kg.list_kcn:
+#         if kcn.is_fwd:
+#             bkcn = find_bkcn(kcn, kg)
+#             if bkcn:
+#                 h_opt = kcn_to_hopt(kcn, bkcn)
+#                 dict_opt[h_opt.name] = h_opt
