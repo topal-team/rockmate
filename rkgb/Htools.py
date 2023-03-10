@@ -93,7 +93,6 @@ class H_op:
         self.is_del = is_del
         self.obj = h_obj
 
-
 # ***********
 # * H_option *
 # ***********
@@ -101,9 +100,10 @@ class H_op:
 
 class H_option:
     """
-    .mem: phantom memory saved from fwd to bwd
-    .fwd_time/bwd_time
-    .fwd_overhead/bwd_overhead
+    Info needed for HILP:
+        .mem: phantom memory saved from fwd to bwd
+        .fwd_time/bwd_time
+        .fwd_overhead/bwd_overhead
     An H_option should be useful for several purpose:
         1. it provides the time/memory information for each feasible
         schedule of running forward/backward loop for the corresponding
@@ -114,7 +114,7 @@ class H_option:
         the H_option and understand what operations should be executed.
     """
 
-    def __init__(self, hgraph, op_list, alive_list):
+    def __init__(self, hgraph, op_list, alive_list, direct_info={}):
         # when op_list and alive_list are empty, all the information can be
         # assigned directly
         for i, op in enumerate(op_list):
@@ -161,22 +161,74 @@ class H_option:
                 else:
                     self.time[i] = op.bwd_time
                     self.overhead[i] = op.bwd_overhead
+        if direct_info:
+            self.mem = direct_info["mem"]
+            self.fwd_time = direct_info["fwd_time"]
+            self.bwd_time = direct_info["bwd_time"]
+            self.fwd_overhead = direct_info["fwd_overhead"]
+            self.bwd_overhead = direct_info["bwd_overhead"]
+            self.dep_inputs = direct_info["dep_inputs"]
+        else:
+            self.mem = self.save_mem[self.loss_idx]
+            self.fwd_time = np.sum(self.time[: self.loss_idx + 1])
+            self.bwd_time = np.sum(self.time[self.loss_idx + 1 :])
+            self.fwd_overhead = get_overhead_(
+                self.save_mem[: self.loss_idx + 1],
+                self.overhead[: self.loss_idx + 1],
+            )
+            self.bwd_overhead = get_overhead_(
+                self.save_mem[self.loss_idx + 1 :],
+                self.overhead[self.loss_idx + 1 :],
+            )
 
-        self.mem = self.save_mem[self.loss_idx]
-        self.fwd_time = np.sum(self.time[: self.loss_idx + 1])
-        self.bwd_time = np.sum(self.time[self.loss_idx + 1 :])
-        self.fwd_overhead = get_overhead_(
-            self.save_mem[: self.loss_idx + 1],
-            self.overhead[: self.loss_idx + 1],
-        )
-        self.bwd_overhead = get_overhead_(
-            self.save_mem[self.loss_idx + 1 :],
-            self.overhead[self.loss_idx + 1 :],
-        )
+            self.dep_inputs = []  # the names of HDNs that are required by BWD
+            for op in op_list[self.loss_idx + 1 :]:
+                if op.is_run:
+                    for hdn in hgraph.dict_hn[op.name].deps:
+                        if (
+                            hdn in hgraph.fwd_inputs
+                            and hdn.name in self.dep_inputs
+                        ):
+                            self.dep_inputs.append(hdn.name)
 
-        self.dep_inputs = []  # the names of HDNs that are required by BWD
-        for op in op_list[self.loss_idx + 1 :]:
-            if op.is_run:
-                for hdn in hgraph.dict_hn[op.name].deps:
-                    if hdn in hgraph.fwd_inputs and hdn.name in self.dep_inputs:
-                        self.dep_inputs.append(hdn.name)
+
+def find_bkcn(fkcn, kg):
+    assert fkcn.is_fwd
+    if fkcn.name.replace("fwd", "bwd") in kg.dict_kn:
+        bkcn = kg.dict_kn[fkcn.name.replace("fwd", "bwd")]
+        return bkcn
+    else:
+        return False
+
+
+def kcn_to_hopt(fkcn, bkcn):
+    mem = 0
+    for kdn in fkcn.users:
+        if "phantom" in kdn.name:  # there should be at most one phantom
+            mem = kdn.mem
+    h_opt = H_option(
+        H_graph(fkcn.name.strip("fwd")),
+        op_list=[],
+        alive_list=[],
+        direct_info={
+            "fwd_time": fkcn.time,
+            "bwd_time": bkcn.time,
+            "mem": mem,
+            "fwd_overhead": fkcn.overhead,
+            "bwd_overhead": bkcn.overhead,
+            "dep_inputs": [
+                kdn.name for kdn in fkcn.deps_global if kdn in bkcn.deps_global
+            ],
+        },
+    )
+    return h_opt
+
+
+def get_dict_opt(kg):
+    dict_opt = {}
+    for kcn in kg.list_kcn:
+        if kcn.is_fwd:
+            bkcn = find_bkcn(kcn, kg)
+            if bkcn:
+                h_opt = kcn_to_hopt(kcn, bkcn)
+                dict_opt[h_opt.name] = h_opt
