@@ -7,6 +7,7 @@
 # ** Graph partitioning **
 
 from rkgb.utils import *
+from rkgb.Stools import S_graph, S_node
 
 # **********
 # * P_node *
@@ -16,10 +17,12 @@ class P_node():
     def __init__(self,
             main_graph,
             subgraph    = None,
-            main_target = None):
+            main_target = None,
+            sn = None):
         self.main_graph  = main_graph
         self.subgraph    = sgp = subgraph
         self.main_target = mt  = main_target
+        self.sn = sn # used for .deps/.user to compute io_targets
         assert((mt is not None) != (sgp is not None))
         if sgp is not None:
             self.subgraph_id = sid = sgp.graph_id
@@ -76,12 +79,15 @@ class P_graph():
         self.graph_id = graph_id
         self.next_subgraph_id = 1 # for new sub_graphs' id
         self.unique_id_generator = unique_id_generator
-        self.dict_leaf_node_address = dict() 
-        # contains all the leaf nodes of self and sub graphs
-        # dict : main_target -> subgraph_id
         self.list_nodes = [] # contains only the nodes of self
         self.input_nodes  = [] # do NOT belong to self -> NOT in list_nodes
         self.output_nodes = [] # do belong to self -> in list_nodes
+
+        # latter :
+        self.input_targets = None
+        self.output_targets = None
+        self.all_produced = None
+        self.all_used = None
 
     def make_subgraph_id(self,new_graph_id):
         self.graph_id = new_graph_id
@@ -94,7 +100,8 @@ class P_graph():
                 pn.subgraph_id = new_sg_id
                 pn.name        = f"Subgraph_{new_sg_id}"
         self.next_subgraph_id = next_id
-    
+
+    """ USELESS
     def make_dict_leaf_node_address(self):
         dict_address = self.dict_leaf_node_address
         for pn in self.list_nodes:
@@ -105,6 +112,7 @@ class P_graph():
                 sub_pg.make_dict_leaf_node_address()
                 sub_dict = sub_pg.dict_leaf_node_address
                 dict_address.update(sub_dict)
+    """
 
     def is_last_wrapping_graph(self):
         return len(self.input_nodes) == 0
@@ -115,6 +123,46 @@ class P_graph():
         for inp_pn in self.input_nodes:
             first_nodes.update(spn.intersection(inp_pn.users_global))
         return first_nodes
+    
+    def make_all_used_and_all_produced(self):
+        self.all_used = used = set()
+        self.all_produced = produced = set()
+        for pn in self.list_nodes:
+            if pn.is_leaf:
+                if not (pn.sn is None):
+                    deps_sn = pn.sn.deps.keys()
+                    deps_mt = [req_sn.main_target for req_sn in deps_sn]
+                    used.update(set(deps_mt))
+                    produced.add(pn.main_target)
+            else:
+                sub_pg : P_graph = pn.subgraph
+                sub_pg.make_all_used_and_all_produced()
+                used.update(sub_pg.all_used)
+                produced.update(sub_pg.all_produced)
+
+    def make_input_targets(self):
+        self.input_targets = self.all_used - self.all_produced
+        for pn in self.list_nodes:
+            if not pn.is_leaf:
+                pn.subgraph.make_input_targets()
+
+    def make_io_targets_attributes_of_subgraphs(self):
+        self.make_all_used_and_all_produced()
+        self.make_input_targets()
+        all_interfaces = set() 
+        # -> We gather all the inputs of the subgraphs
+        # -> so we have all the interface nodes
+        # -> so we can compute output_targets
+        for pn in self.list_nodes:
+            if not pn.is_leaf:
+                all_interfaces.update(pn.subgraph.input_targets)
+        for pn in self.list_nodes:
+            if not pn.is_leaf:
+                sub_pg : P_graph = pn.subgraph
+                sub_pg.output_targets = (
+                    sub_pg.all_produced.intersection(all_interfaces)
+                )
+    
 
 """ FOR FUTURE WORK, TO RECOGNIZE SIMILAR GRAPHS 
     def __eq__(self,pg2,force_order=False,raise_exception=False):
@@ -307,10 +355,11 @@ def unwrap(pn : P_node):
             main_pg.output_nodes.append(sub_pn)
 
     # ** update main_pg inputs/outputs **
+    """ No need to change main_pg.input_nodes 
     main_pg.input_nodes = (
         set(main_pg.input_nodes).union(
         set(pg.input_nodes) - main_spn
-        ))
+        )) """
     if pn in main_pg.output_nodes:
         main_pg.output_nodes.remove(pn)
     # -> We already added new outputs 8 lines above
@@ -352,7 +401,8 @@ def S_to_P_init(sg):
         mt = sn.main_target
         pn = P_node(
             main_graph  = pg,
-            main_target = mt)
+            main_target = mt,
+            sn = sn)
         lpn.append(pn)
         dict_mt_to_pn[mt] = pn
         for req_sn in sn.deps.keys():
@@ -587,13 +637,25 @@ def rule_merge_small_flows(pg : P_graph,config : P_config = default_config):
                 opt.make_nb_nodes_and_nb_subnodes()
             print_debug(f"Successfully : {[ipn.name for ipn in best_group]} -> {new_pn.name}")
 
-
-
-
-
-
-
 # ==========================
+
+
+
+# =====================
+# === Main function ===
+# =====================
+
+def S_to_P(sg : S_graph):
+    pg = S_to_P_init(sg)
+    rule_group_sequences(pg)
+    rule_merge_small_flows(pg)
+    pg.make_subgraph_id("0")
+    pg.make_io_targets_attributes_of_subgraphs("0")
+    pg.input_targets = sg.hidden_inputs
+    pg.output_targets = [sg.hidden_output]
+    return pg
+
+# =====================
 
 
 
