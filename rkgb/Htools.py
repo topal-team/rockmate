@@ -86,6 +86,36 @@ class H_graph:
             for req_hn in hn.deps:
                 req_hn.users.add(hn)
 
+    def fast_fwd_overhead(self):
+        def _can_del(i, hdn):
+            for hcn in hdn.users_real:
+                if not hcn.is_fwd:
+                    continue
+                if self.list_hcn.index(hcn) > i:
+                    return False
+            return True
+
+        loss_idx = self.list_hcn.index(self.loss_hcn)
+        alive_mem = []
+        alive_list = []
+        alive_status = np.zeros(len(self.list_hdn), dtype=bool)
+        loss_idx = self.list_hcn.index(self.loss_hcn)
+        for i, hcn in enumerate(self.list_hcn[:loss_idx]):
+            for hdn in hcn.users:
+                alive_status[self.list_hdn.index(hdn)] = 1
+            for j, hdn in enumerate(self.list_hdn):
+                if False:  # TODO: if hdn is interface
+                    continue
+                if alive_status[j] and _can_del(i, hdn):
+                    alive_status[j] = 0
+            alive_list.append(alive_status.copy())
+            alive_mem.append(
+                sum(hdn.mem)
+                for j, hdn in enumerate(self.list_hdn)
+                if alive_status[j]
+            )
+        return max(alive_mem) - alive_mem[-1]
+
 
 # TODO TODO add the compiling info
 def P_and_K_to_H(pg: P_graph, kg: K_graph):
@@ -180,9 +210,7 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
             hcn_fwd.fwd_time = sum(
                 sub_hcn.fwd_time for sub_hcn in sub_hg.list_hcn
             )
-            hcn_fwd.fwd_overhead = sum(
-                sub_hdn.mem for sub_hdn in sub_hg.list_hdn  # if not interfaces
-            )
+            hcn_fwd.fwd_overhead = sub_hg.fast_fwd_overhead()
             # fwd_time and overhead are for fast forward so bwd node has none
 
             hcns = [hcn_fwd, hcn_bwd]
