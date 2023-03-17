@@ -9,6 +9,13 @@
 from rkgb.utils import *
 from rkgb.Stools import S_graph, S_node
 
+def count_nb_subgraph(pg):
+    nb = 0
+    for pn in pg.list_nodes:
+        if "Subgraph" in pn.name:
+            nb += 1
+    return nb
+
 # **********
 # * P_node *
 # **********
@@ -41,10 +48,12 @@ class P_node():
             main_graph.unique_id_generator,self)
 
     def size(self):
-        if self.is_leaf:
-            return 1
-        else:
-            return len(self.subgraph.list_nodes)
+        if self.is_leaf: return 1
+        else: return len(self.subgraph.list_nodes)
+        
+    def total_size(self):
+        if self.is_leaf: return 1
+        else: return self.subgraph.total_size()
         
     def deps_only_global(self):
         return self.deps_global - self.deps
@@ -80,14 +89,22 @@ class P_graph():
         self.next_subgraph_id = 1 # for new sub_graphs' id
         self.unique_id_generator = unique_id_generator
         self.list_nodes = [] # contains only the nodes of self
-        self.input_nodes  = [] # do NOT belong to self -> NOT in list_nodes
-        self.output_nodes = [] # do belong to self -> in list_nodes
+        self.input_nodes  = set() # do NOT belong to self -> NOT in list_nodes
+        self.output_nodes = set() # do belong to self -> in list_nodes
 
         # latter :
         self.input_targets = None
         self.output_targets = None
         self.all_produced = None
         self.all_used = None
+
+    def size(self):
+        return len(self.list_nodes)
+    def total_size(self):
+        tot = 0
+        for pn in self.list_nodes:
+            tot += pn.total_size()
+        return tot
 
     def make_subgraph_id(self,new_graph_id):
         self.graph_id = new_graph_id
@@ -265,17 +282,20 @@ def wrap(group : list,main_pg : P_graph):
         subgraph   = new_pg,
     )
     set_group = set(group)
-    input_nodes = set()
-    new_pg.output_nodes = output_nodes = []
+    all_input_nodes = set()
+    new_pg.output_nodes = output_nodes = set()
     for pn in group:
         # ** link new_pn with global edges **
         new_pn.deps_global.update(pn.deps_global)
         new_pn.users_global.update(pn.users_global)
         # -> reciprocal at the end
 
+        # -> change pn.main_graph
+        pn.main_graph = new_pg
+
         # ** inputs ** 
         if not pn.deps.issubset(set_group):
-            input_nodes.update(pn.deps)# at the end : minus set_group
+            all_input_nodes.update(pn.deps)# at the end : minus set_group
             deps_outside = pn.deps - set_group
             for req_pn in deps_outside:
                 req_pn.users.discard(pn)
@@ -286,7 +306,7 @@ def wrap(group : list,main_pg : P_graph):
         # ** outputs **
         if (pn in main_pg.output_nodes
         or (not pn.users.issubset(set_group))):
-            output_nodes.append(pn)
+            output_nodes.add(pn)
             user_outside = pn.users - set_group
             for user_pn in user_outside:
                 user_pn.deps.discard(pn)
@@ -301,7 +321,7 @@ def wrap(group : list,main_pg : P_graph):
         user_g_pn.deps_global.add(new_pn)
     
     # ** input_nodes **
-    new_pg.input_nodes = list(input_nodes - set_group)
+    new_pg.input_nodes = all_input_nodes - set_group
 
     # ** update main_pg.list_nodes **
     # I ASSUME that new_pn can take the place
@@ -312,12 +332,10 @@ def wrap(group : list,main_pg : P_graph):
         main_lpn.remove(pn)
 
     # ** update main_pg outputs **
-    set_outputs : set = set(main_pg.output_nodes)
-    if not set_outputs.isdisjoint(set_group):
-        set_outputs.add(new_pn)
-    main_pg.output_nodes = list(
-        set_outputs - set_group
-    )
+    main_out = main_pg.output_nodes
+    if not main_out.isdisjoint(set_group):
+        main_out.add(new_pn)
+    main_pg.output_nodes -= set_group
     return new_pn
 
 
@@ -330,13 +348,16 @@ def unwrap(pn : P_node):
     pg      : P_graph = pn.subgraph
     main_pg : P_graph = pn.main_graph
     if pn.is_leaf: return ()
-    if main_pg.is_last_wrapping_graph: return ()
-    group = pg.list_nodes
+    if main_pg.is_last_wrapping_graph(): return ()
+    group = list(pg.list_nodes)
 
     # ** unplug pn/pg **
     # -> direct edges
-    for req_pn in pn.deps: req_pn.users.remove(pn)
-    for user_pn in pn.users: user_pn.deps.remove(pn)
+    copy_pn_deps  = list(pn.deps)
+    copy_pn_users = list(pn.users)
+    for req_pn in pn.deps: req_pn.users.remove(pn) # useless
+    for user_pn in pn.users: user_pn.deps.remove(pn) # useless
+    # redondant with the update of deps and users 12 lines below
     # -> global edges
     for req_g_pn in pn.deps_global: req_g_pn.users_global.remove(pn)
     for user_g_pn in pn.users_global: user_g_pn.deps_global.remove(pn)
@@ -346,13 +367,17 @@ def unwrap(pn : P_node):
     main_lpn = main_pg.list_nodes
     i = main_lpn.index(pn)
     main_pg.list_nodes = main_lpn[:i] + group + main_lpn[i+1:]    
+    # -> fix sub_pn.main_graph
+    for sub_pn in group:
+        sub_pn.main_graph = main_pg
     # -> use the property : deps = deps_global inter list_nodes 
     main_spn = set(main_pg.list_nodes)
-    for sub_pn in group:
+    to_update = group + copy_pn_deps + copy_pn_users
+    for sub_pn in to_update:
         sub_pn.deps  = sub_pn.deps_global.intersection(main_spn)
         sub_pn.users = sub_pn.users_global.intersection(main_spn)
         if sub_pn.users != sub_pn.users_global: # could just check the size
-            main_pg.output_nodes.append(sub_pn)
+            main_pg.output_nodes.add(sub_pn)
 
     # ** update main_pg inputs/outputs **
     """ No need to change main_pg.input_nodes 
@@ -376,11 +401,17 @@ def unwrap(pn : P_node):
 # thus it creates one wrapper, but flats the first depth level
 # -> To do so, wrap and then unwrap each sub_node
 def merge(group : list, main_pg : P_graph):
+    # print("nb before wrap:",count_nb_subgraph(main_pg))
     new_pn = wrap(group,main_pg)
-    new_pg = new_pn.main_graph
+    # print("nb after wrap:",count_nb_subgraph(main_pg))
+    new_pg = new_pn.subgraph
+    # print("main_graph : ",main_pg)
+    # print("new pg : ",new_pg)
     original_lpn = new_pg.list_nodes
     for sub_pn in original_lpn:
+        #print(sub_pn.main_graph)
         unwrap(sub_pn)
+    # print("nb after unwrap:",count_nb_subgraph(main_pg))
     main_pg.make_subgraph_id(main_pg.graph_id)
     return new_pn
 
@@ -421,7 +452,7 @@ def S_to_P_init(sg):
         main_target="sources"
     )
     last_wrapping_graph.list_nodes = [input_pn]
-    pg.input_nodes = [input_pn]
+    pg.input_nodes = set([input_pn])
     for user_sn in sg.init_node.users:
         user_pn = dict_mt_to_pn[user_sn.main_target]
         user_pn.deps_global.add(input_pn)
@@ -429,7 +460,7 @@ def S_to_P_init(sg):
     
     # ** output **
     output_pn = dict_mt_to_pn[sg.output_node.main_target]
-    pg.output_nodes = [output_pn]
+    pg.output_nodes = set([output_pn])
     return pg
 
 # ==========================
@@ -648,9 +679,10 @@ def rule_merge_small_flows(pg : P_graph,config : P_config = default_config):
 def S_to_P(sg : S_graph):
     pg = S_to_P_init(sg)
     rule_group_sequences(pg)
+    print("nb subgraph after rule 1 :",count_nb_subgraph(pg))
     rule_merge_small_flows(pg)
     pg.make_subgraph_id("0")
-    pg.make_io_targets_attributes_of_subgraphs("0")
+    pg.make_io_targets_attributes_of_subgraphs()
     pg.input_targets = sg.hidden_inputs
     pg.output_targets = [sg.hidden_output]
     return pg
