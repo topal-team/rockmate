@@ -294,6 +294,8 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
         elif l_name[0] == "annotate":
             assert len(args) == 2
             return handle_expr(args[1], target)
+        elif var_impose_device and l_name[0] == "torch" and l_name[1] == "device":
+            return B_var(val = ast.Name("device"))
 
         else:  # -> real function
             args_Bvar = [handle_expr(ar, target=None) for ar in args]
