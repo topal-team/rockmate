@@ -146,14 +146,18 @@ def fct_generate_fake_data(storage, tensor_name):
 
 def fct_del_tensor_data(storage, tensor_name):
     def fct():
-        storage.ld[tensor_name].data = torch.empty(0)
+        storage.ld[tensor_name].data = torch.empty(
+            0, device=storage.gd["device"]
+        )
 
     return fct
 
 
 def fct_del_tensor_base(storage, tensor_name):
     def fct():
-        storage.ld[f"_{tensor_name}"]._base.data = torch.empty(0)
+        storage.ld[f"_{tensor_name}"]._base.data = torch.empty(
+            0, device=storage.gd["device"]
+        )
 
     return fct
 
@@ -289,9 +293,12 @@ class Compiler:
 
         if not last_before_bwd:
 
-            inplace_code = inplace_code.replace(
-                op.main_target, f"_{op.main_target}"
-            )
+            # inplace_code = inplace_code.replace(
+            #     op.main_target, f"_{op.main_target}"
+            # )
+
+            for target in op.tensor_targets:
+                inplace_code = inplace_code.replace(target, "_" + target)
             l.append(
                 fct_run_forward_no_grad(
                     self.storage, main_code.replace("self", "original_mod"),
