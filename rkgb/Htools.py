@@ -27,7 +27,7 @@ class H_C_node:
         self.fwd_time = 0
         self.fwd_overhead = 0
         self.is_fwd = True  # if False, self.fwd_time=self.fwd_overhead=0
-
+        self.is_leaf = False
 
 # ************
 # * H_D_node *
@@ -136,6 +136,8 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
 
     #  ** small functions to extract K_nodes from kg **
     dict_kn = kg.dict_kn
+    dict_kn[kg.input_kdn_data.name] = kg.input_kdn_data
+    dict_kn[kg.input_kdn_grad.name] = kg.input_kdn_grad
     has_bwd = lambda mt: f"bwd_{mt}" in dict_kn
     has_phantoms = lambda mt: f"{mt} phantoms" in dict_kn
     get_kcn_fwd = lambda mt: dict_kn[f"fwd_{mt}"]
@@ -150,6 +152,7 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
             # ** Bottom level **
             mt = pn.main_target
             hcn_fwd = H_C_node(f"Fwd_{pn.name}")
+            hcn_fwd.is_leaf = True
             hdn_data = H_D_node(f"Data_bottom_level_{mt}", mt)
             kcn_fwd = get_kcn_fwd(mt)
             kdn_data = get_kdn_data(mt)
@@ -163,6 +166,7 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
             #  ** bwd part **
             if has_bwd(mt):
                 hcn_bwd = H_C_node(f"Bwd_{pn.name}")
+                hcn_bwd.is_leaf = True
                 hdn_grad = H_D_node(f"Grad_bottom_level_{mt}", mt)
                 kcn_bwd = get_kcn_bwd(mt)
                 kdn_grad = get_kdn_grad(mt)
