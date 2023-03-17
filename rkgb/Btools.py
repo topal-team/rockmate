@@ -1,3 +1,7 @@
+# ==========================
+# ====== B structure =======
+# ==========================
+
 # =====================================
 # = EXTRACT TRACE CODE TO BUILD THE   =
 # = GROUNDWORK OF BASIC FORWARD GRAPH =
@@ -14,11 +18,6 @@
 #  .code attributes are AST objects
 
 from rkgb.utils import *
-
-# ==========================
-# ====== B structure =======
-# ==========================
-
 
 class B_node:
     def __init__(self, target="", code=None, fct="", deps=None, is_input=False):
@@ -295,6 +294,8 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
         elif l_name[0] == "annotate":
             assert len(args) == 2
             return handle_expr(args[1], target)
+        elif var_impose_device and l_name[0] == "torch" and l_name[1] == "device":
+            return B_var(val = ast.Name("device"))
 
         else:  # -> real function
             args_Bvar = [handle_expr(ar, target=None) for ar in args]
