@@ -29,6 +29,7 @@ class H_C_node:
         self.is_fwd = True  # if False, self.fwd_time=self.fwd_overhead=0
         self.is_leaf = False
 
+
 # ************
 # * H_D_node *
 # ************
@@ -112,7 +113,7 @@ class H_graph:
             alive_list.append(alive_status.copy())
             alive_mem.append(
                 sum(
-                    hdn.mem.v
+                    hdn.mem
                     for j, hdn in enumerate(self.list_hdn)
                     if alive_status[j]
                 )

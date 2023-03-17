@@ -212,7 +212,9 @@ class CheckpointedModule(torch.nn.Module):
         self.simulation_overhead = self.simulation_time / sum(
             [kcn.time for kg in self.list_kg for kcn in kg.list_kcn]
         )
-        self.storage = RK_Storage(self.device, self.original_mod, self.dict_constants)
+        self.storage = RK_Storage(
+            self.device, self.original_mod, self.dict_constants
+        )
 
     def get_compiled_fct(self):
         self.compiler = Compiler(self.storage)
@@ -260,7 +262,9 @@ class CheckpointedModule(torch.nn.Module):
 
         return self.storage.get_val(self.output.main_target)
 
-    def backward(self, record_mem=False, add_output_grad=True, compiled=True):
+    def backward(
+        self, stop=False, record_mem=False, add_output_grad=True, compiled=True
+    ):
         if record_mem:
             self.output_size = irotor.tensorMsize(
                 self.storage.ld[self.output.main_target]
@@ -268,6 +272,10 @@ class CheckpointedModule(torch.nn.Module):
             # self.allo_mem[-1] += self.output.info.memsize.v
             # output grad is generated outside
             loss_idx = len(self.allo_mem)
+        if stop:
+            for l in self.bwd_fct_list[: stop - len(self.fwd_fct_list)]:
+                self._exec(l, record_mem, compiled=compiled)
+            return None
         if compiled:
             for l in self.bwd_fct_list:
                 self._exec(l, record_mem, compiled=compiled)

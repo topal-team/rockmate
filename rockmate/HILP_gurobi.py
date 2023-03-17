@@ -25,25 +25,29 @@ class ModelGurobi:
         self.hgraph = hgraph
         self.hcn2sub_g = []
         self.sub_gs = []
-        self.nOpts = []
+        self.nOpts = []  # number of opts
+        self.nR = []  # number to run R, =nOpts unless fwd
         self.time = []
         self.overhead = []
         for i, hcn in enumerate(self.hgraph.list_hcn):
-            if "loss" in hcn.name:
+            if "Loss" in hcn.name:
                 self.loss_idx = i
             if hcn.sub_graph is None:
                 # only when hcn is fwd with requires_grad=False
                 self.hcn2sub_g.append(None)
-                self.nOpts.append(1)
+                self.nR.append(1)
+                self.nOpts.append(0)
                 self.time.append([hcn.fwd_time])
                 self.overhead.append([hcn.fwd_overhead])
             else:
                 if hcn.sub_graph not in self.sub_gs:
                     self.sub_gs.append(hcn.sub_graph)
                 self.hcn2sub_g.append(self.sub_gs.index(hcn.sub_graph))
-                self.nOpts.append(
+                self.nR.append(
                     len(hcn.sub_graph.list_opt) + (1 if hcn.is_fwd else 0)
                 )
+                self.nOpts.append(len(hcn.sub_graph.list_opt))
+
                 if hcn.is_fwd:
                     # add fast forward to the options
                     self.time.append(
@@ -126,14 +130,14 @@ class ModelGurobi:
         # print(Cr, De, I)
         # ======build variables======
         self.R = [
-            self.md.addVars(T, self.nOpts[i], name=f"R{i}", vtype=GRB.BINARY,)
+            self.md.addVars(T, self.nR[i], name=f"R{i}", vtype=GRB.BINARY,)
             for i in range(T)
         ]
         self.sumR = {}
         for i in range(T):
             for t in range(T):
                 self.sumR[(i, t)] = quicksum(
-                    self.R[i][t, o] for o in range(self.nOpts[i])
+                    self.R[i][t, o] for o in range(self.nR[i])
                 )
         self.Sp = [
             self.md.addVars(
@@ -144,7 +148,7 @@ class ModelGurobi:
         self.sumSp = {}
         for j in range(J):
             for t in range(T + 1):
-                self.sumR[(j, t)] = quicksum(
+                self.sumSp[(j, t)] = quicksum(
                     self.Sp[j][t, o]
                     for o in range(len(self.sub_gs[j].list_opt))
                 )
@@ -161,7 +165,7 @@ class ModelGurobi:
                 self.R[i][t, o] * self.time[i][o]
                 for i in range(T)
                 for t in range(T)
-                for o in range(self.nOpts[i])
+                for o in range(self.nR[i])
             ),
             GRB.MINIMIZE,
         )
@@ -172,7 +176,7 @@ class ModelGurobi:
                 self.R[i][t, o]
                 for t in range(T)
                 for i in range(t + 1, T)
-                for o in range(self.nOpts[i])
+                for o in range(self.nR[i])
             ),
             GRB.EQUAL,
             0,
@@ -369,6 +373,7 @@ class ModelGurobi:
 
         for t in range(T):
             for k in range(1, T):
+                j = self.hcn2sub_g[k]
                 self.U[(t, k)] = (
                     self.U[(t, k - 1)]
                     + quicksum(
@@ -385,11 +390,10 @@ class ModelGurobi:
                 # if k < self.loss_idx:
                 if self.hgraph.list_hcn[k].is_fwd:
                     self.U[(t, k)] += quicksum(
-                        self.R[k][t, o] * self.saved_mem[k][o]
-                        for o in range(self.nOpts[k] - 1)
+                        self.R[k][t, o] * self.saved_mem[j][o]
+                        for o in range(self.nOpts[k])
                     )
                 else:
-                    j = self.hcn2sub_g[k]
                     if j is None:
                         continue
                     fwd_i = min(self.sub_g2hcn[j])
@@ -411,7 +415,7 @@ class ModelGurobi:
                     self.U[(t, k)]
                     + quicksum(
                         self.R[k][t, o] * self.overhead[k][o]
-                        for o in range(self.nOpts[k])
+                        for o in range(self.nR[k])
                     )
                     + quicksum(
                         self.mem[i_] * self.delete[t, eidx_d]
@@ -474,14 +478,18 @@ class ModelGurobi:
             for k in range(T):
                 j = self.hcn2sub_g[k]
                 if self.sumR[(k, t)].getValue() == 1:
+
+                    hcn = hgraph.list_hcn[k]
                     for o in range(self.nOpts[k]):
                         if self.R[k][t, o].X == 1:
                             opt = o
                             break
-                    if hcn.is_fwd and self.R[k][t, -1].X == 1:
-                        opt = -1
-                    hcn = hgraph.list_hcn[k]
-                    h_obj = hcn.sub_graph.list_opt[opt] if opt > -1 else hcn
+                    # if hcn.is_fwd and self.R[k][t, -1].X == 1:
+                    #     opt = -1
+                    if opt > -1:
+                        h_obj = hcn.sub_graph.list_opt[opt]
+                    else:
+                        h_obj = hcn
 
                     for eidx, (k_, i) in enumerate(self.create_list):
                         if k == k_ and self.create[t, eidx].X == 1:
