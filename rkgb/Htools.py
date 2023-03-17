@@ -186,7 +186,7 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
                 if has_phantoms(mt):
                     ph_mem = get_kdn_phantoms(mt).mem
                 else:
-                    ph_mem = irotor.MemSize(0)
+                    ph_mem = 0
                 hopt = H_option(
                     sub_hg,
                     op_list=[],

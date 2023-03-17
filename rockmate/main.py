@@ -34,7 +34,7 @@ def print_memsizes(list_kg):
             mt = n.main_target
             try:
                 print_debug(
-                    f"{mt} : memsize {di[mt].memsize} ; " f"fm {n.fgt_mem.v}",
+                    f"{mt} : memsize {di[mt].memsize} ; " f"fm {n.fgt_mem}",
                     end="",
                 )
             except:
@@ -104,7 +104,7 @@ class CheckpointedModule(torch.nn.Module):
             [
                 sum(
                     [
-                        kdn.mem.v
+                        kdn.mem
                         for kdn in kcn.deps_fake
                         if kdn.main_target != kcn.main_target
                     ]
@@ -269,7 +269,7 @@ class CheckpointedModule(torch.nn.Module):
             self.output_size = irotor.tensorMsize(
                 self.storage.ld[self.output.main_target]
             )
-            # self.allo_mem[-1] += self.output.info.memsize.v
+            # self.allo_mem[-1] += self.output.info.memsize
             # output grad is generated outside
             loss_idx = len(self.allo_mem)
         if stop:

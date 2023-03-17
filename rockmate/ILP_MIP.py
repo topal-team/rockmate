@@ -25,8 +25,8 @@ class ModelMIP:
         self.gcd = gcd if gcd else 1
         self.budget = budget / self.gcd
         self.save_budget = save_budget / self.gcd
-        self.overhead = [kcn.overhead.v / self.gcd for kcn in self.kg.list_kcn]
-        self.mem = [kdn.mem.v / self.gcd for kdn in self.kg.list_kdn]
+        self.overhead = [kcn.overhead / self.gcd for kcn in self.kg.list_kcn]
+        self.mem = [kdn.mem / self.gcd for kdn in self.kg.list_kdn]
         self.feasible = None
         self.solve_time = None
 

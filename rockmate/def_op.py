@@ -13,10 +13,10 @@ class RunOp:
     def __init__(self, kcn, keep_kcn=False):
         self.name = kcn.name
         self.time = kcn.time
-        self.overhead = kcn.overhead.v
+        self.overhead = kcn.overhead
         self.main_target = kcn.main_target
         self.tensor_targets = kcn.tensor_targets
-        # self.save_mem = cn.mem.v
+        # self.save_mem = cn.mem
         self.main_code = kcn.main_code
         self.body_code = kcn.body_code
         self.inplace_code = kcn.inplace_code
@@ -53,7 +53,7 @@ class DelOp:
         self.name = kdn.name
         self.kdn_type = kdn.kdn_type
         self.time = 0
-        self.save_mem = kdn.mem.v
+        self.save_mem = kdn.mem
         self.main_target = kdn.main_target
         # self.tensor_targets = kdn.all_targets
         # self.all_targets = list(kdn.deps)[0].all_targets if kdn.deps else []
@@ -98,11 +98,11 @@ class OpSchedule:
 
         self.input_size = (
             input_kdn_data.main_target,
-            input_kdn_data.mem.v,
+            input_kdn_data.mem,
         )
         self.output_size = (
             output_kdn_data.main_target,
-            output_kdn_data.mem.v,
+            output_kdn_data.mem,
         )
         self.kdn_dict = {kdn.name: kdn for kdn in list_kdn}
 
@@ -112,7 +112,7 @@ class OpSchedule:
         self.del_input_idx = L
 
         list_kdn = list_kdn + [input_kdn_grad, input_kdn_data]
-        self.mem_sizes = [kdn.mem.v for kdn in list_kdn]
+        self.mem_sizes = [kdn.mem for kdn in list_kdn]
         self.kdn_names = [kdn.name for kdn in list_kdn]
         self.kdn_info = {
             kdn.name: kdn.info for kdn in list_kdn
@@ -178,7 +178,7 @@ class OpSchedule:
         # # self.del_input_idx = max(self.op_list.index(kcn)
         # #                     for kcn in input_kdn.users_global
         # #                     if kcn in self.op_list)
-        # self.save[self.del_input_idx :] -= input_kdn.mem.v
+        # self.save[self.del_input_idx :] -= input_kdn.mem
         # self.overhead = max(self.save + self.tmp) - self.save[-1]
 
     def valid_sched(self):

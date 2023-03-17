@@ -46,7 +46,7 @@ class Var_info(): # everything needed to randomly regenerate a var
                 self.dtype = value.dtype
                 self.requires_grad = value.requires_grad
                 self.memsize = (
-                    irotor.MemSize(int(irotor.tensorMsize(value))))
+                    int(irotor.tensorMsize(value)))
             elif tt==tuple or tt==list:
                 self.sub_info = [Var_info(y) for y in value]
             else:

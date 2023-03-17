@@ -196,13 +196,13 @@ def get_useful_vars(sn,sg,our_global,device):
 class Inspection_result():
     def __init__(self):
         self.relevant     = False # -> turn True if result of inspection
-        self.mem_del_fwd  = irotor.MemSize(0)
-        self.overhead_fwd = irotor.MemSize(0)
-        self.overhead_bwd = irotor.MemSize(0)
-        self.mem_run_fwd  = irotor.MemSize(0)
-        self.mem_run_bwd  = irotor.MemSize(0)
-        self.mem_fgt_fwd  = irotor.MemSize(0)
-        self.mem_fgt_bwd  = irotor.MemSize(0)
+        self.mem_del_fwd  = 0
+        self.overhead_fwd = 0
+        self.overhead_bwd = 0
+        self.mem_run_fwd  = 0
+        self.mem_run_bwd  = 0
+        self.mem_fgt_fwd  = 0
+        self.mem_fgt_bwd  = 0
         self.time_run_fwd = 0
         self.time_run_bwd = 0
     def __eq__(self,res2,raise_exception=False):
