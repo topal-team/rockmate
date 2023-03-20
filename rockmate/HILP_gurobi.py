@@ -4,7 +4,7 @@ from typing import Dict, Any
 import numpy as np
 from gurobipy import GRB, Model, quicksum
 from rockmate.def_op import RunOp, DelOp, OpSchedule
-from rkgb.Htools import H_op
+from rkgb.Htools import H_op, H_sched, H_option
 
 
 class ModelGurobi:
@@ -67,7 +67,7 @@ class ModelGurobi:
                     self.overhead.append(
                         [h_opt.bwd_overhead for h_opt in hcn.sub_graph.list_opt]
                     )
-        self.sub_g2hcn = [[]] * len(self.sub_gs)
+        self.sub_g2hcn = [[] for _ in self.sub_gs]
         for i, j in enumerate(self.hcn2sub_g):
             if j is None:
                 continue
@@ -84,11 +84,8 @@ class ModelGurobi:
         self.protected_indices = []
 
         _deps_d = [
-            [
-                self.hgraph.list_hcn.index(hcn)
-                for hcn in self.hgraph.list_hdn[i].deps
-            ]
-            for i in range(I)
+            [self.hgraph.list_hcn.index(hcn) for hcn in hdn.deps]
+            for hdn in self.hgraph.list_hdn
         ]
         _users_d = [
             [
@@ -173,10 +170,16 @@ class ModelGurobi:
         # ======boundary constraints======
         self.md.addLConstr(
             quicksum(
-                self.R[i][t, o]
-                for t in range(T)
-                for i in range(t + 1, T)
-                for o in range(self.nR[i])
+                self.sumR[(i, t)] for t in range(T) for i in range(t + 1, T)
+            ),
+            GRB.EQUAL,
+            0,
+        )
+        self.md.addLConstr(
+            quicksum(
+                self.sumSp[(self.hcn2sub_g[i], t)]
+                for t in range(self.loss_idx)
+                for i in range(t + 1, self.loss_idx)
             ),
             GRB.EQUAL,
             0,
@@ -190,15 +193,16 @@ class ModelGurobi:
             GRB.EQUAL,
             0,
         )
-        self.md.addLConstr(
-            quicksum(
-                self.P[t, i]
-                for i in range(I)
-                for t in range(min(_deps_d[i]) + 1)
-            ),
-            GRB.EQUAL,
-            0,
-        )
+        if _deps_d[i]:
+            self.md.addLConstr(
+                quicksum(
+                    self.P[t, i]
+                    for i in range(I)
+                    for t in range(min(_deps_d[i]) + 1)
+                ),
+                GRB.EQUAL,
+                0,
+            )
 
         # options don't conflict
         for i in range(T):
@@ -230,12 +234,12 @@ class ModelGurobi:
                     self.P[t, self.create_list[j][1]],
                 )  # one edge created, memory is occupied
         for t in range(T - 1):
-            for i in range(Cr):
-                src_i = self.create_list[i][0]
+            for j in range(Cr):
+                src_i = self.create_list[j][0]
                 self.md.addLConstr(
-                    self.S[t + 1, i],
+                    self.S[t + 1, j],
                     GRB.LESS_EQUAL,
-                    self.S[t, i] + self.sumR[(src_i, t)],
+                    self.S[t, j] + self.sumR[(src_i, t)],
                 )
         for t in range(T):
             for j, (k, i) in enumerate(self.create_list):
@@ -329,11 +333,13 @@ class ModelGurobi:
             return 1 + num_uses_after_k
 
         # delete when not needed
-        # for t in range(T):
-        #     for eidx, (k, i) in enumerate(self.delete_list):
-        #         self.md.addLConstr(1 - self.delete[t, eidx],
-        #                             GRB.LESS_EQUAL,
-        #                             _num_hazards(t, i, k))
+        for t in range(T):
+            for eidx, (k, i) in enumerate(self.delete_list):
+                self.md.addLConstr(
+                    1 - self.delete[t, eidx],
+                    GRB.LESS_EQUAL,
+                    _num_hazards(t, i, k),
+                )
 
         # don't delete if still needed
         for t in range(T):
@@ -469,17 +475,25 @@ class ModelGurobi:
         alive_list = []
         # alive_status = np.zeros(I, dtype=bool)
         alive_status = {}
+        sizes = {}
         for hdn in hgraph.list_hdn:
-            alive_status[hdn.name] = -1 if (hdn in hgraph.fwd_inputs) else 1
+            alive_status[hdn.name] = (
+                0 if (hdn in hgraph.inputs_hdn_data) else -1
+            )
+            sizes[hdn.name] = [hdn.mem]
 
         for sub_g in self.sub_gs:
             alive_status[sub_g.name] = -1  # to represent phantom from sub_g
+            sizes[sub_g.name] = [h_opt.mem for h_opt in sub_g.list_opt]
+
         for t in range(T):
             for k in range(T):
                 j = self.hcn2sub_g[k]
                 if self.sumR[(k, t)].getValue() == 1:
 
                     hcn = hgraph.list_hcn[k]
+
+                    opt = -1
                     for o in range(self.nOpts[k]):
                         if self.R[k][t, o].X == 1:
                             opt = o
@@ -493,28 +507,33 @@ class ModelGurobi:
 
                     for eidx, (k_, i) in enumerate(self.create_list):
                         if k == k_ and self.create[t, eidx].X == 1:
-                            alive_status[hgraph.list_hdn[i].name] = 1
+                            alive_status[hgraph.list_hdn[i].name] = 0
 
                     # phantoms will be created when not ff
-                    if hcn.is_fwd:
+                    if hcn.is_fwd and j is not None:
                         alive_status[self.sub_gs[j].name] = opt
-                    elif self.sumSp[(j, t + 1)].getValue() == 0:
-                        op_list.append(
-                            H_op(
-                                "Del_" + hcn.sub_graph.name, h_obj, is_del=True,
-                            )
-                        )  # del hcn.name means del phantom
-                        alive_status[self.sub_gs[j].name] = -1
 
                     op_list.append(
                         H_op(hcn.name, h_obj, is_fwd=hcn.is_fwd, is_del=False,)
                     )
                     alive_list.append(alive_status.copy())
 
+                    if (
+                        not hcn.is_fwd
+                        and self.sumSp[(j, t + 1)].getValue() == 0
+                    ):
+                        op_list.append(
+                            H_op(
+                                "Del_" + hcn.sub_graph.name, h_obj, is_del=True,
+                            )
+                        )  # del hcn.name means del phantom
+                        alive_status[hcn.sub_graph.name] = -1
+                        alive_list.append(alive_status.copy())
+
                 for eidx, (k_, i) in enumerate(self.delete_list):
                     if k == k_ and self.delete[t, eidx].X == 1:
                         hdn = hgraph.list_hdn[i]
-                        alive_status[hdn.name] = 0
+                        alive_status[hdn.name] = -1
                         op_list.append(
                             H_op("Del_" + hdn.name, hdn, is_del=True)
                         )
@@ -522,29 +541,38 @@ class ModelGurobi:
 
             # At the end of the stage
             for j in range(J):
-                hcn = hgraph.list_hcn[self.sub_g2hcn[j]]
+                # hcn = hgraph.list_hcn[self.sub_g2hcn[j]]
 
                 if (
                     alive_status[self.sub_gs[j].name] >= 0
                     and self.sumSp[(j, t + 1)].getValue() == 0
                 ):
                     # del phantom happens either after bwd or at the end of stage
-                    h_obj = hcn.sub_graph.list_opt[
+                    h_obj = self.sub_gs[j].list_opt[
                         alive_status[self.sub_gs[j].name]
                     ]
+                    alive_status[self.sub_gs[j].name] = -1
                     op_list.append(
                         H_op("Del_" + self.sub_gs[j].name, h_obj, is_del=True,)
                     )
+                    alive_list.append(alive_status.copy())
 
-        fwd_sched = OpSchedule(
-            op_list[: self.loss_idx + 1],
-            alive_list[: self.loss_idx + 1],
-            hgraph,
-        )
-        bwd_sched = OpSchedule(
-            op_list[self.loss_idx + 1 :],
-            alive_list[self.loss_idx + 1 :],
-            hgraph,
-        )
+        h_sched = H_sched(op_list, alive_list, sizes)
+        # fwd_sched = OpSchedule(
+        #     op_list[: self.loss_idx + 1],
+        #     alive_list[: self.loss_idx + 1],
+        #     hgraph,
+        # )
+        # bwd_sched = OpSchedule(
+        #     op_list[self.loss_idx + 1 :],
+        #     alive_list[self.loss_idx + 1 :],
+        #     hgraph,
+        # )
         # fwd_sched.del_input(hgraph)
-        return fwd_sched, bwd_sched
+        for i, op in enumerate(op_list):
+            if "Loss" in op.name:
+                loss_idx = i
+                break
+        fwd_sched, bwd_sched = h_sched.split_sched(loss_idx)
+        h_option = H_option(hgraph, op_list, alive_list)
+        return fwd_sched, bwd_sched, h_option
