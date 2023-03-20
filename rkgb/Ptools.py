@@ -173,6 +173,12 @@ class P_graph():
         for pn in self.list_nodes:
             if not pn.is_leaf:
                 all_interfaces.update(pn.subgraph.input_targets)
+            else:
+                all_interfaces.add(pn.main_target)
+                if pn.sn is not None:
+                    all_interfaces.update(set([
+                        req_sn.main_target for req_sn in pn.sn.deps.keys()
+                    ]))
         for pn in self.list_nodes:
             if not pn.is_leaf:
                 sub_pg : P_graph = pn.subgraph
