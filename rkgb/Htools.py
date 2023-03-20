@@ -331,6 +331,75 @@ class H_op:
         self.obj = h_obj
 
 
+class H_sched:
+    def __init__(self, op_list: list, alive_list: list, sizes: dict):
+        self.op_list = op_list
+        self.alive_list = alive_list
+        self.sizes = sizes
+        self.ignore = []
+
+    def alive_mem(self, i, ignore=[]):
+        ignore += self.ignore
+        alive_status = self.alive_list[i]
+        return sum(
+            self.sizes[k]
+            for k, v in alive_status.items()
+            if (v and k not in ignore)
+        )
+
+    def del_op(self, i):
+        # this function does not correct alive status
+        self.op_list[i] = ...  # TODO: create an empty op or placeholder
+
+    def update_alive_list(self, target_status, start=0, end=-1):
+        for alive_status in self.alive_list[start:end]:
+            alive_status.update(target_status)
+
+    # def keep_hdn(self, hdn_name, status=1, start=0, end=-1):
+    #     # manually set the status of one hdn
+    #     self.update_alive_list({hdn_name:status}, start, end)
+
+    def extend(self, next_sched):
+        common_k = self.sizes.keys() & next_sched.sizes.keys()
+        current_end_status = self.alive_list[-1].copy()
+        next_start_status = next_sched.alive_list[0].copy()
+
+        self.op_list += next_sched.op_list
+        self.sizes.update(next_sched.sizes)
+        self.alive_list += next_sched.alive_list
+
+        for k in common_k:
+            del next_start_status[k]
+        self.update_alive_list(
+            next_start_status, start=0, end=len(self.alive_list) + 1
+        )
+
+        for k in common_k:
+            del current_end_status[k]
+        self.update_alive_list(
+            current_end_status, start=len(self.alive_list) + 1, end=-1
+        )
+
+    def split_sched(self, split_idx):
+        sched_0 = H_op_sched(
+            self.op_list[: split_idx + 1],
+            self.alive_list[: split_idx + 1],
+            self.sizes,
+        )
+        sched_1 = H_op_sched(
+            self.op_list[split_idx + 1 :],
+            self.alive_list[split_idx + 1 :],
+            self.sizes,
+        )
+        return sched_0, sched_1
+
+    def collapse(self, i, sub_op_sched):
+        # replace the i-th operation by the lower level op_sched
+        self.op_list = (
+            self.op_list[:i] + sub_op_sched.op_list + self.op_list[i + 1 :]
+        )
+
+
 # ***********
 # * H_option *
 # ***********
