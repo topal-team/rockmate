@@ -24,6 +24,7 @@ class H_C_node:
         self.deps = set()  # HDN set
         self.users = set()  # HDN set
         self.sub_graph = None  # is None, meaning HCN is fwd and requires no bwd
+        self.main_target = None # Bottom level
         self.fwd_time = 0
         self.fwd_overhead = 0
         self.is_fwd = True  # if False, self.fwd_time=self.fwd_overhead=0
@@ -119,6 +120,22 @@ class H_graph:
                 )
             )
         return max(alive_mem) - alive_mem[-1]
+    
+    def sort_list_hcn(self):
+        # -> copy paste K_graph.sort_list_kcn
+        leaves_hcn = set()
+        for hcn in self.list_hcn:
+            if not hcn.is_fwd and len(hcn.users) == 0:
+                leaves_hcn.add(hcn)
+        root_hdn = H_D_node("","")
+        root_hcn = H_C_node("")
+        root_hdn.deps = leaves_hcn
+        root_hcn.deps = self.inputs_hdn_grad # Not enought
+        root_hcn.deps.add(root_hdn)
+        self.list_hcn = l = shared_methods.sort_based_on_deps(root_hcn)
+        l.remove(root_hcn)
+
+
 
 
 def P_and_K_to_H(pg: P_graph, kg: K_graph):
@@ -153,12 +170,13 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
             # ** Bottom level **
             mt = pn.main_target
             hcn_fwd = H_C_node(f"Fwd_{pn.name}")
-            hcn_fwd.is_leaf = True
             hdn_data = H_D_node(f"Data_bottom_level_{mt}", mt)
             kcn_fwd = get_kcn_fwd(mt)
             kdn_data = get_kdn_data(mt)
             dict_kcn_to_hcn[kcn_fwd] = hcn_fwd
             dict_hdn_to_kdn[hdn_data] = kdn_data
+            hcn_fwd.is_leaf = True
+            hcn_fwd.main_target = mt
             hcn_fwd.fwd_time = kcn_fwd.time
             hcn_fwd.fwd_overhead = kcn_fwd.overhead
             hdn_data.mem = kdn_data.mem
@@ -167,13 +185,14 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
             #  ** bwd part **
             if has_bwd(mt):
                 hcn_bwd = H_C_node(f"Bwd_{pn.name}")
-                hcn_bwd.is_leaf = True
                 hdn_grad = H_D_node(f"Grad_bottom_level_{mt}", mt)
                 kcn_bwd = get_kcn_bwd(mt)
                 kdn_grad = get_kdn_grad(mt)
                 dict_kcn_to_hcn[kcn_bwd] = hcn_bwd
                 dict_hdn_to_kdn[hdn_grad] = kdn_grad
+                hcn_bwd.is_leaf = True
                 hcn_bwd.is_fwd = False
+                hcn_bwd.main_target = mt
                 # hcn_bwd.fwd_time = kcn_bwd.time
                 # hcn_bwd.fwd_overhead = kcn_bwd.overhead
                 hdn_grad.is_data = False
@@ -235,10 +254,10 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
                 mem = hdn_io_in_sub_hg.mem
                 kdn_io = hdn_io_in_sub_hg.kdn
                 if kdn_io.kdn_type == "grad":
-                    hdn_io = H_D_node("Grad_{mt}_in_{hg.name}", mt)
+                    hdn_io = H_D_node(f"Grad_{mt}_in_{hg.name}", mt)
                     hdn_io.is_data = False
                 else:
-                    hdn_io = H_D_node("Data_{mt}_in_{hg.name}", mt)
+                    hdn_io = H_D_node(f"Data_{mt}_in_{hg.name}", mt)
                 hdn_io.mem = mem
                 hdns.append(hdn_io)
                 dict_hdn_to_kdn[hdn_io] = kdn_io
@@ -247,7 +266,6 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
         for hn in hcns + hdns:
             hg.dict_hn[hn.name] = hn
         hg.list_hcn.extend(hcns)
-        hg.list_hdn.extend(hdns)
         if not (sub_hg is None):
             hg.dict_hg[sub_hg.name] = sub_hg
         for hdn in hdns:
@@ -266,7 +284,6 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
     hg.inputs_hdn_data = inputs_data = set()
     hg.inputs_hdn_grad = inputs_grad = set()
     for inp_mt in pg.input_targets:
-
         assert inp_mt not in dict_mt_to_hdn_data
         assert inp_mt not in dict_mt_to_hdn_grad
         kdn_data = get_kdn_data(inp_mt)
@@ -280,12 +297,15 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
         dict_mt_to_hdn_grad[inp_mt] = hdn_grad
         dict_hdn_to_kdn[hdn_data] = kdn_data
         dict_hdn_to_kdn[hdn_grad] = kdn_grad
-        inputs_data.add(kdn_data)
-        inputs_grad.add(kdn_grad)
+        inputs_data.add(hdn_data)
+        inputs_grad.add(hdn_grad)
 
     #  =* loss_hcn *=
     hg.loss_hcn = loss_hcn = H_C_node(f"Loss_hcn_of_{hg.name}")
+    hg.loss_hcn.main_target = "loss"
     hg.list_hcn.append(hg.loss_hcn)
+
+    hg.list_hdn = list(dict_hdn_to_kdn.keys())
 
     #  =* register hdn.kdn and hg.all_kcn_inside *=
     for hdn, kdn in dict_hdn_to_kdn.items():
@@ -315,8 +335,81 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
         hdn.deps.add(loss_hcn)
         loss_hcn.users.add(hdn)
 
+    # ** special input "source" **
+    if "src" in pg.input_targets:
+        hdn_data = dict_mt_to_hdn_data["src"]
+        kdn_data = dict_hdn_to_kdn[hdn_data]
+        for kcn in kdn_data.users_global:
+            hcn = dict_kcn_to_hcn[kcn]
+            hdn_data.users.add(hcn)
+            hcn.deps.add(hdn_data)
+        hdn_grad = dict_mt_to_hdn_grad["src"]
+        kdn_grad = dict_hdn_to_kdn[hdn_grad]
+        for kcn in kdn_grad.deps_global:
+            hcn = dict_kcn_to_hcn[kcn]
+            hdn_grad.deps.add(hcn)
+            hcn.users.add(hdn_grad)
+    hg.sort_list_hcn()
+
     return hg
 
+
+# ==========================
+
+
+
+# ==========================
+# === printing functions ===
+# ==========================
+
+color_hcn_fwd  = "blue"
+color_hcn_bwd  = "blueviolet"
+color_special  = "green"
+color_hdn      = "olive"
+color_edge     = "black"
+
+def get_color(hn):
+    if hn.main_target == "loss": return color_special
+    if isinstance(hn,H_D_node): return color_hdn
+    if hn.is_fwd: return color_hcn_fwd
+    return color_hcn_bwd
+
+def print_H_graph(hg : H_graph,name=None,open=True,render_format="svg"):
+    # ----- init -----
+    print(f"Hierarchical graph : \n"\
+          f"{len(hg.list_hcn)} H_C_nodes,\n"\
+          f"{len(hg.list_hdn)} H_D_nodes")
+    if name is None: name = "Hierarchical_graph"
+    dot = graphviz.Digraph(
+        name,
+        comment="H_graph = Hierarchical graph")
+    # ----- Core -----
+    # * nodes *
+    def print_hcn(hcn : H_C_node):
+        mt = hcn.main_target
+        dot.node(hcn.name,hcn.name,
+            color = get_color(hcn),
+            tooltip = (
+                f"Fast Forward Time : {hcn.fwd_time}"\
+                f"Fast Forward Memory Overhead : "\
+                f"{irotor.MemSize(hcn.fwd_overhead)}"
+            ) if hcn.is_fwd else "")
+    def print_hdn(kdn):
+        dot.node(kdn.name,kdn.name,color=get_color(kdn),
+            tooltip = f"Mem {irotor.MemSize(kdn.mem)}")
+
+    for hcn in hg.list_hcn: print_hcn(hcn)
+    for hdn in hg.list_hdn: print_hdn(hdn)
+
+    # * edges *
+    for hcn in hg.list_hcn:
+        for req_hdn in hcn.deps:
+            dot.edge(req_hdn.name,hcn.name,color=color_edge)
+        for user_hdn in hcn.users:
+            dot.edge(hcn.name,user_hdn.name,color=color_edge)
+
+    # ----- render -----
+    small_fcts.graph_render(dot,open,"H",render_format)
 
 # ***********
 # * H_op *
