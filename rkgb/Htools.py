@@ -329,6 +329,12 @@ class H_op:
         self.is_fwd = is_fwd
         self.is_del = is_del
         self.obj = h_obj
+        if is_del:
+            self.time = 0
+            self.overhead = 0
+        else:
+            self.time = h_obj.fwd_time if is_fwd else h_obj.bwd_time
+            self.overhead = h_obj.fwd_overhead if is_fwd else h_obj.bwd_overhead
 
 
 class H_sched:
@@ -342,9 +348,9 @@ class H_sched:
         ignore += self.ignore
         alive_status = self.alive_list[i]
         return sum(
-            self.sizes[k]
+            self.sizes[k][v]
             for k, v in alive_status.items()
-            if (v and k not in ignore)
+            if (v > -1 and k not in ignore)
         )
 
     def del_op(self, i):
@@ -381,12 +387,12 @@ class H_sched:
         )
 
     def split_sched(self, split_idx):
-        sched_0 = H_op_sched(
+        sched_0 = H_sched(
             self.op_list[: split_idx + 1],
             self.alive_list[: split_idx + 1],
             self.sizes,
         )
-        sched_1 = H_op_sched(
+        sched_1 = H_sched(
             self.op_list[split_idx + 1 :],
             self.alive_list[split_idx + 1 :],
             self.sizes,
@@ -425,7 +431,7 @@ class H_option:
         # when op_list and alive_list are empty, all the information can be
         # assigned directly
         for i, op in enumerate(op_list):
-            if "loss" in op.name:
+            if "Loss" in op.name:
                 self.loss_idx = i
                 break
         self.op_list = op_list
@@ -462,12 +468,15 @@ class H_option:
         for i, (op, alive_status) in enumerate(zip(op_list, alive_list)):
             self.save_mem[i] = _sum_mem(alive_status, interfaces_names)
             if not op.is_del:
-                if op.is_fwd:
-                    self.time[i] = op.fwd_time
-                    self.overhead[i] = op.fwd_overhead
-                else:
-                    self.time[i] = op.bwd_time
-                    self.overhead[i] = op.bwd_overhead
+                self.time[i] = op.time
+                self.overhead[i] = op.overhead
+
+                # if op.is_fwd:
+                #     self.time[i] = op.fwd_time
+                #     self.overhead[i] = op.fwd_overhead
+                # else:
+                #     self.time[i] = op.bwd_time
+                #     self.overhead[i] = op.bwd_overhead
         if direct_info:
             self.mem = direct_info["mem"]
             self.fwd_time = direct_info["fwd_time"]
@@ -490,10 +499,10 @@ class H_option:
 
             self.dep_inputs = []  # the names of HDNs that are required by BWD
             for op in op_list[self.loss_idx + 1 :]:
-                if op.is_run:
+                if not op.is_del:
                     for hdn in hgraph.dict_hn[op.name].deps:
                         if (
-                            hdn in hgraph.fwd_inputs
+                            hdn in hgraph.inputs_hdn_data
                             and hdn.name in self.dep_inputs
                         ):
                             self.dep_inputs.append(hdn.name)
