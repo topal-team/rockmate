@@ -24,7 +24,7 @@ class H_C_node:
         self.deps = set()  # HDN set
         self.users = set()  # HDN set
         self.sub_graph = None  # is None, meaning HCN is fwd and requires no bwd
-        self.main_target = None # Bottom level
+        self.main_target = None  # Bottom level
         self.fwd_time = 0
         self.fwd_overhead = 0
         self.is_fwd = True  # if False, self.fwd_time=self.fwd_overhead=0
@@ -70,6 +70,7 @@ class H_graph:
         self.outputs_hdn_data = set()  # HDN set -> outputs' data
         self.outputs_hdn_grad = set()  # HDN set -> outputs' grad
         self.inputs_hdn_grad = set()  # HDN set -> inputs' grad
+
         self.loss_hcn = None  #  HCN
         self.all_kcn_inside = set()  # temporary attribute
 
@@ -120,22 +121,20 @@ class H_graph:
                 )
             )
         return max(alive_mem) - alive_mem[-1]
-    
+
     def sort_list_hcn(self):
         # -> copy paste K_graph.sort_list_kcn
         leaves_hcn = set()
         for hcn in self.list_hcn:
             if not hcn.is_fwd and len(hcn.users) == 0:
                 leaves_hcn.add(hcn)
-        root_hdn = H_D_node("","")
+        root_hdn = H_D_node("", "")
         root_hcn = H_C_node("")
         root_hdn.deps = leaves_hcn
-        root_hcn.deps = self.inputs_hdn_grad # Not enought
+        root_hcn.deps = self.inputs_hdn_grad  # Not enought
         root_hcn.deps.add(root_hdn)
         self.list_hcn = l = shared_methods.sort_based_on_deps(root_hcn)
         l.remove(root_hcn)
-
-
 
 
 def P_and_K_to_H(pg: P_graph, kg: K_graph):
@@ -299,6 +298,12 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
         dict_hdn_to_kdn[hdn_grad] = kdn_grad
         inputs_data.add(hdn_data)
         inputs_grad.add(hdn_grad)
+    hg.interfaces = (
+        hg.inputs_hdn_data
+        | hg.inputs_hdn_grad
+        | hg.outputs_hdn_data
+        | hg.outputs_hdn_grad
+    )
 
     #  =* loss_hcn *=
     hg.loss_hcn = loss_hcn = H_C_node(f"Loss_hcn_of_{hg.name}")
@@ -357,59 +362,77 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
 # ==========================
 
 
-
 # ==========================
 # === printing functions ===
 # ==========================
 
-color_hcn_fwd  = "blue"
-color_hcn_bwd  = "blueviolet"
-color_special  = "green"
-color_hdn      = "olive"
-color_edge     = "black"
+color_hcn_fwd = "blue"
+color_hcn_bwd = "blueviolet"
+color_special = "green"
+color_hdn = "olive"
+color_edge = "black"
+
 
 def get_color(hn):
-    if hn.main_target == "loss": return color_special
-    if isinstance(hn,H_D_node): return color_hdn
-    if hn.is_fwd: return color_hcn_fwd
+    if hn.main_target == "loss":
+        return color_special
+    if isinstance(hn, H_D_node):
+        return color_hdn
+    if hn.is_fwd:
+        return color_hcn_fwd
     return color_hcn_bwd
 
-def print_H_graph(hg : H_graph,name=None,open=True,render_format="svg"):
+
+def print_H_graph(hg: H_graph, name=None, open=True, render_format="svg"):
     # ----- init -----
-    print(f"Hierarchical graph : \n"\
-          f"{len(hg.list_hcn)} H_C_nodes,\n"\
-          f"{len(hg.list_hdn)} H_D_nodes")
-    if name is None: name = "Hierarchical_graph"
-    dot = graphviz.Digraph(
-        name,
-        comment="H_graph = Hierarchical graph")
+    print(
+        f"Hierarchical graph : \n"
+        f"{len(hg.list_hcn)} H_C_nodes,\n"
+        f"{len(hg.list_hdn)} H_D_nodes"
+    )
+    if name is None:
+        name = "Hierarchical_graph"
+    dot = graphviz.Digraph(name, comment="H_graph = Hierarchical graph")
     # ----- Core -----
     # * nodes *
-    def print_hcn(hcn : H_C_node):
+    def print_hcn(hcn: H_C_node):
         mt = hcn.main_target
-        dot.node(hcn.name,hcn.name,
-            color = get_color(hcn),
-            tooltip = (
-                f"Fast Forward Time : {hcn.fwd_time}"\
-                f"Fast Forward Memory Overhead : "\
+        dot.node(
+            hcn.name,
+            hcn.name,
+            color=get_color(hcn),
+            tooltip=(
+                f"Fast Forward Time : {hcn.fwd_time}"
+                f"Fast Forward Memory Overhead : "
                 f"{irotor.MemSize(hcn.fwd_overhead)}"
-            ) if hcn.is_fwd else "")
-    def print_hdn(kdn):
-        dot.node(kdn.name,kdn.name,color=get_color(kdn),
-            tooltip = f"Mem {irotor.MemSize(kdn.mem)}")
+            )
+            if hcn.is_fwd
+            else "",
+        )
 
-    for hcn in hg.list_hcn: print_hcn(hcn)
-    for hdn in hg.list_hdn: print_hdn(hdn)
+    def print_hdn(kdn):
+        dot.node(
+            kdn.name,
+            kdn.name,
+            color=get_color(kdn),
+            tooltip=f"Mem {irotor.MemSize(kdn.mem)}",
+        )
+
+    for hcn in hg.list_hcn:
+        print_hcn(hcn)
+    for hdn in hg.list_hdn:
+        print_hdn(hdn)
 
     # * edges *
     for hcn in hg.list_hcn:
         for req_hdn in hcn.deps:
-            dot.edge(req_hdn.name,hcn.name,color=color_edge)
+            dot.edge(req_hdn.name, hcn.name, color=color_edge)
         for user_hdn in hcn.users:
-            dot.edge(hcn.name,user_hdn.name,color=color_edge)
+            dot.edge(hcn.name, user_hdn.name, color=color_edge)
 
-    # ----- render -----
-    small_fcts.graph_render(dot,open,"H",render_format)
+    #  ----- render -----
+    small_fcts.graph_render(dot, open, "H", render_format)
+
 
 # ***********
 # * H_op *
@@ -599,6 +622,74 @@ class H_option:
                             and hdn.name in self.dep_inputs
                         ):
                             self.dep_inputs.append(hdn.name)
+
+
+def get_save_all_option(hgraph):
+    def _can_del(i, hdn):
+        for hcn in hdn.users:
+            if hgraph.list_hcn.index(hcn) > i:
+                return False
+        return True
+
+    op_list = []
+    alive_list = []
+    alive_status = {}
+    sizes = {}
+    for hdn in hgraph.list_hdn:
+        if hdn not in hgraph.interfaces:
+            alive_status[hdn.name] = (
+                0 if (hdn in hgraph.inputs_hdn_data) else -1
+            )
+            sizes[hdn.name] = [hdn.mem]
+
+    for hcn in hgraph.list_hcn:
+        if hcn.is_fwd and hcn.sub_graph is not None:
+            sub_g = hcn.sub_graph
+            if not sub_g.list_opt:
+                sub_opt = get_save_all_option(sub_g)
+                sub_g.list_opt.append(sub_opt)
+            alive_status[sub_g.name] = -1
+            sizes[sub_g.name] = [h_opt.mem for h_opt in sub_g.list_opt]
+
+    for i, hcn in enumerate(hgraph.list_hcn):
+        if hcn.sub_graph is None:
+            for hdn in hcn.users:
+                alive_status[hdn.name] = 0
+            op_list.append(
+                H_op(hcn.name, h_obj=hcn, is_fwd=hcn.is_fwd, is_del=False)
+            )
+            alive_list.append(alive_status.copy())
+
+            continue
+
+        h_obj = hcn.sub_graph.list_opt[0]
+        for hdn in hcn.users:
+            alive_status[hdn.name] = 0
+        if hcn.is_fwd:
+            alive_status[hcn.sub_graph.name] = 0
+        op_list.append(
+            H_op(hcn.name, h_obj=h_obj, is_fwd=hcn.is_fwd, is_del=False)
+        )
+        alive_list.append(alive_status.copy())
+
+        for hdn_name, alive in alive_status.items():
+            if "Hg" in hdn_name:
+                continue
+            hdn = hgraph.dict_hn[hdn_name]
+            if alive > -1 and _can_del(i, hdn):
+                op_list.append(H_op("Del_" + hdn.name, hdn, is_del=True))
+                alive_status[hdn_name] = -1
+                alive_list.append(alive_status.copy())
+
+        if not hcn.is_fwd:
+            alive_status[hcn.sub_graph.name] = -1
+            op_list.append(
+                H_op("Del_" + hcn.sub_graph.name, h_obj, is_del=True)
+            )
+            alive_list.append(alive_status.copy())
+
+    h_option = H_option(hgraph, op_list, alive_list)
+    return h_option
 
 
 # def find_bkcn(fkcn, kg):
