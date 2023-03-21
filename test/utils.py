@@ -6,7 +6,6 @@ from rotor import timing
 import pickle
 import time
 import sys
-import dill
 from models.GPT import *
 
 sys.setrecursionlimit(30000)
@@ -135,7 +134,8 @@ def copy_run_rk(
             res["Error"] = f"caught {type(e)}: {e}"
             if type(e) != torch.cuda.OutOfMemoryError:
                 with open("rk_mod.pkl", "wb") as f:
-                    torch.save(rkmod, f, pickle_module=dill)
+                    torch.save(rkmod, f)
+                raise e
         res["times"] = times
         if return_mod:
             res["module"] = rkmod.to("cpu")

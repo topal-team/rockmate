@@ -207,8 +207,7 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
                     ph_mem = 0
                 hopt = H_option(
                     sub_hg,
-                    op_list=[],
-                    alive_list=[],
+                    h_sched=H_sched([], [], {}),
                     direct_info={
                         "fwd_time": kcn_fwd.time,
                         "bwd_time": kcn_bwd.time,
@@ -543,16 +542,17 @@ class H_option:
         the H_option and understand what operations should be executed.
     """
 
-    def __init__(self, hgraph, op_list, alive_list, direct_info={}):
+    def __init__(self, hgraph, h_sched, direct_info={}):
         # when op_list and alive_list are empty, all the information can be
         # assigned directly
-        for i, op in enumerate(op_list):
+        self.h_sched = h_sched
+        self.op_list = h_sched.op_list
+        self.alive_list = h_sched.alive_list
+        for i, op in enumerate(self.op_list):
             if "Loss" in op.name:
                 self.loss_idx = i
                 break
-        self.op_list = op_list
-        self.alive_list = alive_list
-        L = len(op_list)
+        L = len(self.op_list)
         self.time = np.zeros(L)
         self.save_mem = np.zeros(L)
         self.overhead = np.zeros(L)
@@ -581,7 +581,9 @@ class H_option:
         ]:
             interfaces_names += [hdn.name for hdn in inter]
 
-        for i, (op, alive_status) in enumerate(zip(op_list, alive_list)):
+        for i, (op, alive_status) in enumerate(
+            zip(self.op_list, self.alive_list)
+        ):
             self.save_mem[i] = _sum_mem(alive_status, interfaces_names)
             if not op.is_del:
                 self.time[i] = op.time
@@ -614,7 +616,7 @@ class H_option:
             )
 
             self.dep_inputs = []  # the names of HDNs that are required by BWD
-            for op in op_list[self.loss_idx + 1 :]:
+            for op in self.op_list[self.loss_idx + 1 :]:
                 if not op.is_del:
                     for hdn in hgraph.dict_hn[op.name].deps:
                         if (
@@ -622,6 +624,16 @@ class H_option:
                             and hdn.name in self.dep_inputs
                         ):
                             self.dep_inputs.append(hdn.name)
+
+        self.phantoms = set()
+        for k, v in self.alive_list[self.loss_idx].items():
+            if v > -1 and not k in interfaces_names:
+                if k in hgraph.dict_hn:
+                    self.phantoms.add(hgraph.dict_hn[k])
+                elif k in hgraph.dict_hg:
+                    self.phantoms.add(hgraph.dict_hg[k])
+                else:
+                    raise Warning(f"cannot find {k} in Hgraph")
 
 
 def get_save_all_option(hgraph):
@@ -688,9 +700,45 @@ def get_save_all_option(hgraph):
             )
             alive_list.append(alive_status.copy())
 
-    h_option = H_option(hgraph, op_list, alive_list)
+    h_option = H_option(hgraph, H_sched(op_list, alive_list, sizes))
     return h_option
 
+def replace(op_list, i, sub_op_list):
+    # replace the i-th operation by the lower level op_sched
+    op_list = (
+        op_list[:i] + sub_op_list + op_list[i + 1 :]
+    )
+
+def collapse(op):
+    if isinstance(op.obj, H_option) and op.obj.op_list:
+        if "Del" in op.name:
+            op_list_ = []
+            for obj in op.obj.phantoms:
+                if isinstance(obj, H_D_node):
+                    op_list_.append(H_op(f"Del_{obj.name}", obj, is_del=True))
+                else:
+                    op_list_ += collapse(H_op(f"Del_{obj.name}", obj, is_del=True))
+
+            return op_list_
+        else:
+            op_list_ = []
+            if op.is_fwd:
+                for sub_op in op.obj.op_list[:op.obj.loss_idx+1]:
+                    op_list_ += collapse(sub_op)
+            else:
+                for sub_op in op.obj.op_list[op.obj.loss_idx+1:]:
+                    op_list_ += collapse(sub_op)
+            return op_list_
+            
+    else:
+        return [op]
+    
+
+def get_bottom_op_list(op_list):
+    bottom_op_list = []
+    for i, op in enumerate(op_list):
+        bottom_op_list += collapse(op)
+    return bottom_op_list
 
 # def find_bkcn(fkcn, kg):
 #     assert fkcn.is_fwd

@@ -577,7 +577,7 @@ class ModelGurobi:
                 loss_idx = i
                 break
         fwd_sched, bwd_sched = h_sched.split_sched(loss_idx)
-        h_option = H_option(hgraph, op_list, alive_list)
+        h_option = H_option(hgraph, h_sched)
         return fwd_sched, bwd_sched, h_option
 
 
