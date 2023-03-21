@@ -18,7 +18,10 @@ class ModelGurobi:
         hgraph,
         budget: int,
         save_budget: int,
-        gurobi_params: Dict[str, Any] = {},
+        gurobi_params: Dict[str, Any] = {
+            "LogToConsole": 0,
+            "IntegralityFocus": 1,
+        },
         gcd=None,
     ):
         #############################
@@ -576,3 +579,11 @@ class ModelGurobi:
         fwd_sched, bwd_sched = h_sched.split_sched(loss_idx)
         h_option = H_option(hgraph, op_list, alive_list)
         return fwd_sched, bwd_sched, h_option
+
+
+def add_option(hgraph, budget, save_budget):
+    md = ModelGurobi(hgraph, budget, save_budget)
+    md.solve()
+    if md.feasible:
+        _, _, h_option = md.schedule()
+        hgraph.add_option(h_option)
