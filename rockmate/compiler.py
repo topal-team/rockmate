@@ -1,6 +1,7 @@
 from rkgb.utils.ast_add_on import make_str_assign, make_str_list_assign
 from rkgb.utils import np, torch
 from rockmate.def_op import DelOp
+from rkgb.Ktools import *
 
 # region Define Register Hooks
 def fct_get_pack(storage, no_save_list, sanity_check=False):
@@ -242,6 +243,9 @@ class Compiler:
         self.device = self.storage.gd["device"]
 
     def _is_alive(self, kdn_name, i):
+        if not self.op_sched:
+            return False  # TODO: fix this
+
         if kdn_name in self.op_sched.kdn_names:
             return self.op_sched.alive_list[i][
                 self.op_sched.kdn_names.index(kdn_name)
@@ -250,21 +254,25 @@ class Compiler:
         else:
             return True
 
+    def _get_names(self, name_list):
+        if not self.op_sched:
+            return [kdn.name for kdn in name_list]
+
     def find_next_idx(l, target, i):
         return i + l[i:].index(target)
 
     def get_fwd(self, op, i):
         if "loss" in op.main_target:
             return [fct_run_forward_no_grad(self.storage, "")]
-        rec = op.name in self.op_sched.op_name_list[:i]
+        rec = op.name in self.op_name_list[:i]
         if not op.proxy:
             last_before_bwd = False
         else:
-            next_bwd_idx = i + self.op_sched.op_name_list[i:].index(
+            next_bwd_idx = i + self.op_name_list[i:].index(
                 op.name.replace("fwd", "bwd")
             )
             last_before_bwd = not (
-                op.name in self.op_sched.op_name_list[i + 1 : next_bwd_idx]
+                op.name in self.op_name_list[i + 1 : next_bwd_idx]
             )
         l = []
 
@@ -315,8 +323,9 @@ class Compiler:
         else:
             no_save_list = []
             candidates = list(op.deps_global) + list(op.users_global)
+            candidates = self._get_names(candidates)
             for kdn_name in candidates:
-                if kdn_name in self.op_sched.op_name_list[i:next_bwd_idx]:
+                if kdn_name in self.op_name_list[i:next_bwd_idx]:
                     no_save_list.append(kdn_name.split(" ")[0])
 
             for target in op.tensor_targets:
@@ -349,8 +358,8 @@ class Compiler:
         return l
 
     def get_bwd(self, op, i):
-        rec = op.name in self.op_sched.op_name_list[:i]
-        last = not (op.name in self.op_sched.op_name_list[i + 1 :])
+        rec = op.name in self.op_name_list[:i]
+        last = not (op.name in self.op_name_list[i + 1 :])
         l = []
         l2 = []
 
@@ -362,7 +371,7 @@ class Compiler:
 
         temporary_tensor_names = [
             kdn_name.split(" ")[0]
-            for kdn_name in op.deps_fake
+            for kdn_name in self._get_names(op.deps_fake)
             if not self._is_alive(kdn_name, i)
         ]
         if op.main_target in temporary_tensor_names:
@@ -371,10 +380,10 @@ class Compiler:
             l.append(fct_generate_fake_data(self.storage, tensor_name))
             l2.append(fct_del_tensor_data(self.storage, tensor_name))
         if rec:
-            prev_i = i - self.op_sched.op_name_list[:i][::-1].index(op.name) - 1
+            prev_i = i - self.op_name_list[:i][::-1].index(op.name) - 1
             input_names = []
             for kdn_name in op.users_global:
-                if f"del {kdn_name}" in self.op_sched.op_name_list[prev_i:i]:
+                if f"del {kdn_name}" in self.op_name_list[prev_i:i]:
                     input_names.append(kdn_name.split(" ")[0])
             l.append(
                 fct_run_backward_with_inputs(
@@ -413,6 +422,7 @@ class Compiler:
 
     def compile(self, op_sched):
         self.op_sched = op_sched
+        self.op_name_list = op_sched.op_name_list
 
         fct_list = []
         for i, op in enumerate(op_sched.op_list):
@@ -424,6 +434,26 @@ class Compiler:
                 fct_list.append(self.get_del_data(op, i))
             elif "grad" in op.name:
                 fct_list.append(self.get_del_grad(op, i))
+            else:
+                fct_list.append([])
+
+    def compile_from_KN_list(self, kn_list):
+        self.op_sched = False
+        self.op_name_list = [kn.name for kn in kn_list]
+        fct_list = []
+        for i, kn in enumerate(kn_list):
+            if "fwd" in kn.name:
+                for kdn in kn.users:
+                    if kdn.kdn_type != "data":
+                        continue
+                    setattr(kn, "proxy", kdn.info.requires_grad)
+                fct_list.append(self.get_fwd(kn, i))
+            elif "bwd" in kn.name:
+                fct_list.append(self.get_bwd(kn, i))
+            elif "data" in kn.name:
+                fct_list.append(self.get_del_data(kn, i))
+            elif "grad" in kn.name:
+                fct_list.append(self.get_del_grad(kn, i))
             else:
                 fct_list.append([])
 
