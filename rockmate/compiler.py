@@ -45,6 +45,7 @@ def fct_get_unpack(storage):
 def fct_get_shapes(storage, tensor_name):
     def fct():
         storage.shapes[tensor_name] = storage.ld[tensor_name].shape
+        storage.dtypes[tensor_name] = storage.ld[tensor_name].dtype
 
     return fct
 
@@ -138,7 +139,12 @@ def fct_run_backward_with_inputs(
 
 def fct_generate_fake_data(storage, tensor_name):
     def fct():
-        x = storage.gd["meta"].expand(np.prod(storage.shapes[tensor_name]))
+        m = (
+            storage.gd["cmeta"]
+            if storage.dtypes[tensor_name].is_complex
+            else storage.gd["meta"]
+        )
+        x = m.expand(np.prod(storage.shapes[tensor_name]))
         storage.ld[tensor_name].data = x.view(storage.shapes[tensor_name])
 
     return fct
@@ -146,14 +152,18 @@ def fct_generate_fake_data(storage, tensor_name):
 
 def fct_del_tensor_data(storage, tensor_name):
     def fct():
-        storage.ld[tensor_name].data = torch.empty(0)
+        storage.ld[tensor_name].data = torch.empty(
+            0, device=storage.gd["device"]
+        )
 
     return fct
 
 
 def fct_del_tensor_base(storage, tensor_name):
     def fct():
-        storage.ld[f"_{tensor_name}"]._base.data = torch.empty(0)
+        storage.ld[f"_{tensor_name}"]._base.data = torch.empty(
+            0, device=storage.gd["device"]
+        )
 
     return fct
 
@@ -199,9 +209,11 @@ class RK_Storage:
             "device": device,
             "torch": torch,
             "meta": torch.ones(1).to(device),
+            "cmeta": torch.view_as_complex(torch.ones(2)).to(device),
         }
         self.ld = {}
         self.shapes = dict()
+        self.dtypes = dict()
         self.rng_state = RngState()
 
     def add_val(self, val, x):
@@ -289,9 +301,12 @@ class Compiler:
 
         if not last_before_bwd:
 
-            inplace_code = inplace_code.replace(
-                op.main_target, f"_{op.main_target}"
-            )
+            # inplace_code = inplace_code.replace(
+            #     op.main_target, f"_{op.main_target}"
+            # )
+
+            for target in op.tensor_targets:
+                inplace_code = inplace_code.replace(target, "_" + target)
             l.append(
                 fct_run_forward_no_grad(
                     self.storage, main_code.replace("self", "original_mod"),
