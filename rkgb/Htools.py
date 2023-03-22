@@ -168,8 +168,8 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
         if pn.is_leaf:
             # ** Bottom level **
             mt = pn.main_target
-            hcn_fwd = H_C_node(f"Fwd_{pn.name}")
-            hdn_data = H_D_node(f"Data_bottom_level_{mt}", mt)
+            hcn_fwd = H_C_node(f"Fwd_{mt}")
+            hdn_data = H_D_node(f"Data_{mt}", mt)
             kcn_fwd = get_kcn_fwd(mt)
             kdn_data = get_kdn_data(mt)
             dict_kcn_to_hcn[kcn_fwd] = hcn_fwd
@@ -183,8 +183,8 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
             hdns = [hdn_data]
             #  ** bwd part **
             if has_bwd(mt):
-                hcn_bwd = H_C_node(f"Bwd_{pn.name}")
-                hdn_grad = H_D_node(f"Grad_bottom_level_{mt}", mt)
+                hcn_bwd = H_C_node(f"Bwd_{mt}")
+                hdn_grad = H_D_node(f"Grad_{mt}", mt)
                 kcn_bwd = get_kcn_bwd(mt)
                 kdn_grad = get_kdn_grad(mt)
                 dict_kcn_to_hcn[kcn_bwd] = hcn_bwd
@@ -199,7 +199,7 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
                 hcns.append(hcn_bwd)
                 hdns.append(hdn_grad)
                 #  ** last level graph **
-                sub_hg = H_graph(f"Hg_{pn.name}")
+                sub_hg = H_graph(f"Hg_{mt}")
                 #  -> Build the bottom option
                 if has_phantoms(mt):
                     ph_mem = get_kdn_phantoms(mt).mem
@@ -252,10 +252,10 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
                 mem = hdn_io_in_sub_hg.mem
                 kdn_io = hdn_io_in_sub_hg.kdn
                 if kdn_io.kdn_type == "grad":
-                    hdn_io = H_D_node(f"Grad_{mt}_in_{hg.name}", mt)
+                    hdn_io = H_D_node(f"Grad_in_{hg.name}_{mt}", mt)
                     hdn_io.is_data = False
                 else:
-                    hdn_io = H_D_node(f"Data_{mt}_in_{hg.name}", mt)
+                    hdn_io = H_D_node(f"Data_in_{hg.name}_{mt}", mt)
                 hdn_io.mem = mem
                 hdns.append(hdn_io)
                 dict_hdn_to_kdn[hdn_io] = kdn_io
@@ -625,15 +625,15 @@ class H_option:
                         ):
                             self.dep_inputs.append(hdn.name)
 
-        self.phantoms = set()
-        for k, v in self.alive_list[self.loss_idx].items():
-            if v > -1 and not k in interfaces_names:
-                if k in hgraph.dict_hn:
-                    self.phantoms.add(hgraph.dict_hn[k])
-                elif k in hgraph.dict_hg:
-                    self.phantoms.add(hgraph.dict_hg[k])
-                else:
-                    raise Warning(f"cannot find {k} in Hgraph")
+            self.phantoms = set()
+            for k, v in self.alive_list[self.loss_idx].items():
+                if v > -1 and not k in interfaces_names:
+                    if k in hgraph.dict_hn:
+                        self.phantoms.add(hgraph.dict_hn[k])
+                    elif k in hgraph.dict_hg:
+                        self.phantoms.add(hgraph.dict_hg[k])
+                    else:
+                        raise Warning(f"cannot find {k} in Hgraph")
 
 
 def get_save_all_option(hgraph):
@@ -703,11 +703,11 @@ def get_save_all_option(hgraph):
     h_option = H_option(hgraph, H_sched(op_list, alive_list, sizes))
     return h_option
 
+
 def replace(op_list, i, sub_op_list):
     # replace the i-th operation by the lower level op_sched
-    op_list = (
-        op_list[:i] + sub_op_list + op_list[i + 1 :]
-    )
+    op_list = op_list[:i] + sub_op_list + op_list[i + 1 :]
+
 
 def collapse(op):
     if isinstance(op.obj, H_option) and op.obj.op_list:
@@ -717,28 +717,31 @@ def collapse(op):
                 if isinstance(obj, H_D_node):
                     op_list_.append(H_op(f"Del_{obj.name}", obj, is_del=True))
                 else:
-                    op_list_ += collapse(H_op(f"Del_{obj.name}", obj, is_del=True))
+                    op_list_ += collapse(
+                        H_op(f"Del_{obj.name}", obj, is_del=True)
+                    )
 
             return op_list_
         else:
             op_list_ = []
             if op.is_fwd:
-                for sub_op in op.obj.op_list[:op.obj.loss_idx+1]:
+                for sub_op in op.obj.op_list[: op.obj.loss_idx + 1]:
                     op_list_ += collapse(sub_op)
             else:
-                for sub_op in op.obj.op_list[op.obj.loss_idx+1:]:
+                for sub_op in op.obj.op_list[op.obj.loss_idx + 1 :]:
                     op_list_ += collapse(sub_op)
             return op_list_
-            
+
     else:
         return [op]
-    
+
 
 def get_bottom_op_list(op_list):
     bottom_op_list = []
     for i, op in enumerate(op_list):
         bottom_op_list += collapse(op)
     return bottom_op_list
+
 
 # def find_bkcn(fkcn, kg):
 #     assert fkcn.is_fwd
