@@ -1,7 +1,7 @@
 from rkgb.utils.ast_add_on import make_str_assign, make_str_list_assign
 from rkgb.utils import np, torch
 from rockmate.def_op import DelOp
-from rkgb.Ktools import *
+from rkgb.Ktools import K_C_node, K_D_node
 
 # region Define Register Hooks
 def fct_get_pack(storage, no_save_list, sanity_check=False):
@@ -244,12 +244,10 @@ class Compiler:
 
     def _is_alive(self, kdn_name, i):
         if not self.op_sched:
-            return False  # TODO: fix this
+            return self.alive_list[i][kdn_name]
 
         if kdn_name in self.op_sched.kdn_names:
-            return self.op_sched.alive_list[i][
-                self.op_sched.kdn_names.index(kdn_name)
-            ]
+            return self.alive_list[i][self.op_sched.kdn_names.index(kdn_name)]
 
         else:
             return True
@@ -423,6 +421,7 @@ class Compiler:
     def compile(self, op_sched):
         self.op_sched = op_sched
         self.op_name_list = op_sched.op_name_list
+        self.alive_list = op_sched.alive_list
 
         fct_list = []
         for i, op in enumerate(op_sched.op_list):
@@ -439,9 +438,40 @@ class Compiler:
 
     def compile_from_KN_list(self, kn_list):
         self.op_sched = False
-        self.op_name_list = [kn.name for kn in kn_list]
+        self.op_name_list = []
+        for kn in kn_list:
+            if not isinstance(kn, str):
+                self.op_name_list.append(kn.name)
+            else:
+                self.op_name_list.append(kn)
+
+        kdn_names = set(
+            kn.name for kn in kn_list if isinstance(kn, K_D_node)
+        ).union(
+            set(
+                kdn.name
+                for kn in kn_list
+                if isinstance(kn, K_C_node)
+                for kdn in kn.users
+            )
+        )
+        self.alive_list = []
+        alive_status = {kdn_name: 0 for kdn_name in kdn_names}
+
+        for kn in kn_list:
+            if isinstance(kn, K_C_node):
+                for kdn in kn.users:
+                    alive_status[kdn.name] = 1
+            elif isinstance(kn, K_D_node):
+                alive_status[kn.name] = 0
+            
+            self.alive_list.append(alive_status.copy())
+
         fct_list = []
         for i, kn in enumerate(kn_list):
+            if isinstance(kn, str):
+                fct_list.append([])
+                continue
             if "fwd" in kn.name:
                 for kdn in kn.users:
                     if kdn.kdn_type != "data":

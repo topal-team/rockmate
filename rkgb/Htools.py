@@ -743,6 +743,57 @@ def get_bottom_op_list(op_list):
     return bottom_op_list
 
 
+def find_main_target(op_name, targets):
+    for target in targets:
+        if target in op_name:
+            return target
+    return None
+
+
+def get_kn_list(op_list, kg):
+    kn_list = []
+    targets = set()
+    for kcn in kg.list_kcn:
+        targets.add(kcn.main_target)
+
+    for op in op_list:
+        if "Loss" in op.name:
+            # kn_list.append(op.name)
+            kn_list.append(kg.dict_kn[f"fwd_loss"])
+            continue
+        mt = find_main_target(op.name, targets)
+        if mt is None:
+            kn_list.append(op.name)
+            continue
+        if op.is_del:
+            if "Data" in op.name:
+                kn_list.append(kg.dict_kn[f"{mt} data"])
+            elif "Grad" in op.name:
+                kn_list.append(kg.dict_kn[f"{mt} grad"])
+            elif "Hg" in op.name and f"{mt} phantoms" in kg.dict_kn:
+                kn_list.append(kg.dict_kn[f"{mt} phantoms"])
+            else:
+                kn_list.append(op.name)
+
+        else:
+            if op.is_fwd:
+                kn_list.append(kg.dict_kn[f"fwd_{mt}"])
+            else:
+                kn_list.append(kg.dict_kn[f"bwd_{mt}"])
+    return kn_list
+
+
+def refine_kn_list(kn_list):
+    refined_kn_list = []
+    for kn in kn_list:
+        if not isinstance(kn, str):
+            refined_kn_list.append(kn)
+        else:
+            refined_kn_list.append(kn)
+
+    return refined_kn_list
+
+
 # def find_bkcn(fkcn, kg):
 #     assert fkcn.is_fwd
 #     if fkcn.name.replace("fwd", "bwd") in kg.dict_kn:
