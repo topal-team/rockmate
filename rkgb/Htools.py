@@ -114,7 +114,7 @@ class H_graph:
             alive_mem.append(
                 sum(
                     hdn.mem
-                    for j, hdn in enumerate(self.list_hdn)
+                    for j, hdn in enumerate(self.list_hdn)  # No phantom in FF
                     if alive_status[j]
                 )
             )
@@ -221,7 +221,7 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
                     ph_mem = get_kdn_phantoms(mt).mem
                 else:
                     ph_mem = 0
-                h_sched = H_sched([], [], {})
+                h_sched = H_sched([], [], {}, sub_hg)
                 direct_info = {
                     "fwd_time": kcn_fwd.time,
                     "bwd_time": kcn_bwd.time,
@@ -504,10 +504,13 @@ class H_sched:
 
     """
 
-    def __init__(self, op_list: list, alive_list: list, sizes: dict):
+    def __init__(
+        self, op_list: list, alive_list: list, sizes: dict, hgraph: H_graph
+    ):
         self.op_list = op_list
         self.alive_list = alive_list
         self.sizes = sizes
+        self.hgraph = hgraph
         self.ignore = []
 
     def alive_mem(self, i, ignore=[]):
@@ -566,11 +569,11 @@ class H_sched:
         # return sched_0, sched_1
         return self.op_list[: split_idx + 1], self.op_list[split_idx + 1 :]
 
-    def collapse(self, i, sub_op_sched):
-        # replace the i-th operation by the lower level op_sched
-        self.op_list = (
-            self.op_list[:i] + sub_op_sched.op_list + self.op_list[i + 1 :]
-        )
+    # def collapse(self, i, sub_op_sched):
+    #     # replace the i-th operation by the lower level op_sched
+    #     self.op_list = (
+    #         self.op_list[:i] + sub_op_sched.op_list + self.op_list[i + 1 :]
+    #     )
 
     # # ***********
     # # * H_option *
@@ -599,12 +602,12 @@ class H_sched:
     #         self.op_list = h_sched.op_list
     #         self.alive_list = h_sched.alive_list
 
-    def get_info(self, hgraph):
+    def get_info(self):
         """
         A function that compute the time/memory information based on 
         op_list and alive_list. If they are updated, should run get_info() again.
         """
-
+        hgraph = self.hgraph
         for i, op in enumerate(self.op_list):
             if "Loss" in op.name:
                 self.loss_idx = i
@@ -682,7 +685,8 @@ class H_sched:
                     if k in hgraph.dict_hn:
                         self.phantoms.add(hgraph.dict_hn[k])
                     elif k in hgraph.dict_hg:
-                        self.phantoms.add(hgraph.dict_hg[k])
+                        # delete phantom of a H_sched
+                        self.phantoms.add(hgraph.dict_hg[k].list_opt[v])
                     else:
                         raise Warning(f"cannot find {k} in Hgraph")
 
@@ -712,7 +716,7 @@ def get_save_all_option(hgraph):
                 sub_opt = get_save_all_option(sub_g)
                 sub_g.list_opt.append(sub_opt)
             alive_status[sub_g.name] = -1
-            sizes[sub_g.name] = [h_opt.mem for h_opt in sub_g.list_opt]
+            sizes[sub_g.name] = [h_sched.mem for h_sched in sub_g.list_opt]
 
     for i, hcn in enumerate(hgraph.list_hcn):
         if hcn.sub_graph is None:
@@ -751,10 +755,9 @@ def get_save_all_option(hgraph):
             )
             alive_list.append(alive_status.copy())
 
-    # h_option = H_option(hgraph, H_sched(op_list, alive_list, sizes))
     # return h_option
-    h_sched = H_sched(op_list, alive_list, sizes)
-    h_sched.get_info(hgraph)
+    h_sched = H_sched(op_list, alive_list, sizes, hgraph)
+    h_sched.get_info()
     return h_sched
 
 
@@ -768,27 +771,37 @@ def collapse(op):
         if "Loss" in op.obj.name:
             return [op]
         return op.obj.ff_op_list
-    elif isinstance(op.obj, H_sched) and op.obj.op_list:
-        if "Del" in op.name:
-            op_list_ = []
-            for obj in op.obj.phantoms:
-                if isinstance(obj, H_D_node):
-                    op_list_.append(H_op(f"Del_{obj.name}", obj, is_del=True))
-                else:
-                    op_list_ += collapse(
-                        H_op(f"Del_{obj.name}", obj, is_del=True)
-                    )
-
-            return op_list_
-        else:
-            op_list_ = []
-            if op.is_fwd:
-                for sub_op in op.obj.op_list[: op.obj.loss_idx + 1]:
-                    op_list_ += collapse(sub_op)
+    elif isinstance(op.obj, H_sched):
+        if not op.obj.op_list:
+            # bottom level
+            if op.is_del:
+                hgraph = op.obj.hgraph
+                return [H_op(f"Del_{hgraph.name}", hgraph, is_del=True)]
             else:
-                for sub_op in op.obj.op_list[op.obj.loss_idx + 1 :]:
-                    op_list_ += collapse(sub_op)
-            return op_list_
+                return [op]
+        else:
+            if "Del" in op.name:
+                op_list_ = []
+                for obj in op.obj.phantoms:
+                    if isinstance(obj, H_D_node):
+                        op_list_.append(
+                            H_op(f"Del_{obj.name}", obj, is_del=True)
+                        )
+                    else:
+                        op_list_ += collapse(
+                            H_op(f"Del_sub_graph", obj, is_del=True)
+                        )
+
+                return op_list_
+            else:
+                op_list_ = []
+                if op.is_fwd:
+                    for sub_op in op.obj.op_list[: op.obj.loss_idx + 1]:
+                        op_list_ += collapse(sub_op)
+                else:
+                    for sub_op in op.obj.op_list[op.obj.loss_idx + 1 :]:
+                        op_list_ += collapse(sub_op)
+                return op_list_
 
     else:
         return [op]
@@ -851,3 +864,15 @@ def refine_kn_list(kn_list):
 
     return refined_kn_list
 
+def print_collapse(op_list):
+    for i, op in enumerate(op_list):
+        print(i, op.name)
+        if len(collapse(op))>1:
+            for sub_op in collapse(op):
+                print(f"| {sub_op.name}")
+
+def find_graph(target, hg):
+    for sub_name, sub_g in hg.dict_hg.items():
+        for hcn in sub_g.list_hcn:
+            if target in hcn.name and hcn.is_fwd:
+                print(sub_name)

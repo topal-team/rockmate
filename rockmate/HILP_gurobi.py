@@ -196,16 +196,17 @@ class ModelGurobi:
             GRB.EQUAL,
             0,
         )
-        if _deps_d[i]:
-            self.md.addLConstr(
-                quicksum(
-                    self.P[t, i]
-                    for i in range(I)
-                    for t in range(min(_deps_d[i]) + 1)
-                ),
-                GRB.EQUAL,
-                0,
-            )
+        for i in range(I):
+            if _deps_d[i]:
+                self.md.addLConstr(
+                    quicksum(
+                        self.P[t, i]
+                        
+                        for t in range(min(_deps_d[i]) + 1)
+                    ),
+                    GRB.EQUAL,
+                    0,
+                )
 
         # options don't conflict
         for i in range(T):
@@ -560,7 +561,7 @@ class ModelGurobi:
                     )
                     alive_list.append(alive_status.copy())
 
-        h_sched = H_sched(op_list, alive_list, sizes)
+        h_sched = H_sched(op_list, alive_list, sizes, hgraph)
         # fwd_sched = OpSchedule(
         #     op_list[: self.loss_idx + 1],
         #     alive_list[: self.loss_idx + 1],
@@ -576,7 +577,7 @@ class ModelGurobi:
             if "Loss" in op.name:
                 loss_idx = i
                 break
-        h_sched.get_info(hgraph)
+        h_sched.get_info()
         # fwd_sched, bwd_sched = h_sched.split_sched(loss_idx)
         # h_option = H_option(hgraph, h_sched)
         # return fwd_sched, bwd_sched, h_option

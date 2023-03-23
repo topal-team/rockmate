@@ -238,8 +238,10 @@ class CheckpointedModule(torch.nn.Module):
         md.solve()
         if not md.feasible:
             return "Not feasible solution"
-        h_sched = md.schedule()
-        self.bottom_op_list = rkgb.Htools.get_bottom_op_list(h_sched.op_list)
+        self.h_sched = md.schedule()
+        self.bottom_op_list = rkgb.Htools.get_bottom_op_list(
+            self.h_sched.op_list
+        )
         self.kn_list = rkgb.Htools.get_kn_list(self.bottom_op_list, kg)
         loss_idx = [op.name for op in self.bottom_op_list].index(
             "Loss_hcn_of_Hg_0"
@@ -247,8 +249,8 @@ class CheckpointedModule(torch.nn.Module):
         self.storage = RK_Storage(
             "cuda", self.original_mod, self.dict_constants
         )
-        compiler = Compiler(self.storage)
-        fct_list = compiler.compile_from_KN_list(self.kn_list)
+        self.compiler = Compiler(self.storage)
+        fct_list = self.compiler.compile_from_KN_list(self.kn_list)
         self.fwd_fct_list = fct_list[:loss_idx]
         self.bwd_fct_list = fct_list[loss_idx + 1 :]
 
