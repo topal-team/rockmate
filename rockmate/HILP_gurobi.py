@@ -601,7 +601,7 @@ def get_hg_budgets(hg, nb_bdg_peak=3, nb_bdg_save=5):
         h_sched.bwd_overhead for h_sched in hg.list_opt
     ]
     max_bdg = sum(sizes) + max(overheads)
-    min_bdg = hg.fast_fwd_overhead()
+    min_bdg = hg.fast_fwd_overhead()[0]
     l_bd_peak = np.linspace(min_bdg, max_bdg, nb_bdg_peak)
     for bd_peak in l_bd_peak:
         l_bd_save = np.linspace(0, bd_peak, nb_bdg_save)
@@ -618,12 +618,12 @@ def solve_hg(hg):
             add_hilp_option(hg, bdg_peak, bdg_save)
 
 
-def solve_hg_recursive(hg):
+def solve_hg_recursive(hg, solve_self=True):
     for hcn in hg.list_hcn:
         if hcn.is_fwd and hcn.sub_graph is not None:
             sub_g = hcn.sub_graph
             if len(sub_g.list_opt) <= 1:
                 solve_hg_recursive(sub_g)
-    if hg.list_hcn:#not bottom hgraph
+    if solve_self and hg.list_hcn:  # not bottom hgraph
         solve_hg(hg)
 

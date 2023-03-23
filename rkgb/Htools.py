@@ -29,6 +29,7 @@ class H_C_node:
         self.fwd_overhead = 0
         self.is_fwd = True  # if False, self.fwd_time=self.fwd_overhead=0
         self.is_leaf = False
+        self.ff_op_list = []
 
 
 # ************
@@ -100,18 +101,15 @@ class H_graph:
             return True
 
         loss_idx = self.list_hcn.index(self.loss_hcn)
+        op_list = []
         alive_mem = []
         alive_list = []
         alive_status = np.zeros(len(self.list_hdn), dtype=bool)
         loss_idx = self.list_hcn.index(self.loss_hcn)
         for i, hcn in enumerate(self.list_hcn[:loss_idx]):
+            op_list += hcn.ff_op_list
             for hdn in hcn.users:
                 alive_status[self.list_hdn.index(hdn)] = 1
-            for j, hdn in enumerate(self.list_hdn):
-                if False:  # TODO: if hdn is interface
-                    continue
-                if alive_status[j] and _can_del(i, hdn):
-                    alive_status[j] = 0
             alive_list.append(alive_status.copy())
             alive_mem.append(
                 sum(
@@ -120,7 +118,22 @@ class H_graph:
                     if alive_status[j]
                 )
             )
-        return max(alive_mem) - alive_mem[-1]
+
+            for j, hdn in enumerate(self.list_hdn):
+                if False:  # TODO: if hdn is interface
+                    continue
+                if alive_status[j] and _can_del(i, hdn):
+                    alive_status[j] = 0
+                    op_list.append(H_op(hdn.name, hdn, is_del=True))
+                    alive_list.append(alive_status.copy())
+                    alive_mem.append(
+                        sum(
+                            hdn.mem
+                            for j, hdn in enumerate(self.list_hdn)
+                            if alive_status[j]
+                        )
+                    )
+        return max(alive_mem) - alive_mem[-1], op_list
 
     def sort_list_hcn(self):
         # -> copy paste K_graph.sort_list_kcn
@@ -178,6 +191,9 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
             hcn_fwd.main_target = mt
             hcn_fwd.fwd_time = kcn_fwd.time
             hcn_fwd.fwd_overhead = kcn_fwd.overhead
+            hcn_fwd.ff_op_list = [
+                H_op(hcn_fwd.name, hcn_fwd, is_fwd=True, is_del=False)
+            ]
             hdn_data.mem = kdn_data.mem
             hcns = [hcn_fwd]
             hdns = [hdn_data]
@@ -254,7 +270,10 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
             hcn_fwd.fwd_time = sum(
                 sub_hcn.fwd_time for sub_hcn in sub_hg.list_hcn
             )
-            hcn_fwd.fwd_overhead = sub_hg.fast_fwd_overhead()
+            (
+                hcn_fwd.fwd_overhead,
+                hcn_fwd.ff_op_list,
+            ) = sub_hg.fast_fwd_overhead()
             # fwd_time and overhead are for fast forward so bwd node has none
 
             for kcn in sub_hg.all_kcn_inside:
@@ -745,7 +764,11 @@ def replace(op_list, i, sub_op_list):
 
 
 def collapse(op):
-    if isinstance(op.obj, H_sched) and op.obj.op_list:
+    if isinstance(op.obj, H_C_node):
+        if "Loss" in op.obj.name:
+            return [op]
+        return op.obj.ff_op_list
+    elif isinstance(op.obj, H_sched) and op.obj.op_list:
         if "Del" in op.name:
             op_list_ = []
             for obj in op.obj.phantoms:
