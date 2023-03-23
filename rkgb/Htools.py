@@ -205,24 +205,42 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
                     ph_mem = get_kdn_phantoms(mt).mem
                 else:
                     ph_mem = 0
-                hopt = H_option(
-                    sub_hg,
-                    h_sched=H_sched([], [], {}),
-                    direct_info={
-                        "fwd_time": kcn_fwd.time,
-                        "bwd_time": kcn_bwd.time,
-                        "mem": ph_mem,
-                        "fwd_overhead": kcn_fwd.overhead,
-                        "bwd_overhead": kcn_bwd.overhead,
-                        "dep_inputs": [
-                            # TODO: should read from HDN
-                            # kdn.name
-                            # for kdn in kcn_fwd.deps_global
-                            # if kdn in kcn_bwd.deps_global
-                        ],
-                    },
-                )
-                sub_hg.list_opt = [hopt]
+                h_sched = H_sched([], [], {})
+                direct_info = {
+                    "fwd_time": kcn_fwd.time,
+                    "bwd_time": kcn_bwd.time,
+                    "mem": ph_mem,
+                    "fwd_overhead": kcn_fwd.overhead,
+                    "bwd_overhead": kcn_bwd.overhead,
+                    "dep_inputs": [
+                        # TODO: should read from HDN
+                        # kdn.name
+                        # for kdn in kcn_fwd.deps_global
+                        # if kdn in kcn_bwd.deps_global
+                    ],
+                }
+                for k, v in direct_info.items():
+                    setattr(h_sched, k, v)
+                sub_hg.list_opt = [h_sched]
+
+                # hopt = H_option(
+                #     sub_hg,
+                #     h_sched=H_sched([], [], {}),
+                #     direct_info={
+                #         "fwd_time": kcn_fwd.time,
+                #         "bwd_time": kcn_bwd.time,
+                #         "mem": ph_mem,
+                #         "fwd_overhead": kcn_fwd.overhead,
+                #         "bwd_overhead": kcn_bwd.overhead,
+                #         "dep_inputs": [
+                #             # TODO: should read from HDN
+                #             # kdn.name
+                #             # for kdn in kcn_fwd.deps_global
+                #             # if kdn in kcn_bwd.deps_global
+                #         ],
+                #     },
+                # )
+                # sub_hg.list_opt = [hopt]
                 hcn_fwd.sub_graph = hcn_bwd.sub_graph = sub_hg
             else:
                 sub_hg = None
@@ -439,6 +457,14 @@ def print_H_graph(hg: H_graph, name=None, open=True, render_format="svg"):
 
 
 class H_op:
+    """
+        The operation types:
+        1. Run HCN: fast forward (thus HCN must be forward)
+        2. Del HDN: delete HDN
+        3. Run H_sched/H_option: run the corresponding fwd/bwd sched
+        4. Del H_sched/H_option: delete the phantoms passed from fwd to bwd
+        """
+
     def __init__(self, name, h_obj, is_fwd=True, is_del=False):
         self.name = name
         self.is_fwd = is_fwd
@@ -453,6 +479,12 @@ class H_op:
 
 
 class H_sched:
+    """
+    The H_sched correspond to one fwd/bwd schedule. When op_list is empty, 
+    it represents the bottom level fwd/bwd and information is assigned directly.
+
+    """
+
     def __init__(self, op_list: list, alive_list: list, sizes: dict):
         self.op_list = op_list
         self.alive_list = alive_list
@@ -501,18 +533,19 @@ class H_sched:
             current_end_status, start=len(self.alive_list) + 1, end=-1
         )
 
-    def split_sched(self, split_idx):
-        sched_0 = H_sched(
-            self.op_list[: split_idx + 1],
-            self.alive_list[: split_idx + 1],
-            self.sizes,
-        )
-        sched_1 = H_sched(
-            self.op_list[split_idx + 1 :],
-            self.alive_list[split_idx + 1 :],
-            self.sizes,
-        )
-        return sched_0, sched_1
+    def get_FB_op_list(self, split_idx):
+        # sched_0 = H_sched(
+        #     self.op_list[: split_idx + 1],
+        #     self.alive_list[: split_idx + 1],
+        #     self.sizes,
+        # )
+        # sched_1 = H_sched(
+        #     self.op_list[split_idx + 1 :],
+        #     self.alive_list[split_idx + 1 :],
+        #     self.sizes,
+        # )
+        # return sched_0, sched_1
+        return self.op_list[: split_idx + 1], self.op_list[split_idx + 1 :]
 
     def collapse(self, i, sub_op_sched):
         # replace the i-th operation by the lower level op_sched
@@ -520,34 +553,39 @@ class H_sched:
             self.op_list[:i] + sub_op_sched.op_list + self.op_list[i + 1 :]
         )
 
+    # # ***********
+    # # * H_option *
+    # # ***********
 
-# ***********
-# * H_option *
-# ***********
+    # class H_option:
+    #     """
+    #     Info needed for HILP:
+    #         .mem: phantom memory saved from fwd to bwd
+    #         .fwd_time/bwd_time
+    #         .fwd_overhead/bwd_overhead
+    #     An H_option should be useful for several purpose:
+    #         1. it provides the time/memory information for each feasible
+    #         schedule of running forward/backward loop for the corresponding
+    #         H_Graph.
+    #         2. it should be easy to consider the alive status of interface
+    #         HDN's for the accurate overhead.
+    #         3. after solving everything, compiler could easily read through
+    #         the H_option and understand what operations should be executed.
+    #     """
 
+    #     def __init__(self, hgraph, h_sched, direct_info={}):
+    #         # when op_list and alive_list are empty, all the information can be
+    #         # assigned directly
+    #         self.h_sched = h_sched
+    #         self.op_list = h_sched.op_list
+    #         self.alive_list = h_sched.alive_list
 
-class H_option:
-    """
-    Info needed for HILP:
-        .mem: phantom memory saved from fwd to bwd
-        .fwd_time/bwd_time
-        .fwd_overhead/bwd_overhead
-    An H_option should be useful for several purpose:
-        1. it provides the time/memory information for each feasible
-        schedule of running forward/backward loop for the corresponding
-        H_Graph.
-        2. it should be easy to consider the alive status of interface
-        HDN's for the accurate overhead.
-        3. after solving everything, compiler could easily read through
-        the H_option and understand what operations should be executed.
-    """
+    def get_info(self, hgraph):
+        """
+        A function that compute the time/memory information based on 
+        op_list and alive_list. If they are updated, should run get_info() again.
+        """
 
-    def __init__(self, hgraph, h_sched, direct_info={}):
-        # when op_list and alive_list are empty, all the information can be
-        # assigned directly
-        self.h_sched = h_sched
-        self.op_list = h_sched.op_list
-        self.alive_list = h_sched.alive_list
         for i, op in enumerate(self.op_list):
             if "Loss" in op.name:
                 self.loss_idx = i
@@ -572,14 +610,7 @@ class H_option:
         def get_overhead_(save, overhead):
             return max(save + overhead) - save[-1]
 
-        interfaces_names = []
-        for inter in [
-            hgraph.inputs_hdn_data,
-            hgraph.outputs_hdn_data,
-            hgraph.outputs_hdn_grad,
-            hgraph.inputs_hdn_grad,
-        ]:
-            interfaces_names += [hdn.name for hdn in inter]
+        interfaces_names = [hdn.name for hdn in hgraph.interfaces]
 
         for i, (op, alive_status) in enumerate(
             zip(self.op_list, self.alive_list)
@@ -595,14 +626,15 @@ class H_option:
                 # else:
                 #     self.time[i] = op.bwd_time
                 #     self.overhead[i] = op.bwd_overhead
-        if direct_info:
-            self.mem = direct_info["mem"]
-            self.fwd_time = direct_info["fwd_time"]
-            self.bwd_time = direct_info["bwd_time"]
-            self.fwd_overhead = direct_info["fwd_overhead"]
-            self.bwd_overhead = direct_info["bwd_overhead"]
-            self.dep_inputs = direct_info["dep_inputs"]
-        else:
+        # if direct_info:
+        #     self.mem = direct_info["mem"]
+        #     self.fwd_time = direct_info["fwd_time"]
+        #     self.bwd_time = direct_info["bwd_time"]
+        #     self.fwd_overhead = direct_info["fwd_overhead"]
+        #     self.bwd_overhead = direct_info["bwd_overhead"]
+        #     self.dep_inputs = direct_info["dep_inputs"]
+        # else:
+        if self.op_list:
             self.mem = self.save_mem[self.loss_idx]
             self.fwd_time = np.sum(self.time[: self.loss_idx + 1])
             self.bwd_time = np.sum(self.time[self.loss_idx + 1 :])
@@ -700,8 +732,11 @@ def get_save_all_option(hgraph):
             )
             alive_list.append(alive_status.copy())
 
-    h_option = H_option(hgraph, H_sched(op_list, alive_list, sizes))
-    return h_option
+    # h_option = H_option(hgraph, H_sched(op_list, alive_list, sizes))
+    # return h_option
+    h_sched = H_sched(op_list, alive_list, sizes)
+    h_sched.get_info(hgraph)
+    return h_sched
 
 
 def replace(op_list, i, sub_op_list):
@@ -710,7 +745,7 @@ def replace(op_list, i, sub_op_list):
 
 
 def collapse(op):
-    if isinstance(op.obj, H_option) and op.obj.op_list:
+    if isinstance(op.obj, H_sched) and op.obj.op_list:
         if "Del" in op.name:
             op_list_ = []
             for obj in op.obj.phantoms:
@@ -793,44 +828,3 @@ def refine_kn_list(kn_list):
 
     return refined_kn_list
 
-
-# def find_bkcn(fkcn, kg):
-#     assert fkcn.is_fwd
-#     if fkcn.name.replace("fwd", "bwd") in kg.dict_kn:
-#         bkcn = kg.dict_kn[fkcn.name.replace("fwd", "bwd")]
-#         return bkcn
-#     else:
-#         return False
-
-
-# def kcn_to_hopt(fkcn, bkcn):
-#     mem = 0
-#     for kdn in fkcn.users:
-#         if "phantom" in kdn.name:  # there should be at most one phantom
-#             mem = kdn.mem
-#     h_opt = H_option(
-#         H_graph(fkcn.name.strip("fwd")),
-#         op_list=[],
-#         alive_list=[],
-#         direct_info={
-#             "fwd_time": fkcn.time,
-#             "bwd_time": bkcn.time,
-#             "mem": mem,
-#             "fwd_overhead": fkcn.overhead,
-#             "bwd_overhead": bkcn.overhead,
-#             "dep_inputs": [
-#                 kdn.name for kdn in fkcn.deps_global if kdn in bkcn.deps_global
-#             ],
-#         },
-#     )
-#     return h_opt
-
-
-# def get_dict_opt(kg):
-#     dict_opt = {}
-#     for kcn in kg.list_kcn:
-#         if kcn.is_fwd:
-#             bkcn = find_bkcn(kcn, kg)
-#             if bkcn:
-#                 h_opt = kcn_to_hopt(kcn, bkcn)
-#                 dict_opt[h_opt.name] = h_opt

@@ -455,6 +455,30 @@ class Compiler:
                 for kdn in kn.users
             )
         )
+
+        def refine(kn_list):
+            for i, kn in enumerate(kn_list):
+                if isinstance(kn, K_D_node):
+                    # try to delete KDN
+                    src_i = []  # indices of source KCN's after i
+                    for kcn in kn.deps:
+                        if kcn in kn_list[i:]:
+                            src_i.append(kn_list[i:].index(kcn) + i)
+                        else:
+                            src_i.append(len(kn_list))
+
+                    next_used_i = len(kn_list)  # the next index to use KDN
+                    for kcn in kn.users_real:
+                        if kcn in kn_list[i:]:
+                            next_used_i = min(
+                                kn_list[i:].index(kcn) + i, next_used_i
+                            )
+
+                    if max(src_i) > next_used_i:  # try to use before regenerate
+                        kn_list[i] = kn_list[i].name  # skip this deletion
+
+        refine(kn_list)
+
         self.alive_list = []
         alive_status = {kdn_name: 0 for kdn_name in kdn_names}
 
@@ -464,7 +488,7 @@ class Compiler:
                     alive_status[kdn.name] = 1
             elif isinstance(kn, K_D_node):
                 alive_status[kn.name] = 0
-            
+
             self.alive_list.append(alive_status.copy())
 
         fct_list = []

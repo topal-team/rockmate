@@ -4,7 +4,7 @@ from typing import Dict, Any
 import numpy as np
 from gurobipy import GRB, Model, quicksum
 from rockmate.def_op import RunOp, DelOp, OpSchedule
-from rkgb.Htools import H_op, H_sched, H_option
+from rkgb.Htools import *
 
 
 class ModelGurobi:
@@ -576,14 +576,54 @@ class ModelGurobi:
             if "Loss" in op.name:
                 loss_idx = i
                 break
-        fwd_sched, bwd_sched = h_sched.split_sched(loss_idx)
-        h_option = H_option(hgraph, h_sched)
-        return fwd_sched, bwd_sched, h_option
+        h_sched.get_info(hgraph)
+        # fwd_sched, bwd_sched = h_sched.split_sched(loss_idx)
+        # h_option = H_option(hgraph, h_sched)
+        # return fwd_sched, bwd_sched, h_option
+        return h_sched
 
 
-def add_option(hgraph, budget, save_budget):
+def add_hilp_option(hgraph, budget, save_budget):
     md = ModelGurobi(hgraph, budget, save_budget)
     md.solve()
     if md.feasible:
-        _, _, h_option = md.schedule()
-        hgraph.add_option(h_option)
+        h_sched = md.schedule()
+        hgraph.add_option(h_sched)
+
+
+def get_hg_budgets(hg, nb_bdg_peak=3, nb_bdg_save=5):
+    # return reasonable budget list
+    budgets = []
+    sizes = [hdn.mem for hdn in hg.list_hdn] + [
+        h_sched.mem for h_sched in hg.list_opt
+    ]
+    overheads = [hcn.fwd_overhead for hcn in hg.list_hcn] + [
+        h_sched.bwd_overhead for h_sched in hg.list_opt
+    ]
+    max_bdg = sum(sizes) + max(overheads)
+    min_bdg = hg.fast_fwd_overhead()
+    l_bd_peak = np.linspace(min_bdg, max_bdg, nb_bdg_peak)
+    for bd_peak in l_bd_peak:
+        l_bd_save = np.linspace(0, bd_peak, nb_bdg_save)
+        # for bd_save in l_bd_save:
+        #     budgets.append((bd_peak, bd_save))
+        budgets.append((bd_peak, l_bd_save))
+    return budgets
+
+
+def solve_hg(hg):
+    budgets = get_hg_budgets(hg)
+    for bdg_peak, l_bdg_save in budgets:
+        for bdg_save in l_bdg_save:
+            add_hilp_option(hg, bdg_peak, bdg_save)
+
+
+def solve_hg_recursive(hg):
+    for hcn in hg.list_hcn:
+        if hcn.is_fwd and hcn.sub_graph is not None:
+            sub_g = hcn.sub_graph
+            if len(sub_g.list_opt) <= 1:
+                solve_hg_recursive(sub_g)
+    if hg.list_hcn:#not bottom hgraph
+        solve_hg(hg)
+
