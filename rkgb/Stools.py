@@ -363,7 +363,7 @@ class S_graph():
 def D_to_S_init(dg : D_graph) -> S_graph:
     unique_id_generator = [0]
     sg = S_graph(dg,unique_id_generator)
-    init_node = S_node(target="-- inputs --",
+    init_node = S_node(target="sources",
         unique_id_generator = unique_id_generator)
     init_node.all_targets=[]
     s_nodes = sg.nodes

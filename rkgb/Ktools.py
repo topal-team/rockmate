@@ -584,8 +584,10 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
         kg.input_kdn_grad=input_kdn_grad = prev_kg.output_kdn_grad
     # -> or create fresh vars in case kg is a standalone graph
     else:
-        if len(sg.hidden_inputs) != 1: inp_mt = "sources"
-        else: inp_mt = sg.hidden_inputs[0]
+        inp_mt = "sources"
+        # TO REMOVE
+        # if len(sg.hidden_inputs) != 1: inp_mt = "sources"
+        # else: inp_mt = sg.hidden_inputs[0]
         kg.input_kdn_data=input_kdn_data = K_D_node(
             kdn_type = "data", target = inp_mt,
             all_targets = sg.direct_inputs,

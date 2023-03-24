@@ -137,6 +137,7 @@ class H_graph:
 
     def sort_list_hcn(self):
         # -> copy paste K_graph.sort_list_kcn
+        l1 = list(self.list_hcn)
         leaves_hcn = set()
         for hcn in self.list_hcn:
             if not hcn.is_fwd and len(hcn.users) == 0:
@@ -148,6 +149,11 @@ class H_graph:
         root_hcn.deps.add(root_hdn)
         self.list_hcn = l = shared_methods.sort_based_on_deps(root_hcn)
         l.remove(root_hcn)
+        if set(l1) != set(l):
+            print(f"BEFORE : {len(l1)}")
+            print([hn.name for hn in l1])
+            print(f"AFTER : {len(l)}")
+            print([hn.name for hn in l])
 
 
 def P_and_K_to_H(pg: P_graph, kg: K_graph):
@@ -172,9 +178,21 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
     has_phantoms = lambda mt: f"{mt} phantoms" in dict_kn
     get_kcn_fwd = lambda mt: dict_kn[f"fwd_{mt}"]
     get_kcn_bwd = lambda mt: dict_kn[f"bwd_{mt}"]
-    get_kdn_data = lambda mt: dict_kn[f"{mt} data"]
-    get_kdn_grad = lambda mt: dict_kn[f"{mt} grad"]
-    get_kdn_phantoms = lambda mt: dict_kn[f"{mt} phantoms"]
+    get_kdn_data = lambda mt: dict_kn[f"{mt} data"] 
+    get_kdn_grad = lambda mt: dict_kn[f"{mt} grad"] 
+    get_kdn_phantoms = lambda mt: dict_kn[f"{mt} phantoms"] 
+    # get_kdn_data = lambda mt: (
+        # dict_kn[f"{mt} data"] 
+        # if f"{mt} data" in dict_kn 
+        # else K_D_node())
+    # get_kdn_grad = lambda mt: (
+        # dict_kn[f"{mt} grad"]
+        # if f"{mt} grad" in dict_kn 
+        # else K_D_node())
+    # get_kdn_phantoms = lambda mt: (
+        # dict_kn[f"{mt} phantoms"]
+        # if f"{mt} phantoms" in dict_kn 
+        # else K_D_node())
 
     # ==* First, build the H_nodes *==
     for pn in pg.list_nodes:
@@ -381,15 +399,17 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
         hdn_data = dict_mt_to_hdn_data["src"]
         kdn_data = dict_hdn_to_kdn[hdn_data]
         for kcn in kdn_data.users_global:
-            hcn = dict_kcn_to_hcn[kcn]
-            hdn_data.users.add(hcn)
-            hcn.deps.add(hdn_data)
+            if kcn in dict_kcn_to_hcn:
+                hcn = dict_kcn_to_hcn[kcn]
+                hdn_data.users.add(hcn)
+                hcn.deps.add(hdn_data)
         hdn_grad = dict_mt_to_hdn_grad["src"]
         kdn_grad = dict_hdn_to_kdn[hdn_grad]
         for kcn in kdn_grad.deps_global:
-            hcn = dict_kcn_to_hcn[kcn]
-            hdn_grad.deps.add(hcn)
-            hcn.users.add(hdn_grad)
+            if kcn in dict_kcn_to_hcn:
+                hcn = dict_kcn_to_hcn[kcn]
+                hdn_grad.deps.add(hcn)
+                hcn.users.add(hdn_grad)
     hg.sort_list_hcn()
 
     return hg
