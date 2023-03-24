@@ -183,6 +183,7 @@ class ModelGurobi:
                 self.sumSp[(self.hcn2sub_g[i], t)]
                 for t in range(self.loss_idx)
                 for i in range(t + 1, self.loss_idx)
+                if self.hcn2sub_g[i]
             ),
             GRB.EQUAL,
             0,
@@ -199,11 +200,7 @@ class ModelGurobi:
         for i in range(I):
             if _deps_d[i]:
                 self.md.addLConstr(
-                    quicksum(
-                        self.P[t, i]
-                        
-                        for t in range(min(_deps_d[i]) + 1)
-                    ),
+                    quicksum(self.P[t, i] for t in range(min(_deps_d[i]) + 1)),
                     GRB.EQUAL,
                     0,
                 )
