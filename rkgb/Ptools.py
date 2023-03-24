@@ -166,6 +166,11 @@ class P_graph():
     def make_io_targets_attributes_of_subgraphs(self):
         self.make_all_used_and_all_produced()
         self.make_input_targets()
+        # Explanation : 
+        # -> inputs = used - produced
+        # -> BUT outputs != produced - used. Since some tensors might
+        # -> be used while still begin an output 
+        # (A -> B -> C, both B and C can be outputs)
         all_interfaces = set() 
         # -> We gather all the inputs of the subgraphs
         # -> so we have all the interface nodes
@@ -185,6 +190,11 @@ class P_graph():
                 sub_pg.output_targets = (
                     sub_pg.all_produced.intersection(all_interfaces)
                 )
+                sub_pg.output_targets.update(sub_pg.all_produced - sub_pg.all_used)
+                # -> produced tensors not used are automatically outputs
+                # -> but normally we already took care of them the line above
+                # -> except for the very last graph -> the output of the model
+                # -> Not used by any one, but still an output
     
 
 """ FOR FUTURE WORK, TO RECOGNIZE SIMILAR GRAPHS 
@@ -685,11 +695,10 @@ def rule_merge_small_flows(pg : P_graph,config : P_config = default_config):
 def S_to_P(sg : S_graph):
     pg = S_to_P_init(sg)
     rule_group_sequences(pg)
-    print("nb subgraph after rule 1 :",count_nb_subgraph(pg))
     rule_merge_small_flows(pg)
     pg.make_subgraph_id("0")
     pg.make_io_targets_attributes_of_subgraphs()
-    pg.input_targets = sg.hidden_inputs
+    pg.input_targets = [sg.init_node.main_target]
     pg.output_targets = [sg.hidden_output]
     return pg
 

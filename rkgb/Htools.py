@@ -154,6 +154,10 @@ class H_graph:
             print([hn.name for hn in l1])
             print(f"AFTER : {len(l)}")
             print([hn.name for hn in l])
+            print("loss users : ")
+            print([hn.name for hn in self.loss_hcn.users])
+            print("outputs_hdn_data",self.outputs_hdn_data)
+            print("outputs_hdn_grad",self.outputs_hdn_grad)
 
 
 def P_and_K_to_H(pg: P_graph, kg: K_graph):
@@ -395,15 +399,15 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
         loss_hcn.users.add(hdn)
 
     # ** special input "source" **
-    if "src" in pg.input_targets:
-        hdn_data = dict_mt_to_hdn_data["src"]
+    if "sources" in pg.input_targets:
+        hdn_data = dict_mt_to_hdn_data["sources"]
         kdn_data = dict_hdn_to_kdn[hdn_data]
         for kcn in kdn_data.users_global:
             if kcn in dict_kcn_to_hcn:
                 hcn = dict_kcn_to_hcn[kcn]
                 hdn_data.users.add(hcn)
                 hcn.deps.add(hdn_data)
-        hdn_grad = dict_mt_to_hdn_grad["src"]
+        hdn_grad = dict_mt_to_hdn_grad["sources"]
         kdn_grad = dict_hdn_to_kdn[hdn_grad]
         for kcn in kdn_grad.deps_global:
             if kcn in dict_kcn_to_hcn:
