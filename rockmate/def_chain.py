@@ -5,7 +5,8 @@
 # ==========================
 from rkgb.utils.global_vars import solver_name
 from rkgb.utils import imports_from_rotor as irotor
-from rockmate.ILP_MIP import ModelMIP
+if solver_name[0] != "gurobi":
+    from rockmate.ILP_MIP import ModelMIP
 from rockmate.ILP_gurobi_solver import ModelGurobi
 import numpy as np
 from rockmate.def_op import RunOp, DelOp, OpSchedule
