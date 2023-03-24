@@ -255,6 +255,8 @@ class Compiler:
     def _get_names(self, name_list):
         if not self.op_sched:
             return [kdn.name for kdn in name_list]
+        else:
+            return name_list
 
     def find_next_idx(l, target, i):
         return i + l[i:].index(target)
@@ -435,6 +437,7 @@ class Compiler:
                 fct_list.append(self.get_del_grad(op, i))
             else:
                 fct_list.append([])
+        return fct_list
 
     def compile_from_KN_list(self, kn_list):
         self.op_sched = False
