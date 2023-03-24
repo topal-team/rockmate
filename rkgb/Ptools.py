@@ -39,6 +39,7 @@ class P_node():
             self.subgraph_id = None
             self.name        = f"Var_{mt}"
             self.is_leaf     = True
+
         self.deps         = set()
         self.users        = set()
         self.deps_global  = set()
@@ -148,7 +149,8 @@ class P_graph():
             if pn.is_leaf:
                 if not (pn.sn is None):
                     deps_sn = pn.sn.deps.keys()
-                    deps_mt = [req_sn.main_target for req_sn in deps_sn]
+                    deps_mt = [req_sn.main_target for req_sn in deps_sn
+                               if not req_sn.is_artefact]
                     used.update(set(deps_mt))
                     produced.add(pn.main_target)
             else:
@@ -183,6 +185,7 @@ class P_graph():
                 if pn.sn is not None:
                     all_interfaces.update(set([
                         req_sn.main_target for req_sn in pn.sn.deps.keys()
+                        if not req_sn.is_artefact
                     ]))
         for pn in self.list_nodes:
             if not pn.is_leaf:
@@ -445,6 +448,7 @@ def S_to_P_init(sg):
     pg.list_nodes = lpn = []
     dict_mt_to_pn = dict()
     for sn in sg.nodes:
+        if sn.is_artefact: continue
         mt = sn.main_target
         pn = P_node(
             main_graph  = pg,
@@ -453,7 +457,7 @@ def S_to_P_init(sg):
         lpn.append(pn)
         dict_mt_to_pn[mt] = pn
         for req_sn in sn.deps.keys():
-            if not (req_sn is sg.init_node):
+            if not (req_sn is sg.init_node or req_sn.is_artefact):
                 req_pn = dict_mt_to_pn[req_sn.main_target]
                 pn.deps.add(req_pn)
                 req_pn.users.add(pn)

@@ -30,6 +30,14 @@ class H_C_node:
         self.is_fwd = True  # if False, self.fwd_time=self.fwd_overhead=0
         self.is_leaf = False
         self.ff_op_list = []
+        self.number = -1
+        # When toposorting the HCNs we want to respect the same order 
+        # as the one found for KCNs, ie follow variable number 
+        # (get_num_tar) AND add some special deps for artifacts
+        # To make it easy, we give a number to each hcn based on K_graph's 
+        # toposort : hcn.is_leaf -> hcn.number = kcn index in list_kcn
+        # else -> hcn.number = min (sub_hcn.number in hcn.subgraph)
+
 
 
 # ************
@@ -179,6 +187,7 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
     dict_kn[kg.input_kdn_data.name] = kg.input_kdn_data
     dict_kn[kg.input_kdn_grad.name] = kg.input_kdn_grad
     has_bwd = lambda mt: f"bwd_{mt}" in dict_kn
+    has_grad = lambda mt: f"{mt} grad" in dict_kn
     has_phantoms = lambda mt: f"{mt} phantoms" in dict_kn
     get_kcn_fwd = lambda mt: dict_kn[f"fwd_{mt}"]
     get_kcn_bwd = lambda mt: dict_kn[f"bwd_{mt}"]
@@ -211,6 +220,7 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
             dict_hdn_to_kdn[hdn_data] = kdn_data
             hcn_fwd.is_leaf = True
             hcn_fwd.main_target = mt
+            hcn_fwd.number = (kg.list_kcn.index(kcn_fwd))
             hcn_fwd.fwd_time = kcn_fwd.time
             hcn_fwd.fwd_overhead = kcn_fwd.overhead
             hcn_fwd.ff_op_list = [
@@ -230,6 +240,7 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
                 hcn_bwd.is_leaf = True
                 hcn_bwd.is_fwd = False
                 hcn_bwd.main_target = mt
+                hcn_bwd.number = (kg.list_kcn.index(kcn_bwd))
                 # hcn_bwd.fwd_time = kcn_bwd.time
                 # hcn_bwd.fwd_overhead = kcn_bwd.overhead
                 hdn_grad.is_data = False
@@ -289,6 +300,15 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
             hcn_bwd = H_C_node(f"Bwd_{pn.name}")
             hcn_fwd.sub_graph = hcn_bwd.sub_graph = sub_hg
             hcn_bwd.is_fwd = False
+            # number :
+            nb_min_fwd = 9999999
+            nb_min_bwd = 9999999
+            for sub_hcn in sub_hg.list_hcn:
+                if sub_hcn.is_fwd:
+                      nb_min_fwd = min(sub_hcn.number,nb_min_fwd)
+                else: nb_min_bwd = min(sub_hcn.number,nb_min_bwd)
+            hcn_fwd.number = nb_min_fwd
+            hcn_bwd.number = nb_min_bwd
             hcn_fwd.fwd_time = sum(
                 sub_hcn.fwd_time for sub_hcn in sub_hg.list_hcn
             )
@@ -344,18 +364,19 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
         assert inp_mt not in dict_mt_to_hdn_data
         assert inp_mt not in dict_mt_to_hdn_grad
         kdn_data = get_kdn_data(inp_mt)
-        kdn_grad = get_kdn_grad(inp_mt)
         hdn_data = H_D_node(f"Data_{inp_mt}_in_{hg.name}", inp_mt)
-        hdn_grad = H_D_node(f"Grad_{inp_mt}_in_{hg.name}", inp_mt)
-        hdn_grad.is_data = False
         hdn_data.mem = kdn_data.mem
-        hdn_grad.mem = kdn_grad.mem
         dict_mt_to_hdn_data[inp_mt] = hdn_data
-        dict_mt_to_hdn_grad[inp_mt] = hdn_grad
         dict_hdn_to_kdn[hdn_data] = kdn_data
-        dict_hdn_to_kdn[hdn_grad] = kdn_grad
         inputs_data.add(hdn_data)
-        inputs_grad.add(hdn_grad)
+        if has_grad(inp_mt):
+            kdn_grad = get_kdn_grad(inp_mt)
+            hdn_grad = H_D_node(f"Grad_{inp_mt}_in_{hg.name}", inp_mt)
+            hdn_grad.is_data = False
+            hdn_grad.mem = kdn_grad.mem
+            dict_mt_to_hdn_grad[inp_mt] = hdn_grad
+            dict_hdn_to_kdn[hdn_grad] = kdn_grad
+            inputs_grad.add(hdn_grad)
     hg.interfaces = (
         hg.inputs_hdn_data
         | hg.inputs_hdn_grad
@@ -409,11 +430,14 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
                 hcn.deps.add(hdn_data)
         hdn_grad = dict_mt_to_hdn_grad["sources"]
         kdn_grad = dict_hdn_to_kdn[hdn_grad]
-        for kcn in kdn_grad.deps_global:
-            if kcn in dict_kcn_to_hcn:
-                hcn = dict_kcn_to_hcn[kcn]
-                hdn_grad.deps.add(hcn)
-                hcn.users.add(hdn_grad)
+        if kdn_grad.deps_global == set():
+            hg.list_hdn.remove(hdn_grad)
+        else:
+            for kcn in kdn_grad.deps_global:
+                if kcn in dict_kcn_to_hcn:
+                    hcn = dict_kcn_to_hcn[kcn]
+                    hdn_grad.deps.add(hcn)
+                    hcn.users.add(hdn_grad)
     hg.sort_list_hcn()
 
     return hg

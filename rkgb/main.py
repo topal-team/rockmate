@@ -5,6 +5,7 @@ from rkgb import Stools
 from rkgb import Ktools
 from rkgb import Atools
 from rkgb import Ptools
+from rkgb import Htools
 import inspect
 
 
@@ -250,6 +251,8 @@ def print_graph(g,name=None,open=True,render_format="svg"):
         Ktools.print_K_graph(g,name,open,render_format)
     elif isinstance(g,Ptools.P_graph):
         Ptools.print_P_graph(g,name,open,render_format)
+    elif isinstance(g,Htools.H_graph):
+        Htools.print_H_graph(g,name,open,render_format)
     else: raise Exception(
         "The graph given is neither of type D_graph, S_graph nor K_graph")
 

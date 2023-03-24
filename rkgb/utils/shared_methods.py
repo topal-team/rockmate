@@ -76,7 +76,9 @@ def get_num_name(name): # for KCN or KDN's name
         return get_num_tar(name[:-4])
     elif name.endswith("phantoms"):
         return get_num_tar(name[:-8])
-def get_num(n): # can be used on B, D, S or K
+def get_num(n): # can be used on B, D, S, K and H
+    if hasattr(n,"number"):
+        return n.number # -> for H
     return get_num_tar(get_target(n))
 
 sort_nodes = lambda s : sorted(s,key=get_num)
