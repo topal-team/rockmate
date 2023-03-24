@@ -4,7 +4,9 @@
 #  based on rotor/algorithms/parameters.py
 # ==========================
 from rkgb.utils.global_vars import solver_name
-from rockmate.ILP_MIP import ModelMIP
+from rkgb.utils import imports_from_rotor as irotor
+if solver_name[0] != "gurobi":
+    from rockmate.ILP_MIP import ModelMIP
 from rockmate.ILP_gurobi_solver import ModelGurobi
 import numpy as np
 from rockmate.def_op import RunOp, DelOp, OpSchedule
@@ -66,8 +68,8 @@ def get_rk_block(list_kg, nb_bdg_abar, nb_bdg_all):
     list_blocks = []
     for kg in list_kg:
         list_blocks.append(RK_Block(kg))
-    kdn_sizes = [kdn.mem.v for kdn in kg.list_kdn]
-    overheads = [kcn.overhead.v for kcn in kg.list_kcn]
+    kdn_sizes = [kdn.mem for kdn in kg.list_kdn]
+    overheads = [kcn.overhead for kcn in kg.list_kcn]
     max_bdg = sum(kdn_sizes) + max(overheads)
     min_bdg = (
         list_blocks[-1].Fc_sched.overhead + list_blocks[-1].Fc_sched.save[-1]
@@ -76,7 +78,7 @@ def get_rk_block(list_kg, nb_bdg_abar, nb_bdg_all):
     sols = []
     uniq_sols = set()
     for bd_all in l_bd_all:
-        l_bd_abar = np.linspace(kg.output_kdn_data.mem.v, bd_all, nb_bdg_abar)
+        l_bd_abar = np.linspace(kg.output_kdn_data.mem, bd_all, nb_bdg_abar)
         # for bd_abar in l_bd_abar:
         #     if bd_all >= bd_abar:
         list_sols = get_rk_solution(list_kg, l_bd_abar, bd_all)
@@ -158,16 +160,16 @@ class RK_Block:
         self.time_fast_fwd = self.Fc_sched.time
 
         #  == build .mem_inp/out ==
-        # memsize = lambda inp : kg.dict_info[inp].memsize.v
-        self.mem_inp = kg.input_kdn_data.mem.v if kg.input_kdn_data.mem else 0
-        self.mem_out = kg.output_kdn_data.mem.v if kg.output_kdn_data.mem else 0
+        # memsize = lambda inp : kg.dict_info[inp].memsize
+        self.mem_inp = kg.input_kdn_data.mem if kg.input_kdn_data.mem else 0
+        self.mem_out = kg.output_kdn_data.mem if kg.output_kdn_data.mem else 0
 
     def __str__(self):
         return (
             f"\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
             f"{self.block_name} :\n"
             f"\tnb of sol : {len(self.sols)}\n"
-            f"\tmem_inp   : {self.mem_inp}\n"
+            f"\tmem_inp   : {irotor.MemSize(self.mem_inp)}\n"
             f"\ttime_ff  : {self.time_ff}\n"
             f"\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
         )
