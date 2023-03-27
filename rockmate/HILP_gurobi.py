@@ -47,28 +47,34 @@ class ModelGurobi:
                     self.sub_gs.append(hcn.sub_graph)
                 self.hcn2sub_g.append(self.sub_gs.index(hcn.sub_graph))
                 self.nR.append(
-                    len(hcn.sub_graph.list_opt) + (1 if hcn.is_fwd else 0)
+                    len(hcn.sub_graph.list_sched) + (1 if hcn.is_fwd else 0)
                 )
-                self.nOpts.append(len(hcn.sub_graph.list_opt))
+                self.nOpts.append(len(hcn.sub_graph.list_sched))
 
                 if hcn.is_fwd:
                     # add fast forward to the options
                     self.time.append(
-                        [h_opt.fwd_time for h_opt in hcn.sub_graph.list_opt]
+                        [h_opt.fwd_time for h_opt in hcn.sub_graph.list_sched]
                         + [hcn.fwd_time]
                         if hcn.is_fwd
                         else []
                     )
                     self.overhead.append(
-                        [h_opt.fwd_overhead for h_opt in hcn.sub_graph.list_opt]
+                        [
+                            h_opt.fwd_overhead
+                            for h_opt in hcn.sub_graph.list_sched
+                        ]
                         + [hcn.fwd_overhead]
                     )
                 else:
                     self.time.append(
-                        [h_opt.bwd_time for h_opt in hcn.sub_graph.list_opt]
+                        [h_opt.bwd_time for h_opt in hcn.sub_graph.list_sched]
                     )
                     self.overhead.append(
-                        [h_opt.bwd_overhead for h_opt in hcn.sub_graph.list_opt]
+                        [
+                            h_opt.bwd_overhead
+                            for h_opt in hcn.sub_graph.list_sched
+                        ]
                     )
         self.sub_g2hcn = [[] for _ in self.sub_gs]
         for i, j in enumerate(self.hcn2sub_g):
@@ -77,7 +83,7 @@ class ModelGurobi:
             self.sub_g2hcn[j].append(i)
         self.mem = [hdn.mem for hdn in self.hgraph.list_hdn]
         self.saved_mem = [
-            [h_opt.mem for h_opt in sub_g.list_opt] for sub_g in self.sub_gs
+            [h_opt.mem for h_opt in sub_g.list_sched] for sub_g in self.sub_gs
         ]
 
         T = len(self.hgraph.list_hcn)
@@ -141,7 +147,7 @@ class ModelGurobi:
                 )
         self.Sp = [
             self.md.addVars(
-                T + 1, len(sub_g.list_opt), name=f"Sp{j}", vtype=GRB.BINARY,
+                T + 1, len(sub_g.list_sched), name=f"Sp{j}", vtype=GRB.BINARY,
             )
             for j, sub_g in enumerate(self.sub_gs)
         ]
@@ -150,7 +156,7 @@ class ModelGurobi:
             for t in range(T + 1):
                 self.sumSp[(j, t)] = quicksum(
                     self.Sp[j][t, o]
-                    for o in range(len(self.sub_gs[j].list_opt))
+                    for o in range(len(self.sub_gs[j].list_sched))
                 )
 
         # to present whether one saved tensor can be inheritaged from the last stage
@@ -267,6 +273,17 @@ class ModelGurobi:
                         GRB.LESS_EQUAL,
                         self.Sp[j][t, o] + self.R[fwd_i][t, o],
                     )
+                    sub_g = self.sub_gs[j]
+                    for name in sub_g.list_sched[o].dep_inputs:
+                        # Tensor req_i is required by BWD
+                        req_i = [hdn.name for hdn in sub_g.list_hdn].index(name)
+                        for j_, (k_, i_) in enumerate(self.create_list):
+                            if i_ == req_i:
+                                self.md.addLConstr(
+                                    self.R[bwd_i][t, o],
+                                    GRB.LESS_EQUAL,
+                                    self.sumR[(k_, t)] + self.S[t, j_],
+                                )
 
         self.alive = {}
         for t in range(T):
@@ -485,7 +502,7 @@ class ModelGurobi:
 
         for sub_g in self.sub_gs:
             alive_status[sub_g.name] = -1  # to represent phantom from sub_g
-            sizes[sub_g.name] = [h_opt.mem for h_opt in sub_g.list_opt]
+            sizes[sub_g.name] = [h_opt.mem for h_opt in sub_g.list_sched]
 
         for t in range(T):
             for k in range(T):
@@ -502,7 +519,7 @@ class ModelGurobi:
                     # if hcn.is_fwd and self.R[k][t, -1].X == 1:
                     #     opt = -1
                     if opt > -1:
-                        h_obj = hcn.sub_graph.list_opt[opt]
+                        h_obj = hcn.sub_graph.list_sched[opt]
                     else:
                         h_obj = hcn
 
@@ -549,7 +566,7 @@ class ModelGurobi:
                     and self.sumSp[(j, t + 1)].getValue() == 0
                 ):
                     # del phantom happens either after bwd or at the end of stage
-                    h_obj = self.sub_gs[j].list_opt[
+                    h_obj = self.sub_gs[j].list_sched[
                         alive_status[self.sub_gs[j].name]
                     ]
                     alive_status[self.sub_gs[j].name] = -1
@@ -593,10 +610,10 @@ def get_hg_budgets(hg, nb_bdg_peak=3, nb_bdg_save=5):
     # return reasonable budget list
     budgets = []
     sizes = [hdn.mem for hdn in hg.list_hdn] + [
-        h_sched.mem for h_sched in hg.list_opt
+        h_sched.mem for h_sched in hg.list_sched
     ]
     overheads = [hcn.fwd_overhead for hcn in hg.list_hcn] + [
-        h_sched.bwd_overhead for h_sched in hg.list_opt
+        h_sched.bwd_overhead for h_sched in hg.list_sched
     ]
     max_bdg = sum(sizes) + max(overheads)
     min_bdg = hg.fast_fwd_overhead()[0]
@@ -620,7 +637,7 @@ def solve_hg_recursive(hg, solve_self=True):
     for hcn in hg.list_hcn:
         if hcn.is_fwd and hcn.sub_graph is not None:
             sub_g = hcn.sub_graph
-            if len(sub_g.list_opt) <= 1:
+            if len(sub_g.list_sched) <= 1:
                 solve_hg_recursive(sub_g)
     if solve_self and hg.list_hcn:  # not bottom hgraph
         solve_hg(hg)

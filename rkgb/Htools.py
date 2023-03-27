@@ -31,13 +31,12 @@ class H_C_node:
         self.is_leaf = False
         self.ff_op_list = []
         self.number = -1
-        # When toposorting the HCNs we want to respect the same order 
-        # as the one found for KCNs, ie follow variable number 
+        #  When toposorting the HCNs we want to respect the same order
+        # as the one found for KCNs, ie follow variable number
         # (get_num_tar) AND add some special deps for artifacts
-        # To make it easy, we give a number to each hcn based on K_graph's 
+        #  To make it easy, we give a number to each hcn based on K_graph's
         # toposort : hcn.is_leaf -> hcn.number = kcn index in list_kcn
         # else -> hcn.number = min (sub_hcn.number in hcn.subgraph)
-
 
 
 # ************
@@ -74,7 +73,7 @@ class H_graph:
         self.dict_hg = dict()  #  name -> sub_Hgraph
         self.list_hcn = []  #  toposorted
         self.list_hdn = []  #  including interface HDNs
-        self.list_opt = []
+        self.list_sched = []
         self.inputs_hdn_data = set()  # HDN set -> inputs' data
         self.outputs_hdn_data = set()  # HDN set -> outputs' data
         self.outputs_hdn_grad = set()  # HDN set -> outputs' grad
@@ -85,14 +84,14 @@ class H_graph:
 
     def add_option(self, option):
         pareto = True
-        for opt in self.list_opt:
+        for opt in self.list_sched:
             if (
                 opt.fwd_time + opt.bwd_time <= option.fwd_time + option.bwd_time
             ) and (opt.mem <= option.mem):
                 # should consider other factors like req_inputs
                 pareto = False
         if pareto:
-            self.list_opt.append(option)
+            self.list_sched.append(option)
 
     def make_users(self):
         for hn in self.dict_hn.values():
@@ -164,8 +163,8 @@ class H_graph:
             print([hn.name for hn in l])
             print("loss users : ")
             print([hn.name for hn in self.loss_hcn.users])
-            print("outputs_hdn_data",self.outputs_hdn_data)
-            print("outputs_hdn_grad",self.outputs_hdn_grad)
+            print("outputs_hdn_data", self.outputs_hdn_data)
+            print("outputs_hdn_grad", self.outputs_hdn_grad)
 
 
 def P_and_K_to_H(pg: P_graph, kg: K_graph):
@@ -191,21 +190,21 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
     has_phantoms = lambda mt: f"{mt} phantoms" in dict_kn
     get_kcn_fwd = lambda mt: dict_kn[f"fwd_{mt}"]
     get_kcn_bwd = lambda mt: dict_kn[f"bwd_{mt}"]
-    get_kdn_data = lambda mt: dict_kn[f"{mt} data"] 
-    get_kdn_grad = lambda mt: dict_kn[f"{mt} grad"] 
-    get_kdn_phantoms = lambda mt: dict_kn[f"{mt} phantoms"] 
+    get_kdn_data = lambda mt: dict_kn[f"{mt} data"]
+    get_kdn_grad = lambda mt: dict_kn[f"{mt} grad"]
+    get_kdn_phantoms = lambda mt: dict_kn[f"{mt} phantoms"]
     # get_kdn_data = lambda mt: (
-        # dict_kn[f"{mt} data"] 
-        # if f"{mt} data" in dict_kn 
-        # else K_D_node())
+    # dict_kn[f"{mt} data"]
+    # if f"{mt} data" in dict_kn
+    # else K_D_node())
     # get_kdn_grad = lambda mt: (
-        # dict_kn[f"{mt} grad"]
-        # if f"{mt} grad" in dict_kn 
-        # else K_D_node())
+    # dict_kn[f"{mt} grad"]
+    # if f"{mt} grad" in dict_kn
+    # else K_D_node())
     # get_kdn_phantoms = lambda mt: (
-        # dict_kn[f"{mt} phantoms"]
-        # if f"{mt} phantoms" in dict_kn 
-        # else K_D_node())
+    # dict_kn[f"{mt} phantoms"]
+    # if f"{mt} phantoms" in dict_kn
+    # else K_D_node())
 
     # ==* First, build the H_nodes *==
     for pn in pg.list_nodes:
@@ -220,7 +219,7 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
             dict_hdn_to_kdn[hdn_data] = kdn_data
             hcn_fwd.is_leaf = True
             hcn_fwd.main_target = mt
-            hcn_fwd.number = (kg.list_kcn.index(kcn_fwd))
+            hcn_fwd.number = kg.list_kcn.index(kcn_fwd)
             hcn_fwd.fwd_time = kcn_fwd.time
             hcn_fwd.fwd_overhead = kcn_fwd.overhead
             hcn_fwd.ff_op_list = [
@@ -240,7 +239,7 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
                 hcn_bwd.is_leaf = True
                 hcn_bwd.is_fwd = False
                 hcn_bwd.main_target = mt
-                hcn_bwd.number = (kg.list_kcn.index(kcn_bwd))
+                hcn_bwd.number = kg.list_kcn.index(kcn_bwd)
                 # hcn_bwd.fwd_time = kcn_bwd.time
                 # hcn_bwd.fwd_overhead = kcn_bwd.overhead
                 hdn_grad.is_data = False
@@ -270,7 +269,7 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
                 }
                 for k, v in direct_info.items():
                     setattr(h_sched, k, v)
-                sub_hg.list_opt = [h_sched]
+                sub_hg.list_sched = [h_sched]
 
                 # hopt = H_option(
                 #     sub_hg,
@@ -289,7 +288,7 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
                 #         ],
                 #     },
                 # )
-                # sub_hg.list_opt = [hopt]
+                # sub_hg.list_sched = [hopt]
                 hcn_fwd.sub_graph = hcn_bwd.sub_graph = sub_hg
             else:
                 sub_hg = None
@@ -305,8 +304,9 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
             nb_min_bwd = 9999999
             for sub_hcn in sub_hg.list_hcn:
                 if sub_hcn.is_fwd:
-                      nb_min_fwd = min(sub_hcn.number,nb_min_fwd)
-                else: nb_min_bwd = min(sub_hcn.number,nb_min_bwd)
+                    nb_min_fwd = min(sub_hcn.number, nb_min_fwd)
+                else:
+                    nb_min_bwd = min(sub_hcn.number, nb_min_bwd)
             hcn_fwd.number = nb_min_fwd
             hcn_bwd.number = nb_min_bwd
             hcn_fwd.fwd_time = sum(
@@ -674,7 +674,7 @@ class H_sched:
                     d = hgraph.dict_hn[k]
                     mem += d.mem if v > -1 else 0
                 else:
-                    mem += hgraph.dict_hg[k].list_opt[v].mem if v > -1 else 0
+                    mem += hgraph.dict_hg[k].list_sched[v].mem if v > -1 else 0
             return mem
 
         def get_overhead_(save, overhead):
@@ -717,7 +717,8 @@ class H_sched:
                 self.overhead[self.loss_idx + 1 :],
             )
 
-            self.dep_inputs = []  # the names of HDNs that are required by BWD
+            # names of additional HDNs that are required by BWD
+            self.dep_inputs = []
             for op in self.op_list[self.loss_idx + 1 :]:
                 if not op.is_del:
                     for hdn in hgraph.dict_hn[op.name].deps:
@@ -734,7 +735,7 @@ class H_sched:
                         self.phantoms.add(hgraph.dict_hn[k])
                     elif k in hgraph.dict_hg:
                         # delete phantom of a H_sched
-                        self.phantoms.add(hgraph.dict_hg[k].list_opt[v])
+                        self.phantoms.add(hgraph.dict_hg[k].list_sched[v])
                     else:
                         raise Warning(f"cannot find {k} in Hgraph")
 
@@ -760,11 +761,11 @@ def get_save_all_option(hgraph):
     for hcn in hgraph.list_hcn:
         if hcn.is_fwd and hcn.sub_graph is not None:
             sub_g = hcn.sub_graph
-            if not sub_g.list_opt:
+            if not sub_g.list_sched:
                 sub_opt = get_save_all_option(sub_g)
-                sub_g.list_opt.append(sub_opt)
+                sub_g.list_sched.append(sub_opt)
             alive_status[sub_g.name] = -1
-            sizes[sub_g.name] = [h_sched.mem for h_sched in sub_g.list_opt]
+            sizes[sub_g.name] = [h_sched.mem for h_sched in sub_g.list_sched]
 
     for i, hcn in enumerate(hgraph.list_hcn):
         if hcn.sub_graph is None:
@@ -777,7 +778,7 @@ def get_save_all_option(hgraph):
 
             continue
 
-        h_obj = hcn.sub_graph.list_opt[0]
+        h_obj = hcn.sub_graph.list_sched[0]
         for hdn in hcn.users:
             alive_status[hdn.name] = 0
         if hcn.is_fwd:
@@ -912,12 +913,14 @@ def refine_kn_list(kn_list):
 
     return refined_kn_list
 
+
 def print_collapse(op_list):
     for i, op in enumerate(op_list):
         print(i, op.name)
-        if len(collapse(op))>1:
+        if len(collapse(op)) > 1:
             for sub_op in collapse(op):
                 print(f"| {sub_op.name}")
+
 
 def find_graph(target, hg):
     for sub_name, sub_g in hg.dict_hg.items():
