@@ -603,7 +603,7 @@ def add_hilp_option(hgraph, budget, save_budget):
     md.solve()
     if md.feasible:
         h_sched = md.schedule()
-        hgraph.add_option(h_sched)
+        hgraph.add_sched(h_sched)
 
 
 def get_hg_budgets(hg, nb_bdg_peak=3, nb_bdg_save=5):

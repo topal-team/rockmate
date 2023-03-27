@@ -82,16 +82,16 @@ class H_graph:
         self.loss_hcn = None  #  HCN
         self.all_kcn_inside = set()  # temporary attribute
 
-    def add_option(self, option):
+    def add_sched(self, sched):
         pareto = True
         for opt in self.list_sched:
             if (
-                opt.fwd_time + opt.bwd_time <= option.fwd_time + option.bwd_time
-            ) and (opt.mem <= option.mem):
+                opt.fwd_time + opt.bwd_time <= sched.fwd_time + sched.bwd_time
+            ) and (opt.mem <= sched.mem):
                 # should consider other factors like req_inputs
                 pareto = False
         if pareto:
-            self.list_sched.append(option)
+            self.list_sched.append(sched)
 
     def make_users(self):
         for hn in self.dict_hn.values():
@@ -763,7 +763,7 @@ def get_save_all_option(hgraph):
             sub_g = hcn.sub_graph
             if not sub_g.list_sched:
                 sub_opt = get_save_all_option(sub_g)
-                sub_g.list_sched.append(sub_opt)
+                sub_g.add_sched(sub_opt)
             alive_status[sub_g.name] = -1
             sizes[sub_g.name] = [h_sched.mem for h_sched in sub_g.list_sched]
 
