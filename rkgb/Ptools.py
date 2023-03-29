@@ -263,8 +263,8 @@ class P_config():
             def merge_flow_stop_condition(pg,best_option):
                 # True -> stop
                 tot_nb_nodes = len(pg.list_nodes)
-                if tot_nb_nodes <= max_nodes_per_graph: return True
-                elif best_option.nb_subnodes > max_nodes_per_graph: return False
+                if tot_nb_nodes <= self.max_nodes_per_graph: return True
+                elif best_option.nb_subnodes > self.max_nodes_per_graph: return False
                 else:
                     value = self.merge_flow_value_fct(best_option)
                     return (value <= (math.sqrt(tot_nb_nodes) * math.sqrt(self.max_nodes_per_graph)))
@@ -367,7 +367,7 @@ def unwrap(pn : P_node):
     pg      : P_graph = pn.subgraph
     main_pg : P_graph = pn.main_graph
     if pn.is_leaf: return ()
-    if main_pg.is_last_wrapping_graph(): return ()
+    # if main_pg.is_last_wrapping_graph(): return ()
     group = list(pg.list_nodes)
 
     # ** unplug pn/pg **
@@ -376,7 +376,7 @@ def unwrap(pn : P_node):
     copy_pn_users = list(pn.users)
     for req_pn in pn.deps: req_pn.users.remove(pn) # useless
     for user_pn in pn.users: user_pn.deps.remove(pn) # useless
-    # redondant with the update of deps and users 12 lines below
+    # redundant with the update of deps and users 12 lines below
     # -> global edges
     for req_g_pn in pn.deps_global: req_g_pn.users_global.remove(pn)
     for user_g_pn in pn.users_global: user_g_pn.deps_global.remove(pn)
