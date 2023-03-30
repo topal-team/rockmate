@@ -265,7 +265,9 @@ class Compiler:
         if "loss" in op.main_target:
             return [fct_run_forward_no_grad(self.storage, "")]
         rec = op.name in self.op_name_list[:i]
-        if not op.proxy:
+        if not op.proxy or (
+            op.name.replace("fwd", "bwd") not in self.op_name_list[i:]
+        ):  # not prepared for BWD
             last_before_bwd = False
         else:
             next_bwd_idx = i + self.op_name_list[i:].index(
@@ -478,7 +480,9 @@ class Compiler:
                             )
 
                     if max(src_i) > next_used_i:  # try to use before regenerate
-                        kn_list[i] = kn_list[i].name  # skip this deletion
+                        kn_list[i] = (
+                            "Disabled_" + kn_list[i].name
+                        )  # skip this deletion
 
         refine(kn_list)
 
