@@ -387,14 +387,15 @@ class Compiler:
             for kdn_name in op.users_global:
                 if f"del {kdn_name}" in self.op_name_list[prev_i:i]:
                     input_names.append(kdn_name.split(" ")[0])
-            l.append(
-                fct_run_backward_with_inputs(
-                    self.storage,
-                    op.main_target,
-                    retain_graph=(not last),
-                    input_names=input_names,
+            if input_names:
+                l.append(
+                    fct_run_backward_with_inputs(
+                        self.storage,
+                        op.main_target,
+                        retain_graph=(not last),
+                        input_names=input_names,
+                    )
                 )
-            )
         else:
             l.append(
                 fct_run_backward(
