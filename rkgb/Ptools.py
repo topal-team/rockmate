@@ -35,10 +35,12 @@ class P_node():
             self.subgraph_id = sid = sgp.graph_id
             self.name        = f"Subgraph_{sid}"
             self.is_leaf     = False
+            self.is_protected_from_unwrap = False
         else:
             self.subgraph_id = None
             self.name        = f"Var_{mt}"
             self.is_leaf     = True
+            self.is_protected_from_unwrap = True
 
         self.deps         = set()
         self.users        = set()
@@ -49,7 +51,7 @@ class P_node():
             main_graph.unique_id_generator,self)
 
     def size(self):
-        if self.is_leaf: return 1
+        if self.is_leaf or self.is_protected_from_unwrap: return 1
         else: return len(self.subgraph.list_nodes)
         
     def total_size(self):
@@ -132,9 +134,6 @@ class P_graph():
                 dict_address.update(sub_dict)
     """
 
-    def is_last_wrapping_graph(self):
-        return len(self.input_nodes) == 0
-    
     def first_nodes(self): # -> users of at least one input
         spn = set(self.list_nodes)
         first_nodes = set()
@@ -198,6 +197,12 @@ class P_graph():
                 # -> but normally we already took care of them the line above
                 # -> except for the very last graph -> the output of the model
                 # -> Not used by any one, but still an output
+
+    def set_all_protected_to_false(self):
+        for pn in self.list_nodes:
+            if not pn.is_leaf:
+                pn.is_protected_from_unwrap = False
+                pn.subgraph.set_all_protected_to_false()
     
 
 """ FOR FUTURE WORK, TO RECOGNIZE SIMILAR GRAPHS 
@@ -241,6 +246,7 @@ class P_config():
     def __init__(self,
             min_nodes_per_graph = 3,
             max_nodes_per_graph = 20,
+            max_nodes_for_main_graph = 25,
             merge_flow_importance_nb_nodes = 1,
             merge_flow_importance_nb_subnodes = -1/4,
             merge_flow_constant_value = 5,
@@ -249,6 +255,7 @@ class P_config():
             ):
         self.min_nodes_per_graph = min_nodes_per_graph  
         self.max_nodes_per_graph = max_nodes_per_graph
+        self.max_nodes_for_main_graph = max_nodes_for_main_graph
 
         # ** merge_flow **
         if merge_flow_value_fct is None:
@@ -366,8 +373,7 @@ def wrap(group : list,main_pg : P_graph):
 def unwrap(pn : P_node):
     pg      : P_graph = pn.subgraph
     main_pg : P_graph = pn.main_graph
-    if pn.is_leaf: return ()
-    # if main_pg.is_last_wrapping_graph(): return ()
+    if pn.is_protected_from_unwrap: return ()
     group = list(pg.list_nodes)
 
     # ** unplug pn/pg **
@@ -696,10 +702,15 @@ def rule_merge_small_flows(pg : P_graph,config : P_config = default_config):
 # === Main function ===
 # =====================
 
-def S_to_P(sg : S_graph):
+def S_to_P(sg : S_graph,config : P_config = default_config):
     pg = S_to_P_init(sg)
-    rule_group_sequences(pg)
-    rule_merge_small_flows(pg)
+    while len(pg.list_nodes) > config.max_nodes_for_main_graph:
+        print(len(pg.list_nodes))
+        rule_group_sequences(pg,config=config)
+        rule_merge_small_flows(pg,config=config)
+        for pn in pg.list_nodes:
+            pn.is_protected_from_unwrap = True
+    pg.set_all_protected_to_false()
     pg.make_subgraph_id("0")
     pg.make_io_targets_attributes_of_subgraphs()
     pg.input_targets = [sg.init_node.main_target]
