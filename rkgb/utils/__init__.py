@@ -9,7 +9,7 @@ __all__ = [
     "print_debug",
     # FROM IMPORTS
     "ast",
-    "np","plt",
+    "np","plt","math",
     "torch","tensor",
     "graphviz",
     "irotor"]

@@ -58,8 +58,10 @@ def full_code(n,force_special_kwargs=False): # For S_node or KCN
 # ===============================
 
 def get_target(n):
-    try: return n.target
-    except: return n.main_target
+    if hasattr(n,"target"): return n.target # BN and DN
+    elif hasattr(n,"main_target"): return n.main_target # SN, KN and HN
+    else: raise Exception(
+        "A node without .target nor .main_target ?! Sorry bug")
 
 def get_num_tar(tar):
     try:    return int(tar.split('_')[2])
@@ -74,7 +76,9 @@ def get_num_name(name): # for KCN or KDN's name
         return get_num_tar(name[:-4])
     elif name.endswith("phantoms"):
         return get_num_tar(name[:-8])
-def get_num(n): # can be used on B, D, S or K
+def get_num(n): # can be used on B, D, S, K and H
+    if hasattr(n,"number"):
+        return n.number # -> for H
     return get_num_tar(get_target(n))
 
 sort_nodes = lambda s : sorted(s,key=get_num)
@@ -92,6 +96,9 @@ def get_deps(n):
         n.deps_through_size_artefacts)
     elif "K_D_node" in t: return set().union(
         *[kcn.deps_real for kcn in n.deps])
+    elif "H_C_node" in t: return set().union(
+        *[hdn.deps for hdn in n.deps]
+    )
     else: raise Exception(f"Unrecognize node type : {t}")
 
 # ==========================
@@ -102,7 +109,7 @@ def get_deps(n):
 # ==== PERFECT TOPOSORT ====
 # ==========================
 
-def sort_based_on_deps(origin_node): # used on B, S and K
+def sort_based_on_deps(origin_node): # used on B, S, K and H
     # /!\ origin_node is the root of .deps relation 
     # /!\ => e.g. the output node of the graph
 

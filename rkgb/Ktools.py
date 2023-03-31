@@ -41,11 +41,7 @@ class K_C_node():
         self.main_code   = main_code # target * AST
         self.inplace_code= inplace_code if inplace_code else []
         self.body_code   = body_code if body_code else [] # (str*AST) list
-        if unique_id_generator is None: self.unique_id = id(self)
-        else:
-            u = unique_id_generator[0]
-            self.unique_id = u
-            unique_id_generator[0] = u+1
+        self.unique_id   = small_fcts.use_generator(unique_id_generator,self)
 
         # ** deps/used_by **
         self.deps_real    = deps_real if deps_real else set() # KDN set
@@ -160,16 +156,11 @@ class K_D_node():
         self.inplace_targets   = itars if itars else []
         self.container_targets = ctars if ctars else []
         self.name        = f"{mt} {self.kdn_type}"
-        self.mem         = irotor.MemSize(0)
+        self.mem         = 0
         self.info        = info
         self.includes_base = False
         self.includes_phantoms = False
-        if unique_id_generator is None: self.unique_id = id(self)
-        else:
-            u = unique_id_generator[0]
-            self.unique_id = u
-            unique_id_generator[0] = u+1
-
+        self.unique_id   = small_fcts.use_generator(unique_id_generator,self)
         # ** deps/used_by **
         self.users_real   = set() # KCN set
         self.users_fake   = set() # KCN set
@@ -542,14 +533,14 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
 
             # -> phantoms ins
             if global_vars.ref_test_phantoms_detection[0]:
-                exist_diff=res.mem_run_fwd.v - res.mem_fgt_fwd.v > 0
+                exist_diff=res.mem_run_fwd - res.mem_fgt_fwd > 0
                 if exist_diff or exist_phs:
                     print(f"For node {mt}: mem_diff : {exist_diff} "\
                           f"and detection {exist_phs}")
 
             if exist_phs and not data_includes_phantoms:
-                kdn_phantoms.mem = irotor.MemSize(
-                    res.mem_run_fwd.v - res.mem_fgt_fwd.v)
+                kdn_phantoms.mem = (
+                    res.mem_run_fwd - res.mem_fgt_fwd)
 
     # ============ 
 
@@ -567,7 +558,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
         deps_real = set([output_kdn_data]),
         unique_id_generator = unique_id_generator)
     loss_kcn.time     = 0
-    loss_kcn.overhead = irotor.MemSize(0)
+    loss_kcn.overhead = 0
     dict_KCN_fwd[loss_kcn.main_target] = loss_kcn
     output_kdn_grad.deps.add(loss_kcn)
 
@@ -593,8 +584,10 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg=None):
         kg.input_kdn_grad=input_kdn_grad = prev_kg.output_kdn_grad
     # -> or create fresh vars in case kg is a standalone graph
     else:
-        if len(sg.hidden_inputs) != 1: inp_mt = "sources"
-        else: inp_mt = sg.hidden_inputs[0]
+        inp_mt = "sources"
+        # TO REMOVE
+        # if len(sg.hidden_inputs) != 1: inp_mt = "sources"
+        # else: inp_mt = sg.hidden_inputs[0]
         kg.input_kdn_data=input_kdn_data = K_D_node(
             kdn_type = "data", target = inp_mt,
             all_targets = sg.direct_inputs,
@@ -783,10 +776,10 @@ def aux_print_graph(dot,kg,uniq_num):
             lbl = kcn.get_code() if kcn.is_fwd else f"backward of {mt}"
             node(kcn.name,lbl,color=get_color(kcn),tooltip = (
                 f"Time : {kcn.time}\n"\
-                f"Mem overhead : {kcn.overhead}"))
+                f"Mem overhead : {irotor.MemSize(kcn.overhead)}"))
     def print_kdn(kdn):
         node(kdn.name,kdn.name,color=get_color(kdn),
-            tooltip = f"Mem {kdn.mem}")
+            tooltip = f"Mem {irotor.MemSize(kdn.mem)}")
 
     for kcn in kg.list_kcn: print_kcn(kcn)
     for kdn in kg.list_kdn: print_kdn(kdn)

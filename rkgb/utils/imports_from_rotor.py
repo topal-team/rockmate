@@ -237,6 +237,6 @@ class MeasureMemory:
         usage = self.diffFromLast()
         maxUsage = self.maximumValue() - maxBefore
 
-        return result, usage, maxUsage
+        return result, usage.v, maxUsage.v
 
 # =================

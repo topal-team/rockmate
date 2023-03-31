@@ -16,6 +16,7 @@ from rockmate.def_sequence import (
     SeqBlockFn,
     SeqBlockFe,
 )
+from rockmate.HILP_gurobi import *
 from rockmate.rotor_solver import seq_builder, solve_dp_functionnal
 from rockmate.translator import Translator, RngState
 from rockmate.compiler import Compiler, RK_Storage
@@ -34,7 +35,7 @@ def print_memsizes(list_kg):
             mt = n.main_target
             try:
                 print_debug(
-                    f"{mt} : memsize {di[mt].memsize} ; " f"fm {n.fgt_mem.v}",
+                    f"{mt} : memsize {di[mt].memsize} ; " f"fm {n.fgt_mem}",
                     end="",
                 )
             except:
@@ -64,12 +65,12 @@ class CheckpointedModule(torch.nn.Module):
         self.original_mod = original_mod
         self.mem_unit = mem_unit if mem_unit else 1024 ** 2
         # -- use pytorch graph builder to get the list of K_graphs --
-        rkgb_res = rkgb.make_all_graphs(
-            original_mod, dict_inputs, verbose=verbose, bool_kg=False
+        self.rkgb_res = rkgb.make_all_graphs(
+            original_mod, dict_inputs, verbose=verbose, bool_kg=True
         )  # we don't need the whole K_graph
-        self.list_kg = rkgb_res.K_graph_list
-        self.dict_constants = rkgb_res.K_graph_list[0].dict_constants
-        self.eq_classes = rkgb_res.equivalent_classes
+        self.list_kg = self.rkgb_res.K_graph_list
+        self.dict_constants = self.rkgb_res.K_graph_list[0].dict_constants
+        self.eq_classes = self.rkgb_res.equivalent_classes
         self.init_code = ast_to_str(self.list_kg[0].init_code)
         self.output = self.list_kg[-1].output_kdn_data
         self.mem_limit = mem_limit
@@ -104,7 +105,7 @@ class CheckpointedModule(torch.nn.Module):
             [
                 sum(
                     [
-                        kdn.mem.v
+                        kdn.mem
                         for kdn in kcn.deps_fake
                         if kdn.main_target != kcn.main_target
                     ]
@@ -212,7 +213,9 @@ class CheckpointedModule(torch.nn.Module):
         self.simulation_overhead = self.simulation_time / sum(
             [kcn.time for kg in self.list_kg for kcn in kg.list_kcn]
         )
-        self.storage = RK_Storage(self.device, self.original_mod, self.dict_constants)
+        self.storage = RK_Storage(
+            self.device, self.original_mod, self.dict_constants
+        )
 
     def get_compiled_fct(self):
         self.compiler = Compiler(self.storage)
@@ -220,6 +223,36 @@ class CheckpointedModule(torch.nn.Module):
         loss_idx = len(self.fwd_op_list)
         self.fwd_fct_list = self.fct_list[:loss_idx]
         self.bwd_fct_list = self.fct_list[loss_idx:]
+
+    def get_compiled_fct_HILP(self, mem_limit=False, recursive=True):
+        # based only on rkgb
+        mem_limit = mem_limit or self.mem_limit
+        kg = self.rkgb_res.K_graph
+        sg = self.rkgb_res.S_graph
+        if recursive:
+            pg = rkgb.Ptools.S_to_P(sg)
+            self.hg = rkgb.Htools.P_and_K_to_H(pg, kg)
+            _ = rkgb.Htools.get_save_all_option(self.hg)
+            solve_hg_recursive(self.hg, solve_self=False)
+        md = ModelGurobi(self.hg, mem_limit, mem_limit)
+        md.solve()
+        if not md.feasible:
+            return "Not feasible solution"
+        self.h_sched = md.schedule()
+        self.bottom_op_list = rkgb.Htools.get_bottom_op_list(
+            self.h_sched.op_list
+        )
+        self.kn_list = rkgb.Htools.get_kn_list(self.bottom_op_list, kg)
+        loss_idx = [op.name for op in self.bottom_op_list].index(
+            "Loss_hcn_of_Hg_0"
+        )
+        self.storage = RK_Storage(
+            "cuda", self.original_mod, self.dict_constants
+        )
+        self.compiler = Compiler(self.storage)
+        fct_list = self.compiler.compile_from_KN_list(self.kn_list)
+        self.fwd_fct_list = fct_list[:loss_idx]
+        self.bwd_fct_list = fct_list[loss_idx + 1 :]
 
     def _exec(self, fct_list, record_mem=False, compiled=False):
         if not compiled:
@@ -260,14 +293,20 @@ class CheckpointedModule(torch.nn.Module):
 
         return self.storage.get_val(self.output.main_target)
 
-    def backward(self, record_mem=False, add_output_grad=True, compiled=True):
+    def backward(
+        self, stop=False, record_mem=False, add_output_grad=True, compiled=True
+    ):
         if record_mem:
             self.output_size = irotor.tensorMsize(
                 self.storage.ld[self.output.main_target]
             )
-            # self.allo_mem[-1] += self.output.info.memsize.v
+            # self.allo_mem[-1] += self.output.info.memsize
             # output grad is generated outside
             loss_idx = len(self.allo_mem)
+        if stop:
+            for l in self.bwd_fct_list[: stop - len(self.fwd_fct_list)]:
+                self._exec(l, record_mem, compiled=compiled)
+            return None
         if compiled:
             for l in self.bwd_fct_list:
                 self._exec(l, record_mem, compiled=compiled)
