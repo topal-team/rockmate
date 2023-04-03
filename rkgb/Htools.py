@@ -409,8 +409,9 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
             if kcn is not kg.loss_kcn:
                 if kcn in dict_kcn_to_hcn:
                     hcn = dict_kcn_to_hcn[kcn]
-                    hdn.users.add(hcn)
-                    hcn.deps.add(hdn)
+                    if not (hcn in hdn.deps):
+                        hdn.users.add(hcn)
+                        hcn.deps.add(hdn)
 
     for hdn in hg.outputs_hdn_data:
         hdn.users.add(loss_hcn)

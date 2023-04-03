@@ -92,8 +92,12 @@ class P_graph():
         self.next_subgraph_id = 1 # for new sub_graphs' id
         self.unique_id_generator = unique_id_generator
         self.list_nodes = [] # contains only the nodes of self
-        self.input_nodes  = set() # do NOT belong to self -> NOT in list_nodes
         self.output_nodes = set() # do belong to self -> in list_nodes
+        # self.input_nodes is a method, since they DO NOT belong 
+        # to self and are subject to changes from outside
+
+        self.pn_wrapping_it = None
+        # pn representing pg in an upper graph
 
         # latter :
         self.input_targets = None
@@ -134,10 +138,18 @@ class P_graph():
                 dict_address.update(sub_dict)
     """
 
+    def input_nodes(self):
+        if self.pn_wrapping_it is None:
+            return set()
+        else:
+            return set(self.pn_wrapping_it.deps)
+
+
     def first_nodes(self): # -> users of at least one input
+        input_nodes = self.input_nodes()
         spn = set(self.list_nodes)
         first_nodes = set()
-        for inp_pn in self.input_nodes:
+        for inp_pn in input_nodes:
             first_nodes.update(spn.intersection(inp_pn.users_global))
         return first_nodes
     
@@ -164,9 +176,7 @@ class P_graph():
             if not pn.is_leaf:
                 pn.subgraph.make_input_targets()
 
-    def make_io_targets_attributes_of_subgraphs(self):
-        self.make_all_used_and_all_produced()
-        self.make_input_targets()
+    def make_sub_graphs_output_targets(self):
         # Explanation : 
         # -> inputs = used - produced
         # -> BUT outputs != produced - used. Since some tensors might
@@ -189,6 +199,7 @@ class P_graph():
         for pn in self.list_nodes:
             if not pn.is_leaf:
                 sub_pg : P_graph = pn.subgraph
+                sub_pg.make_sub_graphs_output_targets()
                 sub_pg.output_targets = (
                     sub_pg.all_produced.intersection(all_interfaces)
                 )
@@ -197,6 +208,11 @@ class P_graph():
                 # -> but normally we already took care of them the line above
                 # -> except for the very last graph -> the output of the model
                 # -> Not used by any one, but still an output
+
+    def make_io_targets_attributes_of_subgraphs(self):
+        self.make_all_used_and_all_produced()
+        self.make_input_targets()
+        self.make_sub_graphs_output_targets()
 
     def set_all_protected_to_false(self):
         for pn in self.list_nodes:
@@ -307,8 +323,8 @@ def wrap(group : list,main_pg : P_graph):
         main_graph = main_pg,
         subgraph   = new_pg,
     )
+    new_pg.pn_wrapping_it = new_pn
     set_group = set(group)
-    all_input_nodes = set()
     new_pg.output_nodes = output_nodes = set()
     for pn in group:
         # ** link new_pn with global edges **
@@ -321,7 +337,6 @@ def wrap(group : list,main_pg : P_graph):
 
         # ** inputs ** 
         if not pn.deps.issubset(set_group):
-            all_input_nodes.update(pn.deps)# at the end : minus set_group
             deps_outside = pn.deps - set_group
             for req_pn in deps_outside:
                 req_pn.users.discard(pn)
@@ -346,9 +361,6 @@ def wrap(group : list,main_pg : P_graph):
     for user_g_pn in new_pn.users_global:
         user_g_pn.deps_global.add(new_pn)
     
-    # ** input_nodes **
-    new_pg.input_nodes = all_input_nodes - set_group
-
     # ** update main_pg.list_nodes **
     # I ASSUME that new_pn can take the place
     # of any former node, I'm 95% confident
@@ -404,12 +416,7 @@ def unwrap(pn : P_node):
         if sub_pn.users != sub_pn.users_global: # could just check the size
             main_pg.output_nodes.add(sub_pn)
 
-    # ** update main_pg inputs/outputs **
-    """ No need to change main_pg.input_nodes 
-    main_pg.input_nodes = (
-        set(main_pg.input_nodes).union(
-        set(pg.input_nodes) - main_spn
-        )) """
+    # ** update main_pg outputs **
     if pn in main_pg.output_nodes:
         main_pg.output_nodes.remove(pn)
     # -> We already added new outputs 8 lines above
@@ -477,8 +484,14 @@ def S_to_P_init(sg):
         last_wrapping_graph,
         main_target="sources"
     )
-    last_wrapping_graph.list_nodes = [input_pn]
-    pg.input_nodes = set([input_pn])
+    main_pn = P_node(
+        last_wrapping_graph,
+        subgraph=pg
+    )
+    pg.pn_wrapping_it = main_pn
+    last_wrapping_graph.list_nodes = [input_pn,main_pn]
+    main_pn.deps = set([input_pn])
+    input_pn.users = set([main_pn])
     for user_sn in sg.init_node.users:
         user_pn = dict_mt_to_pn[user_sn.main_target]
         user_pn.deps_global.add(input_pn)
@@ -738,12 +751,12 @@ def print_P_graph(pg : P_graph,name=None,open=True,render_format="svg"):
         name,
         comment="P_graph = Partitioned forward graph")
     # ----- Core -----
-    for input_pn in pg.input_nodes:
+    input_nodes = pg.input_nodes()
+    for input_pn in input_nodes:
         dot.node(
             input_pn.name,
-            f"INPUT {input_pn.main_target}",
+            f"INPUT {input_pn.name}",
             color=color_special, style="dashed")
-    set_input_nodes = pg.input_nodes
     for pn in pg.list_nodes:
         if pn.is_leaf:
             dot.node(pn.name,pn.name,color=color_leaf)
@@ -754,7 +767,7 @@ def print_P_graph(pg : P_graph,name=None,open=True,render_format="svg"):
                 color=color_subgraph)
         for req_pn in pn.deps:
             dot.edge(req_pn.name,pn.name,color=color_edge)
-        for req_pn in pn.deps_global.intersection(set_input_nodes):
+        for req_pn in pn.deps_global.intersection(input_nodes):
             dot.edge(req_pn.name,pn.name,color=color_special)
     # ----- render -----
     small_fcts.graph_render(dot,open,"P",render_format)
