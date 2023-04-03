@@ -415,8 +415,8 @@ def insert_ast_code(main_sn,sub_sn):
                 args.append(sc)
             else: args.append(s)
         for k in mc.keywords:
-            if isinstance(s,ast.Name) and s.id == st:
-                kwds.append(sc)
+            if isinstance(k.value,ast.Name) and k.value.id == st:
+                kwds.append(ast.Keyword(k.arg,sc))
             else: kwds.append(s)
         ret = ast.Call(mc.func,args,kwds)
         main_sn.main_code = (main_sn.main_target,ret)
