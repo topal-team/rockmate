@@ -66,7 +66,8 @@ class CheckpointedModule(torch.nn.Module):
         self.mem_unit = mem_unit if mem_unit else 1024 ** 2
         # -- use pytorch graph builder to get the list of K_graphs --
         self.rkgb_res = rkgb.make_all_graphs(
-            original_mod, dict_inputs, verbose=verbose, bool_kg=True
+            original_mod, dict_inputs, verbose=verbose, 
+            dict_wanted_graphs={"Kl","K"}
         )  # we don't need the whole K_graph
         self.list_kg = self.rkgb_res.K_graph_list
         self.dict_constants = self.rkgb_res.K_graph_list[0].dict_constants
