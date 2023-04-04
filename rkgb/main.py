@@ -131,9 +131,10 @@ def print_cuda_warning_msg(things_not_on_cuda):
 def make_all_graphs(model,
     model_inputs,
     model_kwargs=None,
+    dict_wanted_graphs = {"B","D","S","K","P","H","Sl","Kl"},
+    p_config : Ptools.P_config = Ptools.default_config,
     verbose=False,
     impose_device=True,
-    dict_wanted_graphs = {"B","D","S","K","P","H","Sl","Kl"},
     check_device_is_gpu = True):
     r"""
     ***** this function returns an objet with attributes *****
@@ -207,7 +208,7 @@ def make_all_graphs(model,
         cc,list_kg,list_ano_S = Atools.S_list_to_K_list_eco(list_sg,model,device=device)
     else: list_kg = None ; cc = None ; list_ano_S = None
     # -- hierarchical --
-    pg = Ptools.S_to_P(sg) if bool_pg else None
+    pg = Ptools.S_to_P(sg,p_config) if bool_pg else None
     hg = Htools.P_and_K_to_H(pg,kg) if bool_hg else None
 
     # -- restore running_stats --

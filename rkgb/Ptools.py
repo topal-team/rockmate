@@ -176,13 +176,19 @@ class P_graph():
             if not pn.is_leaf:
                 pn.subgraph.make_input_targets()
 
-    def make_sub_graphs_output_targets(self):
+    def make_sub_graphs_output_targets(self,all_interfaces_of_parent_level = None):
         # Explanation : 
         # -> inputs = used - produced
         # -> BUT outputs != produced - used. Since some tensors might
         # -> be used while still begin an output 
         # (A -> B -> C, both B and C can be outputs)
-        all_interfaces = set() 
+
+        if all_interfaces_of_parent_level is None:
+            all_interfaces = set()
+        else:
+            all_interfaces = set(all_interfaces_of_parent_level)
+            # -> We use the interfaces from above to see if one target
+            # -> is used outside the scope of the current graph
         # -> We gather all the inputs of the subgraphs
         # -> so we have all the interface nodes
         # -> so we can compute output_targets
@@ -199,7 +205,7 @@ class P_graph():
         for pn in self.list_nodes:
             if not pn.is_leaf:
                 sub_pg : P_graph = pn.subgraph
-                sub_pg.make_sub_graphs_output_targets()
+                sub_pg.make_sub_graphs_output_targets(all_interfaces)
                 sub_pg.output_targets = (
                     sub_pg.all_produced.intersection(all_interfaces)
                 )
@@ -288,7 +294,7 @@ class P_config():
                 # True -> stop
                 tot_nb_nodes = len(pg.list_nodes)
                 if tot_nb_nodes <= self.max_nodes_per_graph: return True
-                elif best_option.nb_subnodes > self.max_nodes_per_graph: return False
+                elif best_option.nb_subnodes > self.max_nodes_per_graph: return True
                 else:
                     value = self.merge_flow_value_fct(best_option)
                     return (value <= (math.sqrt(tot_nb_nodes) * math.sqrt(self.max_nodes_per_graph)))
@@ -514,21 +520,21 @@ def S_to_P_init(sg):
 def rule_group_sequences(pg : P_graph,config : P_config = default_config):
     # ** Find the sequences **
     tot_nb_seq = 0
-    dict_seq_nb = dict() # mt -> a seq nb
+    dict_seq_nb = dict() # name -> a seq nb
     dict_sequences = dict() # seq nb -> list of nodes in the seq
     for pn in pg.list_nodes:
         if len(pn.users) == 1 and len(list(pn.users)[0].deps) == 1:
-            mt = pn.main_target
+            name = pn.name
             user_pn = list(pn.users)[0]
-            user_mt = user_pn.main_target
-            if mt in dict_seq_nb:
-                seq_nb = dict_seq_nb[mt]
-                dict_seq_nb[user_mt] = seq_nb
+            user_name = user_pn.name
+            if name in dict_seq_nb:
+                seq_nb = dict_seq_nb[name]
+                dict_seq_nb[user_name] = seq_nb
                 dict_sequences[seq_nb].append(user_pn)
             else:
                 tot_nb_seq += 1
-                dict_seq_nb[mt] = tot_nb_seq
-                dict_seq_nb[user_mt] = tot_nb_seq
+                dict_seq_nb[name] = tot_nb_seq
+                dict_seq_nb[user_name] = tot_nb_seq
                 dict_sequences[tot_nb_seq] = [pn,user_pn]
 
     # ** split too long sequences **
@@ -718,7 +724,10 @@ def rule_merge_small_flows(pg : P_graph,config : P_config = default_config):
 
 def S_to_P(sg : S_graph,config : P_config = default_config):
     pg = S_to_P_init(sg)
-    while len(pg.list_nodes) > config.max_nodes_for_main_graph:
+    previous_size = -1
+    while (len(pg.list_nodes) > config.max_nodes_for_main_graph
+        and len(pg.list_nodes) != previous_size):
+        previous_size = len(pg.list_nodes)
         print_debug(f"Ptools : apply a round of partitioning {len(pg.list_nodes)}")
         rule_group_sequences(pg,config=config)
         rule_merge_small_flows(pg,config=config)
@@ -729,6 +738,10 @@ def S_to_P(sg : S_graph,config : P_config = default_config):
     pg.make_io_targets_attributes_of_subgraphs()
     pg.input_targets = [sg.init_node.main_target]
     pg.output_targets = [sg.hidden_output]
+    print_debug(f"Ptools : P_graph generated, with final graph of : {len(pg.list_nodes)}")
+    if len(pg.list_nodes) == previous_size: print(
+        f"WARNING : Partioning stopped because cannot "\
+        f"shrink more, maybe still to big : {previous_size}")
     return pg
 
 # =====================

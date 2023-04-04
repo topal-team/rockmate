@@ -147,8 +147,16 @@ class H_graph:
         l1 = list(self.list_hcn)
         leaves_hcn = set()
         for hcn in self.list_hcn:
-            if not hcn.is_fwd and len(hcn.users) == 0:
-                leaves_hcn.add(hcn)
+            if not hcn.is_fwd:
+                if len(hcn.users) == 0:
+                    leaves_hcn.add(hcn)
+                else:
+                    really_useful = False
+                    for user_hdn in hcn.users:
+                        if len(user_hdn.users) != 0:
+                            really_useful = True
+                    if not really_useful:
+                        leaves_hcn.add(hcn)
         root_hdn = H_D_node("", "")
         root_hcn = H_C_node("")
         root_hdn.deps = leaves_hcn
