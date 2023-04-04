@@ -275,11 +275,12 @@ class P_config():
 
         # ** merge_flow **
         if merge_flow_value_fct is None:
-            self.merge_flow_value_fct = lambda option : (
+            self.merge_flow_value_fct = lambda option : ((
                 math.exp(
                 option.nb_nodes    * merge_flow_importance_nb_nodes 
               + option.nb_subnodes * merge_flow_importance_nb_subnodes
               + merge_flow_constant_value) )
+              if option.nb_subnodes <= max_nodes_per_graph else -10)
         else:
             self.merge_flow_value_fct = merge_flow_value_fct
         if merge_flow_stop_condition is None:
@@ -718,7 +719,7 @@ def rule_merge_small_flows(pg : P_graph,config : P_config = default_config):
 def S_to_P(sg : S_graph,config : P_config = default_config):
     pg = S_to_P_init(sg)
     while len(pg.list_nodes) > config.max_nodes_for_main_graph:
-        print(len(pg.list_nodes))
+        print_debug(f"Ptools : apply a round of partitioning {len(pg.list_nodes)}")
         rule_group_sequences(pg,config=config)
         rule_merge_small_flows(pg,config=config)
         for pn in pg.list_nodes:

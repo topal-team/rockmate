@@ -14,11 +14,13 @@ import inspect
 # ==========================
 
 class all_graphs():
-    def __init__(self,bg,dg,sg,kg,list_sg,list_kg,cc,list_ano_S):
+    def __init__(self,bg,dg,sg,kg,pg,hg,list_sg,list_kg,cc,list_ano_S):
         self.B_graph = bg
         self.D_graph = dg
         self.S_graph = sg
         self.K_graph = kg
+        self.P_graph = pg
+        self.H_graph = hg
         self.S_graph_list = list_sg
         self.K_graph_list = list_kg
         self.equivalent_classes = cc
@@ -131,14 +133,13 @@ def make_all_graphs(model,
     model_kwargs=None,
     verbose=False,
     impose_device=True,
-    bool_bg = True , bool_dg = True ,
-    bool_sg = True , bool_kg = True ,
-    bool_list_sg = True , bool_list_kg = True,
+    dict_wanted_graphs = {"B","D","S","K","P","H","Sl","Kl"},
     check_device_is_gpu = True):
     r"""
     ***** this function returns an objet with attributes *****
-     -> .B_graph, .D_graph, .S_graph and .K_graph of the whole module
-     -> .S_graph_list and .K_graph_list of the sequentialized module
+     -> .B_graph, .D_graph, .S_graph and .K_graph of the whole module
+     -> .S_graph_list and .K_graph_list of the sequentialized module
+     -> .P_graph, .H_graph
     on which you can use :
     rkgb.print_graph and rkgb.print_graph_list or rkgb.print_all_graphs
 
@@ -153,10 +154,14 @@ def make_all_graphs(model,
         optional dictionnary in case you want to
         call 'model' with kwargs
     """
-    bool_list_sg = bool_list_sg or bool_list_kg
-    bool_sg = bool_sg or bool_kg or bool_list_sg
-    bool_dg = bool_dg or bool_sg
-    bool_bg = bool_bg or bool_dg
+    bool_list_kg = "Kl" in dict_wanted_graphs
+    bool_list_sg = ("Sl" in dict_wanted_graphs) or bool_list_kg
+    bool_hg = "H" in dict_wanted_graphs
+    bool_pg = ("P" in dict_wanted_graphs) or bool_hg
+    bool_kg = ("K" in dict_wanted_graphs) or bool_hg
+    bool_sg = ("S" in dict_wanted_graphs) or bool_kg or bool_list_sg or bool_pg
+    bool_dg = ("D" in dict_wanted_graphs) or bool_sg
+    bool_bg = ("B" in dict_wanted_graphs) or bool_dg
 
     # check inputs
     global_vars.ref_verbose[0] = verbose
@@ -192,33 +197,25 @@ def make_all_graphs(model,
                 )
 
     # -- the whole module --
-    if bool_bg:
-        bg = Btools.make_B(model,dict_inputs,
-            impose_device=impose_device,device=device)
-    else: bg = None
-    if bool_dg: dg = Dtools.B_to_D(bg,model,dict_inputs,device=device)
-    else: dg = None
-    if bool_sg: sg = Stools.D_to_S(
-        dg,model=model,device=device)
-    else: sg = None
-    if bool_kg: kg = Ktools.S_to_K(sg,model,device=device)
-    else: kg = None
+    bg = Btools.make_B(model,dict_inputs,impose_device=impose_device,device=device) if bool_bg else None
+    dg = Dtools.B_to_D(bg,model,dict_inputs,device=device) if bool_dg else None
+    sg = Stools.D_to_S(dg,model=model,device=device) if bool_sg else None
+    kg = Ktools.S_to_K(sg,model,device=device) if bool_kg else None
     # -- sequentialized --
-    if bool_list_sg:
-        list_sg = Stools.cut(sg)
-    else: list_sg = None
+    list_sg = Stools.cut(sg) if bool_list_sg else None
     if bool_list_kg:
-        cc,list_kg,list_ano_S = Atools.S_list_to_K_list_eco(
-            list_sg,model,device=device)
+        cc,list_kg,list_ano_S = Atools.S_list_to_K_list_eco(list_sg,model,device=device)
     else: list_kg = None ; cc = None ; list_ano_S = None
+    # -- hierarchical --
+    pg = Ptools.S_to_P(sg) if bool_pg else None
+    hg = Htools.P_and_K_to_H(pg,kg) if bool_hg else None
 
     # -- restore running_stats --
     for (m,(r_mean,r_var)) in saved_running_stats.items():
         m.running_mean = r_mean
         m.running_var  = r_var
 
-
-    return all_graphs(bg,dg,sg,kg,list_sg,list_kg,cc,list_ano_S)
+    return all_graphs(bg,dg,sg,kg,pg,hg,list_sg,list_kg,cc,list_ano_S)
 
 # ==========================
 
@@ -283,10 +280,10 @@ def print_all_graphs(a,name="",open=True,render_format="svg"):
     print_graph(a.D_graph,f"{name}_D_graph",open,render_format)
     print_graph(a.S_graph,f"{name}_S_graph",open,render_format)
     print_graph(a.K_graph,f"{name}_K_graph",open,render_format)
-    print_graph_list(a.S_graph_list,f"{name}_seq_S_graph",
-        open,render_format)
-    print_graph_list(a.K_graph_list,f"{name}_seq_K_graph",
-        open,render_format)
+    print_graph(a.P_graph,f"{name}_P_graph",open,render_format)
+    print_graph(a.H_graph,f"{name}_H_graph",open,render_format)
+    print_graph_list(a.S_graph_list,f"{name}_seq_S_graph",open,render_format)
+    print_graph_list(a.K_graph_list,f"{name}_seq_K_graph",open,render_format)
 
 # ==========================
 
