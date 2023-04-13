@@ -160,7 +160,7 @@ class H_graph:
         root_hdn = H_D_node("", "")
         root_hcn = H_C_node("")
         root_hdn.deps = leaves_hcn
-        root_hcn.deps = self.inputs_hdn_grad  # Not enough
+        root_hcn.deps = set(self.inputs_hdn_grad)  # Not enough
         root_hcn.deps.add(root_hdn)
         self.list_hcn = l = shared_methods.sort_based_on_deps(root_hcn)
         l.remove(root_hcn)
@@ -794,15 +794,11 @@ class H_sched:
             #         (hdn.name, self.loss_idx)
             #     )  # Before Bwd
         for hdn in self.hgraph.outputs_hdn_grad:
-            if hdn.name:  # TODO: hard-coded
-                interfaces_status.append(
-                    (hdn.name, len(self.op_list))
-                )  # After Bwd
+            interfaces_status.append((hdn.name, len(self.op_list)))  # After Bwd
         for hdn in self.hgraph.inputs_hdn_grad:
-            if hdn.name:  # TODO: hard-coded
-                interfaces_status.append(
-                    (hdn.name, self.loss_idx + 1)
-                )  # Before Bwd
+            interfaces_status.append(
+                (hdn.name, self.loss_idx + 1)
+            )  # Before Bwd
 
         for i, (op, alive_status) in enumerate(
             zip(self.op_list, self.alive_list)
@@ -917,6 +913,8 @@ class H_sched:
 
         refine_correction(self.fwd_overhead_correction)
         refine_correction(self.bwd_overhead_correction)
+
+        # for correction in self.fwd_overhead_correction:
 
 
 def get_save_all_option(hgraph):
