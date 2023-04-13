@@ -54,26 +54,32 @@ class ModelGurobi:
                 if hcn.is_fwd:
                     # add fast forward to the options
                     self.time.append(
-                        [h_opt.fwd_time for h_opt in hcn.sub_graph.list_sched]
+                        [
+                            h_sched.fwd_time
+                            for h_sched in hcn.sub_graph.list_sched
+                        ]
                         + [hcn.fwd_time]
                         if hcn.is_fwd
                         else []
                     )
                     self.overhead.append(
                         [
-                            h_opt.fwd_overhead
-                            for h_opt in hcn.sub_graph.list_sched
+                            h_sched.fwd_overhead
+                            for h_sched in hcn.sub_graph.list_sched
                         ]
                         + [hcn.fwd_overhead]
                     )
                 else:
                     self.time.append(
-                        [h_opt.bwd_time for h_opt in hcn.sub_graph.list_sched]
+                        [
+                            h_sched.bwd_time
+                            for h_sched in hcn.sub_graph.list_sched
+                        ]
                     )
                     self.overhead.append(
                         [
-                            h_opt.bwd_overhead
-                            for h_opt in hcn.sub_graph.list_sched
+                            h_sched.bwd_overhead
+                            for h_sched in hcn.sub_graph.list_sched
                         ]
                     )
         self.sub_g2hcn = [[] for _ in self.sub_gs]
@@ -83,7 +89,8 @@ class ModelGurobi:
             self.sub_g2hcn[j].append(i)
         self.mem = [hdn.mem for hdn in self.hgraph.list_hdn]
         self.saved_mem = [
-            [h_opt.mem for h_opt in sub_g.list_sched] for sub_g in self.sub_gs
+            [h_sched.mem for h_sched in sub_g.list_sched]
+            for sub_g in self.sub_gs
         ]
 
         T = len(self.hgraph.list_hcn)
@@ -112,10 +119,24 @@ class ModelGurobi:
             for i in range(T)
         ]
 
+        #### Update edges based on .dep_interfaces_data
+        for i in range(I):
+            for k, hcn in enumerate(self.hgraph.list_hcn):
+                if hcn.sub_graph is None:
+                    continue
+                for h_sched in hcn.sub_graph.list_sched:
+                    # Without specifying schedule, we assume it's possible to use hdn here
+                    if (
+                        self.hgraph.list_hdn[i].main_target
+                        in h_sched.dep_interfaces_data
+                    ):
+                        assert k not in _users_d[i]
+                        _users_d[i].append(k)
+
         ##############################
 
         self.gcd = gcd if gcd else 1
-        self.budget = budget / self.gcd
+        self.peak_budget = budget / self.gcd
         self.save_budget = save_budget / self.gcd
         self.gurobi_params = gurobi_params
         self.feasible = None
@@ -274,9 +295,11 @@ class ModelGurobi:
                         self.Sp[j][t, o] + self.R[fwd_i][t, o],
                     )
                     sub_g = self.sub_gs[j]
-                    for name in sub_g.list_sched[o].dep_inputs:
+                    for name in sub_g.list_sched[o].dep_interfaces_data:
                         # Tensor req_i is required by BWD
-                        req_i = [hdn.name for hdn in sub_g.list_hdn].index(name)
+                        req_i = [
+                            hdn.kdn.name for hdn in self.hgraph.list_hdn
+                        ].index(name)
                         for j_, (k_, i_) in enumerate(self.create_list):
                             if i_ == req_i:
                                 self.md.addLConstr(
@@ -433,22 +456,64 @@ class ModelGurobi:
         for t in range(T):
             for k in range(T):
                 j = self.hcn2sub_g[k]
-
                 self.md.addLConstr(self.U[(t, k)], GRB.GREATER_EQUAL, 0)
                 self.md.addLConstr(
-                    self.U[(t, k)]
-                    + quicksum(
-                        self.R[k][t, o] * self.overhead[k][o]
-                        for o in range(self.nR[k])
-                    )
-                    + quicksum(
-                        self.mem[i_] * self.delete[t, eidx_d]
-                        for eidx_d, (k_, i_) in enumerate(self.delete_list)
-                        if k == k_
-                    ),
-                    GRB.LESS_EQUAL,
-                    self.budget,
+                    self.U[(t, k)], GRB.LESS_EQUAL, self.peak_budget,
                 )
+                if j is None:
+                    self.md.addLConstr(
+                        self.U[(t, k)]
+                        + quicksum(
+                            self.R[k][t, o] * self.overhead[k][o]
+                            for o in range(self.nR[k])
+                        )
+                        + quicksum(
+                            self.mem[i_] * self.delete[t, eidx_d]
+                            for eidx_d, (k_, i_) in enumerate(self.delete_list)
+                            if k == k_
+                        ),
+                        GRB.LESS_EQUAL,
+                        self.peak_budget,
+                    )
+                else:  # TODO: get the indices of HDN and the corresponding places (start/end)
+                    hcn = self.hgraph.list_hcn[k]
+                    for o, h_sched in enumerate(hcn.sub_graph.list_sched):
+                        for correction in (
+                            h_sched.fwd_overhead_correction
+                            if hcn.is_fwd
+                            else h_sched.bwd_overhead_correction
+                        ):
+                            correction_term = 0
+                            for inter_position, inter_mem in correction.items():
+                                if (
+                                    inter_position == "save"
+                                    or inter_position == "overhead"
+                                ):
+                                    continue
+                                i_ = [
+                                    hdn.kdn.name for hdn in self.hgraph.list_hdn
+                                ].index(inter_position[0])
+                                if not inter_position[1]:  # ending status
+                                    eidx = self.delete_list.index((k, i_))
+                                    not_kept_alive = self.delete[t, eidx]
+                                else: # start status
+                                    eidx = self.create_list.index((k, i_))
+                                    not_kept_alive = self.create[t, eidx]
+                                correction_term += not_kept_alive * inter_mem
+                            self.md.addLConstr(
+                                self.U[(t, k)]
+                                + self.R[k][t, o] * self.overhead[k][o]
+                                + correction_term
+                                + quicksum(
+                                    self.mem[i_] * self.delete[t, eidx_d]
+                                    for eidx_d, (k_, i_) in enumerate(
+                                        self.delete_list
+                                    )
+                                    if k == k_
+                                ),
+                                GRB.LESS_EQUAL,
+                                self.peak_budget,
+                            )
                 if t == self.loss_idx and self.save_budget:
                     self.md.addLConstr(
                         self.U[(t, k)], GRB.LESS_EQUAL, self.save_budget
@@ -502,7 +567,7 @@ class ModelGurobi:
 
         for sub_g in self.sub_gs:
             alive_status[sub_g.name] = -1  # to represent phantom from sub_g
-            sizes[sub_g.name] = [h_opt.mem for h_opt in sub_g.list_sched]
+            sizes[sub_g.name] = [h_sched.mem for h_sched in sub_g.list_sched]
 
         for t in range(T):
             for k in range(T):
@@ -593,8 +658,8 @@ class ModelGurobi:
                 break
         h_sched.get_info()
         # fwd_sched, bwd_sched = h_sched.split_sched(loss_idx)
-        # h_option = H_option(hgraph, h_sched)
-        # return fwd_sched, bwd_sched, h_option
+        # h_schedion = H_option(hgraph, h_sched)
+        # return fwd_sched, bwd_sched, h_schedion
         return h_sched
 
 
@@ -606,7 +671,7 @@ def add_hilp_option(hgraph, budget, save_budget):
         hgraph.add_sched(h_sched)
 
 
-def get_hg_budgets(hg, nb_bdg_peak=3, nb_bdg_save=5):
+def get_hg_budgets(hg, nb_bdg_peak=5, nb_bdg_save=8):
     # return reasonable budget list
     budgets = []
     sizes = [hdn.mem for hdn in hg.list_hdn] + [
@@ -634,11 +699,13 @@ def solve_hg(hg):
 
 
 def solve_hg_recursive(hg, solve_self=True):
+
     for hcn in hg.list_hcn:
         if hcn.is_fwd and hcn.sub_graph is not None:
             sub_g = hcn.sub_graph
             if len(sub_g.list_sched) <= 1:
                 solve_hg_recursive(sub_g)
     if solve_self and hg.list_hcn:  # not bottom hgraph
+        # print(f"Try to solve Hgraph with size {len(hg.list_hcn)}")
         solve_hg(hg)
 

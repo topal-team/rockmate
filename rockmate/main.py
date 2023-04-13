@@ -66,8 +66,10 @@ class CheckpointedModule(torch.nn.Module):
         self.mem_unit = mem_unit if mem_unit else 1024 ** 2
         # -- use pytorch graph builder to get the list of K_graphs --
         self.rkgb_res = rkgb.make_all_graphs(
-            original_mod, dict_inputs, verbose=verbose, 
-            dict_wanted_graphs={"Kl","K"}
+            original_mod,
+            dict_inputs,
+            verbose=verbose,
+            dict_wanted_graphs={"Kl", "K"},
         )  # we don't need the whole K_graph
         self.list_kg = self.rkgb_res.K_graph_list
         self.dict_constants = self.rkgb_res.K_graph_list[0].dict_constants
@@ -225,7 +227,9 @@ class CheckpointedModule(torch.nn.Module):
         self.fwd_fct_list = self.fct_list[:loss_idx]
         self.bwd_fct_list = self.fct_list[loss_idx:]
 
-    def get_compiled_fct_HILP(self, mem_limit=False, recursive=True):
+    def get_compiled_fct_HILP(
+        self, mem_limit=False, recursive=True, P_config=None
+    ):
         # based only on rkgb
         mem_limit = mem_limit or self.mem_limit
         kg = self.rkgb_res.K_graph
@@ -233,12 +237,17 @@ class CheckpointedModule(torch.nn.Module):
         if recursive:
             pg = rkgb.Ptools.S_to_P(sg)
             self.hg = rkgb.Htools.P_and_K_to_H(pg, kg)
-            _ = rkgb.Htools.get_save_all_option(self.hg)
+            print(f"Size of Hgraph {len(self.hg.list_hcn)}")
+
+            save_all_sched = rkgb.Htools.get_save_all_option(self.hg)
+            self.hg.add_sched(save_all_sched)
             solve_hg_recursive(self.hg, solve_self=False)
         md = ModelGurobi(self.hg, mem_limit, mem_limit)
         md.solve()
         if not md.feasible:
             return "Not feasible solution"
+        else:
+            print(f"Solution with obj: {md.md.getObjective().getValue()}")
         self.h_sched = md.schedule()
         self.bottom_op_list = rkgb.Htools.get_bottom_op_list(
             self.h_sched.op_list
