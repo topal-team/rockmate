@@ -9,13 +9,6 @@
 from rkgb.utils import *
 from rkgb.Stools import S_graph, S_node
 
-def count_nb_subgraph(pg):
-    nb = 0
-    for pn in pg.list_nodes:
-        if "Subgraph" in pn.name:
-            nb += 1
-    return nb
-
 # **********
 # * P_node *
 # **********
@@ -87,7 +80,7 @@ class P_node():
 # ***********
 
 class P_graph():
-    def __init__(self,graph_id,unique_id_generator):
+    def __init__(self,graph_id,unique_id_generator,dict_info = None):
         self.graph_id = graph_id
         self.next_subgraph_id = 1 # for new sub_graphs' id
         self.unique_id_generator = unique_id_generator
@@ -104,6 +97,9 @@ class P_graph():
         self.output_targets = None
         self.all_produced = None
         self.all_used = None
+
+        # info relevant for partitioning rules
+        self.dict_info = dict_info if not (dict_info is None) else dict()
 
     def size(self):
         return len(self.list_nodes)
@@ -323,7 +319,8 @@ def wrap(group : list,main_pg : P_graph):
     main_pg.next_subgraph_id += 1
     new_pg = P_graph(
         graph_id=f"{main_pg.graph_id}_{group_nb}",
-        unique_id_generator=main_pg.unique_id_generator
+        unique_id_generator=main_pg.unique_id_generator,
+        dict_info=main_pg.dict_info
     )
     new_pg.list_nodes = group
     new_pn = P_node(
@@ -440,17 +437,11 @@ def unwrap(pn : P_node):
 # thus it creates one wrapper, but flats the first depth level
 # -> To do so, wrap and then unwrap each sub_node
 def merge(group : list, main_pg : P_graph):
-    # print("nb before wrap:",count_nb_subgraph(main_pg))
     new_pn = wrap(group,main_pg)
-    # print("nb after wrap:",count_nb_subgraph(main_pg))
     new_pg = new_pn.subgraph
-    # print("main_graph : ",main_pg)
-    # print("new pg : ",new_pg)
     original_lpn = new_pg.list_nodes
     for sub_pn in original_lpn:
-        #print(sub_pn.main_graph)
         unwrap(sub_pn)
-    # print("nb after unwrap:",count_nb_subgraph(main_pg))
     main_pg.make_subgraph_id(main_pg.graph_id)
     return new_pn
 
@@ -462,9 +453,9 @@ def merge(group : list, main_pg : P_graph):
 # === Generate a P_graph based on a S_graph ===
 # =============================================
 
-def S_to_P_init(sg):
+def S_to_P_init(sg : S_graph):
     unique_id_generator = [0]
-    pg = P_graph("0",unique_id_generator)
+    pg = P_graph("0",unique_id_generator,dict_info=sg.dict_info)
     pg.list_nodes = lpn = []
     dict_mt_to_pn = dict()
     for sn in sg.nodes:
@@ -486,7 +477,7 @@ def S_to_P_init(sg):
         pn.users_global = set(pn.users)
 
     # ** input ** 
-    last_wrapping_graph = P_graph("-1",unique_id_generator)
+    last_wrapping_graph = P_graph("-1",unique_id_generator,dict_info=sg.dict_info)
     input_pn = P_node(
         last_wrapping_graph,
         main_target="sources"
@@ -513,9 +504,23 @@ def S_to_P_init(sg):
 
 
 
-# =====================================================
-# === FIRST RULE : GROUP SEQUENCE OF NODES TOGETHER ===
-# =====================================================
+# =======================================
+# === RULE : GROUP USING 1-SEPARATORS ===
+# =======================================
+
+def rule_group_with_1_sep(pg : P_graph, config : P_config = default_config):
+    separators = shared_methods.cut_based_on_deps(pg)
+    print([pn.name for pn in separators])
+    # TODO TODO : form the groups now
+
+
+# ==========================
+
+
+
+# ===============================================
+# === RULE : GROUP SEQUENCE OF NODES TOGETHER ===
+# ===============================================
 
 def rule_group_sequences(pg : P_graph,config : P_config = default_config):
     # ** Find the sequences **
@@ -565,9 +570,9 @@ def rule_group_sequences(pg : P_graph,config : P_config = default_config):
 
 
 
-# ===============================================================
-# === SECOND RULE : MERGE NODES WITH A UNIQUE COMMON ANCESTOR ===
-# ===============================================================
+# ========================================================
+# === RULE : MERGE NODES WITH A UNIQUE COMMON ANCESTOR ===
+# ========================================================
 
 # the flow of pn is the list of nodes 
 # to_be_visited which are descendants of pn

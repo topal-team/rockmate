@@ -91,15 +91,69 @@ def get_deps(n):
     if   "B_node" in t:   return n.deps
     elif "D_node" in t:   return n.deps
     elif "S_node" in t:   return set(n.deps.keys())
+    elif "P_node" in t:   return n.deps
     elif "K_C_node" in t: return set().union(
-        *[kdn.deps for kdn in n.deps_real],
-        n.deps_through_size_artefacts)
+                                *[kdn.deps for kdn in n.deps_real],
+                                n.deps_through_size_artefacts)
     elif "K_D_node" in t: return set().union(
-        *[kcn.deps_real for kcn in n.deps])
+                                *[kcn.deps_real for kcn in n.deps])
     elif "H_C_node" in t: return set().union(
-        *[hdn.deps for hdn in n.deps]
-    )
+                                *[hdn.deps for hdn in n.deps])
     else: raise Exception(f"Unrecognize node type : {t}")
+
+
+def get_users(n):
+    # To be compatible with different type/name of attribute "deps"
+    t = str(type(n))
+    if   "B_node" in t:   return n.users
+    elif "D_node" in t:   return n.users
+    elif "S_node" in t:   return set(n.users.keys())
+    elif "P_node" in t:   return n.users
+    elif "K_C_node" in t: return set().union(
+                                *[kdn.users_real for kdn in n.users],
+                                n.users_through_size_artefacts)
+    elif "K_D_node" in t: return set().union(
+                                *[kcn.users for kcn in n.users_real])
+    elif "H_C_node" in t: return set().union(
+                                *[hdn.users for hdn in n.users])
+    else: raise Exception(f"Unrecognize node type : {t}")
+
+# ==========================
+
+
+
+# ===========================
+# =   GENERAL FUNCTIONS TO  =
+# = GET GRAPH's INFORMATION =
+# ===========================
+
+def get_list_output_nodes(g): # D , S , P
+    t = str(type(g))
+    if   "D_graph" in t: return [g.output_node]
+    elif "S_graph" in t: return [g.output_node]
+    elif "P_graph" in t: return list(g.output_nodes)
+    else: raise Exception(f"Unrecognize graph type : {t}")
+
+def get_nodes(g): # D , S , P
+    t = str(type(g))
+    if   "D_graph" in t: return g.nodes
+    elif "S_graph" in t: return g.nodes
+    elif "P_graph" in t: return g.list_nodes
+    else: raise Exception(f"Unrecognize graph type : {t}")
+
+def does_require_grad(n,dict_info): # D , S , P
+    t = str(type(n))
+    tar = get_target(n)
+    if tar is None:
+        if "P_node" in t:
+            assert(not n.is_leaf) # Otherwise P should have a main_target
+            return True # a subgraph always requires_grad
+        else:
+            raise Exception(f"target is None but not a P_node ? type : {t}")
+    else:
+        return (tar in dict_info
+            and hasattr(dict_info[tar],"requires_grad")
+            and dict_info[tar].requires_grad)
 
 # ==========================
 
@@ -162,21 +216,18 @@ def sort_based_on_deps(origin_node): # used on B, S, K and H
 # happend after the begging of "requires_grad". To do this,
 # the rule is: a separator must requires_grad.
 
-def cut_based_on_deps(g): # used on D and S
+def cut_based_on_deps(g): # used on D (to protect), S (to cut), P (to partition)
     # returns the list of all 1-separator of the graph.
     dict_info = g.dict_info
-    to_be_visited = [g.output_node]
-    seen = set([g.output_node])
-    dict_nb_usages = dict([(m , len(m.users)) for m in g.nodes])
+    to_be_visited = get_list_output_nodes(g)
+    seen = set(to_be_visited)
+    dict_nb_usages = dict([(m , len(get_users(m))) for m in get_nodes(g)])
     separators = []
     while to_be_visited!=[]:
         n = to_be_visited.pop()
         seen.remove(n)
         if seen==set():
-            tar = get_target(n)
-            if (tar in dict_info
-            and hasattr(dict_info[tar],"requires_grad")
-            and dict_info[tar].requires_grad):
+            if does_require_grad(n,dict_info):
                 separators.append(n)
         for req_n in get_deps(n):
             seen.add(req_n)
