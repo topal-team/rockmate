@@ -484,26 +484,50 @@ class ModelGurobi:
                             else h_sched.bwd_overhead_correction
                         ):
                             correction_term = 0
+                            overhead = (
+                                correction["save"] + correction["overhead"]
+                            ) - (h_sched.mem if hcn.is_fwd else 0)
                             for inter_position, inter_mem in correction.items():
                                 if (
                                     inter_position == "save"
                                     or inter_position == "overhead"
                                 ):
                                     continue
+
                                 i_ = [
                                     hdn.kdn.name for hdn in self.hgraph.list_hdn
                                 ].index(inter_position[0])
-                                if not inter_position[1]:  # ending status
+                                if inter_position[1] == "always":
+                                    not_kept_alive = 1
+                                elif not inter_position[1]:  # ending status
                                     eidx = self.delete_list.index((k, i_))
                                     not_kept_alive = self.delete[t, eidx]
-                                else: # start status
+                                else:  # start status
                                     eidx = self.create_list.index((k, i_))
                                     not_kept_alive = self.create[t, eidx]
                                 correction_term += not_kept_alive * inter_mem
                             self.md.addLConstr(
                                 self.U[(t, k)]
-                                + self.R[k][t, o] * self.overhead[k][o]
+                                + self.R[k][t, o] * overhead
                                 + correction_term
+                                + quicksum(
+                                    self.mem[i_] * self.delete[t, eidx_d]
+                                    for eidx_d, (k_, i_) in enumerate(
+                                        self.delete_list
+                                    )
+                                    if k == k_
+                                ),
+                                GRB.LESS_EQUAL,
+                                self.peak_budget,
+                            )
+                        if not (
+                            h_sched.fwd_overhead_correction
+                            if hcn.is_fwd
+                            else h_sched.bwd_overhead_correction
+                        ):
+                            self.md.addLConstr(
+                                self.U[(t, k)]
+                                + self.R[k][t, o] * self.overhead[k][o]
                                 + quicksum(
                                     self.mem[i_] * self.delete[t, eidx_d]
                                     for eidx_d, (k_, i_) in enumerate(

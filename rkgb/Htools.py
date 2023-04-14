@@ -803,6 +803,8 @@ class H_sched:
         for i, (op, alive_status) in enumerate(
             zip(self.op_list, self.alive_list)
         ):
+            if i == self.loss_idx:
+                continue
             correction_term = {
                 "save": self.save_mem[i],
                 "overhead": self.overhead[i],
@@ -810,7 +812,7 @@ class H_sched:
             for (hdn_name, index) in interfaces_status:
                 hdn = self.hgraph.dict_hn[hdn_name]
                 if (
-                    alive_status[hdn_name] > 0
+                    alive_status[hdn_name] > -1
                     or (index > self.loss_idx) != (i > self.loss_idx)
                     # or not hdn_name
                 ):
@@ -824,9 +826,9 @@ class H_sched:
                         f"Del_{hdn_name}"
                         not in self.op_name_list[index : i + 1]
                     ):
-                        correction_term[
-                            (hdn.kdn.name, True)
-                        ] = -self.hgraph.dict_hn[hdn_name].mem
+                        correction_term[(hdn.kdn.name, True)] = -hdn.mem
+                    else:
+                        correction_term[(hdn.kdn.name, "always")] = -hdn.mem
                 else:
                     if not (hdn in self.hgraph.outputs_hdn_data) and (
                         hdn.deps
@@ -836,9 +838,9 @@ class H_sched:
                         )
                     ):
                         # check if output_data is created after i
-                        correction_term[
-                            (hdn.kdn.name, False)
-                        ] = -self.hgraph.dict_hn[hdn_name].mem
+                        correction_term[(hdn.kdn.name, False)] = -hdn.mem
+                    else:
+                        correction_term[(hdn.kdn.name, "always")] = -hdn.mem
 
             if i < self.loss_idx:
                 self.fwd_overhead_correction.append(correction_term)
