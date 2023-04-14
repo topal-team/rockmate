@@ -1,5 +1,5 @@
 # =======================
-# == Anonymized graphs ==
+# == FIRST TOOL : Anonymizing tools  ==
 # =======================
 
 # A way to recognize similar blocks
@@ -44,7 +44,7 @@ class Graph_Translator():
 
             ########## FIRST PART ########## 
             all_real_vars   = []
-            all_real_csts   = []
+            all_real_cst   = []
             all_real_params = []
             def handle_str(real_str):
                 if (real_str[:2] == "__"
@@ -56,8 +56,8 @@ class Graph_Translator():
                 and not real_str in all_real_params):
                     all_real_params.append(real_str)
                 elif (real_str[:5] == "_cst_"
-                and not real_str in all_real_csts):
-                    all_real_csts.append(real_str)
+                and not real_str in all_real_cst):
+                    all_real_cst.append(real_str)
             def search_through(a):
                 if isinstance(a,ast.AST):
                     if isinstance(a,ast.Name):
@@ -70,8 +70,8 @@ class Graph_Translator():
                 elif hasattr(a,"__iter__"):
                     for sub_a in a: search_through(sub_a)
 
-            snodes = [sg.init_node] + sg.nodes
-            for sn in snodes:
+            s_nodes = [sg.init_node] + sg.nodes
+            for sn in s_nodes:
                 search_through(sn.main_code)
                 search_through(sn.body_code)
 
@@ -86,12 +86,12 @@ class Graph_Translator():
                 ano_name = f"__{nb_var}_ano"
                 r_to_a[real_name] = ano_name
 
-            # Same for "all_real_csts", ie constants
-            all_real_csts = sorted(
-                all_real_csts,key = shared_methods.get_num_cst)
+            # Same for "all_real_cst", ie constants
+            all_real_cst = sorted(
+                all_real_cst,key = shared_methods.get_num_cst)
             self.const_dict = cst_r_to_a = dict()
             nb_cst = 0
-            for real_name in all_real_csts:
+            for real_name in all_real_cst:
                 nb_cst += 1
                 ano_name = f"_cst_{nb_cst}_ano"
                 cst_r_to_a[real_name] = ano_name
@@ -133,7 +133,7 @@ class Graph_Translator():
         # -> K_C/D_node (/!\ in place /!\)
         # -> S_graph
         # -> K_graph
-        # -> an iterable with elts of types mentioned above
+        # -> an iterable with elements of types mentioned above
         translate = self.translate
         # -- STR --
         if isinstance(x,str):
@@ -231,8 +231,8 @@ class Graph_Translator():
         # -- S_GRAPH --
         elif isinstance(x,Stools.S_graph):
             sg = Stools.copy_S_graph(x) # to protect x : NOT inplace
-            snodes = [sg.init_node] + sg.nodes
-            translate(snodes)
+            s_nodes = [sg.init_node] + sg.nodes
+            translate(s_nodes)
             # dict_info is currently shared by all the graphs
             # thus it contains unknown names for each block
             # -> impossible to translate -> so I clean it up.
@@ -308,10 +308,10 @@ class Graph_Translator():
 
 
 # ==================
-# == Utilisation ===
+# == Utilization ===
 # ==================
 
-# cc : connexe componente
+# cc : connected component
 def S_list_to_K_list_eco(
         list_sg,model,verbose=None,
         device=None,print_cc = False):
@@ -329,7 +329,7 @@ def S_list_to_K_list_eco(
         b = False ; cc_num = 0 ; nb_cc = len(tab_S_repr_cc)
         while not b and cc_num < nb_cc:
             if ano_sg == tab_S_repr_cc[cc_num]:
-                # -> We also need to manualy check param_info equalities
+                # -> We also need to manually check param_info equalities
                 sort_key = lambda v : int(v[0][11:])
                 repr_tr = list_translator[cc_num_to_repr_sg_num[cc_num]]
                 ano_param_sg = sorted(
@@ -345,14 +345,14 @@ def S_list_to_K_list_eco(
             cc_num_to_repr_sg_num.append(sg_num)
         sg_num_to_cc_num[sg_num] = cc_num
 
-    # 1') Compute and print connexe components
+    # 1') Compute and print connected components
     nb_cc = len(tab_S_repr_cc)
     cc = [[] for _ in range(nb_cc)]
     for sg_num in range(nb_sg):
         cc[sg_num_to_cc_num[sg_num]].append(sg_num)
     if print_cc:
         for cc_num in range(nb_cc):
-            print(f"Connexe component n°{cc_num}: {cc[cc_num]}")
+            print(f"Connected component n°{cc_num}: {cc[cc_num]}")
         print(
           f"We now have {nb_cc} blocks "\
           f"to handle, instead of {nb_sg}")

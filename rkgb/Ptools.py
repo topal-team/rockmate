@@ -108,6 +108,10 @@ class P_graph():
         for pn in self.list_nodes:
             tot += pn.total_size()
         return tot
+    
+    @property
+    def is_main_graph(self):
+        return bool(self.graph_id == "0")
 
     def make_subgraph_id(self,new_graph_id):
         self.graph_id = new_graph_id
@@ -288,9 +292,13 @@ class P_config():
         if merge_flow_stop_condition is None:
             def merge_flow_stop_condition(pg,best_option):
                 # True -> stop
+                pg : P_graph
                 tot_nb_nodes = len(pg.list_nodes)
-                if tot_nb_nodes <= self.max_nodes_per_graph: return True
-                elif best_option.nb_subnodes > self.max_nodes_per_graph: return True
+                if pg.is_main_graph:
+                    if tot_nb_nodes <= self.max_nodes_for_main_graph: return True
+                else:
+                    if tot_nb_nodes <= self.max_nodes_per_graph: return True
+                if best_option.nb_subnodes > self.max_nodes_per_graph: return True
                 else:
                     value = self.merge_flow_value_fct(best_option)
                     return (value <= (math.sqrt(tot_nb_nodes) * math.sqrt(self.max_nodes_per_graph)))
@@ -585,7 +593,7 @@ def rule_merge_small_flows(pg : P_graph,config : P_config = default_config):
     dict_flow = dict()
     # for a pn already visited -> its descendants in to_be_visited
     # if len(flow_size) = 0 => the flow converged
-    # its a generalisation of "seen" in cut_based_on_deps
+    # its a generalization of "seen" in cut_based_on_deps
     dict_total_flow = dict()
     # when a node is popped out of to_be_visited, 
     # its removed from dict_flow but dict_total_flow 
@@ -745,7 +753,7 @@ def S_to_P(sg : S_graph,config : P_config = default_config):
     pg.output_targets = [sg.hidden_output]
     print_debug(f"Ptools : P_graph generated, with final graph of : {len(pg.list_nodes)}")
     if len(pg.list_nodes) == previous_size: print(
-        f"WARNING : Partioning stopped because cannot "\
+        f"WARNING : Partitioning stopped because cannot "\
         f"shrink more, maybe still to big : {previous_size}")
     return pg
 
