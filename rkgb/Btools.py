@@ -58,11 +58,11 @@ class B_var:
         val,
         node: B_node = None,
         is_attr_of_self=False,
-        path_from_self=None,
+        real_value_as_an_attr_of_self=None,
     ):
         # "val" must be an AST
         self.is_attr_of_self = is_attr_of_self
-        self.path_from_self = path_from_self
+        self.real_value_as_an_attr_of_self = real_value_as_an_attr_of_self
         self.val = val
         self.has_node = False  # by default
         self.is_rand = False  # by default
@@ -84,12 +84,15 @@ class B_var:
             calling_node.deps_rand.add(self.val.id)
         return self.val
 
-    def inherits(self, parent, l_attr):  # for a getattr
+    def inherits(self, parent, l_attr):  
+        # for a getattr AND is_attr_of_self
         if parent.has_node:
             self.has_node = True
             self.node = parent.node
-        self.path_from_self = parent.path_from_self + l_attr
-
+        obj = parent.real_value_as_an_attr_of_self
+        for at in l_attr:
+            obj = getattr(obj,at)
+        self.real_value_as_an_attr_of_self = obj
 
 class B_graph:
     def __init__(self):
@@ -136,7 +139,9 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
 
     dict_vars = {}
     dict_vars["self"] = B_var(
-        val=ast.Name(sub_mod_str), is_attr_of_self=True, path_from_self=[]
+        val=ast.Name(sub_mod_str), 
+        is_attr_of_self=True, 
+        real_value_as_an_attr_of_self=sub_mod
     )
     nodes = []
 
@@ -184,7 +189,7 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    # ===== AUXILARY FUNCTIONS =====
+    # ===== AUXILIARY FUNCTIONS =====
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
     # -- handle attribute --
     # -> explicit "getattr" or using "." (e.g. self.wpe)
@@ -284,7 +289,7 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
             return aux_handle_attr(target, parent_var, format_fct, [attr])
             # might create one node
 
-        # == torchscript's functions ==
+        # == TorchScript's functions ==
         # -> must be removed because some refer to TorchScript global var
         elif l_name[0] == "ops":
             assert len(args) == 1
@@ -307,9 +312,8 @@ def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
                     f"{ast_add_on.ast_to_str(sub_var.val)}.{l_name[1:]}"
                 )
                 assert sub_var.is_attr_of_self
-                sub_sub_mod = sub_mod
-                path_from_self = sub_var.path_from_self + l_name[1:-1]
-                for at in path_from_self:
+                sub_sub_mod = sub_var.real_value_as_an_attr_of_self
+                for at in l_name[1:-1]:
                     sub_sub_mod = getattr(sub_sub_mod, at)
                 sub_sub_str = ast_add_on.ast_to_str(sub_var.val)
                 sub_graph = open_sub_module(

@@ -242,9 +242,15 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
             if is_inplace or is_view:
                 bn_deps_names = set(req_bn.target for req_bn in bn.deps)
                 data_direct_parents = bn_deps_names & data_parents
+                if len(data_direct_parents) == 0:
+                    for req_bn in bn.deps:
+                        for req_req_bn in req_bn.deps:
+                            req_req_name = req_req_bn.target
+                            if req_req_name in data_parents:
+                                data_direct_parents.add(req_req_name)
                 if len(data_direct_parents) == 0: raise Exception(
                     f"{bn.target} is an inplace or view op, it doesn't "\
-                    f"share its data with any of its deps ?!")
+                    f"share its data with any of its deps ?! (even deps of deps)")
                 data_direct_parent_name = data_direct_parents.pop()
                 o_info = dict_info[data_direct_parent_name]
                 data_owner_name = o_info.data_owner_name
