@@ -127,7 +127,8 @@ class H_graph:
             )
 
             for j, hdn in enumerate(self.list_hdn):
-                if False:  # TODO: if hdn is interface
+                # if False:  # TODO: if hdn is interface
+                if hdn in self.inputs_hdn_data:
                     continue
                 if alive_status[j] and _can_del(i, hdn):
                     alive_status[j] = 0
@@ -821,30 +822,36 @@ class H_sched:
                     # 2. Fwd to Fwd, Bwd to Bwd
                     continue
 
-                if i >= index:
-                    if (
+                if i >= index:# if exist before
+                    if (# and not deleted in between
                         f"Del_{hdn_name}"
                         not in self.op_name_list[index : i + 1]
                     ):
                         correction_term[(hdn.kdn.name, True)] = -hdn.mem
                     else:
                         correction_term[(hdn.kdn.name, "always")] = -hdn.mem
-                else:
+                else:# if exist afterwards
                     if not (hdn in self.hgraph.outputs_hdn_data) and (
                         hdn.deps
                         and (
                             list(hdn.deps)[0].name
                             in self.op_name_list[i : index + 1]
                         )
-                    ):
+                    ):#and not generated in between
                         # check if output_data is created after i
                         correction_term[(hdn.kdn.name, False)] = -hdn.mem
                     else:
                         correction_term[(hdn.kdn.name, "always")] = -hdn.mem
 
-            if i < self.loss_idx:
+            if (
+                i < self.loss_idx
+                and correction_term not in self.fwd_overhead_correction
+            ):
                 self.fwd_overhead_correction.append(correction_term)
-            else:
+            elif (
+                i > self.loss_idx
+                and correction_term not in self.bwd_overhead_correction
+            ):
                 self.bwd_overhead_correction.append(correction_term)
 
             # if i < self.loss_idx:  # During forward

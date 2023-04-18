@@ -242,13 +242,13 @@ class CheckpointedModule(torch.nn.Module):
             save_all_sched = rkgb.Htools.get_save_all_option(self.hg)
             self.hg.add_sched(save_all_sched)
             solve_hg_recursive(self.hg, solve_self=False)
-        md = ModelGurobi(self.hg, mem_limit, mem_limit)
-        md.solve()
-        if not md.feasible:
+        self.md = ModelGurobi(self.hg, mem_limit, mem_limit)
+        self.md.solve()
+        if not self.md.feasible:
             return "Not feasible solution"
         else:
-            print(f"Solution with obj: {md.md.getObjective().getValue()}")
-        self.h_sched = md.schedule()
+            print(f"Solution with obj: {self.md.md.getObjective().getValue()}")
+        self.h_sched = self.md.schedule()
         self.bottom_op_list = rkgb.Htools.get_bottom_op_list(
             self.h_sched.op_list
         )
