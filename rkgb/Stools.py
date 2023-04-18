@@ -417,7 +417,7 @@ def insert_ast_code(main_sn,sub_sn):
         for k in mc.keywords:
             if isinstance(k.value,ast.Name) and k.value.id == st:
                 kwds.append(ast.Keyword(k.arg,sc))
-            else: kwds.append(s)
+            else: kwds.append(k)
         ret = ast.Call(mc.func,args,kwds)
         main_sn.main_code = (main_sn.main_target,ret)
     elif (isinstance(mc,ast.Tuple)
