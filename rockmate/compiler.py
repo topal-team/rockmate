@@ -319,7 +319,7 @@ class Compiler:
                 inplace_code = inplace_code.replace(target, "_" + target)
             l.append(
                 fct_run_forward_no_grad(
-                    self.storage, main_code.replace("self", "original_mod"),
+                    self.storage, main_code.replace("self.", "original_mod."),
                 )
             )
         else:
@@ -336,19 +336,19 @@ class Compiler:
             l.append(
                 fct_run_forward_with_grad(
                     self.storage,
-                    main_code.replace("self", "original_mod"),
+                    main_code.replace("self.", "original_mod."),
                     no_save_list=no_save_list,
                 )
             )
         l.append(
             fct_run_forward_with_grad(
-                self.storage, inplace_code.replace("self", "original_mod"),
+                self.storage, inplace_code.replace("self.", "original_mod."),
             )
         )
         l.append(fct_run_detach(self.storage, op.main_target))
         l.append(
             fct_run_forward_with_grad(
-                self.storage, body_code.replace("self", "original_mod")
+                self.storage, body_code.replace("self.", "original_mod.")
             )
         )
 
@@ -452,19 +452,22 @@ class Compiler:
                 self.op_name_list.append(kn)
 
         kdn_names = set(
-            kn.name for kn in kn_list if isinstance(kn, K_D_node)
+            kn.name for kn in kn_list if hasattr(kn, "kdn_type")
         ).union(
             set(
                 kdn.name
                 for kn in kn_list
-                if isinstance(kn, K_C_node)
+                if hasattr(kn, "is_fwd")
                 for kdn in kn.users
             )
         )
 
         def refine(kn_list):
             for i, kn in enumerate(kn_list):
-                if isinstance(kn, K_D_node):
+                if hasattr(kn, "is_fwd") and "loss" in kn.name:
+                    kn_list[i] = "Loss"
+
+                if hasattr(kn, "kdn_type"):
                     # try to delete KDN
                     src_i = []  # indices of source KCN's after i
                     for kcn in kn.deps:
@@ -485,16 +488,16 @@ class Compiler:
                             "Disabled_" + kn_list[i].name
                         )  # skip this deletion
 
-        refine(kn_list)
+        # refine(kn_list)
 
         self.alive_list = []
         alive_status = {kdn_name: 0 for kdn_name in kdn_names}
 
         for kn in kn_list:
-            if isinstance(kn, K_C_node):
+            if hasattr(kn, "is_fwd"):
                 for kdn in kn.users:
                     alive_status[kdn.name] = 1
-            elif isinstance(kn, K_D_node):
+            elif hasattr(kn, "kdn_type"):
                 alive_status[kn.name] = 0
 
             self.alive_list.append(alive_status.copy())
@@ -521,3 +524,127 @@ class Compiler:
 
         return fct_list
 
+
+def kn_list_peak_mem(kn_list, kg, refine_list=False):
+    kdn_names = set(
+        kn.name for kn in kn_list if isinstance(kn, K_D_node)
+    ).union(
+        set(
+            kdn.name
+            for kn in kn_list
+            if isinstance(kn, K_C_node)
+            for kdn in kn.users
+        )
+    )
+
+    def refine(kn_list):
+        for i, kn in enumerate(kn_list):
+            if hasattr(kn, "is_fwd") and "loss" in kn.name:
+                kn_list[i] = "Loss"
+            if isinstance(kn, K_D_node):
+                # try to delete KDN
+                src_i = []  # indices of source KCN's after i
+                for kcn in kn.deps:
+                    if kcn in kn_list[i:]:
+                        src_i.append(kn_list[i:].index(kcn) + i)
+                    else:
+                        src_i.append(len(kn_list))
+
+                next_used_i = len(kn_list)  # the next index to use KDN
+                for kcn in kn.users_real:
+                    if kcn in kn_list[i:]:
+                        next_used_i = min(
+                            kn_list[i:].index(kcn) + i, next_used_i
+                        )
+
+                if max(src_i) > next_used_i:  # try to use before regenerate
+                    kn_list[i] = (
+                        "Disabled_" + kn_list[i].name
+                    )  # skip this deletion
+
+    if refine_list:
+        refine(kn_list)
+
+    alive_list = []
+    alive_status = {kdn_name: 0 for kdn_name in kdn_names}
+    overhead_list = []
+
+    for kn in kn_list:
+        if isinstance(kn, K_C_node):
+            for kdn in kn.users:
+                alive_status[kdn.name] = 1
+        elif isinstance(kn, K_D_node):
+            alive_status[kn.name] = 0
+
+        alive_list.append(alive_status.copy())
+        if isinstance(kn, K_C_node):
+            overhead_list.append(kn.overhead)
+        else:
+            overhead_list.append(0)
+
+    def optimize(kn_list, alive_list):
+        for i, (kn, alive_status) in enumerate(zip(kn_list, alive_list)):
+            alive_kn_names = [k for k, v in alive_status.items() if v]
+            for kn_name in alive_kn_names:
+                kdn = kg.dict_kn[kn_name]
+                src_i = []  # indices of source KCN's after i
+                for kcn in kdn.deps:
+                    if kcn in kn_list[i + 1 :]:
+                        src_i.append(kn_list[i + 1 :].index(kcn) + i)
+                    else:
+                        src_i.append(len(kn_list))
+
+                next_used_i = len(kn_list)  # the next index to use KDN
+                for kcn in kdn.users_real:
+                    if kcn in kn_list[i:]:
+                        next_used_i = min(
+                            kn_list[i:].index(kcn) + i, next_used_i
+                        )
+
+                if max(src_i) < next_used_i:  # use only after regenerate
+                    print(f"{kn_name} is alive at {i}-th place")
+                    # kn_list[i] = (
+                    #     "Disabled_" + kn_list[i].name
+                    # )  # skip this deletion
+
+    # optimize(kn_list, alive_list)
+
+    def _sum_mem(alive_status):
+        return sum(kg.dict_kn[k].mem for k, v in alive_status.items() if v)
+
+    return max(
+        [
+            _sum_mem(alive_status) + overhead
+            for alive_status, overhead in zip(alive_list, overhead_list)
+        ]
+    )
+
+
+def save_all(kg):
+    def _can_del(i, kdn):
+        for kcn in kdn.users_real:
+            # if "bwd" in kcn.name:
+            #     continue
+            if kg.list_kcn.index(kcn) > i:
+                return False
+        return True
+
+    kn_list = []
+    alive_list = []
+    alive_status = np.zeros(len(kg.list_kdn), dtype=bool)
+    alive_status[-1] = True
+    for i, kcn in enumerate(kg.list_kcn):
+        kn_list.append(kcn)
+        for kdn in kcn.users:
+            # if "data" not in kdn.kdn_type:
+            #     continue
+            alive_status[kg.list_kdn.index(kdn)] = 1
+        alive_list.append(alive_status.copy())
+        for j, kdn in enumerate(kg.list_kdn):
+            # if kdn in [kg.output_kdn_data, kg.output_kdn_grad]:
+            #     continue
+            if alive_status[j] and _can_del(i, kdn):
+                kn_list.append(kdn)
+                alive_status[j] = 0
+                alive_list.append(alive_status.copy())
+    return kn_list, alive_list
