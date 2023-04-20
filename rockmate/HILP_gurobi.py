@@ -595,6 +595,8 @@ class ModelGurobi:
                         self.md.status, self.md.solCount
                     )
                 )
+            if self.md.status==9:
+                print(f"GUROBI stopped early for reaching time limit")
             self.feasible = True
 
     def schedule(self, hgraph=None):

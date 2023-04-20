@@ -587,86 +587,6 @@ class H_sched:
             if (v > -1 and k not in ignore)
         )
 
-    # def del_op(self, i):
-    #     # this function does not correct alive status
-    #     self.op_list[i] = ...  # TODO: create an empty op or placeholder
-
-    # def update_alive_list(self, target_status, start=0, end=-1):
-    #     for alive_status in self.alive_list[start:end]:
-    #         alive_status.update(target_status)
-
-    # # def keep_hdn(self, hdn_name, status=1, start=0, end=-1):
-    # #     # manually set the status of one hdn
-    # #     self.update_alive_list({hdn_name:status}, start, end)
-
-    # def extend(self, next_sched):
-    #     common_k = self.sizes.keys() & next_sched.sizes.keys()
-    #     current_end_status = self.alive_list[-1].copy()
-    #     next_start_status = next_sched.alive_list[0].copy()
-
-    #     self.op_list += next_sched.op_list
-    #     self.sizes.update(next_sched.sizes)
-    #     self.alive_list += next_sched.alive_list
-
-    #     for k in common_k:
-    #         del next_start_status[k]
-    #     self.update_alive_list(
-    #         next_start_status, start=0, end=len(self.alive_list) + 1
-    #     )
-
-    #     for k in common_k:
-    #         del current_end_status[k]
-    #     self.update_alive_list(
-    #         current_end_status, start=len(self.alive_list) + 1, end=-1
-    #     )
-
-    # def get_FB_op_list(self, split_idx):
-    #     # sched_0 = H_sched(
-    #     #     self.op_list[: split_idx + 1],
-    #     #     self.alive_list[: split_idx + 1],
-    #     #     self.sizes,
-    #     # )
-    #     # sched_1 = H_sched(
-    #     #     self.op_list[split_idx + 1 :],
-    #     #     self.alive_list[split_idx + 1 :],
-    #     #     self.sizes,
-    #     # )
-    #     # return sched_0, sched_1
-    #     return self.op_list[: split_idx + 1], self.op_list[split_idx + 1 :]
-
-    # def collapse(self, i, sub_op_sched):
-    #     # replace the i-th operation by the lower level op_sched
-    #     self.op_list = (
-    #         self.op_list[:i] + sub_op_sched.op_list + self.op_list[i + 1 :]
-    #     )
-
-    # # ***********
-    # # * H_option *
-    # # ***********
-
-    # class H_option:
-    #     """
-    #     Info needed for HILP:
-    #         .mem: phantom memory saved from fwd to bwd
-    #         .fwd_time/bwd_time
-    #         .fwd_overhead/bwd_overhead
-    #     An H_option should be useful for several purpose:
-    #         1. it provides the time/memory information for each feasible
-    #         schedule of running forward/backward loop for the corresponding
-    #         H_Graph.
-    #         2. it should be easy to consider the alive status of interface
-    #         HDN's for the accurate overhead.
-    #         3. after solving everything, compiler could easily read through
-    #         the H_option and understand what operations should be executed.
-    #     """
-
-    #     def __init__(self, hgraph, h_sched, direct_info={}):
-    #         # when op_list and alive_list are empty, all the information can be
-    #         # assigned directly
-    #         self.h_sched = h_sched
-    #         self.op_list = h_sched.op_list
-    #         self.alive_list = h_sched.alive_list
-
     def get_info(self):
         """
         A function that compute the time/memory information based on 
@@ -707,20 +627,6 @@ class H_sched:
                 self.time[i] = op.time
                 self.overhead[i] = op.overhead
 
-                # if op.is_fwd:
-                #     self.time[i] = op.fwd_time
-                #     self.overhead[i] = op.fwd_overhead
-                # else:
-                #     self.time[i] = op.bwd_time
-                #     self.overhead[i] = op.bwd_overhead
-        # if direct_info:
-        #     self.mem = direct_info["mem"]
-        #     self.fwd_time = direct_info["fwd_time"]
-        #     self.bwd_time = direct_info["bwd_time"]
-        #     self.fwd_overhead = direct_info["fwd_overhead"]
-        #     self.bwd_overhead = direct_info["bwd_overhead"]
-        #     self.dep_interfaces_data = direct_info["dep_interfaces_data"]
-        # else:
         if self.op_list:
             self.mem = self.save_mem[self.loss_idx]
             self.fwd_time = np.sum(self.time[: self.loss_idx + 1])
@@ -766,13 +672,6 @@ class H_sched:
     def correct_overhead(self):
         # correction terms of overhead, each term represents one step in op_list
 
-        # fwd_op_list = self.op_list[: self.loss_idx + 1]
-        # bwd_op_list = self.op_list[self.loss_idx + 1 :]
-        # fwd_op_name_list = [op.name for op in fwd_op_list]
-        # bwd_op_name_list = [op.name for op in bwd_op_list]
-        # fwd_alive_list = self.alive_list[: self.loss_idx + 1]
-        # bwd_alive_list = self.alive_list[self.loss_idx + 1 :]
-
         interfaces_status = []
         for hdn in self.hgraph.inputs_hdn_data:  # Input of Fwd
             interfaces_status.append((hdn.name, self.loss_idx))  # After fwd
@@ -780,20 +679,12 @@ class H_sched:
                 interfaces_status.append(
                     (hdn.name, len(self.op_list))
                 )  # After Bwd
-            # else:
-            #     interfaces_status.append(
-            #         (hdn.name, self.loss_idx)
-            #     )  # Before Bwd
         for hdn in self.hgraph.outputs_hdn_data:  # Output of Fwd
             interfaces_status.append((hdn.name, 0))  # Before fwd?
             if hdn.kdn.name in self.dep_interfaces_data:
                 interfaces_status.append(
                     (hdn.name, len(self.op_list))
                 )  # After Bwd
-            # else:  # if not dep, status is important
-            #     interfaces_status.append(
-            #         (hdn.name, self.loss_idx)
-            #     )  # Before Bwd
         for hdn in self.hgraph.outputs_hdn_grad:
             interfaces_status.append((hdn.name, len(self.op_list)))  # After Bwd
         for hdn in self.hgraph.inputs_hdn_grad:
@@ -822,22 +713,22 @@ class H_sched:
                     # 2. Fwd to Fwd, Bwd to Bwd
                     continue
 
-                if i >= index:# if exist before
-                    if (# and not deleted in between
+                if i >= index:  # if exist before
+                    if (  # and not deleted in between
                         f"Del_{hdn_name}"
                         not in self.op_name_list[index : i + 1]
                     ):
                         correction_term[(hdn.kdn.name, True)] = -hdn.mem
                     else:
                         correction_term[(hdn.kdn.name, "always")] = -hdn.mem
-                else:# if exist afterwards
+                else:  # if exist afterwards
                     if not (hdn in self.hgraph.outputs_hdn_data) and (
                         hdn.deps
                         and (
                             list(hdn.deps)[0].name
                             in self.op_name_list[i : index + 1]
                         )
-                    ):#and not generated in between
+                    ):  # and not generated in between
                         # check if output_data is created after i
                         correction_term[(hdn.kdn.name, False)] = -hdn.mem
                     else:
@@ -853,59 +744,6 @@ class H_sched:
                 and correction_term not in self.bwd_overhead_correction
             ):
                 self.bwd_overhead_correction.append(correction_term)
-
-            # if i < self.loss_idx:  # During forward
-            #     for (hdn_name, index) in interfaces_status:
-            #         # if index < self.loss_idx-1: # Output data
-            #         if alive_status[hdn_name] < 0 and (
-            #             f"Del_{hdn_name}"
-            #             not in self.op_name_list[
-            #                 min(i, index): max(i, index) + 1
-            #             ]
-            #         ):  # real alive status depends on the status at the start/end
-            #             correction_term[
-            #                 (hdn_name, index == 0)
-            #             ] = -self.hgraph.dict_hn[hdn_name].mem
-
-            #     # for hdn in self.hgraph.inputs_hdn_data:
-            #     #     if alive_status[hdn.name] < 0:  # interfaces is not alive
-            #     #         if (
-            #     #             f"Del_{hdn.name}"
-            #     #             not in self.op_name_list[i : self.loss_idx]
-            #     #         ):  # real alive status depends on the status at the start/end
-            #     #             correction_term[
-            #     #                 (hdn.name, self.loss_idx)
-            #     #             ] = -self.hgraph.dict_hn[hdn.name].mem
-            #     # for hdn in self.hgraph.outputs_hdn_data:
-            #     #     if alive_status[hdn.name] < 0:  # interfaces is not alive
-            #     #         if (
-            #     #             f"Del_{hdn.name}" not in self.op_name_list[:i]
-            #     #         ):  # real alive status depends on the status at the start/end
-            #     #             correction_term[
-            #     #                 (hdn.name, self.loss_idx)
-            #     #             ] = -self.hgraph.dict_hn[hdn.name].mem
-            #     self.fwd_overhead_correction.append(correction_term)
-
-            # if i > self.loss_idx:
-            #     for (hdn_name, index) in interfaces_status:
-            #         if index >= self.loss_idx:
-            #             if alive_status[hdn_name] < 0 and (
-            #                 f"Del_{hdn_name}"
-            #                 not in self.op_name_list[
-            #                     min(i, index): max(i, index) + 1
-            #                 ]
-            #             ):  # real alive status depends on the status at the start/end
-            #                 correction_term[
-            #                     (hdn_name, index == self.loss_idx)
-            #                 ] = -self.hgraph.dict_hn[hdn_name].mem
-
-            #     self.bwd_overhead_correction.append(correction_term)
-
-            # # TODO: there might be cases when higher level delete the output_data,
-            # # while during the bwd schedule it is generated.
-            # for hdn in self.hgraph.outputs_hdn_data:
-            #     if hdn.kdn.name not in self.dep_interfaces_data:
-            #         if alive_status[hdn.name]>=0:
 
         def refine_correction(correction):
             # Some correction terms are not useful because they will not be peak
@@ -924,6 +762,55 @@ class H_sched:
         refine_correction(self.bwd_overhead_correction)
 
         # for correction in self.fwd_overhead_correction:
+
+    def get_bottom_op_list(self):
+        def collapse(op):
+            # if isinstance(op.obj, H_C_node):
+            if hasattr(op.obj, "sub_graph"):
+                if "Loss" in op.obj.name:
+                    return [op]
+                return op.obj.ff_op_list
+            # elif isinstance(op.obj, H_sched):
+            elif hasattr(op.obj, "op_list"):
+                if not op.obj.op_list:
+                    # bottom level
+                    if op.is_del:
+                        hgraph = op.obj.hgraph
+                        return [H_op(f"Del_{hgraph.name}", hgraph, is_del=True)]
+                    else:
+                        return [op]
+                else:
+                    if "Del" in op.name:
+                        op_list_ = []
+                        for obj in op.obj.phantoms:
+                            # if isinstance(obj, H_D_node):
+                            if hasattr(obj, "kdn"):
+                                op_list_.append(
+                                    H_op(f"Del_{obj.name}", obj, is_del=True)
+                                )
+                            else:
+                                op_list_ += collapse(
+                                    H_op(f"Del_sub_graph", obj, is_del=True)
+                                )
+
+                        return op_list_
+                    else:
+                        op_list_ = []
+                        if op.is_fwd:
+                            for sub_op in op.obj.op_list[: op.obj.loss_idx + 1]:
+                                op_list_ += collapse(sub_op)
+                        else:
+                            for sub_op in op.obj.op_list[op.obj.loss_idx + 1 :]:
+                                op_list_ += collapse(sub_op)
+                        return op_list_
+
+            else:
+                return [op]
+
+        bottom_op_list = []
+        for i, op in enumerate(self.op_list):
+            bottom_op_list += collapse(op)
+        return bottom_op_list
 
 
 def get_save_all_option(hgraph):
@@ -1049,14 +936,13 @@ def get_bottom_op_list(op_list):
     return bottom_op_list
 
 
-def find_main_target(op_name, targets):
-    for target in targets:
-        if target in op_name:
-            return target
-    return None
-
-
 def get_kn_list(op_list, kg):
+    def find_main_target(op_name, targets):
+        for target in targets:
+            if target in op_name:
+                return target
+        return None
+
     kn_list = []
     targets = set()
     for kcn in kg.list_kcn:

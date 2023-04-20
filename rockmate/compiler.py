@@ -488,7 +488,7 @@ class Compiler:
                             "Disabled_" + kn_list[i].name
                         )  # skip this deletion
 
-        # refine(kn_list)
+        refine(kn_list)
 
         self.alive_list = []
         alive_status = {kdn_name: 0 for kdn_name in kdn_names}
