@@ -126,9 +126,8 @@ def fct_run_backward(storage, tensor_name, retain_graph):
 def fct_run_backward_with_inputs(
     storage, tensor_name, retain_graph, input_names
 ):
-    inputs = [storage.ld[name] for name in input_names]
-
     def fct():
+        inputs = [storage.ld[name] for name in input_names]
         storage.ld[f"_{tensor_name}"].backward(
             storage.ld[tensor_name].grad,
             inputs=inputs,
@@ -319,7 +318,10 @@ class Compiler:
                 inplace_code = inplace_code.replace(target, "_" + target)
             l.append(
                 fct_run_forward_no_grad(
-                    self.storage, main_code.replace("self.", "original_mod."),
+                    self.storage,
+                    main_code.replace("self.", "original_mod.").replace(
+                        "self[", "original_mod["
+                    ),
                 )
             )
         else:
@@ -336,19 +338,27 @@ class Compiler:
             l.append(
                 fct_run_forward_with_grad(
                     self.storage,
-                    main_code.replace("self.", "original_mod."),
+                    main_code.replace("self.", "original_mod.").replace(
+                        "self[", "original_mod["
+                    ),
                     no_save_list=no_save_list,
                 )
             )
         l.append(
             fct_run_forward_with_grad(
-                self.storage, inplace_code.replace("self.", "original_mod."),
+                self.storage,
+                inplace_code.replace("self.", "original_mod.").replace(
+                    "self[", "original_mod["
+                ),
             )
         )
         l.append(fct_run_detach(self.storage, op.main_target))
         l.append(
             fct_run_forward_with_grad(
-                self.storage, body_code.replace("self.", "original_mod.")
+                self.storage,
+                body_code.replace("self.", "original_mod.").replace(
+                    "self[", "original_mod["
+                ),
             )
         )
 
@@ -385,7 +395,7 @@ class Compiler:
             prev_i = i - self.op_name_list[:i][::-1].index(op.name) - 1
             input_names = []
             for kdn_name in op.users_global:
-                if f"del {kdn_name}" in self.op_name_list[prev_i:i]:
+                if f"{kdn_name}" in self.op_name_list[prev_i:i]:
                     input_names.append(kdn_name.split(" ")[0])
             if input_names:
                 l.append(
