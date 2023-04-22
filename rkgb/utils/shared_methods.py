@@ -1,7 +1,6 @@
-# ========================================
-# = Useful functions for rk-GB's graphs
-# = for instance methods with similar code
-# ========================================
+# =======================================
+# = Useful functions for rk-GB's graphs =
+# =======================================
 from rkgb.utils.imports import *
 from rkgb.utils.global_vars import print_debug
 from rkgb.utils.ast_add_on import (
@@ -10,9 +9,14 @@ from rkgb.utils.ast_add_on import (
     make_ast_list_assign,
     ast_to_str)
 
-# ======================================
-# ==== GENERATE STR CODE FOR S AND K==== 
-# ======================================
+
+# ==============================
+
+
+
+# =======================================
+# ==== GENERATE STR CODE FOR S AND K ==== 
+# =======================================
 
 def get_code_ast(n,force_special_kwargs=False): # For S_node or KCN
     mc = n.main_code
