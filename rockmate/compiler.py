@@ -19,7 +19,7 @@ class RngState:
         torch.set_rng_state(self.cpu_states[op_name])
         torch.cuda.set_rng_state(self.gpu_states[op_name])
 
-        
+
 def make_gd(device, nn_mod, dict_constants):
     return {
         **globals(),
@@ -42,22 +42,27 @@ class RK_Storage:
     def add_val(self, val, x):
         self.ld[val] = x
 
-    
+
 class Compiler:
     """
     The compiler takes the full operation schedule as input,
     return the lists of Python functions.
     Each list corresponds to one operation.
     """
-    gd : dict = None
-    storage : RK_Storage = None
-    def __init__(self,gd):
+
+    gd: dict = None
+    storage: RK_Storage = None
+
+    def __init__(self, gd):
         self.gd = gd
-    
+
     def get_val(self, val):
-        if val in self.storage.ld: return self.storage.ld[val]
-        elif val in self.gd: return self.gd[val]
-        else: raise Exception(f"{val} not defined in executing RK_Env")
+        if val in self.storage.ld:
+            return self.storage.ld[val]
+        elif val in self.gd:
+            return self.gd[val]
+        else:
+            raise Exception(f"{val} not defined in executing RK_Env")
 
     def _is_alive(self, kdn_name, i):
         if not self.op_sched:
@@ -219,9 +224,7 @@ class Compiler:
                 )
         else:
             l.append(
-                self.fct_run_backward(
-                    op.main_target, retain_graph=(not last)
-                )
+                self.fct_run_backward(op.main_target, retain_graph=(not last))
             )
 
         return l + l2
@@ -264,6 +267,10 @@ class Compiler:
         return fct_list
 
     def compile_from_KN_list(self, kn_list):
+        for i, kn in enumerate(kn_list):
+            if hasattr(kn, "is_fwd") and "loss" in kn.name:
+                kn_list[i] = "Loss"
+
         self.op_sched = False
         self.op_name_list = []
         for kn in kn_list:
@@ -345,11 +352,11 @@ class Compiler:
 
         return fct_list
 
-    # ==================================
-    # = ELEMENTARY COMPILING FUNCTIONS =
-    # ==================================
-        # region Define Register Hooks
-    def fct_get_pack(self,no_save_list, sanity_check=False):
+    #  ==================================
+    #  = ELEMENTARY COMPILING FUNCTIONS =
+    #  ==================================
+    # region Define Register Hooks
+    def fct_get_pack(self, no_save_list, sanity_check=False):
         # no_save_list contains a list of names
         def pack(x):
             for i, c in enumerate(no_save_list):
@@ -372,7 +379,6 @@ class Compiler:
 
         return pack
 
-
     def fct_get_unpack(self):
         def unpack(x):
             if isinstance(x, tuple):
@@ -384,17 +390,18 @@ class Compiler:
 
         # endregion
 
-
     # region Basic Functions
-
 
     def fct_get_shapes(self, tensor_name):
         def fct():
-            self.storage.shapes[tensor_name] = self.storage.ld[tensor_name].shape
-            self.storage.dtypes[tensor_name] = self.storage.ld[tensor_name].dtype
+            self.storage.shapes[tensor_name] = self.storage.ld[
+                tensor_name
+            ].shape
+            self.storage.dtypes[tensor_name] = self.storage.ld[
+                tensor_name
+            ].dtype
 
         return fct
-
 
     def fct_get_rng_state(self, op_name):
         def fct():
@@ -402,13 +409,11 @@ class Compiler:
 
         return fct
 
-
     def fct_restore_rng_state(self, op_name):
         def fct():
             self.storage.rng_state.restore(op_name)
 
         return fct
-
 
     def fct_run_forward_no_grad(self, code):
         def fct():
@@ -417,17 +422,15 @@ class Compiler:
 
         return fct
 
-
     def fct_run_forward_with_grad(self, code, no_save_list=[]):
         def fct():
-            with torch.autograd.graph.saved_tensors_hooks(
-                self.fct_get_pack(no_save_list), 
-                self.fct_get_unpack()
-            ):
-                exec(code, self.gd, self.storage.ld)
+            with torch.enable_grad():
+                with torch.autograd.graph.saved_tensors_hooks(
+                    self.fct_get_pack(no_save_list), self.fct_get_unpack()
+                ):
+                    exec(code, self.gd, self.storage.ld)
 
         return fct
-
 
     def fct_run_inplace(self, tensor_name, inplace_code):
         def fct():
@@ -438,22 +441,19 @@ class Compiler:
 
         return fct
 
-
     def fct_run_detach(self, tensor_name):
         def fct():
-            self.storage.ld[tensor_name].data = \
-                self.storage.ld[f"_{tensor_name}"].data
+            self.storage.ld[tensor_name].data = self.storage.ld[
+                f"_{tensor_name}"
+            ].data
 
         return fct
-
 
     def fct_assign_proxy(self, tensor_name):
         def fct():
-            self.storage.ld[f"_{tensor_name}"] = \
-                self.storage.ld[tensor_name]
+            self.storage.ld[f"_{tensor_name}"] = self.storage.ld[tensor_name]
 
         return fct
-
 
     def fct_requires_grad(self, tensor_name):
         def fct():
@@ -461,16 +461,13 @@ class Compiler:
 
         return fct
 
-
     def fct_run_backward(self, tensor_name, retain_graph):
         def fct():
             self.storage.ld[f"_{tensor_name}"].backward(
-                self.storage.ld[tensor_name].grad, 
-                retain_graph=retain_graph
+                self.storage.ld[tensor_name].grad, retain_graph=retain_graph
             )
 
         return fct
-
 
     def fct_run_backward_with_inputs(
         self, tensor_name, retain_graph, input_names
@@ -485,7 +482,6 @@ class Compiler:
 
         return fct
 
-
     def fct_generate_fake_data(self, tensor_name):
         def fct():
             m = (
@@ -494,11 +490,11 @@ class Compiler:
                 else self.gd["meta"]
             )
             x = m.expand(np.prod(self.storage.shapes[tensor_name]))
-            self.storage.ld[tensor_name].data = \
-                x.view(self.storage.shapes[tensor_name])
+            self.storage.ld[tensor_name].data = x.view(
+                self.storage.shapes[tensor_name]
+            )
 
         return fct
-
 
     def fct_del_tensor_data(self, tensor_name):
         def fct():
@@ -508,7 +504,6 @@ class Compiler:
 
         return fct
 
-
     def fct_del_tensor_base(self, tensor_name):
         def fct():
             self.storage.ld[f"_{tensor_name}"]._base.data = torch.empty(
@@ -517,13 +512,11 @@ class Compiler:
 
         return fct
 
-
     def fct_del_tensor_grad(self, tensor_name):
         def fct():
             self.storage.ld[tensor_name].grad = None
 
         return fct
-
 
     def fct_del_var(self, var_name):
         def fct():
@@ -532,7 +525,6 @@ class Compiler:
         return fct
 
         # endregion
-
 
 
 def kn_list_peak_mem(kn_list, kg, refine_list=False):
