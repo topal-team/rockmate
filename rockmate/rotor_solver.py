@@ -20,7 +20,7 @@ from rockmate.def_sequence import (
 # ==========================
 
 
-def psolve_dp_functionnal(chain, mmax, opt_table=None):
+def psolve_dp_functional(chain, mmax, opt_table=None):
     """Returns the optimal table:
     Opt[m][lmin][lmax] : int matrix
         with lmin = 0...chain.length
@@ -169,7 +169,7 @@ def pseq_builder(chain, memory_limit, opt_table):
     # returns :
     # - the optimal sequence of computation using mem-persistent algo
     mmax = memory_limit - chain.cw[0]
-    # opt, what = solve_dp_functionnal(chain, mmax, *opt_table)
+    # opt, what = solve_dp_functional(chain, mmax, *opt_table)
     opt, what = opt_table
     #  ~~~~~~~~~~~~~~~~~~
     def seq_builder_rec(lmin, lmax, cmem):
@@ -260,7 +260,7 @@ def convert_sequence_from_C(chain: RK_Chain, original_sequence):
     return result
 
 
-def csolve_dp_functionnal(chain: RK_Chain, mmax, opt_table=None):
+def csolve_dp_functional(chain: RK_Chain, mmax, opt_table=None):
     if opt_table is None:  ## TODO? if opt_table.mmax < mmax, create new table
         result = rs.RkTable(chain, mmax)
     else:
@@ -279,11 +279,11 @@ def cseq_builder(chain: RK_Chain, mmax, opt_table):
 # ===============================================
 
 
-def solve_dp_functionnal(chain, mmax, opt_table=None, force_python=False):
+def solve_dp_functional(chain, mmax, opt_table=None, force_python=False):
     if force_python or not csolver_present:
-        return psolve_dp_functionnal(chain, mmax, opt_table)
+        return psolve_dp_functional(chain, mmax, opt_table)
     else:
-        return csolve_dp_functionnal(chain, int(mmax), opt_table)
+        return csolve_dp_functional(chain, int(mmax), opt_table)
 
 
 def seq_builder(chain, mmax, opt_table):
