@@ -15,15 +15,23 @@ class ModelGurobi:
 
     def __init__(
         self,
-        hgraph,
+        hgraph: H_graph,
         budget: int,
         save_budget: int,
         gurobi_params: Dict[str, Any] = {
             "LogToConsole": 0,
             "IntegralityFocus": 1,
+            "TimeLimit": 4 * 60,
         },
         gcd=None,
     ):
+        self.gcd = gcd if gcd else 1
+        self.peak_budget = budget / self.gcd
+        self.save_budget = save_budget / self.gcd
+        self.gurobi_params = gurobi_params
+        self.feasible = None
+        self.solve_time = None
+
         #############################
         self.hgraph = hgraph
         self.hcn2sub_g = []
@@ -41,7 +49,7 @@ class ModelGurobi:
                 self.nR.append(1)
                 self.nOpts.append(0)
                 self.time.append([hcn.fwd_time])
-                self.overhead.append([hcn.fwd_overhead])
+                self.overhead.append([hcn.fwd_overhead / self.gcd])
             else:
                 if hcn.sub_graph not in self.sub_gs:
                     self.sub_gs.append(hcn.sub_graph)
@@ -64,10 +72,10 @@ class ModelGurobi:
                     )
                     self.overhead.append(
                         [
-                            h_sched.fwd_overhead
+                            h_sched.fwd_overhead / self.gcd
                             for h_sched in hcn.sub_graph.list_sched
                         ]
-                        + [hcn.fwd_overhead]
+                        + [hcn.fwd_overhead / self.gcd]
                     )
                 else:
                     self.time.append(
@@ -78,7 +86,7 @@ class ModelGurobi:
                     )
                     self.overhead.append(
                         [
-                            h_sched.bwd_overhead
+                            h_sched.bwd_overhead / self.gcd
                             for h_sched in hcn.sub_graph.list_sched
                         ]
                     )
@@ -87,9 +95,9 @@ class ModelGurobi:
             if j is None:
                 continue
             self.sub_g2hcn[j].append(i)
-        self.mem = [hdn.mem for hdn in self.hgraph.list_hdn]
+        self.mem = [hdn.mem / self.gcd for hdn in self.hgraph.list_hdn]
         self.saved_mem = [
-            [h_sched.mem for h_sched in sub_g.list_sched]
+            [h_sched.mem / self.gcd for h_sched in sub_g.list_sched]
             for sub_g in self.sub_gs
         ]
 
@@ -98,6 +106,10 @@ class ModelGurobi:
         J = len(self.sub_gs)
 
         self.protected_indices = []
+        self.input_grad_indices = [
+            self.hgraph.list_hdn.index(hdn)
+            for hdn in self.hgraph.inputs_hdn_grad
+        ]
 
         _deps_d = [
             [self.hgraph.list_hcn.index(hcn) for hcn in hdn.deps]
@@ -134,13 +146,6 @@ class ModelGurobi:
                         _users_d[i].append(k)
 
         ##############################
-
-        self.gcd = gcd if gcd else 1
-        self.peak_budget = budget / self.gcd
-        self.save_budget = save_budget / self.gcd
-        self.gurobi_params = gurobi_params
-        self.feasible = None
-        self.solve_time = None
 
         self.md = Model(f"rockmateMILP_{T}_{budget}")
         if gurobi_params is not None:
@@ -231,6 +236,14 @@ class ModelGurobi:
                     GRB.EQUAL,
                     0,
                 )
+
+        # In the last stage, every edge of input_grad should be alive or executed
+        for i in self.input_grad_indices:
+            for j_, (k_, i_) in enumerate(self.create_list):
+                if i_ == i:
+                    self.md.addLConstr(
+                        self.S[T - 1, j_] + self.sumR[(k_, T - 1)], GRB.EQUAL, 1
+                    )
 
         # options don't conflict
         for i in range(T):
@@ -466,6 +479,7 @@ class ModelGurobi:
                 )
                 # if k < self.loss_idx:
                 if self.hgraph.list_hcn[k].is_fwd:
+                    # TODO: consider the case when you keep two different phantoms
                     self.U[(t, k)] += quicksum(
                         self.R[k][t, o] * self.saved_mem[j][o]
                         for o in range(self.nOpts[k])
@@ -505,7 +519,7 @@ class ModelGurobi:
                         GRB.LESS_EQUAL,
                         self.peak_budget,
                     )
-                else:  # TODO: get the indices of HDN and the corresponding places (start/end)
+                else:
                     hcn = self.hgraph.list_hcn[k]
                     for o, h_sched in enumerate(hcn.sub_graph.list_sched):
                         for correction in (
@@ -530,15 +544,26 @@ class ModelGurobi:
                                 if inter_position[1] == "always":
                                     not_kept_alive = 1
                                 elif not inter_position[1]:  # ending status
-                                    eidx = self.delete_list.index((k, i_))
-                                    not_kept_alive = self.delete[t, eidx]
+                                    if (k, i_) in self.delete_list:
+                                        eidx = self.delete_list.index((k, i_))
+                                        not_kept_alive = self.delete[t, eidx]
+                                    else:  # when output_data is not deps, but we care about it
+                                        # eidx = self.delete_list.index((k, i_))
+                                        k_ = max(
+                                            [
+                                                kk
+                                                for kk in _users_d[i_]
+                                                if kk < k
+                                            ]
+                                        )
+                                        not_kept_alive = self.alive[(t, k_, i_)]
                                 else:  # start status
                                     eidx = self.create_list.index((k, i_))
                                     not_kept_alive = self.create[t, eidx]
                                 correction_term += not_kept_alive * inter_mem
                             self.md.addLConstr(
                                 self.U[(t, k)]
-                                + self.R[k][t, o] * overhead
+                                + self.R[k][t, o] * overhead / self.gcd
                                 + correction_term
                                 + quicksum(
                                     self.mem[i_] * self.delete[t, eidx_d]
@@ -584,19 +609,15 @@ class ModelGurobi:
     def solve(self):
         # self.md.message("\n\nRestarting solve\n\n")
         self.md.optimize()
-
-        infeasible = self.md.status == GRB.INFEASIBLE
-        if infeasible:
+        if self.md.status == 9:
+            print(
+                f"GUROBI stopped early for reaching time limit with gap {self.md.MIPGap}"
+            )
+        # infeasible = self.md.status == GRB.INFEASIBLE
+        if self.md.solCount < 1:
             self.feasible = False
         else:
-            if self.md.solCount < 1:
-                raise ValueError(
-                    "Model status is {}, but solCount is {}".format(
-                        self.md.status, self.md.solCount
-                    )
-                )
-            if self.md.status==9:
-                print(f"GUROBI stopped early for reaching time limit")
+            self.solve_time = self.md.Runtime
             self.feasible = True
 
     def schedule(self, hgraph=None):
@@ -719,49 +740,85 @@ class ModelGurobi:
         return h_sched
 
 
-def add_hilp_option(hgraph, budget, save_budget):
-    md = ModelGurobi(hgraph, budget, save_budget)
-    md.solve()
-    if md.feasible:
-        h_sched = md.schedule()
-        hgraph.add_sched(h_sched)
+# def add_hilp_option(hgraph, budget, save_budget):
+#     md = ModelGurobi(hgraph, budget, save_budget)
+#     md.solve()
+#     if md.feasible:
+#         h_sched = md.schedule()
+#         hgraph.add_sched(h_sched)
+#         print(
+#             f"Solve Hgraph with {len(hgraph.list_hcn)} nodes takes {md.solve_time:03f}s"
+#         )
 
 
-def get_hg_budgets(hg, nb_bdg_peak=5, nb_bdg_save=8):
+def get_hg_budgets(hg, nb_bdg_peak=3, nb_bdg_save=6):
     # return reasonable budget list
     budgets = []
-    sizes = [hdn.mem for hdn in hg.list_hdn] + [
-        h_sched.mem for h_sched in hg.list_sched
-    ]
+    sizes = []
+    # fwd_hdns = set()
+    for hcn in hg.list_hcn:
+        # if hcn.is_fwd:
+        for hdn in hcn.users:
+            # if hdn not in hg.interfaces:
+            #     fwd_hdns.add(hdn)
+            if not hcn.sub_graph is None:
+                sizes.append(hcn.sub_graph.list_sched[0].mem)
+    sizes += [hdn.mem for hdn in hg.list_hdn]
+
     overheads = [hcn.fwd_overhead for hcn in hg.list_hcn] + [
         h_sched.bwd_overhead for h_sched in hg.list_sched
     ]
     max_bdg = sum(sizes) + max(overheads)
-    min_bdg = hg.fast_fwd_overhead()[0]
+    # max_bdg = hg.list_sched[0].mem + max(overheads)
+
+    # TODO: find the minimum feasible budget
+    # min_bdg = hg.fast_fwd_overhead()[0]
+    min_bdg = min(h_sched.mem for h_sched in hg.list_sched) + max(overheads)
+
     l_bd_peak = np.linspace(min_bdg, max_bdg, nb_bdg_peak)
     for bd_peak in l_bd_peak:
-        l_bd_save = np.linspace(0, bd_peak, nb_bdg_save)
+        l_bd_save = np.linspace(
+            0, min(bd_peak, hg.list_sched[0].mem), nb_bdg_save,
+        ) + sum(hdn.mem for hdn in hg.interfaces)
         # for bd_save in l_bd_save:
         #     budgets.append((bd_peak, bd_save))
         budgets.append((bd_peak, l_bd_save))
     return budgets
 
 
-def solve_hg(hg):
+def solve_hg(hg: H_graph):
+    # print(f"solving hg {hg.name} with {len(hg.list_hcn)} nodes")
     budgets = get_hg_budgets(hg)
+
     for bdg_peak, l_bdg_save in budgets:
-        for bdg_save in l_bdg_save:
-            add_hilp_option(hg, bdg_peak, bdg_save)
+        # print(bdg_peak)
+
+        md = ModelGurobi(hg, bdg_peak, save_budget=False)
+        # md = ModelGurobi(hg, 1e10, save_budget=False)
+        for bdg_save in np.sort(l_bdg_save)[::-1]:
+            # print(bdg_save)
+            md.add_abar_constraint(bdg_save)
+            md.solve()
+
+            # add_hilp_option(hg, bdg_peak, bdg_save)
+            if md.feasible:
+                h_sched = md.schedule()
+                # print(h_sched.mem)
+                hg.add_sched(h_sched)
+                print(
+                    f"Solve Hgraph {hg.name} with {len(hg.list_hcn)} nodes takes {md.solve_time:03f}s"
+                )
+    hg.refine_scheds()
 
 
-def solve_hg_recursive(hg, solve_self=True):
+def solve_hg_recursive(hg: H_graph, solve_self=True):
 
     for hcn in hg.list_hcn:
         if hcn.is_fwd and hcn.sub_graph is not None:
             sub_g = hcn.sub_graph
             if len(sub_g.list_sched) <= 1:
                 solve_hg_recursive(sub_g)
-    if solve_self and hg.list_hcn:  # not bottom hgraph
+    if solve_self and len(hg.list_hcn) >= 1:  # not bottom hgraph
         # print(f"Try to solve Hgraph with size {len(hg.list_hcn)}")
         solve_hg(hg)
 

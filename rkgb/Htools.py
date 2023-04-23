@@ -90,8 +90,46 @@ class H_graph:
             ) and (opt.mem < sched.mem):
                 # should consider other factors like req_inputs
                 pareto = False
+            if (
+                opt.fwd_time + opt.bwd_time > sched.fwd_time + sched.bwd_time
+            ) and (opt.mem > sched.mem):
+                self.list_sched.remove(opt)
         if pareto:
             self.list_sched.append(sched)
+        # self.refine_scheds()
+
+    def refine_scheds(self, expect_num=10):
+        def exclude_one():
+            def worse_sched(sched1, sched2):
+                if (
+                    sched1.fwd_time + sched1.bwd_time
+                    > sched2.fwd_time + sched2.bwd_time
+                ):
+                    return sched1
+                else:
+                    return sched2
+
+            # find the pair to remove one
+            diff = 100
+            for i, _sched1 in enumerate(self.list_sched[1:]):
+                for _sched2 in self.list_sched[i + 1 :]:
+
+                    if (
+                        abs((_sched2.mem - _sched1.mem + 1) / (_sched2.mem + 1))
+                        < diff
+                    ):
+                        sched1 = _sched1
+                        sched2 = _sched2
+                        diff = abs(
+                            (_sched2.mem - _sched1.mem + 1) / (_sched2.mem + 1)
+                        )
+            # assert sched1 in self.list_sched
+            # assert sched2 in self.list_sched
+            self.list_sched.remove(worse_sched(sched1, sched2))
+
+        while len(self.list_sched) > expect_num:
+            # print(len(self.list_sched))
+            exclude_one()
 
     def make_users(self):
         for hn in self.dict_hn.values():
@@ -577,6 +615,7 @@ class H_sched:
         self.ignore = []
         self.fwd_overhead_correction = []
         self.bwd_overhead_correction = []
+        self.bottom_op_list = []
 
     def alive_mem(self, i, ignore=[]):
         ignore += self.ignore
@@ -631,13 +670,24 @@ class H_sched:
             self.mem = self.save_mem[self.loss_idx]
             self.fwd_time = np.sum(self.time[: self.loss_idx + 1])
             self.bwd_time = np.sum(self.time[self.loss_idx + 1 :])
-            self.fwd_overhead = get_overhead_(
-                self.save_mem[: self.loss_idx + 1],
-                self.overhead[: self.loss_idx + 1],
+            # self.fwd_overhead = get_overhead_(
+            #     self.save_mem[: self.loss_idx + 1],
+            #     self.overhead[: self.loss_idx + 1],
+            # )
+            # self.bwd_overhead = get_overhead_(
+            #     self.save_mem[self.loss_idx + 1 :],
+            #     self.overhead[self.loss_idx + 1 :],
+            # )
+
+            # # In practice, h_sched is assumed to be still alive after BWD
+            # # this will lead to negative overhead, but it makes
+            # # bwd_overhead[i]+save[i]=real memory usage
+
+            self.fwd_overhead = (
+                max(self.overhead[: self.loss_idx + 1]) - self.mem
             )
-            self.bwd_overhead = get_overhead_(
-                self.save_mem[self.loss_idx + 1 :],
-                self.overhead[self.loss_idx + 1 :],
+            self.bwd_overhead = (
+                max(self.overhead[self.loss_idx + 1 :]) - self.mem
             )
 
             # names of additional HDNs that are required by BWD
@@ -682,9 +732,14 @@ class H_sched:
         for hdn in self.hgraph.outputs_hdn_data:  # Output of Fwd
             interfaces_status.append((hdn.name, 0))  # Before fwd?
             if hdn.kdn.name in self.dep_interfaces_data:
+                # TODO: add the case when output is generated then deleted during bwd
+
                 interfaces_status.append(
                     (hdn.name, len(self.op_list))
                 )  # After Bwd
+            else:
+                interfaces_status.append((hdn.name, -1))  # After Bwd
+
         for hdn in self.hgraph.outputs_hdn_grad:
             interfaces_status.append((hdn.name, len(self.op_list)))  # After Bwd
         for hdn in self.hgraph.inputs_hdn_grad:
@@ -703,6 +758,15 @@ class H_sched:
             }
             for (hdn_name, index) in interfaces_status:
                 hdn = self.hgraph.dict_hn[hdn_name]
+                if index == -1:
+                    # special case: output_data in BWD without dependency
+                    # If outside is alive, no need to correct;
+                    # Otherwise, add hdn to memory
+                    if i > self.loss_idx and alive_status[hdn_name] > -1:
+                        correction_term["save"] += hdn.mem
+                        correction_term[(hdn.kdn.name, False)] = -hdn.mem
+                    continue
+
                 if (
                     alive_status[hdn_name] > -1
                     or (index > self.loss_idx) != (i > self.loss_idx)
@@ -764,7 +828,7 @@ class H_sched:
         # for correction in self.fwd_overhead_correction:
 
     def get_bottom_op_list(self):
-        def collapse(op):
+        def collapse_op(op):
             # if isinstance(op.obj, H_C_node):
             if hasattr(op.obj, "sub_graph"):
                 if "Loss" in op.obj.name:
@@ -807,10 +871,10 @@ class H_sched:
             else:
                 return [op]
 
-        bottom_op_list = []
-        for i, op in enumerate(self.op_list):
-            bottom_op_list += collapse(op)
-        return bottom_op_list
+        if not self.bottom_op_list:
+            for i, op in enumerate(self.op_list):
+                self.bottom_op_list += collapse_op(op)
+        return self.bottom_op_list
 
 
 def get_save_all_option(hgraph):
