@@ -55,8 +55,8 @@ class Compiler:
         self.gd = gd
     
     def get_val(self, val):
-        if val in self.storage.ld: self.storage.ld[val]
-        elif val in self.gd: self.gd[val]
+        if val in self.storage.ld: return self.storage.ld[val]
+        elif val in self.gd: return self.gd[val]
         else: raise Exception(f"{val} not defined in executing RK_Env")
 
     def _is_alive(self, kdn_name, i):

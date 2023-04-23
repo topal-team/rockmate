@@ -87,6 +87,7 @@ class CheckpointedModule(torch.nn.Module):
                 self.get_sequence(mem_limit)
                 if get_compiled_fct:
                     self.get_compiled_fct()
+                    self.define_autograd_Function()
 
     def get_chain(self, nb_budget_abar=10, nb_budget_all=5):
         start = time.time()
@@ -360,7 +361,7 @@ class CheckpointedModule(torch.nn.Module):
                 RkMod.compiler.storage = storage
                 # -> Detach input tensors (Rem 3) and store all the inputs
                 dict_input_tensors_detach = dict() # dict : input -> detached input
-                for k,v in dict_inputs:
+                for k,v in dict_inputs.items():
                     if isinstance(v,torch.Tensor):
                         v_d = v.detach().requires_grad_(v.requires_grad)
                         dict_input_tensors_detach[v] = v_d
@@ -390,9 +391,7 @@ class CheckpointedModule(torch.nn.Module):
                 # TODO multiple outputs
                 # -> Clear the compiler
                 RkMod.compiler.storage = None
-                # -> Remember that out is detached from the rest.
-                # -> We need to save it because we will set the grad manually (Rem 4)
-                ctx.save_for_backward(out)
+                # -> Remember that out have been detached from the rest during exec
                 return out
                 """
                 ctx.set_materialize_grads(True) # as the default
@@ -419,12 +418,12 @@ class CheckpointedModule(torch.nn.Module):
             @staticmethod
             @torch.autograd.function.once_differentiable
             def backward(ctx, grad_out): # TODO multiple outputs
-                # -> Put grad_out in out.grad (Rem 4)
-                out = ctx.saved_tensors
-                out.grad = grad_out
-                # -> Reload the storage
+                # -> Reload the storage and out
                 storage = ctx.RK_Storage
                 RkMod.compiler.storage = storage
+                out = RkMod.compiler.get_val(RkMod.output.main_target)
+                # -> Put grad_out in out.grad (Rem 4)
+                out.grad = grad_out
                 # * record_mem stuff *
                 if RkMod.exec_with_record_mem:
                     RkMod.output_size = irotor.tensorMsize(
