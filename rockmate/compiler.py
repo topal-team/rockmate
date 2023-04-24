@@ -424,11 +424,11 @@ class Compiler:
 
     def fct_run_forward_with_grad(self, code, no_save_list=[]):
         def fct():
-            with torch.enable_grad():
-                with torch.autograd.graph.saved_tensors_hooks(
-                    self.fct_get_pack(no_save_list), self.fct_get_unpack()
-                ):
-                    exec(code, self.gd, self.storage.ld)
+            # with torch.enable_grad():
+            with torch.autograd.graph.saved_tensors_hooks(
+                self.fct_get_pack(no_save_list), self.fct_get_unpack()
+            ):
+                exec(code, self.gd, self.storage.ld)
 
         return fct
 

@@ -8,6 +8,7 @@ from rkgb.utils import print_debug, np, irotor
 from rkgb.utils.global_vars import ref_verbose, solver_name
 from rkgb.utils.small_fcts import get_device
 from rkgb.utils.ast_add_on import ast_to_str
+from rkgb.Ptools import P_config
 from rockmate.def_op import DelOp, OpSchedule
 from rockmate.def_chain import RK_Chain
 from rockmate.def_sequence import (
@@ -48,6 +49,7 @@ class CheckpointedModule(torch.nn.Module):
     autograd_Function = None
     backward_stop = False
     backward_add_output_grad = True
+
     def __init__(
         self,
         original_mod,
@@ -234,7 +236,7 @@ class CheckpointedModule(torch.nn.Module):
         self,
         mem_limit=False,
         recursive=True,
-        P_config=None,
+        p_config=P_config(),
         gurobi_params={"LogToConsole": 0, "IntegralityFocus": 1,},
     ):
         # based only on rkgb
@@ -242,7 +244,7 @@ class CheckpointedModule(torch.nn.Module):
         kg = self.rkgb_res.K_graph
         sg = self.rkgb_res.S_graph
         if recursive:
-            pg = rkgb.Ptools.S_to_P(sg, config=P_config)
+            pg = rkgb.Ptools.S_to_P(sg, config=p_config)
             self.hg = rkgb.Htools.P_and_K_to_H(pg, kg)
             print(f"Size of Hgraph {len(self.hg.list_hcn)}")
 
@@ -251,7 +253,11 @@ class CheckpointedModule(torch.nn.Module):
             solve_hg_recursive(self.hg, solve_self=False)
             print("Low level finished")
         self.md = ModelGurobi(
-            self.hg, mem_limit, mem_limit, gurobi_params=gurobi_params
+            self.hg,
+            mem_limit,
+            mem_limit,
+            gurobi_params=gurobi_params,
+            accurate_mem=True,
         )
         self.md.solve()
         if not self.md.feasible:
@@ -270,7 +276,7 @@ class CheckpointedModule(torch.nn.Module):
         fct_list = self.compiler.compile_from_KN_list(self.kn_list)
         self.fwd_fct_list = fct_list[:loss_idx]
         self.bwd_fct_list = fct_list[loss_idx + 1 :]
-
+        self.define_autograd_Function()
 
     def _exec(self, fct_list):
         if self.exec_with_record_mem:
@@ -287,21 +293,20 @@ class CheckpointedModule(torch.nn.Module):
             for fct in fct_list:
                 fct()
 
-
     def define_autograd_Function(self):
-        # To define properly new module's forward and backward
-        # functions we need to make it compatible with Autograd.
-        # This method MUST be called to create the forward function.
+        #  To define properly new module's forward and backward
+        #  functions we need to make it compatible with Autograd.
+        #  This method MUST be called to create the forward function.
         # With this the module will be fully compatible with Autograd.
-        
-        # Rem 1: 
+
+        # Rem 1:
         # Autograd.Function forward function kwargs must be defined,
-        # so we cannot use "**kwargs". Which means to do things 
-        # properly we would need to extract original_mod's kwargs
+        #  so we cannot use "**kwargs". Which means to do things
+        #  properly we would need to extract original_mod's kwargs
         # definition (with default value) and write custom Autograd.Function
-        # definition using a string and `exec` (since the definition 
-        # of the Function depends on some arguments). 
-        # To avoid this issue we do the following : 
+        # definition using a string and `exec` (since the definition
+        # of the Function depends on some arguments).
+        # To avoid this issue we do the following :
         # nn.Module.forward function receives *args and **kwargs
         # and saves everything in a buffer `self(nn.Module).dict_inputs_buffer`
         # then we call Function.forward without giving it the inputs.
@@ -310,28 +315,28 @@ class CheckpointedModule(torch.nn.Module):
         # we just give a dummy input, and this input must requires_grad
         # (otherwise, if none of Function.forward's inputs req_grad,
         # Autograd thinks it's useless to generate a backward function.
-        # Because it only sees the inputs and outputs, and we
+        #  Because it only sees the inputs and outputs, and we
         # take care of all the intermediate evaluations, therefore
-        # autograd doesn't realize there are some params which 
+        # autograd doesn't realize there are some params which
         # require_grad for instance.)
-        
-        # Rem 2:
+
+        #  Rem 2:
         # Normally Autograd.Function's backward method returns inputs' grad,
         # and Autograd then backward the inputs using these grads.
-        # But since we use a buffer to pass the inputs (cf Rem 1). 
-        # Autograd cannot see the inputs and therefore backward them once
+        # But since we use a buffer to pass the inputs (cf Rem 1).
+        #  Autograd cannot see the inputs and therefore backward them once
         # we finished. So instead of returning inputs' grad we trigger
         # inputs' backward.
-        
+
         # Rem 3:
         # To isolate our Module range of action we need to detach the inputs
         # before using them so we won't backward through them when handling
-        # the backward of our module. Otherwise the backward operations of the
+        #  the backward of our module. Otherwise the backward operations of the
         # first nodes inside our computation graph will trigger inputs' backward.
         # So we detach the inputs, then we do everything for our part, and once
-        # we finished, we trigger inputs' backward (cf Rem 2 -> normally we 
+        # we finished, we trigger inputs' backward (cf Rem 2 -> normally we
         # would have simply returned inputs' grad).
-        
+
         # Rem 4: TODO REWRITE THIS
         # Our goal is to define a custom backward method for the output
         # of the nn.Module, which mean output.backward() will lead to
@@ -342,54 +347,57 @@ class CheckpointedModule(torch.nn.Module):
         # function. So we must not overwrite last node's output backward
         # function, otherwise last_kcn.backward will call the following lines.
         # SO we need to return a detached copy of the outputs.
-        # Thus, the last node's output backward isn't affected, and
+        #  Thus, the last node's output backward isn't affected, and
         # we properly redefine CheckpointedModule's output backward.
-        
+
         RkMod = self
         # -> so we can access to it inside the following class definition
-        # (when defining a Class inside a Class we cannot use `self`)
+        #  (when defining a Class inside a Class we cannot use `self`)
         class RK_autograd_Function(torch.autograd.Function):
             # === OUR FORWARD FUNCTION ===
             @staticmethod
-            def forward(ctx,dummy_input):
+            def forward(ctx, dummy_input):
                 # *** INITIALIZATION PART ***
-                # -> Get the inputs using the buffer (Rem 1)
+                #  -> Get the inputs using the buffer (Rem 1)
                 dict_inputs = RkMod.dict_inputs_buffer
                 RkMod.dict_inputs_buffer = None
-                # -> Create the RK_Storage for this run, and store it in ctx
+                #  -> Create the RK_Storage for this run, and store it in ctx
                 ctx.RK_Storage = storage = RK_Storage()
                 RkMod.compiler.storage = storage
-                # -> Detach input tensors (Rem 3) and store all the inputs
-                dict_input_tensors_detach = dict() # dict : input -> detached input
-                for k,v in dict_inputs.items():
-                    if isinstance(v,torch.Tensor):
+                #  -> Detach input tensors (Rem 3) and store all the inputs
+                dict_input_tensors_detach = (
+                    dict()
+                )  #  dict : input -> detached input
+                for k, v in dict_inputs.items():
+                    if isinstance(v, torch.Tensor):
                         v_d = v.detach().requires_grad_(v.requires_grad)
                         dict_input_tensors_detach[v] = v_d
                         storage.ld[k] = v_d
-                    # TODO elif iterables of Tensors ?
+                    #  TODO elif iterables of Tensors ?
                     else:
                         storage.ld[k] = v
-                # -> Initialize the storage
+                #  -> Initialize the storage
                 for kg in RkMod.list_kg:
                     for kdn in kg.list_kdn:
                         storage.ld[kdn.main_target] = torch.empty(
-                            0, device=RkMod.device, requires_grad=kdn.info.requires_grad
+                            0,
+                            device=RkMod.device,
+                            requires_grad=kdn.info.requires_grad,
                         )
 
-                # *** EXECUTION PART ***
+                #  *** EXECUTION PART ***
                 # -> Autograd turns off itself before giving use the control.
                 # -> But we need it to forward/backward each node.
                 with torch.enable_grad():
                     exec(
-                        RkMod.init_code, 
-                        RkMod.gd,# is compiler.gd
-                        storage.ld)
+                        RkMod.init_code, RkMod.gd, storage.ld  # is compiler.gd
+                    )
                     for l in RkMod.fwd_fct_list:
                         RkMod._exec(l)
                 # -> Get the output
                 out = RkMod.compiler.get_val(RkMod.output.main_target)
                 # TODO multiple outputs
-                # -> Clear the compiler
+                #  -> Clear the compiler
                 RkMod.compiler.storage = None
                 # -> Remember that out have been detached from the rest during exec
                 return out
@@ -398,8 +406,9 @@ class CheckpointedModule(torch.nn.Module):
                 # -> so we don't have to check if grad_output is None
                 # -> if outputs' grad is None Autograd fill them with zeros
                 """
+
             # === END OF FORWARD FUNCTION ===
-        
+
             """
             @staticmethod
             def setup_context(ctx,inputs,outputs):
@@ -417,17 +426,18 @@ class CheckpointedModule(torch.nn.Module):
             # === OUR BACKWARD FUNCTION ===
             @staticmethod
             @torch.autograd.function.once_differentiable
-            def backward(ctx, grad_out): # TODO multiple outputs
-                # -> Reload the storage and out
+            def backward(ctx, grad_out):  #  TODO multiple outputs
+                #  -> Reload the storage and out
                 storage = ctx.RK_Storage
                 RkMod.compiler.storage = storage
                 out = RkMod.compiler.get_val(RkMod.output.main_target)
                 # -> Put grad_out in out.grad (Rem 4)
                 out.grad = grad_out
-                # * record_mem stuff *
+                #  * record_mem stuff *
                 if RkMod.exec_with_record_mem:
                     RkMod.output_size = irotor.tensorMsize(
-                        storage.ld[RkMod.output.main_target])
+                        storage.ld[RkMod.output.main_target]
+                    )
                     loss_idx = len(RkMod.allo_mem)
                     # self.allo_mem[-1] += self.output.info.memsize
                     # output grad is generated outside
@@ -435,27 +445,30 @@ class CheckpointedModule(torch.nn.Module):
                 stop = RkMod.backward_stop
                 if stop:
                     len_fwd = len(RkMod.fwd_fct_list)
-                    for l in RkMod.bwd_fct_list[:(stop-len_fwd)]:
+                    for l in RkMod.bwd_fct_list[: (stop - len_fwd)]:
                         RkMod._exec(l)
                 else:
                     for l in RkMod.bwd_fct_list:
-                        RkMod._exec(l)
-                    if (RkMod.exec_with_record_mem
-                    and RkMod.backward_add_output_grad):
+                        with torch.enable_grad():
+                            RkMod._exec(l)
+                    if (
+                        RkMod.exec_with_record_mem
+                        and RkMod.backward_add_output_grad
+                    ):
                         RkMod.allo_mem[loss_idx] += RkMod.output_size
-                # -> Clear the compiler (and Autograd clears ctx)
+                #  -> Clear the compiler (and Autograd clears ctx)
                 RkMod.compiler.storage = None
-                # -> return grad of dummy input (Rem 1)
+                #  -> return grad of dummy input (Rem 1)
                 return torch.ones(1)
+
             # === END OF BACKWARD FUNCTION ===
-        
+
         self.autograd_Function = RK_autograd_Function
 
-
-    # === nn.module's forward method wrapping self.autograd_Function.forward ===
+    #  === nn.module's forward method wrapping self.autograd_Function.forward ===
     def forward(self, *args, record_mem=False, **kwargs):
         self.exec_with_record_mem = record_mem
-        self.max_mem  = []
+        self.max_mem = []
         self.allo_mem = []
         if not self.training:
             self.original_mod.eval()
@@ -463,17 +476,22 @@ class CheckpointedModule(torch.nn.Module):
         else:
             if self.compiler is None:
                 raise Exception(
-                    "No schedule compiled, no solution to exec,\n"\
-                    "To be able to use the RkMod you first need "\
-                    "to call get_compiled_fct(_HILP).")
+                    "No schedule compiled, no solution to exec,\n"
+                    "To be able to use the RkMod you first need "
+                    "to call get_compiled_fct(_HILP)."
+                )
             elif self.autograd_Function is None:
                 raise Exception(
-                    "The custom forward and backward functions haven't "\
-                    "been generated yet, please call the method : "\
-                    "define_autograd_Function")
+                    "The custom forward and backward functions haven't "
+                    "been generated yet, please call the method : "
+                    "define_autograd_Function"
+                )
             # -> Send the inputs to Function.forward via the buffer
-            self.dict_inputs_buffer = make_inputs(self.original_mod, args, kwargs)
-            return self.autograd_Function.apply(torch.ones(1).requires_grad_())           
+            self.dict_inputs_buffer = make_inputs(
+                self.original_mod, args, kwargs
+            )
+            return self.autograd_Function.apply(torch.ones(1).requires_grad_())
+
     # === end of forward ===
 
     def expect_time(self):
@@ -507,6 +525,8 @@ class CheckpointedModule(torch.nn.Module):
             #     pred_mem[-1] += op.overhead
         return pred_mem
 
-    def reinit(self):
-        self.original_mod.zero_grad()
-    
+    def reinit(self, set_to_none=False):
+        # In our experiments, we set the parameter grad to 0's
+        # so that Backward only creates memory for activations
+        self.original_mod.zero_grad(set_to_none=set_to_none)
+
