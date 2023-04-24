@@ -68,7 +68,9 @@ class CheckpointedModule(torch.nn.Module):
         ref_verbose[0] = verbose
         solver_name[0] = ilp_solver
         self.device = get_device()
-        self.original_mod = original_mod
+        object.__setattr__(self,"original_mod",original_mod)
+        # We don't want to use the default setattr
+        # because torch.nn.Module will register it as a submodule
         self.mem_unit = mem_unit if mem_unit else 1024 ** 2
         # -- use pytorch graph builder to get the list of K_graphs --
         self.rkgb_res = rkgb.make_all_graphs(
@@ -90,6 +92,7 @@ class CheckpointedModule(torch.nn.Module):
                 if get_compiled_fct:
                     self.get_compiled_fct()
                     self.define_autograd_Function()
+                    self.inherits_original_mod_attributes_and_methods()
 
     def get_chain(self, nb_budget_abar=10, nb_budget_all=5):
         start = time.time()
@@ -460,14 +463,14 @@ class CheckpointedModule(torch.nn.Module):
                         and RkMod.backward_add_output_grad
                     ):
                         RkMod.allo_mem[loss_idx] += RkMod.output_size
-                #  -> Clear the compiler (and Autograd clears ctx)
-                RkMod.compiler.storage = None
                 #  -> return grad of dummy input + inputs' which req grad (Rem 1)
                 grad_inputs = tuple(
                     RkMod.compiler.get_val(inp).grad \
                     for inp in ctx.name_of_inputs_which_req_grad
                 )
                 grads = (torch.ones(1),) + grad_inputs
+                #  -> Clear the compiler (and Autograd clears ctx)
+                RkMod.compiler.storage = None
                 return grads
 
             # === END OF BACKWARD FUNCTION ===
@@ -548,4 +551,26 @@ class CheckpointedModule(torch.nn.Module):
         # In our experiments, we set the parameter grad to 0's
         # so that Backward only creates memory for activations
         self.original_mod.zero_grad(set_to_none=set_to_none)
-
+        
+    # === Inherits original_mod Attributes and Methods ===
+    """
+    @property
+    def original_mod(self):
+        return self._HideFromPytorch.mod
+    @original_mod.setter
+    def original_mod(self,original_mod):
+        print("SET ORIGINAL MOD")
+        class HideFromPytorch():
+            def __init__(self,mod):
+                self.mod = mod
+        self._HideFromPytorch = HideFromPytorch(original_mod)
+    #original_mod = property(get_original_mod,set_original_mod)
+    """
+        
+    def inherits_original_mod_attributes_and_methods(self):
+        for k,v in self.original_mod.__dict__.items():
+            if (not "forward" in k
+            and not "backward" in k
+            and k not in ["training"]):
+                self.__dict__[k]=v
+        
