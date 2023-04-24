@@ -356,7 +356,7 @@ class CheckpointedModule(torch.nn.Module):
         class RK_autograd_Function(torch.autograd.Function):
             # === OUR FORWARD FUNCTION ===
             @staticmethod
-            def forward(ctx, dummy_input):
+            def forward(ctx, dummy_input, *args):
                 # *** INITIALIZATION PART ***
                 #  -> Get the inputs using the buffer (Rem 1)
                 dict_inputs = RkMod.dict_inputs_buffer
@@ -364,6 +364,10 @@ class CheckpointedModule(torch.nn.Module):
                 #  -> Create the RK_Storage for this run, and store it in ctx
                 ctx.RK_Storage = storage = RK_Storage()
                 RkMod.compiler.storage = storage
+                #  -> Store what we need to return inputs' grad (Rem 1)
+                ctx.name_of_inputs_which_req_grad = \
+                    RkMod.name_of_inputs_which_req_grad_buffer
+                RkMod.name_of_inputs_which_req_grad_buffer = None
                 #  -> Detach input tensors (Rem 3) and store all the inputs
                 dict_input_tensors_detach = (
                     dict()
@@ -458,8 +462,13 @@ class CheckpointedModule(torch.nn.Module):
                         RkMod.allo_mem[loss_idx] += RkMod.output_size
                 #  -> Clear the compiler (and Autograd clears ctx)
                 RkMod.compiler.storage = None
-                #  -> return grad of dummy input (Rem 1)
-                return torch.ones(1)
+                #  -> return grad of dummy input + inputs' which req grad (Rem 1)
+                grad_inputs = tuple(
+                    RkMod.compiler.get_val(inp).grad \
+                    for inp in ctx.name_of_inputs_which_req_grad
+                )
+                grads = (torch.ones(1),) + grad_inputs
+                return grads
 
             # === END OF BACKWARD FUNCTION ===
 
@@ -486,11 +495,21 @@ class CheckpointedModule(torch.nn.Module):
                     "been generated yet, please call the method : "
                     "define_autograd_Function"
                 )
-            # -> Send the inputs to Function.forward via the buffer
-            self.dict_inputs_buffer = make_inputs(
+            # -> Send the inputs to Function.forward via the buffer (Rem 1)
+            self.dict_inputs_buffer = dict_inputs = make_inputs(
                 self.original_mod, args, kwargs
             )
-            return self.autograd_Function.apply(torch.ones(1).requires_grad_())
+            # -> Pass the inputs which req grad to prepare their backward (Rem 1)
+            inputs_which_req_grad = []
+            name_of_inputs_which_req_grad = []
+            for k,v in dict_inputs.items():
+                if isinstance(v,torch.Tensor) and v.requires_grad:
+                    inputs_which_req_grad.append(v)
+                    name_of_inputs_which_req_grad.append(k)
+            self.name_of_inputs_which_req_grad_buffer = \
+                name_of_inputs_which_req_grad
+            dummy_input = torch.ones(1).requires_grad_()
+            return self.autograd_Function.apply(dummy_input,*inputs_which_req_grad)
 
     # === end of forward ===
 
