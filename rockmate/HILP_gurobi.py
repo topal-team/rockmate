@@ -24,6 +24,7 @@ class ModelGurobi:
             "TimeLimit": 4 * 60,
         },
         gcd=None,
+        accurate_mem=False,
     ):
         self.gcd = gcd if gcd else 1
         self.peak_budget = budget / self.gcd
@@ -504,7 +505,7 @@ class ModelGurobi:
                 self.md.addLConstr(
                     self.U[(t, k)], GRB.LESS_EQUAL, self.peak_budget,
                 )
-                if j is None:
+                if j is None or not accurate_mem:
                     self.md.addLConstr(
                         self.U[(t, k)]
                         + quicksum(
