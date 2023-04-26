@@ -87,6 +87,7 @@ class CheckpointedModule(torch.nn.Module):
         self.init_code = ast_to_str(self.list_kg[0].init_code)
         self.output = self.list_kg[-1].output_kdn_data
         self.mem_limit = mem_limit
+        self.gd = make_gd(self.device, self.original_mod, self.dict_constants)
         if get_chain:
             self.get_chain(nb_budget_abar, nb_budget_all)
             if get_sequence:
@@ -95,7 +96,6 @@ class CheckpointedModule(torch.nn.Module):
                     self.get_compiled_fct()
                     self.define_autograd_Function()
                     self.inherits_original_mod_attributes_and_methods()
-        self.gd = make_gd(self.device, self.original_mod, self.dict_constants)
 
     def get_chain(self, nb_budget_abar=10, nb_budget_all=5):
         start = time.time()
@@ -343,6 +343,8 @@ class CheckpointedModule(torch.nn.Module):
         # would have simply returned inputs' grad).
 
         # Rem 4: TODO REWRITE THIS
+        # ALWAYS DETACH IN CASE OF VIEWS TO PROCESS grad_out
+        # SO IT'S A DOUBLE DETACH
         # Our goal is to define a custom backward method for the output
         # of the nn.Module, which mean output.backward() will lead to
         # the following lines, where `output` is the output of the forward
@@ -404,12 +406,13 @@ class CheckpointedModule(torch.nn.Module):
                     for l in RkMod.fwd_fct_list:
                         RkMod._exec(l)
                 # -> Get the output
-                out = RkMod.compiler.get_val(RkMod.output.main_target)
+                out = RkMod.compiler.get_val(RkMod.rkgb_res.D_graph.output)
+                out_d = out.detach().requires_grad_(out.requires_grad)
                 # TODO multiple outputs
                 #  -> Clear the compiler
                 RkMod.compiler.storage = None
                 # -> Remember that out have been detached from the rest during exec
-                return out
+                return out_d
                 """
                 ctx.set_materialize_grads(True) # as the default
                 # -> so we don't have to check if grad_output is None
@@ -435,13 +438,15 @@ class CheckpointedModule(torch.nn.Module):
             # === OUR BACKWARD FUNCTION ===
             @staticmethod
             @torch.autograd.function.once_differentiable
-            def backward(ctx, grad_out):  #  TODO multiple outputs
+            def backward(ctx, grad_out_d):  #  TODO multiple outputs
                 #  -> Reload the storage and out
                 storage = ctx.RK_Storage
                 RkMod.compiler.storage = storage
-                out = RkMod.compiler.get_val(RkMod.output.main_target)
-                # -> Put grad_out in out.grad (Rem 4)
-                out.grad = grad_out
+                # -> Put grad_out in out.grad (Rem 4) 
+                out = RkMod.compiler.get_val(RkMod.rkgb_res.D_graph.output)
+                out.backward(grad_out_d) # -> set out.grad cleanly
+                # remember that forward returned out_d not out
+                
                 #  * record_mem stuff *
                 if RkMod.exec_with_record_mem:
                     RkMod.output_size = irotor.tensorMsize(

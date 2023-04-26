@@ -34,6 +34,7 @@ class Var_info(): # everything needed to randomly regenerate a var
         else:
             if (isinstance(value,int) or
                 (isinstance(value,torch.Tensor)
+                and not value.requires_grad
                 and value.shape==torch.Size([]))):
                 self.ttype = tt = torch.Size
             else: self.ttype = tt = type(value)

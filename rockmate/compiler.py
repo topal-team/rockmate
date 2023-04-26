@@ -489,11 +489,12 @@ class Compiler:
                 if self.storage.dtypes[tensor_name].is_complex
                 else self.gd["meta"]
             )
-            x = m.expand(np.prod(self.storage.shapes[tensor_name]))
-            self.storage.ld[tensor_name].data = x.view(
-                self.storage.shapes[tensor_name]
-            )
-
+            s = self.storage.shapes[tensor_name]
+            if s == torch.Size([]):
+                x = m.sum() # easy way to obtain a Tensor of shape []
+            else:
+                x = m.expand(np.prod(s)).view(s)
+            self.storage.ld[tensor_name].data = x
         return fct
 
     def fct_del_tensor_data(self, tensor_name):
