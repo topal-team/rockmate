@@ -93,6 +93,7 @@ class CheckpointedModule(torch.nn.Module):
                     self.get_compiled_fct()
                     self.define_autograd_Function()
                     self.inherits_original_mod_attributes_and_methods()
+        self.gd = make_gd(self.device, self.original_mod, self.dict_constants)
 
     def get_chain(self, nb_budget_abar=10, nb_budget_all=5):
         start = time.time()
@@ -226,7 +227,6 @@ class CheckpointedModule(torch.nn.Module):
         self.simulation_overhead = self.simulation_time / sum(
             [kcn.time for kg in self.list_kg for kcn in kg.list_kcn]
         )
-        self.gd = make_gd(self.device, self.original_mod, self.dict_constants)
 
     def get_compiled_fct(self):
         self.compiler = Compiler(self.gd)
@@ -234,6 +234,8 @@ class CheckpointedModule(torch.nn.Module):
         loss_idx = len(self.fwd_op_list)
         self.fwd_fct_list = self.fct_list[:loss_idx]
         self.bwd_fct_list = self.fct_list[loss_idx:]
+        self.define_autograd_Function()
+        # TODO only one get_compiled
 
     def get_compiled_fct_HILP(
         self,
@@ -273,8 +275,6 @@ class CheckpointedModule(torch.nn.Module):
         loss_idx = [op.name for op in self.bottom_op_list].index(
             "Loss_hcn_of_Hg_0"
         )
-        self.gd = make_gd("cuda", self.original_mod, self.dict_constants)
-        # TO CHANGE self.device instead of "cuda"
         self.compiler = Compiler(self.gd)
         fct_list = self.compiler.compile_from_KN_list(self.kn_list)
         self.fwd_fct_list = fct_list[:loss_idx]
