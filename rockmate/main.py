@@ -53,7 +53,7 @@ class CheckpointedModule(torch.nn.Module):
     def __init__(
         self,
         original_mod,
-        dict_inputs,
+        model_inputs,
         mem_limit=None,
         mem_unit=None,
         verbose=False,
@@ -63,12 +63,14 @@ class CheckpointedModule(torch.nn.Module):
         nb_budget_abar=10,
         nb_budget_all=2,
         ilp_solver="gurobi",
+        model_kwargs=None,
     ):
         super().__init__()
         ref_verbose[0] = verbose
         solver_name[0] = ilp_solver
         self.device = get_device()
         object.__setattr__(self,"original_mod",original_mod)
+        dict_inputs = make_inputs(original_mod,model_inputs,model_kwargs)
         # We don't want to use the default setattr
         # because torch.nn.Module will register it as a submodule
         self.mem_unit = mem_unit if mem_unit else 1024 ** 2
