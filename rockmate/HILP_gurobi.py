@@ -3,7 +3,9 @@
 from typing import Dict, Any
 import numpy as np
 from gurobipy import GRB, Model, quicksum
-from rockmate.def_op import RunOp, DelOp, OpSchedule
+
+# from rockmate.def_op import RunOp, DelOp, OpSchedule
+from rockmate.OpSchedule import Op, OpSchedule
 from rkgb.Htools import *
 
 
@@ -38,9 +40,10 @@ class ModelGurobi:
         self.hcn2sub_g = []
         self.sub_gs = []
         self.nOpts = []  # number of opts
-        self.nR = []  # number to run R, =nOpts unless fwd
+        self.nR = []  # number to run R, =nOpts if bwd, =nOpts+1 if fwd
         self.time = []
         self.overhead = []
+
         for i, hcn in enumerate(self.hgraph.list_hcn):
             if "Loss" in hcn.name:
                 self.loss_idx = i
@@ -61,7 +64,7 @@ class ModelGurobi:
                 self.nOpts.append(len(hcn.sub_graph.list_sched))
 
                 if hcn.is_fwd:
-                    # add fast forward to the options
+                    # add fast forward to the options (final one)
                     self.time.append(
                         [
                             h_sched.fwd_time
@@ -91,7 +94,9 @@ class ModelGurobi:
                             for h_sched in hcn.sub_graph.list_sched
                         ]
                     )
-        self.sub_g2hcn = [[] for _ in self.sub_gs]
+        self.sub_g2hcn = [
+            [] for _ in self.sub_gs
+        ]  # index of sub_graph to index of hcn
         for i, j in enumerate(self.hcn2sub_g):
             if j is None:
                 continue
@@ -115,7 +120,7 @@ class ModelGurobi:
         _deps_d = [
             [self.hgraph.list_hcn.index(hcn) for hcn in hdn.deps]
             for hdn in self.hgraph.list_hdn
-        ]
+        ]  # source of hdn
         _users_d = [
             [
                 self.hgraph.list_hcn.index(hcn)
@@ -123,16 +128,17 @@ class ModelGurobi:
                 if hcn in self.hgraph.list_hcn
             ]
             for i in range(I)
-        ]
+        ]  # outputs of hdn
         _users_c = [
             [
                 self.hgraph.list_hdn.index(hdn)
                 for hdn in self.hgraph.list_hcn[i].users
             ]
             for i in range(T)
-        ]
+        ]  # outputs of hcn
 
         #### Update edges based on .dep_interfaces_data
+        #### In certain schedules, BWD depends on input/output data
         for i in range(I):
             for k, hcn in enumerate(self.hgraph.list_hcn):
                 if hcn.sub_graph is None:
@@ -162,16 +168,20 @@ class ModelGurobi:
         De = len(self.delete_list)
         # print(Cr, De, I)
         # ======build variables======
+        # For every HCN[i], R[i] is of size T*nR[i]
         self.R = [
             self.md.addVars(T, self.nR[i], name=f"R{i}", vtype=GRB.BINARY,)
             for i in range(T)
         ]
+
         self.sumR = {}
         for i in range(T):
             for t in range(T):
                 self.sumR[(i, t)] = quicksum(
                     self.R[i][t, o] for o in range(self.nR[i])
                 )
+
+        # Sp for saved Phantoms, option-related
         self.Sp = [
             self.md.addVars(
                 T + 1, len(sub_g.list_sched), name=f"Sp{j}", vtype=GRB.BINARY,
@@ -203,7 +213,7 @@ class ModelGurobi:
             GRB.MINIMIZE,
         )
 
-        # ======boundary constraints======
+        # ======Boundary constraints======
         self.md.addLConstr(
             quicksum(
                 self.sumR[(i, t)] for t in range(T) for i in range(t + 1, T)
@@ -238,13 +248,36 @@ class ModelGurobi:
                     0,
                 )
 
-        # In the last stage, every edge of input_grad should be alive or executed
+        # ======Correction constraints======
+
+        # In the last stage, every source edge of input_grad should be alive or executed
         for i in self.input_grad_indices:
             for j_, (k_, i_) in enumerate(self.create_list):
                 if i_ == i:
                     self.md.addLConstr(
                         self.S[T - 1, j_] + self.sumR[(k_, T - 1)], GRB.EQUAL, 1
                     )
+
+        for j in range(J):
+            bwd_i = max(self.sub_g2hcn[j])
+            # Forward start with no phantoms
+            self.md.addLConstr(
+                quicksum(
+                    (self.Sp[j][0, o])  # - self.R[bwd_i][T - 1, o])
+                    for o in range(self.nOpts[bwd_i])
+                ),
+                GRB.EQUAL,
+                0,
+            )
+            # in the end of bwd, del every phantoms
+            self.md.addLConstr(
+                quicksum(
+                    (self.Sp[j][T, o])  # - self.R[bwd_i][T - 1, o])
+                    for o in range(self.nOpts[bwd_i])
+                ),
+                GRB.EQUAL,
+                0,
+            )
 
         # options don't conflict
         for i in range(T):
@@ -256,9 +289,9 @@ class ModelGurobi:
             for t in range(T + 1):
                 self.md.addLConstr(
                     self.sumSp[(j, t)], GRB.LESS_EQUAL, 1,
-                )  # assuming no keeping two copies of saved tensors at the same time
+                )  # assuming two copies of saved tensors won't be kept at the same time
 
-        # option-free constraints
+        #### Option-free constraints: from rk-checkmate
         self.md.addLConstr(
             quicksum(self.sumR[(t, t)] for t in range(T)), GRB.EQUAL, T,
         )  # diagonal should be executed
@@ -292,7 +325,7 @@ class ModelGurobi:
                         self.sumR[(k, t)] + self.S[t, j],
                     )
 
-        # options-related constraints
+        #### Options-related constraints
         for j in range(J):
             fwd_i = min(self.sub_g2hcn[j])
             bwd_i = max(self.sub_g2hcn[j])
@@ -328,6 +361,9 @@ class ModelGurobi:
                                     self.sumR[(k_, t)] + self.S[t, j_],
                                 )
 
+        # ======Memory constraints======
+        # we don't keep eyes on the alive status all the time
+        # only the steps when changes can happen
         self.alive = {}
         for t in range(T):
             for eidx, (k, i) in enumerate(self.delete_list):
@@ -370,26 +406,6 @@ class ModelGurobi:
                         GRB.EQUAL,
                         0,
                     )
-            for j in range(J):
-                bwd_i = max(self.sub_g2hcn[j])
-                # Forward start with no phantoms
-                self.md.addLConstr(
-                    quicksum(
-                        (self.Sp[j][0, o])  # - self.R[bwd_i][T - 1, o])
-                        for o in range(self.nOpts[bwd_i])
-                    ),
-                    GRB.EQUAL,
-                    0,
-                )
-                # in the end of bwd, del every phantoms
-                self.md.addLConstr(
-                    quicksum(
-                        (self.Sp[j][T, o])  # - self.R[bwd_i][T - 1, o])
-                        for o in range(self.nOpts[bwd_i])
-                    ),
-                    GRB.EQUAL,
-                    0,
-                )
 
         def _num_hazards(t, i, k):
             if i in self.protected_indices:
@@ -480,7 +496,6 @@ class ModelGurobi:
                 )
                 # if k < self.loss_idx:
                 if self.hgraph.list_hcn[k].is_fwd:
-                    # TODO: consider the case when you keep two different phantoms
                     self.U[(t, k)] += quicksum(
                         self.R[k][t, o] * self.saved_mem[j][o]
                         for o in range(self.nOpts[k])
@@ -506,6 +521,7 @@ class ModelGurobi:
                     self.U[(t, k)], GRB.LESS_EQUAL, self.peak_budget,
                 )
                 if j is None or not accurate_mem:
+                    # don't consider correction_term
                     self.md.addLConstr(
                         self.U[(t, k)]
                         + quicksum(
@@ -740,6 +756,78 @@ class ModelGurobi:
         # return fwd_sched, bwd_sched, h_schedion
         return h_sched
 
+    def schedule_(self, hgraph=None):
+        """ 
+        Given the solution from HILP, we want to translate the result
+        to a OpSchedule that can be used in a higher level.
+        """
+        hgraph = hgraph if hgraph else self.hgraph
+        assert self.feasible, "Cannot schedule an infeasible model!"
+        T = len(hgraph.list_hcn)
+        I = len(hgraph.list_hdn)
+        J = len(self.sub_gs)
+
+        op_list = []
+        for t in range(T):
+            for k in range(T):
+                j = self.hcn2sub_g[k]
+                if self.sumR[(k, t)].getValue() == 1:
+                    hcn = hgraph.list_hcn[k]
+                    opt = -1
+                    for o in range(self.nOpts[k]):
+                        if self.R[k][t, o].X == 1:
+                            opt = o
+                            break
+                    if opt > -1:
+                        h_obj = hcn.sub_graph.list_sched[opt]
+                        if hcn.is_fwd:
+                            sub_op_list = h_obj.op_list[: h_obj.loss_idx]
+                        else:
+                            sub_op_list = h_obj.op_list[h_obj.loss_idx + 1 :]
+
+                    else:
+                        h_obj = hcn
+                        sub_op_list = h_obj.ff_op_list
+
+                    if (
+                        not hcn.is_fwd and self.sumSp[(j, t + 1)].getValue() > 0
+                    ):  # phantoms should be kept
+                        phantoms_to_keep = h_obj.phantoms
+                        for op in sub_op_list[::-1]:
+                            if (
+                                op.is_del
+                                and not op.disabled
+                                and op.kn in phantoms_to_keep
+                            ):
+                                # Only the last del should be disabled
+                                op.disabled = True
+                                phantoms_to_keep.pop(op.kn)
+
+                    op_list += sub_op_list
+
+                for eidx, (k_, i) in enumerate(self.delete_list):
+                    if k == k_ and self.delete[t, eidx].X == 1:
+                        hdn = hgraph.list_hdn[i]
+                        op_list.append(Op(hdn.kdn))
+                if t == self.loss_idx:
+                    loss_idx = len(op_list)
+
+        interfaces = dict()
+        interfaces["inputs_kdn_data"] = set(
+            hdn.kdn for hdn in hgraph.inputs_hdn_data
+        )
+        interfaces["outputs_kdn_data"] = set(
+            hdn.kdn for hdn in hgraph.outputs_hdn_data
+        )
+        interfaces["inputs_kdn_grad"] = set(
+            hdn.kdn for hdn in hgraph.inputs_hdn_grad
+        )
+        interfaces["outputs_kdn_grad"] = set(
+            hdn.kdn for hdn in hgraph.outputs_hdn_grad
+        )
+
+        return OpSchedule(op_list, loss_idx, interfaces)
+
 
 # def add_hilp_option(hgraph, budget, save_budget):
 #     md = ModelGurobi(hgraph, budget, save_budget)
@@ -803,7 +891,7 @@ def solve_hg(hg: H_graph):
 
             # add_hilp_option(hg, bdg_peak, bdg_save)
             if md.feasible:
-                h_sched = md.schedule()
+                h_sched = md.schedule_()
                 # print(h_sched.mem)
                 hg.add_sched(h_sched)
                 print(
