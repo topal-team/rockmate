@@ -170,7 +170,8 @@ class H_graph:
                     continue
                 if alive_status[j] and _can_del(i, hdn):
                     alive_status[j] = 0
-                    op_list.append(H_op(hdn.name, hdn, is_del=True))
+                    # op_list.append(H_op(hdn.name, hdn, is_del=True))
+                    op_list.append(Op(hdn.kdn))
                     alive_list.append(alive_status.copy())
                     alive_mem.append(
                         sum(
@@ -270,7 +271,8 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
             hcn_fwd.fwd_time = kcn_fwd.time
             hcn_fwd.fwd_overhead = kcn_fwd.overhead
             hcn_fwd.ff_op_list = [
-                H_op(hcn_fwd.name, hcn_fwd, is_fwd=True, is_del=False)
+                # H_op(hcn_fwd.name, hcn_fwd, is_fwd=True, is_del=False)
+                Op(kcn_fwd, fast_forward=True)
             ]
             hdn_data.mem = kdn_data.mem
             hcns = [hcn_fwd]
@@ -316,7 +318,8 @@ def P_and_K_to_H(pg: P_graph, kg: K_graph):
                 }
                 for k, v in direct_info.items():
                     setattr(h_sched, k, v)
-                sub_hg.list_sched = [h_sched]
+                # sub_hg.list_sched = [h_sched]
+                sub_hg.list_sched = []
 
                 # hopt = H_option(
                 #     sub_hg,
@@ -595,6 +598,19 @@ class H_op:
         else:
             self.time = h_obj.fwd_time if is_fwd else h_obj.bwd_time
             self.overhead = h_obj.fwd_overhead if is_fwd else h_obj.bwd_overhead
+
+
+class Op:
+    def __init__(self, kn, fast_forward=False, disabled=False, detach=True):
+        self.kn = kn
+        self.name = kn.name
+        self.fast_forward = fast_forward
+        self.disabled = disabled
+        self.detach = detach
+        self.is_del = isinstance(kn, K_D_node)
+
+    def __repr__(self):
+        return "Disabled" * self.disabled + self.name
 
 
 class H_sched:
@@ -998,6 +1014,58 @@ def get_bottom_op_list(op_list):
     for i, op in enumerate(op_list):
         bottom_op_list += collapse(op)
     return bottom_op_list
+
+
+def get_kop_list(bottom_op_list, hg: H_graph):
+    def find_main_target(op_name, targets):
+        for target in targets:
+            if target in op_name:
+                return target
+        return None
+
+    def fake_kop(name):
+        return K_op(K_C_node(target=name), disabled=True)
+
+    kn_list = []
+    targets = set()
+    dict_kn = {}
+    for kcn in hg.all_kcn_inside:
+        dict_kn[kcn.name] = kcn
+        targets.add(kcn.main_target)
+        for kdn in kcn.users:
+            dict_kn[kdn.name] = kdn
+        for kdn in kcn.deps_real:
+            dict_kn[kdn.name] = kdn
+
+    for op in bottom_op_list:
+        if "Loss" in op.name:
+            # kn_list.append(op.name)
+            kn_list.append(fake_kop(op.name))
+            continue
+        mt = find_main_target(op.name, targets)
+        if mt is None:
+            # kn_list.append(op.name)
+            kn_list.append(fake_kop(op.name))
+            continue
+        if op.is_del:
+            if "Data" in op.name:
+                kn_list.append(K_op(dict_kn[f"{mt} data"]))
+            elif "Grad" in op.name:
+                kn_list.append(K_op(dict_kn[f"{mt} grad"]))
+            elif "Hg" in op.name and f"{mt} phantoms" in dict_kn:
+                kn_list.append(K_op(dict_kn[f"{mt} phantoms"]))
+            else:
+                kn_list.append(fake_kop(op.name))
+                # kn_list.append(op.name)
+
+        else:
+            if op.is_fwd:
+                kn_list.append(
+                    K_op(dict_kn[f"fwd_{mt}"], ff=hasattr(op.obj, "ff_op_list"))
+                )
+            else:
+                kn_list.append(K_op(dict_kn[f"bwd_{mt}"]))
+    return kn_list
 
 
 def get_kn_list(op_list, kg):

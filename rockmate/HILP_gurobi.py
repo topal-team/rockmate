@@ -339,7 +339,9 @@ class ModelGurobi:
                     self.md.addLConstr(
                         self.Sp[j][t + 1, o],
                         GRB.GREATER_EQUAL,
-                        self.Sp[j][t, o] - self.R[bwd_i][t, o],
+                        self.Sp[j][t, o]
+                        - self.R[bwd_i][t, o]
+                        + self.R[fwd_i][t, o],
                     )  # phantoms can only be deleted by bwd
                     self.md.addLConstr(
                         self.R[bwd_i][t, o],
@@ -770,6 +772,8 @@ class ModelGurobi:
         op_list = []
         for t in range(T):
             for k in range(T):
+                if t == self.loss_idx and k == self.loss_idx:
+                    loss_idx = len(op_list)
                 j = self.hcn2sub_g[k]
                 if self.sumR[(k, t)].getValue() == 1:
                     hcn = hgraph.list_hcn[k]
@@ -783,7 +787,7 @@ class ModelGurobi:
                         if hcn.is_fwd:
                             sub_op_list = h_obj.op_list[: h_obj.loss_idx]
                         else:
-                            sub_op_list = h_obj.op_list[h_obj.loss_idx + 1 :]
+                            sub_op_list = h_obj.op_list[h_obj.loss_idx :]
 
                     else:
                         h_obj = hcn
@@ -801,16 +805,14 @@ class ModelGurobi:
                             ):
                                 # Only the last del should be disabled
                                 op.disabled = True
-                                phantoms_to_keep.pop(op.kn)
+                                phantoms_to_keep.remove(op.kn)
 
-                    op_list += sub_op_list
+                    op_list += sub_op_list.copy()
 
                 for eidx, (k_, i) in enumerate(self.delete_list):
                     if k == k_ and self.delete[t, eidx].X == 1:
                         hdn = hgraph.list_hdn[i]
                         op_list.append(Op(hdn.kdn))
-                if t == self.loss_idx:
-                    loss_idx = len(op_list)
 
         interfaces = dict()
         interfaces["inputs_kdn_data"] = set(
@@ -825,7 +827,7 @@ class ModelGurobi:
         interfaces["outputs_kdn_grad"] = set(
             hdn.kdn for hdn in hgraph.outputs_hdn_grad
         )
-
+        # loss_idx =
         return OpSchedule(op_list, loss_idx, interfaces)
 
 
@@ -894,10 +896,10 @@ def solve_hg(hg: H_graph):
                 h_sched = md.schedule_()
                 # print(h_sched.mem)
                 hg.add_sched(h_sched)
-                print(
-                    f"Solve Hgraph {hg.name} with {len(hg.list_hcn)} nodes takes {md.solve_time:03f}s"
-                )
-    hg.refine_scheds()
+                # print(
+                #     f"Solve Hgraph {hg.name} with {len(hg.list_hcn)} nodes takes {md.solve_time:03f}s"
+                # )
+    # hg.refine_scheds()
 
 
 def solve_hg_recursive(hg: H_graph, solve_self=True):

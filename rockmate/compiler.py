@@ -81,7 +81,7 @@ class Compiler:
     def find_next_idx(l, target, i):
         return i + l[i:].index(target)
 
-    def get_fwd(self, op, i):
+    def get_fwd(self, op, i, detach=True):
         if "loss" in op.main_target:
             return [self.fct_run_forward_no_grad("")]
         rec = op.name in self.op_name_list[:i]
@@ -170,7 +170,11 @@ class Compiler:
                 ),
             )
         )
-        l.append(self.fct_run_detach(op.main_target))
+
+        if detach:
+            l.append(self.fct_run_detach(op.main_target))
+        else:
+            l.append(self.fct_fake_detach(op.main_target))
         l.append(
             self.fct_run_forward_with_grad(
                 body_code.replace("self.", "original_mod.").replace(
@@ -186,7 +190,9 @@ class Compiler:
                 l.append(self.fct_get_shapes(target))
         return l
 
-    def get_bwd(self, op, i):
+    def get_bwd(self, op, i, detach=True):
+        if not detach:
+            return []
         rec = op.name in self.op_name_list[:i]
         last = not (op.name in self.op_name_list[i + 1 :])
         l = []
@@ -352,6 +358,36 @@ class Compiler:
 
         return fct_list
 
+    def compile_from_schedule(self, op_sched):
+        fct_list = []
+        # self.op_name_list = op_sched.op_name_list
+        self.op_name_list = [
+            (op.name if not op.disabled else "") for op in op_sched.op_list
+        ]
+        self.alive_list = op_sched.alive_list
+        self.op_sched = False
+        for i, op in enumerate(op_sched.op_list):
+            kn = op.kn
+            if op.disabled:
+                fct_list.append([])
+                continue
+            if "fwd" in op.kn.name:
+                for kdn in op.kn.users:
+                    if kdn.kdn_type != "data":
+                        continue
+                    setattr(kn, "proxy", kdn.info.requires_grad)
+                fct_list.append(self.get_fwd(kn, i, detach=op.detach))
+            elif "bwd" in kn.name:
+                fct_list.append(self.get_bwd(kn, i, detach=op.detach))
+            elif "data" in kn.name:
+                fct_list.append(self.get_del_data(kn, i))
+            elif "grad" in kn.name:
+                fct_list.append(self.get_del_grad(kn, i))
+            else:
+                fct_list.append([])
+
+        return fct_list
+
     #  ==================================
     #  = ELEMENTARY COMPILING FUNCTIONS =
     #  ==================================
@@ -449,6 +485,13 @@ class Compiler:
 
         return fct
 
+    def fct_fake_detach(self, tensor_name):
+        def fct():
+            self.storage.ld[tensor_name] = self.storage.ld[f"_{tensor_name}"]
+            self.storage.ld[f"_{tensor_name}"] = torch.empty(0)
+
+        return fct
+
     def fct_assign_proxy(self, tensor_name):
         def fct():
             self.storage.ld[f"_{tensor_name}"] = self.storage.ld[tensor_name]
@@ -491,10 +534,11 @@ class Compiler:
             )
             s = self.storage.shapes[tensor_name]
             if s == torch.Size([]):
-                x = m.sum() # easy way to obtain a Tensor of shape []
+                x = m.sum()  # easy way to obtain a Tensor of shape []
             else:
                 x = m.expand(np.prod(s)).view(s)
             self.storage.ld[tensor_name].data = x
+
         return fct
 
     def fct_del_tensor_data(self, tensor_name):
