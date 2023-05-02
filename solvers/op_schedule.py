@@ -8,10 +8,10 @@ from collections import namedtuple
 class Cluster:
     def __init__(self, list_kcn, interfaces, loss_idx):
         self.list_kcn = list_kcn
-        self.list_kdn = set()
+        self.list_kdn = []
         for kcn in list_kcn:
-            self.list_kdn.update(kcn.users_global)
-            self.list_kdn.update(kcn.deps_global)
+            self.list_kdn += kcn.users_global
+            self.list_kdn += kcn.deps_global
 
         self.dict_kn = {
             **{kdn.name: kdn for kdn in self.list_kdn},
@@ -82,18 +82,18 @@ class OpSchedule:
             "outputs_kdn_grad": set(),
         },
         refine=True,
-        correct_overhead = True
+        correct_overhead=True,
     ):
         self.op_list = op_list
-        if loss_idx is not None:
-            self.loss_idx = loss_idx
-        else:
+        if loss_idx is None:
             # Find the last loss op before the first bwd
             for i, op in enumerate(self.op_list):
                 if "loss" in op.name:
                     self.loss_idx = i
                 if "bwd" in op.name:
                     break
+        else:
+            self.loss_idx = loss_idx
 
         self.interfaces = interfaces
         self.interface_kdns = [
@@ -283,6 +283,8 @@ class OpSchedule:
                         )
                     ):  # and not generated in between
                         # check if output_data is created after i
+                        correction_term[(kdn.name, False)] = -kdn.mem
+                    elif kdn in self.interfaces["inputs_kdn_data"]:
                         correction_term[(kdn.name, False)] = -kdn.mem
                     else:
                         correction_term[(kdn.name, "always")] = -kdn.mem
