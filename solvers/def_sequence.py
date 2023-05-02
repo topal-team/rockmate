@@ -3,7 +3,7 @@
 # based on rotor/algorithms/sequence.py
 # ==========================
 
-from rockmate.def_op import OpSchedule
+from solvers.def_op import OpSchedule
 
 ref_print_atoms = [True]
 

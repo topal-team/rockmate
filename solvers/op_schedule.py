@@ -82,15 +82,16 @@ class OpSchedule:
             "outputs_kdn_grad": set(),
         },
         refine=True,
+        correct_overhead = True
     ):
         self.op_list = op_list
-        if loss_idx:
+        if loss_idx is not None:
             self.loss_idx = loss_idx
         else:
             # Find the last loss op before the first bwd
-            for i,op in enumerate(self.op_list):
+            for i, op in enumerate(self.op_list):
                 if "loss" in op.name:
-                    self.loss_idx=i
+                    self.loss_idx = i
                 if "bwd" in op.name:
                     break
 
@@ -207,7 +208,8 @@ class OpSchedule:
 
         self.fwd_overhead_correction = []
         self.bwd_overhead_correction = []
-        self.correct_overhead()
+        if correct_overhead:
+            self.correct_overhead()
 
     def correct_overhead(self, refine=True):
         # correction terms of overhead, each term represents one step in op_list

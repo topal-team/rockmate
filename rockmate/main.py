@@ -9,18 +9,21 @@ from rkgb.utils.global_vars import ref_verbose, solver_name
 from rkgb.utils.small_fcts import get_device
 from rkgb.utils.ast_add_on import ast_to_str
 from rkgb.Ptools import P_config
-from rockmate.def_op import DelOp, OpSchedule
-from rockmate.def_chain import RK_Chain
-from rockmate.def_sequence import (
+from solvers.def_op import DelOp, OpSchedule
+from solvers.def_chain import RK_Chain
+from solvers.def_sequence import (
     SeqBlockBwd,
     SeqBlockFc,
     SeqBlockFn,
     SeqBlockFe,
 )
-from rockmate.HILP_gurobi import *
-from rockmate.rotor_solver import seq_builder, solve_dp_functional
-from rockmate.translator import Translator, RngState
+from solvers.HILP_gurobi import *
+from solvers.rotor_solver import seq_builder, solve_dp_functional
 from rockmate.compiler import Compiler, RK_Storage, make_gd
+
+import solvers
+from solvers.op_schedule import *
+
 import torch
 from torch import tensor
 import ast
@@ -69,9 +72,9 @@ class CheckpointedModule(torch.nn.Module):
         ref_verbose[0] = verbose
         solver_name[0] = ilp_solver
         self.device = get_device()
-        object.__setattr__(self,"original_mod",original_mod)
-        dict_inputs = make_inputs(original_mod,model_inputs,model_kwargs)
-        # We don't want to use the default setattr
+        object.__setattr__(self, "original_mod", original_mod)
+        dict_inputs = make_inputs(original_mod, model_inputs, model_kwargs)
+        #  We don't want to use the default setattr
         # because torch.nn.Module will register it as a submodule
         self.mem_unit = mem_unit if mem_unit else 1024 ** 2
         # -- use pytorch graph builder to get the list of K_graphs --
@@ -232,8 +235,14 @@ class CheckpointedModule(torch.nn.Module):
 
     def get_compiled_fct(self):
         self.compiler = Compiler(self.gd)
-        self.fct_list = self.compiler.compile(self.op_sched)
-        loss_idx = len(self.fwd_op_list)
+        if hasattr(self.op_sched, "interfaces"):
+            self.fct_list = self.compiler.compile_from_schedule(self.op_sched)
+        else:
+            self.fct_list = self.compiler.compile(self.op_sched)
+        if hasattr(self.op_sched, "loss_idx"):
+            loss_idx = self.op_sched.loss_idx
+        else:
+            loss_idx = len(self.fwd_op_list)
         self.fwd_fct_list = self.fct_list[:loss_idx]
         self.bwd_fct_list = self.fct_list[loss_idx:]
         self.define_autograd_Function()
@@ -245,9 +254,11 @@ class CheckpointedModule(torch.nn.Module):
         recursive=True,
         p_config=P_config(),
         gurobi_params={"LogToConsole": 0, "IntegralityFocus": 1,},
+        protect_names=["sources data", "sources grad"],
     ):
         # based only on rkgb
         mem_limit = mem_limit or self.mem_limit
+        self.mem_limit = mem_limit
         kg = self.rkgb_res.K_graph
         sg = self.rkgb_res.S_graph
         if recursive:
@@ -255,7 +266,8 @@ class CheckpointedModule(torch.nn.Module):
             self.hg = rkgb.Htools.P_and_K_to_H(pg, kg)
             print(f"Size of Hgraph {len(self.hg.list_hcn)}")
 
-            save_all_sched = rkgb.Htools.get_save_all_option(self.hg)
+            # save_all_sched = rkgb.Htools.get_save_all_option(self.hg)
+            save_all_sched = get_autograd_sched_rec(self.hg, kg)
             self.hg.add_sched(save_all_sched)
             solve_hg_recursive(self.hg, solve_self=False)
             print("Low level finished")
@@ -271,16 +283,24 @@ class CheckpointedModule(torch.nn.Module):
             return "Not feasible solution"
         else:
             print(f"Solution with obj: {self.md.md.getObjective().getValue()}")
-        self.h_sched = self.md.schedule()
-        self.bottom_op_list = self.h_sched.get_bottom_op_list()
-        self.kn_list = rkgb.Htools.get_kn_list(self.bottom_op_list, kg)
-        loss_idx = [op.name for op in self.bottom_op_list].index(
-            "Loss_hcn_of_Hg_0"
-        )
+        # self.h_sched = self.md.schedule_()
+        # self.bottom_op_list = self.h_sched.get_bottom_op_list()
+        # self.kn_list = rkgb.Htools.get_kn_list(self.bottom_op_list, kg)
+        # loss_idx = [op.name for op in self.bottom_op_list].index(
+        #     "Loss_hcn_of_Hg_0"
+        # )
+        self.op_sched = self.md.schedule_()
+        # self.op_sched.refine()
+        loss_idx = self.op_sched.loss_idx
+        for op in self.op_sched.op_list:
+            if op.name in protect_names:
+                op.disabled = True
+
         self.compiler = Compiler(self.gd)
-        fct_list = self.compiler.compile_from_KN_list(self.kn_list)
-        self.fwd_fct_list = fct_list[:loss_idx]
-        self.bwd_fct_list = fct_list[loss_idx + 1 :]
+        # fct_list = self.compiler.compile_from_KN_list(self.kn_list)
+        self.fct_list = self.compiler.compile_from_schedule(self.op_sched)
+        self.fwd_fct_list = self.fct_list[:loss_idx]
+        self.bwd_fct_list = self.fct_list[loss_idx + 1 :]
         self.define_autograd_Function()
 
     def _exec(self, fct_list):
@@ -372,8 +392,9 @@ class CheckpointedModule(torch.nn.Module):
                 ctx.RK_Storage = storage = RK_Storage()
                 RkMod.compiler.storage = storage
                 #  -> Store what we need to return inputs' grad (Rem 1)
-                ctx.name_of_inputs_which_req_grad = \
+                ctx.name_of_inputs_which_req_grad = (
                     RkMod.name_of_inputs_which_req_grad_buffer
+                )
                 RkMod.name_of_inputs_which_req_grad_buffer = None
                 #  -> Detach input tensors (Rem 3) and store all the inputs
                 dict_input_tensors_detach = (
@@ -442,11 +463,11 @@ class CheckpointedModule(torch.nn.Module):
                 #  -> Reload the storage and out
                 storage = ctx.RK_Storage
                 RkMod.compiler.storage = storage
-                # -> Put grad_out in out.grad (Rem 4) 
+                # -> Put grad_out in out.grad (Rem 4)
                 out = RkMod.compiler.get_val(RkMod.rkgb_res.D_graph.output)
-                out.backward(grad_out_d) # -> set out.grad cleanly
+                out.backward(grad_out_d)  #  -> set out.grad cleanly
                 # remember that forward returned out_d not out
-                
+
                 #  * record_mem stuff *
                 if RkMod.exec_with_record_mem:
                     RkMod.output_size = irotor.tensorMsize(
@@ -460,7 +481,8 @@ class CheckpointedModule(torch.nn.Module):
                 if stop:
                     len_fwd = len(RkMod.fwd_fct_list)
                     for l in RkMod.bwd_fct_list[: (stop - len_fwd)]:
-                        RkMod._exec(l)
+                        with torch.enable_grad():
+                            RkMod._exec(l)
                 else:
                     for l in RkMod.bwd_fct_list:
                         with torch.enable_grad():
@@ -470,15 +492,15 @@ class CheckpointedModule(torch.nn.Module):
                         and RkMod.backward_add_output_grad
                     ):
                         RkMod.allo_mem[loss_idx] += RkMod.output_size
-                #  -> return grad of dummy input + inputs' which req grad (Rem 1)
-                grad_inputs = tuple(
-                    RkMod.compiler.get_val(inp).grad \
-                    for inp in ctx.name_of_inputs_which_req_grad
-                )
-                grads = (torch.ones(1),) + grad_inputs
-                #  -> Clear the compiler (and Autograd clears ctx)
-                RkMod.compiler.storage = None
-                return grads
+                    #  -> return grad of dummy input + inputs' which req grad (Rem 1)
+                    grad_inputs = tuple(
+                        RkMod.compiler.get_val(inp).grad
+                        for inp in ctx.name_of_inputs_which_req_grad
+                    )
+                    grads = (torch.ones(1),) + grad_inputs
+                    #  -> Clear the compiler (and Autograd clears ctx)
+                    RkMod.compiler.storage = None
+                    return grads
 
             # === END OF BACKWARD FUNCTION ===
 
@@ -512,14 +534,17 @@ class CheckpointedModule(torch.nn.Module):
             # -> Pass the inputs which req grad to prepare their backward (Rem 1)
             inputs_which_req_grad = []
             name_of_inputs_which_req_grad = []
-            for k,v in dict_inputs.items():
-                if isinstance(v,torch.Tensor) and v.requires_grad:
+            for k, v in dict_inputs.items():
+                if isinstance(v, torch.Tensor) and v.requires_grad:
                     inputs_which_req_grad.append(v)
                     name_of_inputs_which_req_grad.append(k)
-            self.name_of_inputs_which_req_grad_buffer = \
+            self.name_of_inputs_which_req_grad_buffer = (
                 name_of_inputs_which_req_grad
+            )
             dummy_input = torch.ones(1).requires_grad_()
-            return self.autograd_Function.apply(dummy_input,*inputs_which_req_grad)
+            return self.autograd_Function.apply(
+                dummy_input, *inputs_which_req_grad
+            )
 
     # === end of forward ===
 
@@ -558,7 +583,7 @@ class CheckpointedModule(torch.nn.Module):
         # In our experiments, we set the parameter grad to 0's
         # so that Backward only creates memory for activations
         self.original_mod.zero_grad(set_to_none=set_to_none)
-        
+
     # === Inherits original_mod Attributes and Methods ===
     """
     @property
@@ -573,11 +598,13 @@ class CheckpointedModule(torch.nn.Module):
         self._HideFromPytorch = HideFromPytorch(original_mod)
     #original_mod = property(get_original_mod,set_original_mod)
     """
-        
+
     def inherits_original_mod_attributes_and_methods(self):
-        for k,v in self.original_mod.__dict__.items():
-            if (not "forward" in k
-            and not "backward" in k
-            and k not in ["training"]):
-                self.__dict__[k]=v
-        
+        for k, v in self.original_mod.__dict__.items():
+            if (
+                not "forward" in k
+                and not "backward" in k
+                and k not in ["training"]
+            ):
+                self.__dict__[k] = v
+

@@ -1,5 +1,5 @@
-__all__ = ["rkgb", "RK_rotor", "HILP"]
+__all__ = ["rkgb", "Rockmate", "HILP"]
 
-from .rk_rotor import RK_rotor
+from .rockmate import Rockmate
 from .hilp import HILP
 import rkgb

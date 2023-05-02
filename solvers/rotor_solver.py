@@ -5,8 +5,8 @@
 # ==========================
 
 from rkgb.utils import print_debug
-from rockmate.def_chain import RK_Chain
-from rockmate.def_sequence import (
+from solvers.def_chain import RK_Chain
+from solvers.def_sequence import (
     SeqBlockFn,
     SeqBlockFc,
     SeqBlockFe,
@@ -292,64 +292,4 @@ def seq_builder(chain, mmax, opt_table):
         return cseq_builder(chain, int(mmax), opt_table)
     else:
         return pseq_builder(chain, mmax, opt_table)
-
-
-# ==============================================
-# =====  interface to use Rotor for Hgraph =====
-# ==============================================
-
-
-def Hg_to_RK_Chain(hg):
-    chain = RK_Chain([], [])
-
-    def discretize(values, mem_unit=1024 ** 2):
-        return [math.ceil(value / mem_unit) for value in values]
-
-    fwd_hcns = []
-    no_grad_hcns = {}
-    for i, hcn in enumerate(hg.list_hcn):  # toposorted
-        if len(hcn.users) > 1:
-            return False
-        if hcn.sub_graph is None:
-            # WARNING: if hcn has no bwd, it has to be merged with the next one
-            no_grad_hcns[i] = hcn
-        else:
-            fwd_hcns.append(hcn)
-    chain.ln = len(fwd_hcns)
-    mkl = lambda n: [[] for _ in range(n)]
-    chain.fw = mkl(chain.ln + 1)
-    chain.bw = mkl(chain.ln + 1)
-    chain.cw = [None] * (chain.ln + 2)
-    chain.cbw = mkl(chain.ln + 2)
-    chain.fwd_tmp = mkl(chain.ln + 1)
-    chain.bwd_tmp = mkl(chain.ln + 1)
-    chain.ff_fwd_tmp = [None] * (chain.ln + 1)
-    chain.ff_fw = [None] * (chain.ln + 1)
-    for (i, hcn) in enumerate(fwd_hcns):
-        s_hg = hcn.sub_graph
-        chain.nb_sol.append(len(s_hg.list_sched))
-        for j, s_sched in enumerate(s_hg.list_sched):
-            chain.fw[i].append(s_sched.fwd_time)
-            chain.bw[i].append(s_sched.bwd_time)
-            chain.cbw[i + 1].append(
-                discretize(list(s_hg.outputs_hdn_data)[0].mem + s_sched.mem)
-            )  # output + phantom
-            chain.fwd_tmp[i].append(discretize(s_sched.fwd_overhead))
-            chain.bwd_tmp[i].append(discretize(s_sched.bwd_overhead))
-        chain.cw[i] = discretize(list(s_hg.inputs_hdn_data)[0].mem)
-        chain.ff_fwd_tmp[i] = discretize(hcn.fwd_overhead)
-        chain.ff_fw[i] = hcn.fwd_time
-
-    # Loss block
-    chain.nb_sol.append(1)
-    chain.fw[-1] = [0]
-    chain.bw[-1] = [0]
-    chain.cw[-1] = 0
-    chain.cbw[-1] = [0]
-    chain.fwd_tmp[-1] = [0]
-    chain.bwd_tmp[-1] = [0]
-    chain.ff_fwd_tmp[-1] = 0
-    chain.ff_fw[-1] = 0
-
-    return chain
 
