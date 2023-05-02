@@ -5,7 +5,7 @@ import numpy as np
 from gurobipy import GRB, Model, quicksum
 
 # from rockmate.def_op import RunOp, DelOp, OpSchedule
-from rockmate.OpSchedule import Op, OpSchedule
+from solvers.op_schedule import Op, OpSchedule
 from rkgb.Htools import *
 
 
@@ -151,10 +151,9 @@ class ModelGurobi:
                 for h_sched in hcn.sub_graph.list_sched:
                     # Without specifying schedule, we assume it's possible to use hdn here
                     if (
-                        self.hgraph.list_hdn[i].main_target
+                        self.hgraph.list_hdn[i].kdn.name
                         in h_sched.dep_interfaces_data
-                    ):
-                        assert k not in _users_d[i]
+                    ) and k not in _users_d[i]:
                         _users_d[i].append(k)
 
         ##############################
@@ -408,11 +407,11 @@ class ModelGurobi:
                     )
                 elif i not in self.protected_indices:
                     # in the end of bwd, del every HDN
-                        self.md.addLConstr(
-                            self.alive[(t, max(_deps_d[i] + _users_d[i]), i)],
-                            GRB.EQUAL,
-                            0,
-                        )
+                    self.md.addLConstr(
+                        self.alive[(t, max(_deps_d[i] + _users_d[i]), i)],
+                        GRB.EQUAL,
+                        0,
+                    )
 
         def _num_hazards(t, i, k):
             if i in self.protected_indices:
@@ -835,7 +834,7 @@ class ModelGurobi:
             hdn.kdn for hdn in hgraph.outputs_hdn_grad
         )
         # loss_idx =
-        return OpSchedule(op_list, loss_idx, interfaces)
+        return OpSchedule(op_list, loss_idx=None, interfaces=interfaces)
 
 
 # def add_hilp_option(hgraph, budget, save_budget):
