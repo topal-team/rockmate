@@ -120,6 +120,7 @@ class ModelGurobi:
         self.input_grad_indices = [
             self.hgraph.list_hdn.index(hdn)
             for hdn in self.hgraph.inputs_hdn_grad
+            if hdn in self.hgraph.list_hdn
         ]
 
         _deps_d = [

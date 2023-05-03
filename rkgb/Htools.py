@@ -150,6 +150,8 @@ class H_graph:
         alive_mem = []
         alive_list = []
         alive_status = np.zeros(len(self.list_hdn), dtype=bool)
+        for hdn in self.inputs_hdn_data:
+            alive_status[self.list_hdn.index(hdn)] = 1
         loss_idx = self.list_hcn.index(self.loss_hcn)
         for i, hcn in enumerate(self.list_hcn[:loss_idx]):
             op_list += hcn.ff_op_list
@@ -166,8 +168,8 @@ class H_graph:
 
             for j, hdn in enumerate(self.list_hdn):
                 # if False:  # TODO: if hdn is interface
-                if hdn in self.inputs_hdn_data:
-                    continue
+                # if hdn in self.inputs_hdn_data:
+                #     continue
                 if alive_status[j] and _can_del(i, hdn):
                     alive_status[j] = 0
                     # op_list.append(H_op(hdn.name, hdn, is_del=True))
