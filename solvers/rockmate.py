@@ -3,6 +3,7 @@ from rkgb.utils import np
 
 from solvers.def_chain import RK_Chain
 from solvers.rotor_solver import seq_builder, solve_dp_functional
+from solvers.rk_rotor import RK_rotor
 from solvers.def_op import OpSchedule
 from solvers.def_sequence import (
     SeqBlockBwd,
@@ -37,13 +38,14 @@ class Rockmate:
 
         # -- solve the chain like rotor --
         start = time.time()
-        mmax = self.mem_limit // self.mem_unit - self.rk_chain.cw[0]
-        self.opt_table = solve_dp_functional(
-            self.rk_chain, mmax, self.opt_table
-        )
-        self.seq = seq_builder(
-            self.rk_chain, self.mem_limit // self.mem_unit, self.opt_table
-        )
+        # mmax = self.mem_limit // self.mem_unit - self.rk_chain.cw[0]
+        # self.opt_table = solve_dp_functional(
+        #     self.rk_chain, mmax, self.opt_table
+        # )
+        # self.seq = seq_builder(
+        #     self.rk_chain, self.mem_limit // self.mem_unit, self.opt_table
+        # )
+        self.seq = RK_rotor().solve(self.rk_chain, mem_limit)
         end = time.time()
         self.DP_solve_time = end - start
 

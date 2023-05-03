@@ -6,7 +6,7 @@ import rkgb
 import math
 from solvers.def_chain import RK_Chain
 from solvers.def_sequence import SeqBlockBwd, SeqBlockFe, RK_Sequence
-from rockmate.rotor_solver import seq_builder, solve_dp_functional
+from solvers.rotor_solver import seq_builder, solve_dp_functional
 from solvers.op_schedule import OpSchedule, Op
 from solvers.def_op import OpSchedule as OpSchedule_old
 from solvers.def_op import RunOp, DelOp
@@ -34,13 +34,35 @@ class RK_rotor:
         self.mem_unit = mem_unit
 
     def solve(
-        self, chain, mem_limit,
+        self, graph, mem_limit,
     ):
         self.mem_limit = mem_limit
-        if isinstance(chain, RK_Chain) or isinstance(chain, RK_Chain_):
-            return self.solve_rk_chain(chain)
-        elif isinstance(chain, rkgb.Htools.H_graph):
-            return self.solve_rk_chain(self.hg_to_rk_chain(chain))
+        if isinstance(graph, RK_Chain) or isinstance(graph, RK_Chain_):
+            return self.solve_rk_chain(graph)
+        elif isinstance(graph, rkgb.Htools.H_graph):
+            try:
+                self.chain = self.hg_to_rk_chain(graph)
+            except Exception as e:
+                raise Exception("Input graph is not a chain")
+            _ = self.solve_rk_chain(self.chain)
+            self.fwd_seq, self.bwd_seq = self.seq.cut_fwd_bwd()
+            self.fwd_op_sched_list = [seq.op_sched for seq in self.fwd_seq.seq]
+            self.bwd_op_sched_list = [seq.op_sched for seq in self.bwd_seq.seq]
+
+            self.fwd_op_list = [
+                op
+                for op_sched in self.fwd_op_sched_list
+                for op in op_sched.op_list
+            ]
+            self.bwd_op_list = [
+                op
+                for op_sched in self.bwd_op_sched_list
+                for op in op_sched.op_list
+            ]
+            return OpSchedule(
+                self.fwd_op_list + self.bwd_op_list,
+                loss_idx=len(self.fwd_op_list),
+            )
         else:
             warnings.warn(f"Unrecognized chain type {type(chain)}")
 
@@ -56,6 +78,9 @@ class RK_rotor:
         )
         end = time.time()
         self.DP_solve_time = end - start
+        return self.seq
+
+    def post_process_seq(self,):
 
         enable = np.zeros(chain.ln)
         for s in self.seq.seq:
@@ -163,7 +188,9 @@ class RK_rotor:
                 ff_op_list = []
                 for f_hcn in no_grad_hcns:
                     ff_op_list += f_hcn.ff_op_list
-                fn_op_list = ff_op_list.copy() + hcn.ff_op_list
+
+                fwd_loss = Op(rkgb.Ktools.K_C_node("loss"), disabled=True)
+                fn_op_list = ff_op_list.copy() + hcn.ff_op_list + [fwd_loss]
                 first_hcn = hcn if not no_grad_hcns else no_grad_hcns[0]
                 # assume single input
 
@@ -171,19 +198,19 @@ class RK_rotor:
                 for op in ff_op_list:
                     if op.kn.name == input_kdn.name:
                         op.disabled = True
-                fc_op_list = ff_op_list.copy() + hcn.ff_op_list
+                fc_op_list = ff_op_list.copy() + hcn.ff_op_list + [fwd_loss]
 
                 no_grad_hcns = []
 
                 Fn_sched = OpSchedule(
-                    fn_op_list + hcn.ff_op_list,
-                    len(fn_op_list),
+                    fn_op_list,
+                    len(fn_op_list) - 1,
                     refine=False,
                     correct_overhead=False,
                 )
                 Fc_sched = OpSchedule(
-                    fc_op_list + hcn.ff_op_list,
-                    len(fc_op_list),
+                    fc_op_list,
+                    len(fc_op_list) - 1,
                     refine=False,
                     correct_overhead=False,
                 )
@@ -191,16 +218,18 @@ class RK_rotor:
                 set_op_sched(Fn_sched)
 
                 sols = []
+                output_kdn = list(first_hcn.users)[0].kdn
+
                 for op_sched in hcn.sub_graph.list_sched:
                     fwd_op_list = (
-                        fc_op_list + op_sched.op_list[: op_sched.loss_idx + 1]
+                        ff_op_list + op_sched.op_list[: op_sched.loss_idx + 1]
                     )
                     bwd_op_list = op_sched.op_list[
                         op_sched.loss_idx :
                     ]  # start with loss op
                     Fwd_sched = OpSchedule(
                         fwd_op_list,
-                        len(fwd_op_list) - 2,
+                        len(fwd_op_list) - 1,
                         refine=False,
                         correct_overhead=False,
                     )

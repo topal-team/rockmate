@@ -184,10 +184,11 @@ class OpSchedule:
             self.save_mem[: self.loss_idx + 1],
             self.overhead[: self.loss_idx + 1],
         )
-        self.bwd_overhead = get_overhead_(
-            self.save_mem[self.loss_idx + 1 :],
-            self.overhead[self.loss_idx + 1 :],
-        )
+        if self.loss_idx < len(self.op_list) - 1:  # bwd is not empty
+            self.bwd_overhead = get_overhead_(
+                self.save_mem[self.loss_idx + 1 :],
+                self.overhead[self.loss_idx + 1 :],
+            )
 
         # names of additional HDNs that are required by BWD
         self.dep_interfaces_data = set()
