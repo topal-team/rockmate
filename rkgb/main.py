@@ -12,14 +12,14 @@ import inspect
 # ====== OUTPUT CLASS ======
 # ==========================
 
-class all_graphs():
-    def __init__(self,bg,dg,sg,kg,pg,hg,list_sg,list_kg,cc,list_ano_S):
+class rkgb_res():
+    def __init__(self,bg,dg,sg,kg,ps,hs,list_sg,list_kg,cc,list_ano_S):
         self.B_graph = bg
         self.D_graph = dg
         self.S_graph = sg
         self.K_graph = kg
-        self.P_graph = pg
-        self.H_graph = hg
+        self.P_structure = ps
+        self.H_structure = hs
         self.S_graph_list = list_sg
         self.K_graph_list = list_kg
         self.equivalent_classes = cc
@@ -134,7 +134,10 @@ def make_all_graphs(model,
     model_inputs,
     model_kwargs=None,
     wanted_graphs = {"B","D","S","K","P","H","Sl","Kl"},
-    p_config : Ptools.P_config = Ptools.default_config,
+    partitioners = {
+        Ptools.Partitioner_bottom_to_top(),
+        Ptools.Partitioner_seq()
+    },
     verbose=False,
     impose_device=True,
     check_device_is_gpu = True):
@@ -212,15 +215,15 @@ def make_all_graphs(model,
         cc,list_kg,list_ano_S = Atools_for_S_and_K.S_list_to_K_list_eco(list_sg,model,device=device)
     else: list_kg = None ; cc = None ; list_ano_S = None
     # -- hierarchical --
-    pg = Ptools.S_to_P(sg,p_config) if bool_pg else None
-    hg = Htools.P_and_K_to_H(pg,kg) if bool_hg else None
+    ps = Ptools.S_to_P(sg,model,partitioners) if bool_pg else None
+    hs = Htools.P_and_K_to_H(ps,kg) if bool_hg else None
 
     # -- restore running_stats --
     for (m,(r_mean,r_var)) in saved_running_stats.items():
         m.running_mean = r_mean
         m.running_var  = r_var
 
-    return all_graphs(bg,dg,sg,kg,pg,hg,list_sg,list_kg,cc,list_ano_S)
+    return rkgb_res(bg,dg,sg,kg,ps,hs,list_sg,list_kg,cc,list_ano_S)
 
 # ==========================
 

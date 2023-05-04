@@ -333,7 +333,7 @@ class S_graph(RK_graph):
         self.inputs = list(inputs)
 
     def unhook_init_node(self):
-        for user_sn in self.init_node.keys():
+        for user_sn in self.init_node.users.keys():
             del user_sn.deps[self.init_node]
     def unhook_special_output_node(self):
         assert(len(self.output_nodes)==1)
