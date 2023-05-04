@@ -3,31 +3,77 @@
 
 **Context:** We assume that we have an arbitrary graph $H$, where each
 node `hcn` is an operation. We have $T$ compute nodes, $I$ data nodes.
-Compute nodes are numbered in a topological order. Each compute node
-can be computed with one of several options, indexed by $o$.
+Compute nodes are numbered in a topological order. 
 
-+ Important: a data node can have several predecessors. This happens in
-  backward when computing gradients: each computation is a
-  contribution to the same memory slot (gradients are accumulated)
+The novelty of H-rockmate is that each compute node can be computed
+with one of several options, indexed by $o$. There is a connection
+between the forward and the respective backward computations, and each
+backward should be performed with the same option as its corresponding
+forward. A pair of a forward and the corresponding backward nodes are
+called a *layer*.
 
-+ Phantoms represent the data needed to compute the backward compute
-  nodes. They are like special data nodes, with two characteristics:
+In addition, we introduce the concept of *phantom nodes*, which represent
+the data saved in memory between a forward and its corresponding
+backward. They are like special data nodes, with two characteristics:
   + their only dependencies are with the FWD and corresponding BWD:
     created by FWD, consumed by BWD, not needed by any other computing
-    node
-  + the values saved by a phantom node (and thus the associated memory
+    node.
+  + the values saved in a phantom node (and thus the associated memory
     size) depend on the option used for the FWD and BWD
     computations. For this reason, a phantom node has several options.
+
+In this formulation, we consider schedules in which for a given
+phantom node, only one option is present in memory at a given
+time. However, it is possible that a phantom node is produced several
+times with different options during the course of the schedule.
+
+An output value of the forward compute node (ie, a data node which is
+computed during forward and used by another compute node) is never
+included in the phantom node. However, it happens that this value is
+also used within the forward computation to produce other results. In
+that case, the backward schedule might choose either to use it as
+input (if having it in memory between forward and backward fits in the
+budget), or to recompute it during backward. The implication is that
+for a given layer, different options might have different input
+dependencies for the backward compute node. Additional dependencies
+are stored in the `dep_interfaces_data` field of each schedule.
+
+Just like in rk-checkmate, a data node can have several
+predecessors. This happens in backward when computing gradients: each
+computation is a contribution to the same memory slot (gradients are
+accumulated). A successor of such a data node can only be processed if
+all the contributions have been computed.
   
 **Intuition:** Like Checkmate, the schedule is divided into $T$
 phases. The goal of phase $t$ is to compute node $t$ for the first
-time. $R_{i, t, o}$ is $1$ if and only if node $i$ is computed with
-option $o$ during phase $t$.
+time. 
+
+**Notations** Compute nodes are denoted with index $k$, data nodes
+with index $d$, options with index $o$, phases with index $t$ and
+layers (a pair of forward and corresponding backward nodes) with index
+$j$.
+
+**Variables:**
++ $R_{k, t, o}$ is $1$ if and only if node $k$ is computed with option
+$o$ during phase $t$.
++ $P_{t, d}$ is $1$ if and only if data node $d$ is present in memory
+  before phase $t$.
++ $S_{k, t, d}$ for $k$ predecessor of $d$ is $1$ if and only if the
+  contribution of compute node $k$ has been included in data node $d$
+  before phase $t$.
++ $Sp_{j, t, o}$ is $1$ if and only if the phantom of layer $j$ is
+  saved with option $o$ before phase $t$.
++ $C_{k, t, d}$ is $1$ iff data node $d$ is created when computing
+  node $k$ during phase $t$
++ $D_{k, t, d}$ is $1$ iff data node $d$ is deleted after computing
+  node $k$ during phase $t$
+
+Some layers do not have a backward computation, I am not sure which case this represents
 
 **Formulation:** Minimize total running time, \ie sum of $R_{i, t,
 o}*\text{time of computing option $o$ for node $i$}$
 
-**Trivial constraints:**
+**Ordering constraints**
 * Node $i > t$ can not be computed in phase $t$
 * You can not save any phantom $j$ from node $i > t$ in phase $t$
 * You can not save the result of compute node $k$ in any phase $t \leq k$
@@ -40,7 +86,7 @@ o}*\text{time of computing option $o$ for node $i$}$
 * In a given phase, a node is computed with only one option, and only
   one phantom is in memory (THERE IS PROBABLY A PROOF THAT THIS IS
   OPTIMAL? If you keep two options, you can just forget the one that
-  is most expensive to compute...)
+  is most expensive to compute... Not clear, but nvm.)
 * Node $t$ is executed in phase $t$
 * Loss node is executed only once
 
@@ -53,7 +99,7 @@ o}*\text{time of computing option $o$ for node $i$}$
   computing $k$ during phase $t$ or having it saved before
 
 **Constraints about phantom nodes**
-* For each subgraph, and for each option:
+* For each layer, and for each option:
   * A phantom can be saved after phase $t$ only if it was saved before or the FWD is computed during $t$
   * If a phantom was saved before phase $t$ and its BWD was not
     computed during $t$, then it is still saved after $t$
@@ -62,7 +108,7 @@ o}*\text{time of computing option $o$ for node $i$}$
   * for any edge (k, i) in create_list that contributes to an input of
 	 the backward of this option: computing the BWD during phase $t$
 	 can only be done if some option of $k$ is computed during $t$ or
-	 its contribution is stored before $t$ -- Not all BWD graphs require the same inputs!
+	 its contribution is stored before $t$
 
 **Alive status of values**
 * At least 0, at most 1 version of node $i$ is alive at a time
@@ -73,7 +119,7 @@ o}*\text{time of computing option $o$ for node $i$}$
 * A data node is deleted after computing node $k$ if it is not used afterwards -- requires 'OR' construction cf checkmate
 
 **Memory constraint**
-* All on variables `U`, very close to Checkmate
+* All on expressions `U`, very close to Checkmate
   * `U[t, 0]` is based on `P(t, .)` plus what is computed for node 0
   * `U[t, k+1]` is based on `U[t, k]`
 * Constraint: peak for computing node $k$ is at most `peak_budget`
@@ -99,24 +145,24 @@ highest possible memory usage, denoted $O$, which assumes that no
 input is deleted after the computation of this schedule of node
 $k$. Consider a substep $i$ of the schedule: its *actual* memory usage
 is $O - \sum_{inp \in \text{inputs not needed after $i$}} \text{$inp$
-is deleted after node $k$}\cdot \text{size of $inp$}$
+is deleted after node $k$}\cdot \text{size of $inp$}$.
 
-There is a variable in the formulation (`delete`) which is equal to
-$1$ iff a value is deleted after computing a node, so that this actual
-memory usage can be expressed as a linear expression. We can thus
-write such a constraint for each substep of the schedule, and this
-provides a more precise assessment of the memory usage of the
-solution.  The case of output values is the same, except that we care
-whether the output value is created during the computation of node
-$k$. In the formulation, variable `create` expresses exactly this
-condition.
+In the formulation, variable $D_{k, t, d}$ is equal to $1$ iff a value
+$d$ is deleted after computing node $k$, so that this actual memory
+usage can be expressed as a linear expression. We can thus write such
+a constraint for each substep of the schedule, and this provides a
+more precise assessment of the memory usage of the solution.  The case
+of output values is the same, except that we care whether the output
+value is created during the computation of node $k$, which is
+represented with variable $C_{k, t, d}$
 
 An interesting remark is that it is not necessary to write one
 constraint for each substep: if the set of inputs not needed after
-substeps $i$ and $j$ are the same, or if one is included in the other,
-we can keep only one of both constraints. The number of constraints is
-thus bounded by $\min(\text{schedule length}, 2^{|\{\text{inputs}\}| +
-|\{\text{inputs}\}|})$.
+substeps $i$ and $j$ are the same, we can keep only one of both
+constraints (the one with larger overhead $O$). The number of
+constraints is thus bounded by $\min(\text{schedule length},
+2^{|\{\text{inputs}\}| + |\{\text{inputs}\}|})$. In practice, the
+number of different constraints remain low.
 
 
 # Python variable documentation
@@ -161,7 +207,7 @@ thus bounded by $\min(\text{schedule length}, 2^{|\{\text{inputs}\}| +
   + `R[i][t, o] == 1` iff operation $i$ is computed with option $o$ during phase $t$
 
 * `Sp`: list of dicts of length $J$, each contains $(T+1) * (\text{number of options of subgraph})$
-  + `Sp[j][t, o] == 1` iff you save the phantom of option $o$ of subgraph $j$ during phase $t$
+  + `Sp[j][t, o] == 1` iff you save the phantom of option $o$ of subgraph $j$ before phase $t$
 
 * `S`: dict with $T*Cr$ values. `S[t][j] == 1` for the $j$-th edge $(k, i)$ iff the contribution of compute node $k$ to data node $i$ has been included in data node $i$ before phase $t$
 * `P`: dict with $T*I$ values. `P[t][d] == 1` iff data node $d$ is present in memory before phase $t$ 
