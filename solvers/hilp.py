@@ -15,7 +15,9 @@ class HILP:
     def __init__(
         self,
         mem_unit=1024 ** 2,
-        p_config=rkgb.Ptools.P_config(),
+        p_config=rkgb.Ptools.P_config(
+            max_nodes_for_main_graph=10, max_nodes_per_graph=10
+        ),
         gurobi_params={"LogToConsole": 0, "IntegralityFocus": 1,},
     ):
         self.mem_unit = mem_unit
@@ -29,6 +31,7 @@ class HILP:
         recursive=True,
         print_info=False,
         protect_names=["sources data", "sources grad"],
+        return_hg=False
     ):
         if isinstance(rkgb_res, rkgb.Htools.H_graph):
             return self.solve_hg(
@@ -37,6 +40,7 @@ class HILP:
                 mem_limit,
                 print_info=print_info,
                 protect_names=protect_names,
+                
             )
         self.mem_limit = mem_limit
         #  -- build Hgraph --
@@ -51,13 +55,17 @@ class HILP:
             self.hg.add_sched(save_all_sched)
             solve_hg_recursive(self.hg, solve_self=False, print_info=print_info)
             print("Low level finished")
+        if return_hg:
+            return self.hg
         self.md = ModelGurobi(
             self.hg,
             mem_limit,
             mem_limit,
             gurobi_params=self.gurobi_params,
             accurate_mem=True,
-            protected_names=[kg.output_kdn_data.name]# output data is protected
+            protected_names=[
+                kg.output_kdn_data.name
+            ],  # output data is protected
         )
         self.md.solve()
         if not self.md.feasible:
@@ -79,7 +87,7 @@ class HILP:
         print_info=False,
         protect_names=["sources data", "sources grad"],
         gurobi_params=None,
-        accurate_mem=False
+        accurate_mem=False,
     ):
         gurobi_params = gurobi_params or self.gurobi_params
         md = ModelGurobi(
@@ -87,7 +95,7 @@ class HILP:
             save_budget,
             peak_budget,
             gurobi_params=gurobi_params,
-            accurate_mem=accurate_mem
+            accurate_mem=accurate_mem,
         )
         md.solve()
         if md.feasible:

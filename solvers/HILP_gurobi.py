@@ -778,7 +778,9 @@ class ModelGurobi:
         for t in range(T):
             for k in range(T):
                 if t == self.loss_idx and k == self.loss_idx:
-                    loss_idx = len(op_list)
+                    # loss_idx = len(op_list)
+                    loss_op = Op(K_C_node("loss"))
+                    op_list.append(loss_op)
                 j = self.hcn2sub_g[k]
                 if self.sumR[(k, t)].getValue() == 1:
                     hcn = hgraph.list_hcn[k]
@@ -790,15 +792,17 @@ class ModelGurobi:
                     if opt > -1:
                         h_obj = hcn.sub_graph.list_sched[opt]
                         if hcn.is_fwd:
-                            sub_op_list = h_obj.op_list[: h_obj.loss_idx]
+                            sub_op_list = h_obj.op_list[: h_obj.loss_idx].copy()
                         else:
-                            sub_op_list = h_obj.op_list[h_obj.loss_idx :]
+                            sub_op_list = h_obj.op_list[
+                                h_obj.loss_idx + 1 :
+                            ].copy()
                             # if self.sumSp[(j, t + 1)].getValue() == 0:
                             # sub_op_list.append()
 
                     else:
                         h_obj = hcn
-                        sub_op_list = h_obj.ff_op_list
+                        sub_op_list = h_obj.ff_op_list.copy()
 
                     if (
                         not hcn.is_fwd and self.sumSp[(j, t + 1)].getValue() > 0
@@ -814,7 +818,7 @@ class ModelGurobi:
                                 op.disabled = True
                                 phantoms_to_keep.remove(op.kn)
 
-                    op_list += sub_op_list.copy()
+                    op_list += sub_op_list
 
                 for eidx, (k_, i) in enumerate(self.delete_list):
                     if k == k_ and self.delete[t, eidx].X == 1:
