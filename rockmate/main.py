@@ -9,7 +9,7 @@ from rkgb.utils.global_vars import ref_verbose, solver_name
 from rkgb.utils.small_fcts import get_device
 from rkgb.utils.ast_add_on import ast_to_str
 from rkgb.Ptools import P_config
-from solvers.def_op import DelOp, OpSchedule
+from solvers.def_op import OpSchedule as OpSchedule_old
 from solvers.def_chain import RK_Chain
 from solvers.def_sequence import (
     SeqBlockBwd,
@@ -21,6 +21,7 @@ from solvers.HILP_gurobi import *
 from solvers.rotor_solver import seq_builder, solve_dp_functional
 from rockmate.compiler import Compiler, RK_Storage, make_gd
 
+
 import solvers
 from solvers.op_schedule import *
 
@@ -30,7 +31,6 @@ import ast
 import time
 import warnings
 from os import environ
-
 
 def print_memsizes(list_kg):
     di = list_kg[-1].dict_info
@@ -198,7 +198,7 @@ class CheckpointedModule(torch.nn.Module):
                 alive_status[index] = a
                 self.bwd_alive_list.append(alive_status.copy())
 
-        self.fwd_op_sched = OpSchedule(
+        self.fwd_op_sched = OpSchedule_old(
             self.fwd_op_list,
             self.fwd_alive_list,
             self.list_kg[0].input_kdn_data,
@@ -207,7 +207,7 @@ class CheckpointedModule(torch.nn.Module):
             list_kdn,
         )
 
-        self.bwd_op_sched = OpSchedule(
+        self.bwd_op_sched = OpSchedule_old(
             self.bwd_op_list,
             self.bwd_alive_list,
             self.list_kg[0].input_kdn_data,
@@ -216,7 +216,7 @@ class CheckpointedModule(torch.nn.Module):
             list_kdn,
         )
 
-        self.op_sched = OpSchedule(
+        self.op_sched = OpSchedule_old(
             self.fwd_op_list + self.bwd_op_list,
             self.fwd_alive_list + self.bwd_alive_list,
             self.list_kg[0].input_kdn_data,
