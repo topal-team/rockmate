@@ -134,10 +134,10 @@ def make_all_graphs(model,
     model_inputs,
     model_kwargs=None,
     wanted_graphs = {"B","D","S","K","P","H","Sl","Kl"},
-    partitioners = {
+    partitioners = [
         Ptools.Partitioner_bottom_to_top(),
         Ptools.Partitioner_seq()
-    },
+    ],
     verbose=False,
     impose_device=True,
     check_device_is_gpu = True):

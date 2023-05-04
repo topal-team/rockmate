@@ -134,11 +134,11 @@ class Ano_S_node_Info():
                 )
             else:
                 return (
-                    info.dtype,
                     info.ttype,
-                    info.tsize,
-                    info.requires_grad,
-                    info.memsize,
+                    info.dtype if hasattr(info,"dtype") else None,
+                    info.tsize if hasattr(info,"tsize") else None,
+                    info.requires_grad if hasattr(info,"requires_grad") else None,
+                    info.memsize if hasattr(info,"memsize") else None,
                 )
         charac_list = [self.ano_code]
         for atar,info in self.dict_ano_tar_to_basic_info.items():
@@ -169,7 +169,7 @@ class Partitioner():
     def __init__(self, config = None):
         self.config = config \
             if config is not None \
-            else Partitioner.Config()
+            else type(self).Config()
     def __call__(self, cluster):
         return cluster.init_P_graph()
         # raise Exception(
@@ -177,7 +177,8 @@ class Partitioner():
             # "must be overwritten by all subclasses")
 
 
-class P_node():
+class P_node(RK_node):
+    is_protected_from_unwrap = None
     def __init__(self,
             main_graph,
             sub_cluster  = None,
@@ -200,7 +201,7 @@ class P_node():
         if sub_c is not None:
             self.name = sub_c.name
             self.is_leaf = False
-        if sub_g is not None:
+        elif sub_g is not None:
             self.sub_graph_id = sid = sub_g.graph_id
             self.name        = f"sub_graph_{sid}"
             self.is_leaf     = False
@@ -343,7 +344,7 @@ class P_cluster():
             self.make_io()
             self.make_translator()
             self.make_ano_cluster_id()
-            self.name = f"Cluster_{cluster_nb}\nAno_id : {self.ano_cluster_id}"
+            self.name = f"Cluster_{cluster_nb}_Ano_id_{self.ano_cluster_id}"
 
     @property
     def size(self):
@@ -453,12 +454,13 @@ class P_cluster():
                     else:
                         dict_outputs_sent[out_node.mt].update(out_targets)
 
-        self.inputs = list(inputs).sort(key=RK_node.get_num_tar)
-        self.outputs = list(outputs).sort(key=RK_node.get_num_tar)
-        self.inputs_mt = inputs_mt.sort(key=RK_node.get_num_tar)
-        self.outputs_mt = outputs_mt.sort(key=RK_node.get_num_tar)
-        self.first_nodes = first_nodes.sort(key=RK_node.get_num)
-        self.output_nodes = output_nodes.sort(key=RK_node.get_num)
+        self.inputs = list(inputs) ; self.inputs.sort(key=RK_node.get_num_tar)
+        self.outputs = list(outputs) ; self.outputs.sort(key=RK_node.get_num_tar)
+        self.firsts_mt = firsts_mt ; firsts_mt.sort(key=RK_node.get_num_tar)
+        self.inputs_mt = inputs_mt ; inputs_mt.sort(key=RK_node.get_num_tar)
+        self.outputs_mt = outputs_mt ; outputs_mt.sort(key=RK_node.get_num_tar)
+        self.first_nodes = first_nodes ; first_nodes.sort(key=RK_node.get_num)
+        self.output_nodes = output_nodes ; output_nodes.sort(key=RK_node.get_num)
     # =========================
     
     # =========================
@@ -469,15 +471,14 @@ class P_cluster():
         self.translator = translator = Cluster_translator()
         translator.dict_sn_to_ano_pair = dict()
         translator.dict_ano_pair_to_sn = dict()
-        dict_sn_to_nb_seen = dict()
+        dict_ano_id_to_nb_seen = dict()
         for sn in self.s_nodes:
             ano_id = dict_sn_to_ano_info[sn].ano_id
-            if ano_id not in dict_sn_to_nb_seen:
-                placement = 1
-                dict_sn_to_nb_seen[sn] = placement
+            if ano_id not in dict_ano_id_to_nb_seen:
+                dict_ano_id_to_nb_seen[ano_id] = placement = 1
             else:
-                placement = dict_sn_to_nb_seen[sn]+1
-                dict_sn_to_nb_seen[sn] = placement
+                dict_ano_id_to_nb_seen[ano_id] = placement \
+                    = dict_ano_id_to_nb_seen[ano_id]+1
             pair = (ano_id,placement)
             translator.dict_sn_to_ano_pair[sn] = pair
             translator.dict_ano_pair_to_sn[pair] = sn
@@ -498,7 +499,8 @@ class P_cluster():
                 if req_sn not in self.s_nodes: continue
                 charac_used_targets = []
                 sort_key = lambda tar : ano_info.dict_tar_to_ano_nb[tar]
-                used_targets = list(used_targets).sort(key=sort_key)
+                used_targets = list(used_targets)
+                used_targets.sort(key=sort_key)
                 for used_target in used_targets:
                     charac_used_targets.append(
                         req_sn.all_targets.index(used_target)
@@ -571,6 +573,7 @@ class P_structure():
         self.dict_info = sg.dict_info
         self.nb_clusters = 0
         self.nb_unique_clusters = 0
+        self.dict_sn_to_ano_sn_info = dict()
         self.dict_cluster_charac_string_to_cluster = dict()
         self.dict_cluster_ano_charac_string_to_ano_cluster_id = dict()
         self.dict_ano_cluster_id_to_representee_cluster = dict()
@@ -790,10 +793,10 @@ class Partitioner_bottom_to_top(Partitioner):
 
 
             self.option_value_fct = option_value_fct \
-                if not (option_value_fct is None) \
+                if option_value_fct is not None \
                 else self.get_default_option_value_fct()
             self.merge_flow_stop_fct = merge_flow_stop_fct \
-                if not (merge_flow_stop_fct is None) \
+                if merge_flow_stop_fct is not None \
                 else self.get_default_merge_flow_stop_fct()
 
         def get_default_option_value_fct(self,
@@ -821,9 +824,10 @@ class Partitioner_bottom_to_top(Partitioner):
                     if tot_nb_nodes <= self.max_nodes_per_sub_graph: return True
                 if best_option.nb_subnodes > self.max_nodes_per_sub_graph: return True
                 else:
-                    value = self.merge_flow_value_fct(best_option)
+                    value = self.option_value_fct(best_option)
                     limit = math.sqrt(tot_nb_nodes) * math.sqrt(self.max_nodes_per_sub_graph)
                     return value <= limit
+            return merge_flow_stop_condition
 
     def __init__(self, config=None):
         super().__init__(config)
@@ -984,7 +988,7 @@ class Partitioner_bottom_to_top(Partitioner):
                         dict_options_pn_is_part_of[pn] = set([opt])
 
         # for opt in all_options:
-            # print(math.exp((config.merge_flow_value_fct(opt)+config.max_nodes_per_sub_graph)/5))
+            # print(math.exp((config.option_value_fct(opt)+config.max_nodes_per_sub_graph)/5))
 
         # ** main loop **
         while all_options != set():
@@ -1011,8 +1015,6 @@ class Partitioner_bottom_to_top(Partitioner):
                         if opt in all_options: updated_opts.add(opt)
                     del dict_options_pn_is_part_of[pn]
                 dict_options_pn_is_part_of[new_pn] = updated_opts
-                for opt in updated_opts:
-                    opt.make_nb_nodes_and_nb_subnodes()
 
     def __call__(self, cluster: P_cluster):
         pg : P_graph = cluster.init_P_graph()
@@ -1084,7 +1086,7 @@ class Partitioner_seq(Partitioner):
         pg.output_nodes = set([p_nodes[-1]])
         # -- sub partition --
         for block_pn in p_nodes:
-            sub_cluster : P_cluster = block_nb.sub_cluster
+            sub_cluster : P_cluster = block_pn.sub_cluster
             sub_cluster.partition(self.config.sub_partitioner)
         return pg
 
@@ -1093,10 +1095,10 @@ class Partitioner_seq(Partitioner):
 def S_to_P(
     sg : S_graph,
     model : torch.nn.Module,
-    partitioners = {
+    partitioners = [
         Partitioner_bottom_to_top(),
         Partitioner_seq()
-    },
+    ],
     min_size_to_trigger_partitioning = 4):
     p_structure = P_structure(sg,
         min_size_to_trigger_partitioning = min_size_to_trigger_partitioning)
