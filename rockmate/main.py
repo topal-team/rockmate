@@ -8,7 +8,6 @@ from rkgb.utils import print_debug, np, irotor
 from rkgb.utils.global_vars import ref_verbose, solver_name
 from rkgb.utils.small_fcts import get_device
 from rkgb.utils.ast_add_on import ast_to_str
-from rkgb.Ptools import P_config
 from solvers.def_op import OpSchedule as OpSchedule_old
 from solvers.def_chain import RK_Chain
 from solvers.def_sequence import (
@@ -252,7 +251,6 @@ class CheckpointedModule(torch.nn.Module):
         self,
         mem_limit=False,
         recursive=True,
-        p_config=P_config(),
         gurobi_params={"LogToConsole": 0, "IntegralityFocus": 1,},
         protect_names=["sources data", "sources grad"],
     ):
@@ -262,7 +260,7 @@ class CheckpointedModule(torch.nn.Module):
         kg = self.rkgb_res.K_graph
         sg = self.rkgb_res.S_graph
         if recursive:
-            pg = rkgb.Ptools.S_to_P(sg, config=p_config)
+            pg = rkgb.Ptools.S_to_P(sg, self.original_mod)
             self.hg = rkgb.Htools.P_and_K_to_H(pg, kg)
             print(f"Size of Hgraph {len(self.hg.list_hcn)}")
 

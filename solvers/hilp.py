@@ -15,13 +15,9 @@ class HILP:
     def __init__(
         self,
         mem_unit=1024 ** 2,
-        p_config=rkgb.Ptools.P_config(
-            max_nodes_for_main_graph=10, max_nodes_per_graph=10
-        ),
         gurobi_params={"LogToConsole": 0, "IntegralityFocus": 1,},
     ):
         self.mem_unit = mem_unit
-        self.p_config = p_config
         self.gurobi_params = gurobi_params
 
     def solve(
@@ -48,8 +44,8 @@ class HILP:
         kg = rkgb_res.K_graph
         sg = rkgb_res.S_graph
         if recursive:
-            pg = rkgb.Ptools.S_to_P(sg, config=self.p_config)
-            self.hg = rkgb.Htools.P_and_K_to_H(pg, kg)
+            ps = rkgb.Ptools.S_to_P(sg,None) # TO TODO None=model
+            self.hg = rkgb.Htools.P_and_K_to_H(ps, kg)
             print(f"Size of Hgraph {len(self.hg.list_hcn)}")
             save_all_sched = get_autograd_sched_rec(self.hg, kg)
             self.hg.add_sched(save_all_sched)
