@@ -29,10 +29,20 @@ times with different options during the course of the schedule.
 
 An output value of the forward compute node (ie, a data node which is
 computed during forward and used by another compute node) is never
-included in the phantom node. However, it happens that this value is
-also used within the forward computation to produce other results. In
-that case, the backward schedule might choose either to use it as
-input (if having it in memory between forward and backward fits in the
+included in the phantom node. However, it happens that an output value is
+also used within the forward computation to produce other results. An
+example could be:
+```python
+def layer(a):
+	x = f(a)
+	y = g(x)
+	return x, y
+```
+
+In this example, the value `x` is both an output of the layer and used
+to produce `y`. In that case, the backward schedule might choose
+either to use `x` as input to be able to perform the backward of `g`
+(if having it in memory between forward and backward fits in the
 budget), or to recompute it during backward. The implication is that
 for a given layer, different options might have different input
 dependencies for the backward compute node. Additional dependencies
@@ -43,7 +53,7 @@ predecessors. This happens in backward when computing gradients: each
 computation is a contribution to the same memory slot (gradients are
 accumulated). A successor of such a data node can only be processed if
 all the contributions have been computed.
-  
+
 **Intuition:** Like Checkmate, the schedule is divided into $T$
 phases. The goal of phase $t$ is to compute node $t$ for the first
 time. 
@@ -167,13 +177,13 @@ number of different constraints remain low.
 
 # Python variable documentation
 * `gcd`: normalization factor for memory usage
-* `sub_gs`: subgraphs, each graph only appears once (so that if there are duplicates, we only include them once)
+* `sub_gs`: subgraphs (=layers), each graph only appears once (so that if there are duplicates, we only include them once)
   + duplicates only happen for forward and backward of the same computation
   + every subgraph is shared between its FWD and BWD nodes
 * `hcn2sub_g`: list of length $N$, where $N$ is the number of nodes in
   the graph $H$. Each element of this list is an index in `sub_gs`, to
   reference the subgraph of node $i$.
-* `sub_g2hcn`: reverse indexing, contains the list of nodes that use a given subgraph
+* `sub_g2hcn`: reverse indexing, contains the list of nodes that use a given subgraph (ie, the FWD and the BWD)
 * `nOpts`: list, entry $i$ is the number of options of node $i$
 * `nR`: same as nOpts, contains number of recompute possibilities?
 	`nR` is equal to `nOpts` for a bwd operation, and to `nOpts+1` for
@@ -181,13 +191,11 @@ number of different constraints remain low.
 * `time` and `overhead` are lists of lists, the $i$-th list has length
   `nR[i]`
 * `saved_mem` (list of lists) contains the saved memory size of each option of each subgraph
-  * unclear why only this one is indexed by subgraphs rather than
-    HCN. Why not `time`, `overhead`, `nOpts`, `nR`?
 * `T`: number of compute nodes
 * `I`: number of data nodes
 * `J`: number of subgraphs
 
-* `input_grad_indices`: indixes of the data nodes?
+* `input_grad_indices`: indices of the data nodes
 * `_deps_d`: list of length $I$, containing the list of indices (in
   `hgraph.list_hcn`) of the compute nodes that are predecessors of
   each data node
@@ -199,8 +207,14 @@ number of different constraints remain low.
   
 * `create_list`: list of edges, as pairs $(k, i)$, from compute node $k$ to its
   users $i$. Is the flattened version of `users_c`. Length is `Cr`
-* `delete_list`: list of edges $(k, i)$, to and from data node $i$ and
-  its predecessors and users $k$. Length is `De`
+* `delete_list`: list of edges $(k, i)$, where $i$ spans all data
+  nodes, and $k$ spans all its predecessors and users. Length is
+  `De`. It is the list of data nodes that might be deleted when
+  computing node $k$.
+  + This also contains predecessors of data node $i$ (`_deps_d[i]`): a
+    value can be deleted when computing a node that creates it, for
+    example because the computation creates two values, and only one
+    of them is useful next.
 
 # Gurobi variables
 * `R`: list of dicts of length $T$, each has length `T * nR[i]`
