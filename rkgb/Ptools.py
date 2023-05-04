@@ -601,11 +601,8 @@ class P_structure():
             self.dict_sn_to_ano_sn_info[sn] = ano_sn_info
                 
 
-# ==============================
-# === WRAP, UNWRAP AND MERGE ===
-# ==============================
-
 class P_Dynamic_manipulation(): # only contains staticmethod
+
     # ********
     # * WRAP *
     # ********
@@ -765,8 +762,6 @@ class P_Dynamic_manipulation(): # only contains staticmethod
                 all_snodes.add(pn.sn)
         return all_snodes
             
-
-# ==========================
 
 class Partitioner_bottom_to_top(Partitioner):
     class Option():
@@ -1089,7 +1084,6 @@ class Partitioner_seq(Partitioner):
             sub_cluster : P_cluster = block_pn.sub_cluster
             sub_cluster.partition(self.config.sub_partitioner)
         return pg
-
 
 
 def S_to_P(
