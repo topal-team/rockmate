@@ -24,16 +24,11 @@ def remove_suffix(text, suffix):
         return text[:-len(suffix)]
     return text
 
-# -> for unique_num of each node
-def copy_generator(gen):
-    if gen is None: return None
-    else: return [gen[0]]
-def use_generator(gen,obj):
-    if gen is None: return id(obj)
-    else:
-        u = gen[0]
-        gen[0] = u+1
-        return u
+# -> So that we can give all args just using *args (without **kwargs)
+def order_dict_inputs(dict_inputs,model):
+    sign = inspect.signature(model.forward)
+    params = list(sign.parameters.keys())
+    return [dict_inputs[p] for p in params if p in dict_inputs]
 
 
 # ==========================
@@ -132,16 +127,18 @@ def has_a_data_ptr(value):
         or
         ( ( isinstance(value,list) or isinstance(value,tuple))
             and
-            isinstance(value[0],torch.Tensor))
+            any([has_a_data_ptr(v) for v in value]))
     )
 
-
 def get_data_ptr(value):
-    if (isinstance(value,list)
-    or  isinstance(value,tuple)):
-        return get_data_ptr(value[0])
-    elif isinstance(value,torch.Tensor):
+    if isinstance(value,torch.Tensor):
         return value.data_ptr()
+    elif (isinstance(value,list) or isinstance(value,tuple)):
+        for v in value:
+            v_ptr = get_data_ptr(v)
+            if not (v_ptr is None):
+                return v_ptr
+        return None
     else: return None
 
 # ==========================

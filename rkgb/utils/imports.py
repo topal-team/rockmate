@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import math
 from torch import tensor
 import graphviz
+import warnings
+from copy import copy
 
 # == rotor == for utils/def_inspection
 import rkgb.utils.imports_from_rotor as irotor

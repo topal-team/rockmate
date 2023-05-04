@@ -204,7 +204,7 @@ class H_graph:
         root_hdn.deps = leaves_hcn
         root_hcn.deps = set(self.inputs_hdn_grad)  # Not enough
         root_hcn.deps.add(root_hdn)
-        self.list_hcn = l = shared_methods.sort_based_on_deps(root_hcn)
+        self.list_hcn = l = RK_sort_based_on_deps(root_hcn)
         l.remove(root_hcn)
         if set(l1) != set(l):
             print(f"BEFORE : {len(l1)}")

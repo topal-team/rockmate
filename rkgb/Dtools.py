@@ -5,9 +5,15 @@
 from rkgb.utils import *
 from rkgb.Btools import B_node,B_graph
 
-class D_node(B_node):
-    def __init__(self,target="",code=None,fct="",
-            is_rand=False,deps_rand=None):
+# **********
+# * D_node *
+# **********
+
+class D_node(RK_node): # Also subclass of B_node
+    def __init__(self,
+            target="",code=None,fct="",
+            is_rand=False,deps_rand=None,
+            d_graph = None):
         """ attributes :
         .target    : str  : the name of the only var defined in the node
         .ast_code  : AST  : right part of the assigning code
@@ -19,42 +25,43 @@ class D_node(B_node):
         .users     : D_node set : reciprocal of .deps
         .protected : bool : whether self is a 1-separator of the graph
         """
-        super().__init__(target,code,fct)
+        super().__init__("D",d_graph,target=target)
+        if not code:
+            code = ast_add_on.make_ast_constant("/!\\ not defined /!\\")
+        self.ast_code = code
+        self.fct = fct
+        self.is_input = False
         self.is_rand = is_rand
-        self.deps_rand = deps_rand if deps_rand else set()
+        self.deps = set()
         self.users = set()
+        self.deps_rand = deps_rand if deps_rand else set()
         self.protected = False
-        self.num = shared_methods.get_num(self)
     def __eq__(self,dn2,force_order=False,raise_exception=False):
         dn1 = self
         b = small_fcts.check_attr(dn1,dn2,
             ["protected","target","fct","is_rand","deps_rand"],
             raise_exception=raise_exception)
         mkstr = lambda nl : [rn.target for rn in nl]
-        s = shared_methods.sort_nodes if force_order else (lambda s : s)
+        s = RK_node.sort_nodes if force_order else (lambda s : s)
         b = (b
             and (mkstr(s(dn1.deps)) == mkstr(s(dn2.deps)))
             and (mkstr(s(dn1.users)) == mkstr(s(dn2.users)))
             and (dn1.get_code() == dn2.get_code()))
         return b
-    def __hash__(self):
-        if hasattr(self,"num"): return self.num
-        else: return id(self)
-        # __eq__ => need __hash__
+    __hash__ = RK_node.__hash__
 
-class D_graph():
+
+# ***********
+# * D_graph *
+# ***********
+
+class D_graph(RK_graph):
     def __init__(self):
-        self.inputs = [] # str list
-        self.nodes  = [] # D_node list -> topo sorted
-        self.output = None # str
-        self.output_node = None # D_node
-        self.dict_info = dict() # target -> FWD_info
-        self.dict_rand = dict()
-        self.dict_constants = dict()
+        super().__init__("D")
     def __eq__(self,g2,force_order=False,raise_exception=False):
         g1 = self
         b = small_fcts.check_attr(g1,g2,
-            ["inputs","output","dict_info"],
+            ["inputs","outputs","dict_info"],
             raise_exception=raise_exception)
         mt = lambda l : [dn.target for dn in l]
         b *= (mt(g1.nodes) == mt(g2.nodes))
@@ -64,8 +71,7 @@ class D_graph():
             for dn1,dn2 in zip(g1.nodes,g2.nodes):
                 b *= dn1.__eq__(dn2,force_order,raise_exception)
         return b
-    def __hash__(self):
-        return id(self)
+    __hash__ = RK_node.__hash__
 
     def prepare_cut(self):
         # in case, after simplifications, we will cut / sequentialize
@@ -73,13 +79,13 @@ class D_graph():
         # but in case of chain of separators, we only protect
         # the last one (we will keep a good structure, while reducing
         # the number of blocs)
-        all_sep = shared_methods.cut_based_on_deps(self)
+        all_seps = RK_get_1_separators(self)
         important_sep = []
-        for i in range(len(all_sep)-1):
-            sep = all_sep[i]
-            if sep.users != set([all_sep[i+1]]):
+        for i in range(len(all_seps)-1):
+            sep = all_seps[i]
+            if sep.users != set([all_seps[i+1]]):
                 important_sep.append(sep)
-        important_sep.append(all_sep[-1])
+        important_sep.append(all_seps[-1])
         print_debug([sep.target for sep in important_sep])
         for sep in important_sep: sep.protected = True
 
@@ -93,11 +99,12 @@ class D_graph():
 def sort_nodes(g : B_graph): # -> B_node list 
     # use output's node and trace everything
     # /!\ never trust B_graph.nodes
-    o_var = g.output
+    o_var = g.output_var
     if not o_var.has_node: return []
-    else: return shared_methods.sort_based_on_deps(o_var.node)
+    else: return RK_sort_based_on_deps(o_var.node)
 
-def generate_deep_tmp_local(bg,dict_info,bn,our_global):
+
+def generate_deep_tmp_local(dg,bn,our_global):
     tmp_local = dict()
     done = set()
     ready = set()
@@ -108,7 +115,7 @@ def generate_deep_tmp_local(bg,dict_info,bn,our_global):
         if req_tar in done:
             todo.pop()
         else:
-            req_info = dict_info[req_tar]
+            req_info = dg.dict_info[req_tar]
             if (req_info.is_inplace 
             or  req_info.is_view
             or  req_bn.fct == "getattr"):
@@ -116,7 +123,7 @@ def generate_deep_tmp_local(bg,dict_info,bn,our_global):
                     for req_rd in req_bn.deps_rand:
                         if not req_rd in done:
                             code = ast_add_on.make_str_assign(
-                                (req_rd,bg.dict_rand[req_rd]))
+                                (req_rd,dg.dict_rand[req_rd]))
                             exec(code,our_global,tmp_local)
                             done.add(req_rd)
                     exec(req_bn.get_code(),our_global,tmp_local)
@@ -142,15 +149,13 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
     if not device:
         device = small_fcts.get_device_and_check_all_same_device(
             model,dict_inputs)
-    # globals()["device"] = device
 
     # --- init and sort ---
     dg = D_graph()
+    dg.inherit_base_attributes(bg)
     inputs       = dg.inputs
     d_nodes      = dg.nodes
     dict_info    = dg.dict_info
-    dg.dict_rand = bg.dict_rand
-    dg.dict_constants = bg.dict_constants
     dict_nodes   = dict()
     b_nodes      = sort_nodes(bg)
 
@@ -168,6 +173,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
     for bn in b_nodes:
         # -- translate B node to D --
         dn = D_node(bn.target,bn.ast_code,bn.fct,
+                d_graph=dg,
                 is_rand = bn.is_rand,
                 deps_rand = set(bn.deps_rand))
         if bn.is_input:
@@ -187,7 +193,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
         if dont_build_dict_info:
             dict_info[bn.target] = def_info.Var_info()
         elif not bn.is_input:
-            tmp_local = generate_deep_tmp_local(dg,dict_info,bn,our_global)
+            tmp_local = generate_deep_tmp_local(dg,bn,our_global)
             try:
                 exec(
                     bn.get_code(force_special_kwargs=True), 
@@ -197,7 +203,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
                 # -> for instance a dtype has been replaced by an integer 
                 # we will try to fix this
                 fixed = [False]
-                def try_to_fix(sub_code):
+                def try_to_fix(sub_code): # fix inplace
                     if isinstance(sub_code,ast.Call):
                         args_ast = list(sub_code.args)
                         for i,arg in enumerate(args_ast):
@@ -271,16 +277,33 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
             del tmp_local
 
     # --- translate output ---
-    o_var = bg.output
-    assert(isinstance(o_var.val,ast.Name))
+    o_var = bg.output_var
+    if not isinstance(o_var.val,ast.Name):
+        warnings.warn(
+            f"According to Btools module's return isn't a variable."\
+            f"Thus we assume it's a constant. \n"\
+            f"AST type of the output: {type(o_var.val)}")
+        raise global_vars.ExceptionModuleDoesNotReqGrad
     str_val = o_var.val.id
-    if o_var.has_node:
-        dg.output_node = dict_nodes[str_val]
-    dg.output = str_val
+    if not o_var.has_node:
+        warnings.warn(
+            f"Btools hasn't attached any node to the output."\
+            f"Thus we assume it's a constant.")
+        raise global_vars.ExceptionModuleDoesNotReqGrad
+    else:
+        output_node = dict_nodes[str_val]
+        output_info = dict_info[output_node.mt]
+        if not output_info.requires_grad:
+            warnings.warn(
+                "None of the outputs require grad. "\
+                "Thus there is nothing to do.")
+            raise global_vars.ExceptionModuleDoesNotReqGrad
+        else:
+            dg.output_nodes = [output_node]
+    dg.outputs = [str_val] # maybe just a tuple constructor...
 
     # -- prepares the sequencing --
     dg.prepare_cut()
-
     return dg
 
 # ==========================
@@ -294,7 +317,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
 def print_all_fw_nodes(g,print_ast=True):
     # g : B or D graph
     print(g.dict_rand)
-    for n in g.nodes:
+    for n in g:
         if print_ast:
             print(ast.dump(ast_add_on.make_ast_assign(
                 (n.target,n.ast_code)),indent=4))
@@ -321,7 +344,7 @@ def print_D_graph(dg : D_graph,name=None,open=True,render_format="svg"):
     for dn in dg.nodes:
         if dn.is_input:
             dot.node(dn.target,dn.get_code(),color="blue")
-        elif dn.target == dg.output:
+        elif dn.target in dg.outputs:
             dot.node(dn.target,dn.get_code(),color="red")
         else: dot.node(dn.target,dn.get_code())
     for dn in dg.nodes:

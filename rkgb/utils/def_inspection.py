@@ -17,7 +17,7 @@ def generate_our_global(sg,model,device):
     #print([s for s in our_global if s[:5]=="_cst_"])
     our_global["self"] = model
     our_global["device"] = device
-    for inp in sg.direct_inputs:
+    for inp in sg.inputs:
         info = sg.dict_info[inp]
         x = def_info.generate_val(info,device)
         our_global[inp]=x
@@ -133,7 +133,7 @@ def get_useful_vars(sn,sg,our_global,device):
     # ph_name -> (var_name,data_owner_name) st .view == ph
 
     for name,val in tmp_local.items():
-        if (name not in sg.direct_inputs
+        if (name not in sg.inputs
         and isinstance(val,torch.Tensor)):
             if name not in dict_info: 
                 print(

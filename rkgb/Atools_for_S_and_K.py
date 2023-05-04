@@ -1,12 +1,15 @@
-# =======================
-# == FIRST TOOL : Anonymizing tools  ==
-# =======================
+# ==================================================
+# === Anonymizing tools used for S and K graphs  ===
+# ==================================================
 
 # A way to recognize similar blocks
 # e.g. for GPT2 -> Transformer blocks
 from rkgb.utils import *
 from rkgb import Stools
 from rkgb import Ktools
+
+# Note that this file is build on top of S and K structures
+# and is used in rkgb/main.py, not in Stools nor Ktools.
 
 # Note : to handle parameters anonymization :
 # 1) I need to check "info" equality, -> I need the model
@@ -42,9 +45,10 @@ class Graph_Translator():
             # -> so we first gather all the names, then sort
             # -> them based on sn.num, and anonymize them.
 
-            ########## FIRST PART ########## 
+            # ==========================
+            # ===     FIRST PART     ===
             all_real_vars   = []
-            all_real_cst   = []
+            all_real_cst    = []
             all_real_params = []
             def handle_str(real_str):
                 if (real_str[:2] == "__"
@@ -72,13 +76,14 @@ class Graph_Translator():
 
             s_nodes = [sg.init_node] + sg.nodes
             for sn in s_nodes:
-                search_through(sn.main_code)
-                search_through(sn.body_code)
+                search_through(sn.get_code_ast())
 
-            ########## SECOND PART ########## 
+
+            # ===========================
+            # ===     SECOND PART     ===
             # Now that "all_real_vars" is complete, we generate the dict
             all_real_vars = sorted(
-                all_real_vars,key = shared_methods.get_num_tar)
+                all_real_vars,key = RK_node.get_num_tar)
             self.main_dict = r_to_a = dict()
             nb_var = 0
             for real_name in all_real_vars:
@@ -88,7 +93,7 @@ class Graph_Translator():
 
             # Same for "all_real_cst", ie constants
             all_real_cst = sorted(
-                all_real_cst,key = shared_methods.get_num_cst)
+                all_real_cst,key = RK_node.get_num_cst)
             self.const_dict = cst_r_to_a = dict()
             nb_cst = 0
             for real_name in all_real_cst:
@@ -242,22 +247,20 @@ class Graph_Translator():
                 for k in dict_info_keys:
                     if k not in self.main_dict:
                         del sg.dict_info[k]
-                    elif k in sg.direct_inputs:
+                    elif k in sg.inputs:
                         info = sg.dict_info[k]
                         info.data_owner_name = k
                         info.data_direct_parent_name = k
                         info.is_inplace = False
                         info.is_view = False
             for attr in [
-                "direct_inputs","dict_info",
-                "dict_rand",
-                "hidden_output","direct_outputs"]:
+                "inputs","outputs",
+                "dict_info","dict_rand"]:
                 setattr(sg,attr,translate(getattr(sg,attr)))
             new_dict_constants = dict()
             for old,new in self.const_dict.items():
                 new_dict_constants[new] = x.dict_constants[old]
             sg.dict_constants = new_dict_constants
-            # -> I do NOT translate hidden/direct_inputs 
             return sg
 
         # -- K_GRAPH --
@@ -390,8 +393,15 @@ def S_list_to_K_list_eco(
     for i in range(1,nb_sg):
         prev_kg = list_kg[i-1]
         kg      = list_kg[i]
-        real_inp_data = prev_kg.output_kdn_data
-        real_inp_grad = prev_kg.output_kdn_grad
+        nb_input_kdn = len(prev_kg.list_outputs_kdn_data)
+        if nb_input_kdn != 1:
+            raise Exception(
+                f"Except the last one, K_graph always has "\
+                f"exactly one output. Error here, prev_kg "\
+                f"has {nb_input_kdn} outputs"
+            )
+        real_inp_data = prev_kg.list_outputs_kdn_data[0]
+        real_inp_grad = prev_kg.list_outputs_kdn_grad[0]
         fake_inp_data = kg.input_kdn_data
         fake_inp_grad = kg.input_kdn_grad
         kg.input_kdn_data = real_inp_data
@@ -408,8 +418,8 @@ def S_list_to_K_list_eco(
         #assert(real_inp_grad.main_target == fake_inp_grad.main_target)
         # We cannot make this assertion because I don't 
         # translate hidden inputs because we don't care 
-        # about how direct_inputs was generated. But it 
-        # implies that fake_inp_data targets are dummy.
+        # about how inputs were generated. But it implies
+        # that we cannot trust fake_inp_data targets.
 
     return cc,list_kg,tab_S_repr_cc
 

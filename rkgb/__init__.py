@@ -1,5 +1,5 @@
 __all__ = [
-    "Btools","Dtools","Stools","Ktools","Atools","Ptools","Htools",
+    "Btools","Dtools","Stools","Ktools","Atools_for_S_and_K","Ptools","Htools",
     "print_inputs","make_inputs",
     "make_all_graphs","print_all_graphs",
     "print_graph","print_graph_list",
@@ -9,7 +9,7 @@ from . import Btools
 from . import Dtools
 from . import Stools
 from . import Ktools
-from . import Atools
+from . import Atools_for_S_and_K
 from . import Ptools
 from . import Htools
 from .main import print_inputs,make_inputs

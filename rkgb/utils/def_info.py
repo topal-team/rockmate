@@ -50,6 +50,7 @@ class Var_info(): # everything needed to randomly regenerate a var
                     int(irotor.tensorMsize(value)))
             elif tt==tuple or tt==list:
                 self.sub_info = [Var_info(y) for y in value]
+                self.requires_grad = any([sub.requires_grad for sub in self.sub_info])
             else:
                 raise Exception(
                     f"The type {tt} is not supported for Var_info")

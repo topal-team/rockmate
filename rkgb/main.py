@@ -3,11 +3,10 @@ from rkgb import Btools
 from rkgb import Dtools
 from rkgb import Stools
 from rkgb import Ktools
-from rkgb import Atools
+from rkgb import Atools_for_S_and_K
 from rkgb import Ptools
 from rkgb import Htools
 import inspect
-
 
 # ==========================
 # ====== OUTPUT CLASS ======
@@ -89,6 +88,8 @@ def make_inputs(model,model_inputs,model_kwargs):
         dict_inputs = dict(zip(not_kw_params,inputs))
 
     dict_inputs.update(model_kwargs)
+    sign = inspect.signature(model.forward)
+    params = list(sign.parameters.items())
 
     # 2) check types
     """ # -> might fail
@@ -101,6 +102,7 @@ def make_inputs(model,model_inputs,model_kwargs):
                 f"the given value has type {type(value)}")
     """
     return dict_inputs
+
 
 
 # to check is the device is cuda
@@ -131,7 +133,7 @@ def print_cuda_warning_msg(things_not_on_cuda):
 def make_all_graphs(model,
     model_inputs,
     model_kwargs=None,
-    dict_wanted_graphs = {"B","D","S","K","P","H","Sl","Kl"},
+    wanted_graphs = {"B","D","S","K","P","H","Sl","Kl"},
     p_config : Ptools.P_config = Ptools.default_config,
     verbose=False,
     impose_device=True,
@@ -152,17 +154,17 @@ def make_all_graphs(model,
         args of 'model', it can either be a simple
         variable or an iterable of variables.
     -> model_kwargs :
-        optional dictionnary in case you want to
+        optional dictionary in case you want to
         call 'model' with kwargs
     """
-    bool_list_kg = "Kl" in dict_wanted_graphs
-    bool_list_sg = ("Sl" in dict_wanted_graphs) or bool_list_kg
-    bool_hg = "H" in dict_wanted_graphs
-    bool_pg = ("P" in dict_wanted_graphs) or bool_hg
-    bool_kg = ("K" in dict_wanted_graphs) or bool_hg
-    bool_sg = ("S" in dict_wanted_graphs) or bool_kg or bool_list_sg or bool_pg
-    bool_dg = ("D" in dict_wanted_graphs) or bool_sg
-    bool_bg = ("B" in dict_wanted_graphs) or bool_dg
+    bool_list_kg = "Kl" in wanted_graphs
+    bool_list_sg = ("Sl" in wanted_graphs) or bool_list_kg
+    bool_hg = "H" in wanted_graphs
+    bool_pg = ("P" in wanted_graphs) or bool_hg
+    bool_kg = ("K" in wanted_graphs) or bool_hg
+    bool_sg = ("S" in wanted_graphs) or bool_kg or bool_list_sg or bool_pg
+    bool_dg = ("D" in wanted_graphs) or bool_sg
+    bool_bg = ("B" in wanted_graphs) or bool_dg
 
     # check inputs
     global_vars.ref_verbose[0] = verbose
@@ -197,7 +199,9 @@ def make_all_graphs(model,
                     r_var.clone() if r_var is not None else None,
                 )
 
-    # -- the whole module --
+    # ============
+    # === CORE ===
+    # -- whole module --
     bg = Btools.make_B(model,dict_inputs,impose_device=impose_device,device=device) if bool_bg else None
     dg = Dtools.B_to_D(bg,model,dict_inputs,device=device) if bool_dg else None
     sg = Stools.D_to_S(dg,model=model,device=device) if bool_sg else None
@@ -205,7 +209,7 @@ def make_all_graphs(model,
     # -- sequentialized --
     list_sg = Stools.cut(sg) if bool_list_sg else None
     if bool_list_kg:
-        cc,list_kg,list_ano_S = Atools.S_list_to_K_list_eco(list_sg,model,device=device)
+        cc,list_kg,list_ano_S = Atools_for_S_and_K.S_list_to_K_list_eco(list_sg,model,device=device)
     else: list_kg = None ; cc = None ; list_ano_S = None
     # -- hierarchical --
     pg = Ptools.S_to_P(sg,p_config) if bool_pg else None
@@ -258,7 +262,7 @@ def print_graph_list(gl,name=None,open=True,render_format="svg"):
     r"""The equivalent of rkgb.print_graph for a list of graph.
     Generates all graphs next to each other in a single pdf.
     Note:
-         Originally intented to visualize a sequentialized graph :
+         Originally intended to visualize a sequentialized graph :
          i.e. one graph cut by rkgb in blocks
          i.e. S_graph_list of K_graph_list
     """

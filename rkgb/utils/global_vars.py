@@ -8,8 +8,6 @@ time_min_repeat = 5
 
 # -> print debug messages
 ref_verbose = [False]
-
-
 def print_debug(*args, **kwargs):
     if ref_verbose[0]:
         print(*args, **kwargs)
@@ -17,8 +15,6 @@ def print_debug(*args, **kwargs):
 
 # -> acceptance rate for two time measures to be declared equal
 ref_reasonable_rate = [0.4]
-
-
 def change_reasonable_rate(x):
     assert 0 <= x
     ref_reasonable_rate[0] = x
@@ -27,9 +23,17 @@ def change_reasonable_rate(x):
 # -> to test phantoms detection
 ref_test_phantoms_detection = [False]
 
+# =========================
+# === Custom exceptions ===
+# =========================
+
+class ExceptionModuleDoesNotReqGrad(Exception):
+    # Either none of the outputs require a grad 
+    # or the module returns only constants
+    pass
 
 # ==========================
-#  === LISTS OF FUNCTIONS ===
+# === LISTS OF FUNCTIONS ===
 # ==========================
 
 list_python_modules = [
@@ -51,7 +55,7 @@ list_rand_fct = [
     "torch.rrelu",
 ]
 # -> ONLY used for root nodes
-# -> ie nodes without depedencies
+# -> ie nodes without dependencies
 
 list_cheap_fct = [
     "torch.add",
