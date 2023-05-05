@@ -89,7 +89,7 @@ class Ano_S_node_Info():
             atar = f"__{nb_var}_ano"
             dict_tar_atar[real_name] = atar
             dict_tar_anb[real_name] = nb_var
-            dict_atar_info[real_name] = sg.dict_info[real_name]
+            dict_atar_info[atar] = sg.dict_info[real_name]
             # -> We will keep only basic attributes of Var_info
 
         # Build ano constants + info
@@ -116,11 +116,11 @@ class Ano_S_node_Info():
         # === THIRD: build ano code ===
         str_code = sn.get_code()
         for tar,atar in dict_tar_atar.items():
-            str_code.replace(tar,atar)
+            str_code = str_code.replace(tar,atar)
         for cst,acst in dict_cst_acst.items():
-            str_code.replace(cst,acst)
+            str_code = str_code.replace(cst,acst)
         for param,aparam in dict_param_aparam.items():
-            str_code.replace(param,aparam)
+            str_code = str_code.replace(param,aparam)
         self.ano_code = str_code
     # ============================
 
@@ -265,10 +265,22 @@ class P_graph(RK_graph):
         if self.pn_wrapping_it is None:
             return set()
         else:
-            return set(self.pn_wrapping_it.deps)
+            pnw = self.pn_wrapping_it
+            # deps at level above :
+            input_nodes = set(pnw.deps)
+            # deps higher :
+            if pnw.main_graph is not None:
+                higher_g = pnw.main_graph
+                if pnw in higher_g.first_nodes:
+                    input_nodes.update(
+                        higher_g.input_nodes.intersection(
+                        pnw.deps_global
+                        )
+                    )
+            return input_nodes
     @property
     def first_nodes(self): # -> users of at least one input
-        if not (self._first_nodes is None):
+        if self._first_nodes is not None:
             return self._first_nodes
         else:
             input_nodes = self.input_nodes
@@ -280,6 +292,13 @@ class P_graph(RK_graph):
     @property
     def is_main_graph(self):
         return bool(self.graph_id == "0")
+
+    def all_p_nodes_inside(self): # FOR DYNAMIC PARTITIONING
+        all_p = set(self.nodes)
+        for pn in self.nodes:
+            if pn.sub_graph is not None:
+                all_p.update(pn.sub_graph.all_p_nodes_inside())
+        return all_p
 
     def make_sub_graph_id(self,new_graph_id):
         self.graph_id = new_graph_id
@@ -312,7 +331,7 @@ class P_cluster():
     original_cluster = None
     ano_cluster_id = None
     name = None
-    represent_of_its_equivalence_class = None
+    representee_cluster = None
     possible_partitioning = None
     partitioners_already_used = None
     # Tmp attributes :
@@ -487,7 +506,7 @@ class P_cluster():
     # =============================
     def make_ano_cluster_id(self):
         # ATTRIBUTES NEEDED : s_nodes, p_structure, io
-        # DO : ano_cluster_id, represent_of_its_equivalence_class
+        # DO : ano_cluster_id, representee_cluster
         dict_sn_to_ano_info = self.p_structure.dict_sn_to_ano_sn_info
         dict_inputs_used = self.dict_first_mt_to_inputs_used
         dict_outputs_sent = self.dict_output_mt_to_outputs_sent
@@ -528,7 +547,7 @@ class P_cluster():
             self.p_structure.dict_cluster_ano_charac_string_to_ano_cluster_id
         if charac_string in dict_cluster_to_ano_id:
             self.ano_cluster_id = ano_id = dict_cluster_to_ano_id[charac_string]
-            self.represent_of_its_equivalence_class \
+            self.representee_cluster \
                 = self.p_structure.dict_ano_cluster_id_to_representee_cluster[ano_id]
         else:
             self.possible_partitioning = []
@@ -538,7 +557,7 @@ class P_cluster():
                 = dict_cluster_to_ano_id[charac_string] \
                 = self.p_structure.nb_unique_clusters \
                 = self.p_structure.nb_unique_clusters + 1
-            self.represent_of_its_equivalence_class \
+            self.representee_cluster \
                 = self.p_structure.dict_ano_cluster_id_to_representee_cluster[ano_id] \
                 = self
     # =============================
@@ -546,8 +565,8 @@ class P_cluster():
     def partition(self,partitioner : Partitioner):
         if not (self.original_cluster is self):
             self.original_cluster.partition(partitioner)
-        elif not (self.represent_of_its_equivalence_class is self):
-            self.represent_of_its_equivalence_class.partition(partitioner)
+        elif not (self.representee_cluster is self):
+            self.representee_cluster.partition(partitioner)
         elif partitioner in self.partitioners_already_used:
             pass
         elif self.size < self.p_structure.min_size_to_trigger_partitioning:
@@ -585,7 +604,7 @@ class P_structure():
         # ATTRIBUTES NEEDED : sg
         # DO : dict_sn_to_ano_sn_info
         # -> generate ano_sn_info for all the s_nodes
-        dict_sn_charac_string_to_ano_id = dict()
+        self.dict_sn_charac_string_to_ano_id = dict_sn_charac_string_to_ano_id = dict()
         nb_unique_sns = 0
         for sn in self.sg.nodes:
             ano_sn_info = Ano_S_node_Info(sn,self.sg,model)
@@ -652,6 +671,11 @@ class P_Dynamic_manipulation(): # only contains staticmethod
                     user_pn.deps.add(new_pn)
                     pn.users.discard(user_pn)
                     new_pn.users.add(user_pn)
+
+        # ** global edges must not include edge to nodes inside new_pn **
+        all_p_nodes_inside = new_pg.all_p_nodes_inside()
+        new_pn.deps_global -= all_p_nodes_inside
+        new_pn.users_global -= all_p_nodes_inside
 
         # ** reciprocal global edges **
         for req_g_pn in new_pn.deps_global:
@@ -736,6 +760,7 @@ class P_Dynamic_manipulation(): # only contains staticmethod
     @staticmethod
     def freeze(pg : P_graph,p_structure : P_structure,partitioner : Partitioner):
         # return list of all nodes in pg for recursive purpose
+        pg._first_nodes = pg.first_nodes # comment this if one day want to restart Dynamic
         all_snodes = set()
         for pn in pg.nodes:
             pn : P_node
@@ -744,7 +769,7 @@ class P_Dynamic_manipulation(): # only contains staticmethod
                 sub_snodes = P_Dynamic_manipulation.freeze(sub_g,p_structure,partitioner)
                 sub_c = P_cluster(sub_snodes,p_structure)
                 original_c = sub_c.original_cluster
-                representee_c = original_c.represent_of_its_equivalence_class
+                representee_c = original_c.representee_cluster
                 representee_c.partitioners_already_used.append(partitioner)
                 representee_c.possible_partitioning.append(sub_g)
                 sub_g.cluster = original_c
@@ -1014,6 +1039,28 @@ class Partitioner_bottom_to_top(Partitioner):
     def __call__(self, cluster: P_cluster):
         pg : P_graph = cluster.init_P_graph()
         pg.cluster = cluster
+        if cluster.size < self.config.max_nodes_per_sub_graph:
+            return pg
+        # === Prepare dynamic setup ===
+        first_nodes = pg._first_nodes
+        pg._first_nodes = None
+        last_wrapping_graph = P_graph("-1",cluster.p_structure)
+        source_pn = P_node(
+            last_wrapping_graph,
+            main_target="sources"
+        )
+        main_pn = P_node(
+            last_wrapping_graph,
+            sub_graph=pg
+        )
+        pg.pn_wrapping_it = main_pn
+        last_wrapping_graph.nodes = [source_pn,main_pn]
+        main_pn.deps = set([source_pn])
+        source_pn.users = set([main_pn])
+        for fst_node in first_nodes:
+            fst_node.deps_global.add(source_pn)
+            source_pn.users_global.add(fst_node)
+
         # === FIRST : Dynamic partitioning ===
         previous_size = -1
         while (len(pg.nodes) > self.config.max_nodes_for_main_graph
@@ -1063,14 +1110,14 @@ class Partitioner_seq(Partitioner):
         seps_sn = [sn for sn in cluster.s_nodes if sn.mt in seps_mt]
         seps_index = [-1]+[cluster.s_nodes.index(sep) for sep in seps_sn]
         pg.nodes = p_nodes = []
-        for block_nb in range(1, len(seps_sn)):
-            first_i = seps_index[block_nb-1]
-            last_i = seps_index[block_nb]
+        for block_nb in range(len(seps_sn)):
+            first_i = seps_index[block_nb]
+            last_i = seps_index[block_nb+1]
             block_s_nodes = cluster.s_nodes[first_i+1:last_i+1]
             sub_cluster = P_cluster(block_s_nodes,cluster.p_structure)
             block_pn = P_node(pg,sub_cluster=sub_cluster)
             p_nodes.append(block_pn)
-            if block_nb > 1:
+            if block_nb > 0:
                 prev_pn : P_node = p_nodes[-2]
                 block_pn.deps.add(prev_pn)
                 block_pn.deps_global.add(prev_pn)
