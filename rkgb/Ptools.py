@@ -152,12 +152,13 @@ class Ano_S_node_Info():
 
 
 class Cluster_translator():
+    dict_mt_to_ano_pair : dict[str, tuple[int,int]] = None
     dict_sn_to_ano_pair : dict[S_node, tuple[int,int]] = None
     dict_ano_pair_to_sn : dict[tuple[int,int], S_node] = None
-    dict_kcn_to_ano_triplet : dict[K_C_node, tuple[int,int,int]] = None
-    dict_kdn_to_ano_triplet : dict[K_D_node, tuple[int,int,int]] = None
-    dict_ano_triplet_to_kcn : dict[tuple[int,int,int], K_C_node] = None
-    dict_ano_triplet_to_kdn : dict[tuple[int,int,int], K_D_node] = None
+    dict_kcn_to_ano_triplet : dict[K_C_node, tuple[str,int,int]] = None
+    dict_kdn_to_ano_triplet : dict[K_D_node, tuple[str,int,int]] = None
+    dict_ano_triplet_to_kcn : dict[tuple[str,int,int], K_C_node] = None
+    dict_ano_triplet_to_kdn : dict[tuple[str,int,int], K_D_node] = None
     def __init__(self):
         pass
 
@@ -317,7 +318,13 @@ class P_graph(RK_graph):
             if not pn.is_leaf:
                 pn.is_protected_from_unwrap = False
                 pn.sub_graph.set_all_protected_to_false()
-    
+
+    def make_sub_cluster_original(self):
+        for pn in self.nodes:
+            pn : P_node
+            if pn.sub_cluster is not None:
+                pn.sub_cluster = sub_c = pn.sub_cluster.original_cluster
+                sub_c.make_sub_cluster_original()
 
 class P_cluster():
     s_nodes = None
@@ -488,6 +495,7 @@ class P_cluster():
         # DO : translator
         dict_sn_to_ano_info = self.p_structure.dict_sn_to_ano_sn_info
         self.translator = translator = Cluster_translator()
+        translator.dict_mt_to_ano_pair = dict()
         translator.dict_sn_to_ano_pair = dict()
         translator.dict_ano_pair_to_sn = dict()
         dict_ano_id_to_nb_seen = dict()
@@ -499,6 +507,7 @@ class P_cluster():
                 dict_ano_id_to_nb_seen[ano_id] = placement \
                     = dict_ano_id_to_nb_seen[ano_id]+1
             pair = (ano_id,placement)
+            translator.dict_mt_to_ano_pair[sn.mt] = pair
             translator.dict_sn_to_ano_pair[sn] = pair
             translator.dict_ano_pair_to_sn[pair] = sn
     # =============================
@@ -574,6 +583,11 @@ class P_cluster():
         else:
             self.partitioners_already_used.append(partitioner)
             self.possible_partitioning.append(partitioner(self))
+
+    def make_sub_cluster_original(self):
+        if self.possible_partitioning is not None:
+            for pg in self.possible_partitioning:
+                pg.make_sub_cluster_original()
 
 
 class P_structure():
@@ -1148,6 +1162,7 @@ def S_to_P(
         = P_cluster([sn for sn in sg.nodes if not sn.is_artefact],p_structure)
     for partitioner in partitioners:
         main_cluster.partition(partitioner)
+    main_cluster.make_sub_cluster_original()
     return p_structure
 
 

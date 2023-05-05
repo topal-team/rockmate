@@ -216,7 +216,14 @@ class K_graph(RK_graph):
         # -> otherwise they are shared with the previous k_graph
         # -> output_kdn_data/grad are shared with the next one
 
-        # ** special codes **
+        # ** useful dicts **
+        self.dict_KCN_fwd  = dict() # mt -> KCN(fwd)
+        self.dict_KCN_bwd  = dict() # mt -> KCN(bwd)
+        self.dict_KDN_data = dict() # mt -> KDN(data)
+        self.dict_KDN_grad = dict() # ...
+        self.dict_KDN_phantoms = dict()
+
+        # ** init and final codes **
         self.init_code = sg.init_node.get_code_ast()
         if not (sg.special_output_node is None):
             self.outputs_wrapping_code = sg.special_output_node.get_code_ast()
@@ -298,13 +305,12 @@ def aux_init_S_to_K(model,verbose,d):
 
 # the function that does it all
 def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
-    # -- init --
-    dict_KCN_fwd  = dict() # mt -> KCN(fwd)
-    dict_KCN_bwd  = dict() # mt -> KCN(bwd)
-    dict_KDN_data = dict() # mt -> KDN(data)
-    dict_KDN_grad = dict() # ...
-    dict_KDN_phantoms = dict()
     kg = K_graph(sg)
+    dict_KCN_fwd = kg.dict_KCN_fwd
+    dict_KCN_bwd = kg.dict_KCN_bwd
+    dict_KDN_data = kg.dict_KDN_data
+    dict_KDN_grad = kg.dict_KDN_grad
+    dict_KDN_phantoms = kg.dict_KDN_phantoms
 
     # ============  
     def handle_node(sn : S_node):
@@ -574,6 +580,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
             kdn_type = "grad", main_target = inp_mt,
             all_targets = sg.inputs,
             k_graph = kg)
+    kg.dict_KDN_data[input_kdn_data.mt] = input_kdn_data
+    kg.dict_KDN_grad[input_kdn_grad.mt] = input_kdn_grad
 
     # -> users of inp_data and deps of inp_grad
     input_sn_users_mt = [
@@ -678,6 +686,16 @@ def copy_K_graph(kg : K_graph):
     new_kg.list_kdn = new_list_kdn = (
         [copy_K_D_node(kdn) for kdn in kg.list_kdn])
     for kn in new_list_kcn+new_list_kdn: new_dict_kn[kn.name]=kn
+    new_kg.dict_KCN_fwd = dict(
+        (kn.mt,new_dict_kn[kn.name]) for kn in kg.dict_KCN_fwd.values())
+    new_kg.dict_KCN_bwd = dict(
+        (kn.mt,new_dict_kn[kn.name]) for kn in kg.dict_KCN_bwd.values())
+    new_kg.dict_KDN_data = dict(
+        (kn.mt,new_dict_kn[kn.name]) for kn in kg.dict_KDN_data.values())
+    new_kg.dict_KDN_grad = dict(
+        (kn.mt,new_dict_kn[kn.name]) for kn in kg.dict_KDN_grad.values())
+    new_kg.dict_KDN_phantoms = dict(
+        (kn.mt,new_dict_kn[kn.name]) for kn in kg.dict_KDN_phantoms.values())
 
     # -- edges --
     for new_kcn,old_kcn in zip(new_list_kcn,kg.list_kcn):
