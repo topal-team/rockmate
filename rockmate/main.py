@@ -31,6 +31,7 @@ import time
 import warnings
 from os import environ
 
+
 def print_memsizes(list_kg):
     di = list_kg[-1].dict_info
     for kg in list_kg:
@@ -75,13 +76,13 @@ class CheckpointedModule(torch.nn.Module):
         dict_inputs = make_inputs(original_mod, model_inputs, model_kwargs)
         #  We don't want to use the default setattr
         # because torch.nn.Module will register it as a submodule
-        self.mem_unit = mem_unit if mem_unit else 1024 ** 2
+        self.mem_unit = mem_unit if mem_unit else 1024**2
         # -- use pytorch graph builder to get the list of K_graphs --
         self.rkgb_res = rkgb.make_all_graphs(
             original_mod,
             dict_inputs,
             verbose=verbose,
-            dict_wanted_graphs={"Kl", "K"},
+            wanted_graphs={"Kl", "K"},
         )  # we don't need the whole K_graph
         self.list_kg = self.rkgb_res.K_graph_list
         self.dict_constants = self.rkgb_res.K_graph_list[0].dict_constants
@@ -251,7 +252,10 @@ class CheckpointedModule(torch.nn.Module):
         self,
         mem_limit=False,
         recursive=True,
-        gurobi_params={"LogToConsole": 0, "IntegralityFocus": 1,},
+        gurobi_params={
+            "LogToConsole": 0,
+            "IntegralityFocus": 1,
+        },
         protect_names=["sources data", "sources grad"],
     ):
         # based only on rkgb
@@ -376,6 +380,7 @@ class CheckpointedModule(torch.nn.Module):
         # we properly redefine CheckpointedModule's output backward.
 
         RkMod = self
+
         # -> so we can access to it inside the following class definition
         #  (when defining a Class inside a Class we cannot use `self`)
         class RK_autograd_Function(torch.autograd.Function):
@@ -605,4 +610,3 @@ class CheckpointedModule(torch.nn.Module):
                 and k not in ["training"]
             ):
                 self.__dict__[k] = v
-
