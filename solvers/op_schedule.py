@@ -5,69 +5,17 @@ from rkgb.Htools import *
 from collections import namedtuple
 
 
-class Cluster:
-    def __init__(self, list_kcn, interfaces, loss_idx):
-        self.list_kcn = list_kcn
-        self.list_kdn = []
-        for kcn in list_kcn:
-            self.list_kdn += kcn.users_global
-            self.list_kdn += kcn.deps_global
+class Op:
+    def __init__(self, kn, fast_forward=False, disabled=False, detach=True):
+        self.kn = kn
+        self.name = kn.name
+        self.fast_forward = fast_forward
+        self.disabled = disabled
+        self.detach = detach
+        self.is_del = isinstance(kn, K_D_node)
 
-        self.dict_kn = {
-            **{kdn.name: kdn for kdn in self.list_kdn},
-            **{kcn.name: kcn for kcn in list_kcn},
-        }
-        self.interfaces = interfaces
-        self.loss_idx = loss_idx
-
-        # self.interfaces = dict()
-        # self.interfaces["inputs_kdn_data"] = list_kcn[0].deps_real
-        # self.interfaces["outputs_kdn_data"] = ...
-        # self.interfaces["inputs_kdn_grad"] = list_kcn[-1].users
-        # self.interfaces["outputs_kdn_grad"] = ...
-
-
-def hg_to_cluster(hg: H_graph, kg: K_graph):
-    interfaces = dict()
-    interfaces["inputs_kdn_data"] = set(hdn.kdn for hdn in hg.inputs_hdn_data)
-    interfaces["outputs_kdn_data"] = set(hdn.kdn for hdn in hg.outputs_hdn_data)
-    interfaces["inputs_kdn_grad"] = set(hdn.kdn for hdn in hg.inputs_hdn_grad)
-    interfaces["outputs_kdn_grad"] = set(hdn.kdn for hdn in hg.outputs_hdn_grad)
-    # interfaces["all"] = hg.interfaces
-    list_kcn = []
-    loss_kcn = K_C_node("loss")
-    for kdn in interfaces["outputs_kdn_data"]:
-        loss_kcn.deps_real.add(kdn)
-    for kdn in interfaces["outputs_kdn_grad"]:
-        loss_kcn.users.add(kdn)
-    for kcn in kg.list_kcn:
-        if kcn in hg.all_kcn_inside or kcn.main_target in hg.name:
-            # bottom level hg has no kcn inside
-            list_kcn.append(kcn)
-        if kcn == kg.loss_kcn:
-            loss_idx = len(list_kcn)
-            list_kcn.append(loss_kcn)
-    cluster = Cluster(list_kcn, interfaces, loss_idx)
-    return cluster
-
-
-"""
-Ptools: clusters, A_clusters which keeps all the schedules
-Htools: Hgraph with HCN/HDN, each HCN could lead to one cluster
-OpSchedule: always anonymized. 
-Init: adding save all schedule to every A_cluster.
-HILP: given one Hgraph, solve based on the schedules of clusters of HCN
-
-"""
-
-# class Op:
-#     def __init__(self, kn, fast_forward=False, disabled=False, detach=True):
-#         self.kn = kn
-#         self.name = kn.name
-#         self.fast_forward = fast_forward
-#         self.disabled = disabled
-#         self.detach = detach
-#         self.is_del = isinstance(kn, K_D_node)
+    def __repr__(self):
+        return "Disabled" * self.disabled + self.name
 
 
 class OpSchedule:
@@ -75,15 +23,13 @@ class OpSchedule:
         self,
         op_list,
         loss_idx=None,
-        interfaces={
-            "inputs_kdn_data": set(),
-            "outputs_kdn_data": set(),
-            "inputs_kdn_grad": set(),
-            "outputs_kdn_grad": set(),
-        },
+        cluster=None,
+        interfaces=None,
         refine=True,
         correct_overhead=True,
     ):
+        # Key role of OpSchedule: taking op_list, analyzing memory stats,
+        # keeping info for further solving.
         self.op_list = op_list
         if loss_idx is None:
             # Find the last loss op before the first bwd
@@ -95,37 +41,42 @@ class OpSchedule:
         else:
             self.loss_idx = loss_idx
 
-        self.interfaces = interfaces
+        if cluster is not None:
+            self.interfaces = cluster.interfaces
+        elif interfaces is not None:
+            self.interfaces = interfaces
+        else:
+            interfaces = {
+                "inputs_kdn_data": set(),
+                "outputs_kdn_data": set(),
+                "inputs_kdn_grad": set(),
+                "outputs_kdn_grad": set(),
+            }
         self.interface_kdns = [
             kdn for inter in interfaces.values() for kdn in inter
-        ]
+        ]  # all interface KDN's
+        self.interface_names = [kdn.name for kdn in self.interface_kdns]
         self.op_name_list = [op.name for op in self.op_list]
 
-        # self.fwd_time = sum(
-        #     op.kn.time for op in op_list[: loss_idx + 1] if not op.disabled
-        # )
-        # self.bwd_time = sum(
-        #     op.kn.time for op in op_list[loss_idx + 1 :] if not op.disabled
-        # )
         if refine:
             self.refine()
 
-        all_kdns = set()
+        list_kdn = []
         for op in self.op_list:
             if op.is_del:
-                all_kdns.add(op.kn)
+                list_kdn.append(op.kn)
             else:
-                all_kdns.update(op.kn.users)
-                all_kdns.update(op.kn.deps_global)
-        all_kdns.update(
+                list_kdn.extend(op.kn.users)
+                list_kdn.extend(op.kn.deps_global)
+        list_kdn.extend(
             interfaces["inputs_kdn_grad"]
         )  # inputs grad are not in users
 
-        self.dict_kdn = {kdn.name: kdn for kdn in all_kdns}
-
-        alive_status = {kdn.name: False for kdn in all_kdns}
-        for kdn in self.interfaces["inputs_kdn_data"]:
-            alive_status[kdn.name] = True
+        self.dict_kdn = {kdn.name: kdn for kdn in list_kdn}
+        alive_status = {
+            kdn.name: kdn in self.interfaces["inputs_kdn_data"]
+            for kdn in list_kdn
+        }
 
         self.alive_list = []
         # overhead_list = []
@@ -158,8 +109,6 @@ class OpSchedule:
         def get_overhead_(save, overhead):
             return max(save + overhead) - save[-1]
 
-        self.interface_names = [kdn.name for kdn in self.interface_kdns]
-
         for i, (op, alive_status) in enumerate(
             zip(self.op_list, self.alive_list)
         ):
@@ -173,7 +122,7 @@ class OpSchedule:
         self.bwd_time = np.sum(self.time[self.loss_idx + 1 :])
 
         self.phantoms = set()
-        for kdn in all_kdns:
+        for kdn in list_kdn:
             if (
                 self.alive_list[self.loss_idx][kdn.name]
                 and not kdn in self.interface_kdns
@@ -247,7 +196,7 @@ class OpSchedule:
                 "save": self.save_mem[i],
                 "overhead": self.overhead[i],
             }
-            for (kdn_name, index) in interfaces_status:
+            for kdn_name, index in interfaces_status:
                 kdn = self.dict_kdn[kdn_name]
                 if index == -1:
                     # special case: output_data in BWD without dependency
@@ -347,82 +296,28 @@ class OpSchedule:
                         )
 
                 if max(src_i) > next_used_i:  # try to use before regenerate
-
                     op.disabled = True
 
 
-def get_autograd_sched_rec(hgraph: H_graph, kg: K_graph):
-
-    for hcn in hgraph.list_hcn:
-        if hcn.is_fwd and hcn.sub_graph is not None:
-            sub_g = hcn.sub_graph
-            if not sub_g.list_sched:
-                sub_opt = get_autograd_sched_rec(sub_g, kg)
-                sub_g.add_sched(sub_opt)
-    cluster = hg_to_cluster(hgraph, kg)
-    return get_autograd_sched(cluster)
-
-
-def get_autograd_sched(
-    cluster: Cluster, protect_names=["sources data", "sources grad"]
-):
-    list_kcn = cluster.list_kcn
-
-    def _can_del(i, kdn):
-        if kdn.name in protect_names:
-            return False
-        for kcn in cluster.list_kcn[i + 1 :]:
-            if kdn in kcn.deps_real:
-                return False
-        # for kcn in kdn.users_real:
-        #     if cluster.list_kcn.index(kcn) > i:
-        #         return False
-        return True
-
-    if len(list_kcn) == 3:  # leaf nodes: fwd+bwd pair & loss
-        op_list = [
-            Op(list_kcn[0], detach=True),
-            Op(list_kcn[1], disabled=True),
-            Op(list_kcn[2], detach=True),
-        ]
-        for kdn in list_kcn[2].deps_real:
-            if "phantoms" in kdn.name:
-                op_list.append(Op(kdn))
-        loss_idx = 1
-        # interfaces = dict()
-        # interfaces["inputs_kdn_data"] = list_kcn[0].deps_real
-        # interfaces["outputs_kdn_data"] = set(
-        #     kdn for kdn in list_kcn[0].users if "phantoms" not in kdn.name
-        # )
-        # interfaces["outputs_kdn_grad"] = set(
-        #     kdn for kdn in list_kcn[1].deps_real if "phantoms" not in kdn.name
-        # )
-        # interfaces["inputs_kdn_grad"] = list_kcn[1].users
-
-    else:
-        op_list = []
-        alive_list = []
-        alive_status = {}
-        for kdn in cluster.list_kdn:
-            # if hdn not in cluster.interfaces:
-            alive_status[kdn.name] = (
-                1 if (kdn in cluster.interfaces["inputs_kdn_data"]) else 0
-            )
-
-        for i, kcn in enumerate(cluster.list_kcn):
-            if i == cluster.loss_idx:
-                loss_idx = len(op_list)
-            for kdn in kcn.users:
-                alive_status[kdn.name] = 1
-            op_list.append(Op(kcn, detach=True, disabled=("loss" in kcn.name)))
-            alive_list.append(alive_status.copy())
-
-            for kdn_name, alive in alive_status.items():
-
-                kdn = cluster.dict_kn[kdn_name]
-                if alive and _can_del(i, kdn):
-                    op_list.append(Op(kdn))
-                    alive_status[kdn_name] = 0
-                    alive_list.append(alive_status.copy())
-
-    return OpSchedule(op_list, loss_idx, cluster.interfaces)
+# def hg_to_cluster(hg: H_graph, kg: K_graph):
+#     interfaces = dict()
+#     interfaces["inputs_kdn_data"] = set(hdn.kdn for hdn in hg.inputs_hdn_data)
+#     interfaces["outputs_kdn_data"] = set(hdn.kdn for hdn in hg.outputs_hdn_data)
+#     interfaces["inputs_kdn_grad"] = set(hdn.kdn for hdn in hg.inputs_hdn_grad)
+#     interfaces["outputs_kdn_grad"] = set(hdn.kdn for hdn in hg.outputs_hdn_grad)
+#     # interfaces["all"] = hg.interfaces
+#     list_kcn = []
+#     loss_kcn = K_C_node("loss")
+#     for kdn in interfaces["outputs_kdn_data"]:
+#         loss_kcn.deps_real.add(kdn)
+#     for kdn in interfaces["outputs_kdn_grad"]:
+#         loss_kcn.users.add(kdn)
+#     for kcn in kg.list_kcn:
+#         if kcn in hg.all_kcn_inside or kcn.main_target in hg.name:
+#             # bottom level hg has no kcn inside
+#             list_kcn.append(kcn)
+#         if kcn == kg.loss_kcn:
+#             loss_idx = len(list_kcn)
+#             list_kcn.append(loss_kcn)
+#     cluster = Cluster(list_kcn, interfaces, loss_idx)
+#     return cluster

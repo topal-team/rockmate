@@ -8,14 +8,17 @@ from rkgb.utils.ast_add_on import ast_to_str
 
 from solvers.HILP_gurobi import ModelGurobi, solve_hg_recursive
 from solvers.rotor_solver import seq_builder, solve_dp_functional
-from solvers.op_schedule import OpSchedule, get_autograd_sched_rec
+from solvers.op_schedule import OpSchedule
 
 
 class HILP:
     def __init__(
         self,
-        mem_unit=1024 ** 2,
-        gurobi_params={"LogToConsole": 0, "IntegralityFocus": 1,},
+        mem_unit=1024**2,
+        gurobi_params={
+            "LogToConsole": 0,
+            "IntegralityFocus": 1,
+        },
     ):
         self.mem_unit = mem_unit
         self.gurobi_params = gurobi_params
@@ -27,7 +30,7 @@ class HILP:
         recursive=True,
         print_info=False,
         protect_names=["sources data", "sources grad"],
-        return_hg=False
+        return_hg=False,
     ):
         if isinstance(rkgb_res, rkgb.Htools.H_graph):
             return self.solve_hg(
@@ -36,7 +39,6 @@ class HILP:
                 mem_limit,
                 print_info=print_info,
                 protect_names=protect_names,
-                
             )
         self.mem_limit = mem_limit
         #  -- build Hgraph --
@@ -44,11 +46,11 @@ class HILP:
         kg = rkgb_res.K_graph
         sg = rkgb_res.S_graph
         if recursive:
-            ps = rkgb.Ptools.S_to_P(sg,None) # TO TODO None=model
+            ps = rkgb.Ptools.S_to_P(sg, None)  # TO TODO None=model
             self.hg = rkgb.Htools.P_and_K_to_H(ps, kg)
             print(f"Size of Hgraph {len(self.hg.list_hcn)}")
-            save_all_sched = get_autograd_sched_rec(self.hg, kg)
-            self.hg.add_sched(save_all_sched)
+            # save_all_sched = get_autograd_sched_rec(self.hg, kg)
+            # self.hg.add_sched(save_all_sched)
             solve_hg_recursive(self.hg, solve_self=False, print_info=print_info)
             print("Low level finished")
         if return_hg:
