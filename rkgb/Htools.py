@@ -138,8 +138,7 @@ class H_cluster():
     all_clusters : set = None
     representee_cluster = None # : H_cluster
     possible_hg : list[H_graph] = None
-    solutions = None #: list[H_sched] LATER 
-    solvers_already_used = None #: list[Solver] LATER
+    list_sched = None #: list[Op_sched] LATER 
 
     def __init__(self,name,is_bottom):
         self.name = name
@@ -233,6 +232,7 @@ def P_cluster_to_H_cluster(p_cluster : P_cluster, kg : K_graph):
     if p_cluster is p_cluster.representee_cluster:
         h_cluster.representee_cluster = h_cluster
         h_cluster.possible_hg = possible_hg = []
+        h_cluster.list_sched = []
         for pg in p_cluster.possible_partitioning:
             hg = P_graph_to_H_graph(pg,p_cluster,kg)
             h_cluster.all_clusters.update(hg.all_clusters)
@@ -251,6 +251,8 @@ def P_node_to_H_cluster(pn : P_node, kg : K_graph):
         return None
     else:
         h_cluster = H_cluster(f"H_Cluster_bottom_{pn.mt}",True)
+        h_cluster.list_sched = []
+        h_cluster.representee_cluster = h_cluster
         loss_kcn = h_cluster.loss_kcn
         mt = pn.mt
         # -- list_kcn part --
@@ -281,7 +283,6 @@ def P_node_to_H_cluster(pn : P_node, kg : K_graph):
             "outputs_kdn_grad" : inputs_grad
         }
 
-        h_cluster.representee_cluster = h_cluster
         return h_cluster
 
 

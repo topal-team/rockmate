@@ -692,7 +692,10 @@ def copy_K_graph(kg : K_graph):
         [copy_K_C_node(kcn) for kcn in kg.list_kcn])
     new_kg.list_kdn = new_list_kdn = (
         [copy_K_D_node(kdn) for kdn in kg.list_kdn])
-    for kn in new_list_kcn+new_list_kdn: new_dict_kn[kn.name]=kn
+    all_nodes = set(new_list_kcn+new_list_kdn)
+    all_nodes.update(set(kg.dict_KDN_data.values())) # to add inputs
+    all_nodes.update(set(kg.dict_KDN_grad.values()))
+    for kn in all_nodes: new_dict_kn[kn.name]=kn
     new_kg.dict_KCN_fwd = dict(
         (kn.mt,new_dict_kn[kn.name]) for kn in kg.dict_KCN_fwd.values())
     new_kg.dict_KCN_bwd = dict(
