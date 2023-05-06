@@ -72,7 +72,7 @@ class H_D_node(RK_node):
 # * H_graph *
 # ***********
 class H_graph(RK_graph):
-    def __init__(self, name, other_obj = None):
+    def __init__(self, name, h_cluster = None, other_obj = None):
         super().__init__("H",other_obj)
         # /!\ All the HCN's and HDN's should be in the same level. /!\ 
         self.name = name
@@ -84,6 +84,12 @@ class H_graph(RK_graph):
         self.outputs_hdn_grad = set()  # HDN set -> outputs' grad
         self.inputs_hdn_grad = set()  # HDN set -> inputs' grad
         self.loss_hcn = None
+        if h_cluster is not None:
+            self.cluster = h_cluster
+            self.all_clusters = set([h_cluster])
+        else:
+            self.cluster = None
+            self.all_clusters = set()
 
     def make_users(self):
         for hn in self.dict_hn.values():
@@ -108,6 +114,7 @@ class H_graph(RK_graph):
         self.list_hcn = l = RK_sort_based_on_deps(root_hcn)
         l.remove(root_hcn)
         if set(l1) != set(l):
+            print([hcn.name for hcn in l1 if hcn not in l])
             raise Exception(
                 "Problem with H_nodes edges, set(list_hcn) "\
                 "has changed after RK_sort_based_on_deps.\n"\
@@ -120,6 +127,7 @@ class H_graph(RK_graph):
 # * H_cluster *
 # *************
 class H_cluster():
+    is_bottom : bool = None
     list_kcn : list[K_C_node] = None
     list_kdn : list[K_D_node] = None
     loss_kcn : K_C_node = None
@@ -127,19 +135,23 @@ class H_cluster():
     dict_kn : dict = None
     interfaces : dict[str, set[K_D_node]]
     translator : Cluster_translator = None
+    all_clusters : set = None
     representee_cluster = None # : H_cluster
     possible_hg : list[H_graph] = None
     solutions = None #: list[H_sched] LATER 
     solvers_already_used = None #: list[Solver] LATER
 
-    def __init__(self):
+    def __init__(self,name,is_bottom):
+        self.name = name
         self.loss_kcn = K_C_node("loss")
+        self.is_bottom = is_bottom
+        self.all_clusters = set([self])
 
     def make_dict_kn(self):
         # ATTRIBUTES NEEDED: list_kcn, list_kdn
         self.dict_kn = dict(
             [(kdn.name,kdn) for kdn in self.list_kdn]
-          + [(kcn.name,kcn) for kcn in self.list_kdn]
+          + [(kcn.name,kcn) for kcn in self.list_kcn]
         )
 
     @property
@@ -149,7 +161,7 @@ class H_cluster():
 
 def P_cluster_to_H_cluster(p_cluster : P_cluster, kg : K_graph):
     if hasattr(p_cluster,"h_cluster"): return p_cluster.h_cluster
-    h_cluster = H_cluster()
+    h_cluster = H_cluster(p_cluster.name.replace("P","H"),False)
     p_cluster.h_cluster = h_cluster
     all_computation_mt = set(sn.mt for sn in p_cluster.s_nodes)
 
@@ -204,8 +216,11 @@ def P_cluster_to_H_cluster(p_cluster : P_cluster, kg : K_graph):
     dict_ano_to_kcn = translator.dict_ano_triplet_to_kcn = dict()
     dict_ano_to_kdn = translator.dict_ano_triplet_to_kdn = dict()
     for kcn in h_cluster.list_kcn:
-        ano_pair = dict_mt_to_ano[kcn.mt]
-        ano_triplet = ("fwd" if kcn.is_fwd else "bwd",) + ano_pair
+        if kcn is loss_kcn:
+            ano_triplet = ("loss",0,0)
+        else:
+            ano_pair = dict_mt_to_ano[kcn.mt]
+            ano_triplet = ("fwd" if kcn.is_fwd else "bwd",) + ano_pair
         dict_kcn_to_ano[kcn] = ano_triplet
         dict_ano_to_kcn[ano_triplet] = kcn
     for kdn in h_cluster.list_kdn:
@@ -219,10 +234,12 @@ def P_cluster_to_H_cluster(p_cluster : P_cluster, kg : K_graph):
         h_cluster.representee_cluster = h_cluster
         h_cluster.possible_hg = possible_hg = []
         for pg in p_cluster.possible_partitioning:
-            possible_hg.append(P_graph_to_H_graph(pg,p_cluster,kg))
+            hg = P_graph_to_H_graph(pg,p_cluster,kg)
+            h_cluster.all_clusters.update(hg.all_clusters)
+            possible_hg.append(hg)
     else:
         h_cluster.representee_cluster \
-            = P_cluster_to_H_cluster(p_cluster.representee_cluster)
+            = P_cluster_to_H_cluster(p_cluster.representee_cluster,kg)
 
     return h_cluster
 
@@ -233,7 +250,7 @@ def P_node_to_H_cluster(pn : P_node, kg : K_graph):
     elif pn.mt not in kg.dict_KCN_bwd:
         return None
     else:
-        h_cluster = H_cluster()
+        h_cluster = H_cluster(f"H_Cluster_bottom_{pn.mt}",True)
         loss_kcn = h_cluster.loss_kcn
         mt = pn.mt
         # -- list_kcn part --
@@ -270,9 +287,9 @@ def P_node_to_H_cluster(pn : P_node, kg : K_graph):
 
 def P_graph_to_H_graph(
         pg : P_graph, 
-        main_p_cluster : P_cluster, 
+        main_p_cluster : P_cluster,
         kg : K_graph):
-    hg = H_graph(pg.name.replace("pg","hg"))
+    hg = H_graph(pg.name.replace("pg","hg"),main_p_cluster.h_cluster)
 
     # -> Useful for interfaces
     dict_mt_to_hdn_data = dict()
@@ -286,6 +303,8 @@ def P_graph_to_H_graph(
 
     for pn in pg.nodes:
         sub_cluster = P_node_to_H_cluster(pn,kg)
+        if sub_cluster is not None:
+            hg.all_clusters.update(sub_cluster.all_clusters)
         if pn.is_leaf:
             # === Bottom level ===
             mt = pn.mt
@@ -351,14 +370,15 @@ def P_graph_to_H_graph(
             # ** HDNs **
             all_interfaces = sub_cluster.all_interfaces
             for kdn in all_interfaces:
-                if kdn.mt in dict_mt_to_hdn_data:
-                    continue # interfaces of sub clusters overlap
                 hdn = H_D_node(kdn)
-                dict_hdn_to_kdn[hdn] = kdn
                 if hdn.is_data:
-                    dict_mt_to_hdn_data[hdn.mt] = hdn
+                    if kdn.mt not in dict_mt_to_hdn_data:
+                        dict_hdn_to_kdn[hdn] = kdn
+                        dict_mt_to_hdn_data[hdn.mt] = hdn
                 else:
-                    dict_mt_to_hdn_grad[hdn.mt] = hdn
+                    if kdn.mt not in dict_mt_to_hdn_grad:
+                        dict_hdn_to_kdn[hdn] = kdn
+                        dict_mt_to_hdn_grad[hdn.mt] = hdn
 
     # ** loss_hcn **
     hg.loss_hcn = loss_hcn = H_C_node(
@@ -366,13 +386,26 @@ def P_graph_to_H_graph(
         main_target = "loss"
         )
     
+    # ** missing H_D_nodes -> inputs **
+    for inp_mt in main_p_cluster.inputs_mt:
+        if inp_mt not in dict_mt_to_hdn_data:
+            kdn_data = kg.dict_KDN_data[inp_mt]
+            hdn_data = H_D_node(kdn_data)
+            dict_hdn_to_kdn[hdn_data] = kdn_data
+            dict_mt_to_hdn_data[hdn_data.mt] = kdn_data
+            if inp_mt in kg.dict_KDN_grad:
+                kdn_grad = kg.dict_KDN_grad[inp_mt]
+                hdn_grad = H_D_node(kdn_grad)
+                dict_hdn_to_kdn[hdn_grad] = kdn_grad
+                dict_mt_to_hdn_grad[hdn_grad.mt] = kdn_grad
+    
     # ** register nodes **
     hg.list_hdn = list(dict_hdn_to_kdn.keys())
     hg.list_hcn = list(dict_kcn_to_hcn.values())
     hg.list_hcn.append(loss_hcn)
     hg.dict_hn = dict(
         [(hdn.name,hdn) for hdn in hg.list_hdn]
-      + [(hcn.name,hcn) for hcn in hg.list_hdn]
+      + [(hcn.name,hcn) for hcn in hg.list_hcn]
     )
 
     # ** interfaces **
@@ -384,7 +417,7 @@ def P_graph_to_H_graph(
         = set(dict_mt_to_hdn_grad[mt] 
             for mt in main_p_cluster.inputs_mt \
             if mt in dict_mt_to_hdn_grad)
-    hg.outputs_hdn_data \
+    hg.outputs_hdn_grad \
         = set(dict_mt_to_hdn_grad[mt] 
             for mt in main_p_cluster.outputs_mt \
             if mt in dict_mt_to_hdn_grad)
@@ -392,13 +425,13 @@ def P_graph_to_H_graph(
     # === Build the edges ===
     for hdn in hg.list_hdn:
         kdn = dict_hdn_to_kdn[hdn]
-        for kcn in kdn.deps:
+        for kcn in kdn.deps if kdn.mt != "sources" else kdn.deps_global:
             if kcn is not kg.loss_kcn:
                 if kcn in dict_kcn_to_hcn:
                     hcn = dict_kcn_to_hcn[kcn]
                     hdn.deps.add(hcn)
                     hcn.users.add(hdn)
-        for kcn in kdn.users_real:
+        for kcn in kdn.users_real if kdn.mt != "sources" else kdn.users_global:
             if kcn is not kg.loss_kcn:
                 if kcn in dict_kcn_to_hcn:
                     hcn = dict_kcn_to_hcn[kcn]

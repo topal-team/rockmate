@@ -543,7 +543,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
     for kdn in list_outputs_kdn_grad:
         kdn.deps.add(loss_kcn)
 
-    # -> store the nodes
+    # -> list of nodes
     kg.list_kcn = (
         list(dict_KCN_fwd.values()) +
         list(dict_KCN_bwd.values()))
@@ -556,9 +556,10 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
     # -> build "users" attributes as reciprocal of "deps"
     kg.make_users()
 
-
     # *** global relations ***
     kg.init_deps_and_users_global()
+
+    # ** input nodes **
     # -> get input_kdn_data/grad from prev_kg
     if prev_kg:
         nb_input_kdn = len(prev_kg.list_outputs_kdn_data)
@@ -586,6 +587,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
             other_obj = kg)
     kg.dict_KDN_data[input_kdn_data.mt] = input_kdn_data
     kg.dict_KDN_grad[input_kdn_grad.mt] = input_kdn_grad
+    kg.dict_kn[input_kdn_data.name] = input_kdn_data
+    kg.dict_kn[input_kdn_grad.name] = input_kdn_grad
 
     # -> users of inp_data and deps of inp_grad
     input_sn_users_mt = [

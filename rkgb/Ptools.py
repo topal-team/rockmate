@@ -368,7 +368,7 @@ class P_cluster():
             self.make_io()
             self.make_translator()
             self.make_ano_cluster_id()
-            self.name = f"Cluster_{cluster_nb}_Ano_id_{self.ano_cluster_id}"
+            self.name = f"P_Cluster_{cluster_nb}_Ano_id_{self.ano_cluster_id}"
 
     @property
     def size(self):
@@ -491,14 +491,15 @@ class P_cluster():
     def make_translator(self):
         # ATTRIBUTES NEEDED : s_nodes, p_structure
         # DO : translator
-        dict_sn_to_ano_info = self.p_structure.dict_sn_to_ano_sn_info
+        dict_mt_to_ano_info = self.p_structure.dict_mt_to_ano_sn_info
         self.translator = translator = Cluster_translator()
         translator.dict_mt_to_ano_pair = dict()
         translator.dict_sn_to_ano_pair = dict()
         translator.dict_ano_pair_to_sn = dict()
         dict_ano_id_to_nb_seen = dict()
+
         for sn in self.s_nodes:
-            ano_id = dict_sn_to_ano_info[sn].ano_id
+            ano_id = dict_mt_to_ano_info[sn.mt].ano_id
             if ano_id not in dict_ano_id_to_nb_seen:
                 dict_ano_id_to_nb_seen[ano_id] = placement = 1
             else:
@@ -508,18 +509,22 @@ class P_cluster():
             translator.dict_mt_to_ano_pair[sn.mt] = pair
             translator.dict_sn_to_ano_pair[sn] = pair
             translator.dict_ano_pair_to_sn[pair] = sn
+        
+        for inp_mt in self.inputs_mt:
+            ano_id = dict_mt_to_ano_info[inp_mt].ano_id
+            translator.dict_mt_to_ano_pair[inp_mt] = (ano_id,"input")
     # =============================
 
     # =============================
     def make_ano_cluster_id(self):
         # ATTRIBUTES NEEDED : s_nodes, p_structure, io
         # DO : ano_cluster_id, representee_cluster
-        dict_sn_to_ano_info = self.p_structure.dict_sn_to_ano_sn_info
+        dict_mt_to_ano_info = self.p_structure.dict_mt_to_ano_sn_info
         dict_inputs_used = self.dict_first_mt_to_inputs_used
         dict_outputs_sent = self.dict_output_mt_to_outputs_sent
         charac_list = []
         for sn in self.s_nodes:
-            ano_info : Ano_S_node_Info = dict_sn_to_ano_info[sn]
+            ano_info : Ano_S_node_Info = dict_mt_to_ano_info[sn.mt]
             charac_edges = []
             for req_sn,used_targets in sn.deps.items():
                 if req_sn not in self.s_nodes: continue
@@ -532,7 +537,7 @@ class P_cluster():
                         req_sn.all_targets.index(used_target)
                     )
                 charac_edges.append((
-                    dict_sn_to_ano_info[req_sn].ano_id,
+                    dict_mt_to_ano_info[req_sn.mt].ano_id,
                     charac_used_targets
                 ))
             charac_inputs = []
@@ -592,7 +597,7 @@ class P_structure():
     main_cluster : P_cluster = None
     sg : S_graph = None
     dict_info : dict = None
-    dict_sn_to_ano_sn_info : dict[S_node, Ano_S_node_Info] = None
+    dict_mt_to_ano_sn_info : dict[str, Ano_S_node_Info] = None
     dict_cluster_charac_string_to_cluster : dict[str, P_cluster] = None
     dict_cluster_ano_charac_string_to_ano_cluster_id : dict[str,int] = None
     dict_ano_cluster_id_to_representee_cluster : dict[int,P_cluster] = None
@@ -604,7 +609,7 @@ class P_structure():
         self.dict_info = sg.dict_info
         self.nb_clusters = 0
         self.nb_unique_clusters = 0
-        self.dict_sn_to_ano_sn_info = dict()
+        self.dict_mt_to_ano_sn_info = dict()
         self.dict_cluster_charac_string_to_cluster = dict()
         self.dict_cluster_ano_charac_string_to_ano_cluster_id = dict()
         self.dict_ano_cluster_id_to_representee_cluster = dict()
@@ -612,13 +617,13 @@ class P_structure():
         self.min_size_to_trigger_partitioning = min_size_to_trigger_partitioning 
 
     # ==========================================================
-    def make_dict_sn_to_ano_info(self,model : torch.nn.Module):
+    def make_dict_mt_to_ano_info(self,model : torch.nn.Module):
         # ATTRIBUTES NEEDED : sg
-        # DO : dict_sn_to_ano_sn_info
+        # DO : dict_mt_to_ano_sn_info
         # -> generate ano_sn_info for all the s_nodes
         self.dict_sn_charac_string_to_ano_id = dict_sn_charac_string_to_ano_id = dict()
         nb_unique_sns = 0
-        for sn in self.sg.nodes:
+        for sn in [self.sg.init_node] + self.sg.nodes:
             ano_sn_info = Ano_S_node_Info(sn,self.sg,model)
             sn_charac_string = ano_sn_info.make_charac_string()
             if sn_charac_string in dict_sn_charac_string_to_ano_id:
@@ -629,7 +634,7 @@ class P_structure():
                     = dict_sn_charac_string_to_ano_id[sn_charac_string] \
                     = nb_unique_sns \
                     = nb_unique_sns + 1
-            self.dict_sn_to_ano_sn_info[sn] = ano_sn_info
+            self.dict_mt_to_ano_sn_info[sn.mt] = ano_sn_info
 
     def make_graphs_names(self):
         for cluster in self.dict_ano_cluster_id_to_representee_cluster.values():
@@ -786,9 +791,11 @@ class P_Dynamic_manipulation(): # only contains staticmethod
                 sub_snodes = P_Dynamic_manipulation.freeze(sub_g,p_structure,partitioner)
                 sub_c = P_cluster(sub_snodes,p_structure)
                 original_c = sub_c.original_cluster
-                representee_c = original_c.representee_cluster
-                representee_c.partitioners_already_used.append(partitioner)
-                representee_c.possible_partitioning.append(sub_g)
+                if original_c.representee_cluster is original_c:
+                    original_c.partitioners_already_used.append(partitioner)
+                    original_c.possible_partitioning.append(sub_g)
+                # otherwise -> We won't keep this sub_graph
+                # -> we are only interested in partitioning representee
                 sub_g.cluster = original_c
                 pn.sub_cluster = original_c
                 pn.name = sub_c.name
@@ -1160,7 +1167,7 @@ def S_to_P(
     min_size_to_trigger_partitioning = 4):
     p_structure = P_structure(sg,
         min_size_to_trigger_partitioning = min_size_to_trigger_partitioning)
-    p_structure.make_dict_sn_to_ano_info(model)
+    p_structure.make_dict_mt_to_ano_info(model)
     p_structure.main_cluster = main_cluster \
         = P_cluster([sn for sn in sg.nodes if not sn.is_artefact],p_structure)
     for partitioner in partitioners:

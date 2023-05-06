@@ -54,7 +54,7 @@ class RK_node():
         elif not (mt is None):
             self.main_target = mt
         else:
-            main_target = "/!\\ No target /!\\"
+            self.main_target = "/!\\ No target /!\\"
         # == init unique_id ==
         if other_obj is not None:
             if hasattr(other_obj,"node_unique_id_generator"):
