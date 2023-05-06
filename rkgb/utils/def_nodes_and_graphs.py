@@ -41,7 +41,7 @@ class RK_node():
     def __init__(
             self,
             node_type : str,
-            graph = None,
+            other_obj = None,
             main_target : str = None,
             target = None, mt = None, # aliases
             unique_id_generator : Node_unique_id_generator = None):
@@ -56,9 +56,12 @@ class RK_node():
         else:
             main_target = "/!\\ No target /!\\"
         # == init unique_id ==
-        if not (graph is None):
-            self.unique_id = graph.node_unique_id_generator.use()
-        elif not(unique_id_generator is None):
+        if other_obj is not None:
+            if hasattr(other_obj,"node_unique_id_generator"):
+                self.unique_id = other_obj.node_unique_id_generator.use()
+            elif isinstance(other_obj,Node_unique_id_generator):
+                self.unique_id = other_obj.use()
+        elif unique_id_generator is not None:
             self.unique_id = unique_id_generator.use()
         else:
             self.unique_id = id(self)
@@ -243,7 +246,8 @@ class RK_node():
 class RK_graph():
     def __init__(
             self,
-            graph_type : str, 
+            graph_type : str,
+            other_obj = None,
             node_unique_id_generator : Node_unique_id_generator = None):
         self.graph_type = graph_type # string: B, D, S, P, K, H
         # - base attribute -
@@ -254,7 +258,12 @@ class RK_graph():
         self.nodes = []
         self.output_nodes = []
 
-        if node_unique_id_generator is None:
+        if other_obj is not None:
+            if hasattr(other_obj,"node_unique_id_generator"):
+                self.node_unique_id_generator = other_obj.node_unique_id_generator
+            elif isinstance(other_obj,Node_unique_id_generator):
+                self.node_unique_id_generator = other_obj
+        elif node_unique_id_generator is None:
             self.node_unique_id_generator = Node_unique_id_generator()
         else:
             self.node_unique_id_generator = node_unique_id_generator

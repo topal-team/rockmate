@@ -115,7 +115,7 @@ class S_node(RK_node):
             main_target="No target",code=None,fct="",
             protected=False,
             is_rand=False,deps_rand=None,
-            s_graph = None):
+            other_obj = None):
         """
         A S_node is composed by one "real" computation, defining the
         "main_target", and followed by size / view operations over it.
@@ -143,7 +143,7 @@ class S_node(RK_node):
         .is_rand    : bool
         .deps_rand  : str set : because we don't want random src nodes here
         """
-        super().__init__("S",s_graph,main_target=main_target)
+        super().__init__("S",other_obj,main_target=main_target)
         self.is_artefact = False
         self.main_code = (main_target,code)
         self.main_fct = fct
@@ -455,7 +455,7 @@ class S_graph(RK_graph):
 
 def D_to_S_init(dg : D_graph) -> S_graph:
     sg = S_graph(dg)
-    init_node = S_node(main_target="sources",s_graph=sg)
+    init_node = S_node(main_target="sources",other_obj=sg)
     init_node.all_targets=[]
     s_nodes = sg.nodes
     dict_s_nodes = dict() # to translate D to S
@@ -464,10 +464,10 @@ def D_to_S_init(dg : D_graph) -> S_graph:
                 main_target=dn.target,
                 code=dn.ast_code,
                 fct=dn.fct,
-                s_graph=sg,
                 protected=dn.protected,
                 is_rand=dn.is_rand,
-                deps_rand= set(dn.deps_rand))
+                deps_rand= set(dn.deps_rand),
+                other_obj=sg)
         s_nodes.append(sn)
         dict_s_nodes[dn.target] = sn
         for req_dn in dn.deps:
@@ -725,9 +725,9 @@ def create_random_snodes_from_dict_rand(sg,model,device):
             main_target = name,
             code       = ast_code,
             fct        = "--Random function--",
-            s_graph    = sg,
             protected  = True,
-            is_rand    = True)
+            is_rand    = True,
+            other_obj  = sg)
         # -> We need to generate ".info" from def_info.py
         # -> to do so we first need to generate the variable <name>
         our_global = globals().copy()
@@ -850,7 +850,7 @@ def cut(sg : S_graph): # -> list of S_graph
         else:
             ino = S_node(
                 main_target=f"init_node of bloc, should NEVER be used",
-                s_graph=new_sg)
+                other_obj=new_sg)
             new_sg.init_node = ino
             inputs = set()
             for (user_sn,str_set) in first_node.users.items():

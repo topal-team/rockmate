@@ -13,7 +13,7 @@ class D_node(RK_node): # Also subclass of B_node
     def __init__(self,
             target="",code=None,fct="",
             is_rand=False,deps_rand=None,
-            d_graph = None):
+            other_obj = None):
         """ attributes :
         .target    : str  : the name of the only var defined in the node
         .ast_code  : AST  : right part of the assigning code
@@ -25,7 +25,7 @@ class D_node(RK_node): # Also subclass of B_node
         .users     : D_node set : reciprocal of .deps
         .protected : bool : whether self is a 1-separator of the graph
         """
-        super().__init__("D",d_graph,target=target)
+        super().__init__("D",other_obj,target=target)
         if not code:
             code = ast_add_on.make_ast_constant("/!\\ not defined /!\\")
         self.ast_code = code
@@ -173,9 +173,9 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
     for bn in b_nodes:
         # -- translate B node to D --
         dn = D_node(bn.target,bn.ast_code,bn.fct,
-                d_graph=dg,
                 is_rand = bn.is_rand,
-                deps_rand = set(bn.deps_rand))
+                deps_rand = set(bn.deps_rand),
+                other_obj=dg)
         if bn.is_input:
             inputs.append(bn.target)
             dn.is_input = True

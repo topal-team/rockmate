@@ -10,55 +10,73 @@ from rkgb.Ktools import K_graph, K_C_node, K_D_node
 # ************
 # * H_C_node *
 # ************
-class H_C_node:
-    """ previous attrs TO REMOVE OR MOVE TO SOLVER DIR
-    fwd_time = 0
-    fwd_overhead = 0
-    ff_op_list = []
-    """
-    def __init__(self, name):
+class H_C_node(RK_node):
+    def __init__(self,
+            name,
+            main_target = None, 
+            sub_cluster = None,
+            is_fwd = True,
+            number = -1):
+        super().__init__("HC",mt = main_target)
         self.name = name  # e.g. Fwd_1
+        self.sub_cluster = sub_cluster
+        self.is_fwd = is_fwd
+        self.is_leaf = bool(main_target is None)
         self.deps = set()  # HDN set
         self.users = set()  # HDN set
-        self.sub_cluster = None
-        self.main_target = None  # Bottom level
-        self.is_fwd = True
-        self.is_leaf = False
-        self.number = -1
-        #  When toposorting the HCNs we want to respect the same order
-        # as the one found for KCNs, ie follow variable number
-        # (get_num_tar) AND add some special deps for artifacts
-        #  To make it easy, we give a number to each hcn based on K_graph's
-        # toposort : hcn.is_leaf -> hcn.number = kcn index in list_kcn
-        # else -> hcn.number = min (sub_hcn.number in hcn.subgraph)
+        self.number = number
+        # About self.number :
+        # When toposorting list_hcn we want to respect as much as possible
+        # the original order, so list_hcn toposort consists of:
+        # -> inverse Breath First Search (as any toposort)
+        # -> if equal, then choose the one which comes first in list_kcn.
+        # And that's what self.number is used for: Rk_node.get_num
+        # (for D, S and K nodes we can get the number from main_target,
+        # but some H_nodes don't have a main_target).
 
 
 # ************
 # * H_D_node *
 # ************
-class H_D_node:
-    def __init__(self, name, main_target):
-        self.name = name
-        self.main_target = main_target
-        self.deps = set()  # HCN set
-        self.users = set()  # HCN set
-        self.mem = 0
-        self.is_data = True  #  otherwise, grad
-        self.kdn = None  # temporary attribute
+class H_D_node(RK_node):
+    kdn : K_D_node = None
+    main_target : str = None
+    name : str = None
+    is_data : bool = None
+    deps : set[H_C_node] = None
+    users : set[H_C_node] = None
+    def __init__(self,kdn : K_D_node = None):
+        self.deps = set()
+        self.users = set()
+        if kdn is None:
+            super().__init__("HD")
+        else:
+            super().__init__("HD",mt = kdn.mt)
+            self.kdn = kdn
+            self.name = H_D_node.make_name_from_kdn(kdn)
+            self.mem = kdn.mem
+            if kdn.kdn_type == "data":
+                self.is_data = True
+            elif kdn.kdn_type == "grad":
+                self.is_data = False
+            else:
+                assert(kdn.kdn_type == "phantoms")
+                raise Exception("An HDN cannot represent a KDN of type 'phantoms'")
+        
+    @staticmethod
+    def make_name_from_kdn(kdn):
+        return f"{kdn.kdn_type}_{kdn.mt}"
 
 
 # ***********
 # * H_graph *
 # ***********
-class H_graph:
-    """ previous attrs TO REMOVE OR MOVE TO SOLVER DIR
-    list_sched = []
-    """
-    def __init__(self, name):
+class H_graph(RK_graph):
+    def __init__(self, name, other_obj = None):
+        super().__init__("H",other_obj)
         # /!\ All the HCN's and HDN's should be in the same level. /!\ 
         self.name = name
         self.dict_hn = dict()  #  name -> HN
-        self.dict_hg = dict()  #  name -> sub_Hgraph
         self.list_hcn = []  #  toposorted
         self.list_hdn = []  #  including interface HDNs
         self.inputs_hdn_data = set()  # HDN set -> inputs' data
@@ -66,7 +84,6 @@ class H_graph:
         self.outputs_hdn_grad = set()  # HDN set -> outputs' grad
         self.inputs_hdn_grad = set()  # HDN set -> inputs' grad
         self.loss_hcn = None
-        self.all_kcn_inside = set()  # temporary attribute
 
     def make_users(self):
         for hn in self.dict_hn.values():
@@ -76,22 +93,17 @@ class H_graph:
     def sort_list_hcn(self):
         # -> similar to K_graph.sort_list_kcn
         l1 = list(self.list_hcn)
+        root_hcn = H_C_node("")
+        root_hcn.deps = set(self.inputs_hdn_grad) # Not enough
+        # -> Not enough, some hdn_grad aren't returned
+        # -> We need all the root of the 'deps' relation
         leaves_hcn = set()
         for hcn in self.list_hcn:
             if not hcn.is_fwd:
-                if len(hcn.users) == 0:
+                if len(hcn.get_users())==0:
                     leaves_hcn.add(hcn)
-                else:
-                    really_useful = False
-                    for user_hdn in hcn.users:
-                        if len(user_hdn.users) != 0:
-                            really_useful = True
-                    if not really_useful:
-                        leaves_hcn.add(hcn)
-        root_hdn = H_D_node("", "")
-        root_hcn = H_C_node("")
+        root_hdn = H_D_node()
         root_hdn.deps = leaves_hcn
-        root_hcn.deps = set(self.inputs_hdn_grad)  # Not enough
         root_hcn.deps.add(root_hdn)
         self.list_hcn = l = RK_sort_based_on_deps(root_hcn)
         l.remove(root_hcn)
@@ -129,6 +141,10 @@ class H_cluster():
             [(kdn.name,kdn) for kdn in self.list_kdn]
           + [(kcn.name,kcn) for kcn in self.list_kdn]
         )
+
+    @property
+    def all_interfaces(self):
+        return set().union(*self.interfaces.values())
 
 
 def P_cluster_to_H_cluster(p_cluster : P_cluster, kg : K_graph):
@@ -203,7 +219,7 @@ def P_cluster_to_H_cluster(p_cluster : P_cluster, kg : K_graph):
         h_cluster.representee_cluster = h_cluster
         h_cluster.possible_hg = possible_hg = []
         for pg in p_cluster.possible_partitioning:
-            possible_hg.append(P_graph_to_H_graph(pg,kg))
+            possible_hg.append(P_graph_to_H_graph(pg,p_cluster,kg))
     else:
         h_cluster.representee_cluster \
             = P_cluster_to_H_cluster(p_cluster.representee_cluster)
@@ -252,189 +268,128 @@ def P_node_to_H_cluster(pn : P_node, kg : K_graph):
         return h_cluster
 
 
-def P_graph_to_H_graph(pg : P_graph, kg : K_graph):
-    pass # TODO TODO TODO
-    """
-    #  -> This function is recursive in 'pg'
-    hg = H_graph(f"Hg_{pg.graph_id}")
-    # ** useful dicts **
+def P_graph_to_H_graph(
+        pg : P_graph, 
+        main_p_cluster : P_cluster, 
+        kg : K_graph):
+    hg = H_graph(pg.name.replace("pg","hg"))
+
+    # -> Useful for interfaces
     dict_mt_to_hdn_data = dict()
     dict_mt_to_hdn_grad = dict()
-    #  -> to easily find the inputs and outputs
-    dict_hdn_to_kdn = dict()
+
+    dict_hdn_to_kdn : dict[H_D_node, K_D_node] = dict()
     #  A hdn represents exactly one kdn
-    dict_kcn_to_hcn = dict()
+    dict_kcn_to_hcn : dict[K_C_node, H_C_node] = dict()
     #  At a fixed level of depth, a kcn can be found in only one hcn
     #  -> These two dict make it super easy to build edges
 
-    #  ** small functions to extract K_nodes from kg **
-    dict_kn = kg.dict_kn
-    dict_kn[kg.input_kdn_data.name] = kg.input_kdn_data
-    dict_kn[kg.input_kdn_grad.name] = kg.input_kdn_grad
-    has_bwd = lambda mt: f"bwd_{mt}" in dict_kn
-    has_grad = lambda mt: f"{mt} grad" in dict_kn
-    has_phantoms = lambda mt: f"{mt} phantoms" in dict_kn
-    get_kcn_fwd = lambda mt: dict_kn[f"fwd_{mt}"]
-    get_kcn_bwd = lambda mt: dict_kn[f"bwd_{mt}"]
-    get_kdn_data = lambda mt: dict_kn[f"{mt} data"]
-    get_kdn_grad = lambda mt: dict_kn[f"{mt} grad"]
-    get_kdn_phantoms = lambda mt: dict_kn[f"{mt} phantoms"]
-    
-    # ==* First, build the H_nodes *==
-    for pn in pg.list_nodes:
+    for pn in pg.nodes:
+        sub_cluster = P_node_to_H_cluster(pn,kg)
         if pn.is_leaf:
-            # ** Bottom level **
-            mt = pn.main_target
-            hcn_fwd = H_C_node(f"Fwd_{mt}")
-            hdn_data = H_D_node(f"Data_{mt}", mt)
-            kcn_fwd = get_kcn_fwd(mt)
-            kdn_data = get_kdn_data(mt)
+            # === Bottom level ===
+            mt = pn.mt
+            # ** HCN_fwd **
+            kcn_fwd = kg.dict_KCN_fwd[mt]
+            hcn_fwd = H_C_node(
+                f"fwd_{mt}",
+                main_target = mt,
+                sub_cluster = sub_cluster, # = None if no grad
+                is_fwd = True,
+                number = kcn_fwd._number)
             dict_kcn_to_hcn[kcn_fwd] = hcn_fwd
-            dict_hdn_to_kdn[hdn_data] = kdn_data
-            hcn_fwd.is_leaf = True
-            hcn_fwd.main_target = mt
-            hcn_fwd.number = kg.list_kcn.index(kcn_fwd)
-            hcn_fwd.fwd_time = kcn_fwd.time
-            hcn_fwd.fwd_overhead = kcn_fwd.overhead
-            hcn_fwd.ff_op_list = [
-                # H_op(hcn_fwd.name, hcn_fwd, is_fwd=True, is_del=False)
-                Op(kcn_fwd, fast_forward=True)
-            ]
-            hdn_data.mem = kdn_data.mem
-            hcns = [hcn_fwd]
-            hdns = [hdn_data]
-            #  ** bwd part **
-            if has_bwd(mt):
-                hcn_bwd = H_C_node(f"Bwd_{mt}")
-                hdn_grad = H_D_node(f"Grad_{mt}", mt)
-                kcn_bwd = get_kcn_bwd(mt)
-                kdn_grad = get_kdn_grad(mt)
-                dict_kcn_to_hcn[kcn_bwd] = hcn_bwd
-                dict_hdn_to_kdn[hdn_grad] = kdn_grad
-                hcn_bwd.is_leaf = True
-                hcn_bwd.is_fwd = False
-                hcn_bwd.main_target = mt
-                hcn_bwd.number = kg.list_kcn.index(kcn_bwd)
-                # hcn_bwd.fwd_time = kcn_bwd.time
-                # hcn_bwd.fwd_overhead = kcn_bwd.overhead
-                hdn_grad.is_data = False
-                hdn_grad.mem = kdn_grad.mem
-                hcns.append(hcn_bwd)
-                hdns.append(hdn_grad)
-                #  ** last level graph **
-                sub_hg = H_graph(f"Hg_{mt}")
-                hcn_fwd.sub_graph = hcn_bwd.sub_graph = sub_hg
-            else:
-                sub_hg = None
-        else:
-            #  ** Recursive **
-            sub_hg = P_and_K_to_H(pn.subgraph, kg)
-            hcn_fwd = H_C_node(f"Fwd_{pn.name}")
-            hcn_bwd = H_C_node(f"Bwd_{pn.name}")
-            hcn_fwd.sub_graph = hcn_bwd.sub_graph = sub_hg
-            hcn_bwd.is_fwd = False
-            # number :
-            nb_min_fwd = 9999999
-            nb_min_bwd = 9999999
-            for sub_hcn in sub_hg.list_hcn:
-                if sub_hcn.is_fwd:
-                    nb_min_fwd = min(sub_hcn.number, nb_min_fwd)
-                else:
-                    nb_min_bwd = min(sub_hcn.number, nb_min_bwd)
-            hcn_fwd.number = nb_min_fwd
-            hcn_bwd.number = nb_min_bwd
-            hcn_fwd.fwd_time = sum(
-                sub_hcn.fwd_time for sub_hcn in sub_hg.list_hcn
-            )
-            (
-                hcn_fwd.fwd_overhead,
-                hcn_fwd.ff_op_list,
-            ) = sub_hg.fast_fwd_overhead()
-            # fwd_time and overhead are for fast forward so bwd node has none
 
-            for kcn in sub_hg.all_kcn_inside:
+            # ** HDN_data **
+            if mt not in dict_mt_to_hdn_data: # interfaces of sub clusters overlap
+                kdn_data = kg.dict_KDN_data[mt]
+                hdn_data = H_D_node(kdn_data)
+                dict_hdn_to_kdn[hdn_data] = kdn_data
+                dict_mt_to_hdn_data[mt] = hdn_data
+            
+            if mt in kg.dict_KCN_bwd:
+                # ** HCN_bwd **
+                kcn_bwd = kg.dict_KCN_bwd[mt]
+                hcn_bwd = H_C_node(
+                    f"bwd_{mt}",
+                    main_target = mt,
+                    sub_cluster = sub_cluster,
+                    is_fwd = False,
+                    number = kcn_bwd._number)
+                dict_kcn_to_hcn[kcn_bwd] = hcn_bwd
+
+                # ** HDN_grad **
+                if mt not in dict_mt_to_hdn_grad: # interfaces of sub clusters overlap
+                    kdn_grad = kg.dict_KDN_grad[mt]
+                    hdn_grad = H_D_node(kdn_grad)
+                    dict_hdn_to_kdn[hdn_grad] = kdn_grad
+                    dict_mt_to_hdn_grad[mt] = hdn_grad
+
+        else:
+            # === NOT bottom ===
+            # ** HCN_fwd and bwd **
+            hcn_fwd_num = 999999
+            hcn_bwd_num = -1
+            for kcn in sub_cluster.list_kcn:
+                if not hasattr(kcn,"_number"): continue
+                if kcn.is_fwd:
+                    hcn_fwd_num = min(hcn_fwd_num,kcn._number)
+                else:
+                    hcn_bwd_num = max(hcn_bwd_num,kcn._number)
+            hcn_fwd = H_C_node(
+                f"fwd_{pn.name}",
+                sub_cluster = sub_cluster,
+                is_fwd = True,
+                number = hcn_fwd_num)
+            hcn_bwd = H_C_node(
+                f"bwd_{pn.name}",
+                sub_cluster = sub_cluster,
+                is_fwd = False,
+                number = hcn_bwd_num)
+            for kcn in sub_cluster.list_kcn:
                 dict_kcn_to_hcn[kcn] = hcn_fwd if kcn.is_fwd else hcn_bwd
 
-            hcns = [hcn_fwd, hcn_bwd]
-            hdns = []
-            io_of_sub_hg = sub_hg.outputs_hdn_data.union(
-                sub_hg.outputs_hdn_grad
-            )  # We don't create the nodes for the inputs
-            for hdn_io_in_sub_hg in io_of_sub_hg:
-                mt = hdn_io_in_sub_hg.main_target
-                mem = hdn_io_in_sub_hg.mem
-                kdn_io = hdn_io_in_sub_hg.kdn
-                if kdn_io.kdn_type == "grad":
-                    hdn_io = H_D_node(f"Grad_in_{hg.name}_{mt}", mt)
-                    hdn_io.is_data = False
+            # ** HDNs **
+            all_interfaces = sub_cluster.all_interfaces
+            for kdn in all_interfaces:
+                if kdn.mt in dict_mt_to_hdn_data:
+                    continue # interfaces of sub clusters overlap
+                hdn = H_D_node(kdn)
+                dict_hdn_to_kdn[hdn] = kdn
+                if hdn.is_data:
+                    dict_mt_to_hdn_data[hdn.mt] = hdn
                 else:
-                    hdn_io = H_D_node(f"Data_in_{hg.name}_{mt}", mt)
-                hdn_io.mem = mem
-                hdns.append(hdn_io)
-                dict_hdn_to_kdn[hdn_io] = kdn_io
+                    dict_mt_to_hdn_grad[hdn.mt] = hdn
 
-        # * register everything *
-        for hn in hcns + hdns:
-            hg.dict_hn[hn.name] = hn
-        hg.list_hcn.extend(hcns)
-        if not (sub_hg is None):
-            hg.dict_hg[sub_hg.name] = sub_hg
-        for hdn in hdns:
-            if hdn.is_data:
-                dict_mt_to_hdn_data[hdn.main_target] = hdn
-            else:
-                dict_mt_to_hdn_grad[hdn.main_target] = hdn
-
-    #  ==* Inputs / Outputs *==
-    hg.outputs_hdn_data = set(
-        dict_mt_to_hdn_data[inp] for inp in pg.output_targets
-    )
-    hg.outputs_hdn_grad = set(
-        dict_mt_to_hdn_grad[inp] for inp in pg.output_targets
-    )
-    hg.inputs_hdn_data = inputs_data = set()
-    hg.inputs_hdn_grad = inputs_grad = set()
-    for inp_mt in pg.input_targets:
-        assert inp_mt not in dict_mt_to_hdn_data
-        assert inp_mt not in dict_mt_to_hdn_grad
-        kdn_data = get_kdn_data(inp_mt)
-        hdn_data = H_D_node(f"Data_{inp_mt}_in_{hg.name}", inp_mt)
-        hdn_data.mem = kdn_data.mem
-        dict_mt_to_hdn_data[inp_mt] = hdn_data
-        dict_hdn_to_kdn[hdn_data] = kdn_data
-        inputs_data.add(hdn_data)
-        hg.list_hdn.append(hdn_data)
-        hg.dict_hn[hdn_data.name] = hdn_data
-        if has_grad(inp_mt):
-            kdn_grad = get_kdn_grad(inp_mt)
-            hdn_grad = H_D_node(f"Grad_{inp_mt}_in_{hg.name}", inp_mt)
-            hdn_grad.is_data = False
-            hdn_grad.mem = kdn_grad.mem
-            dict_mt_to_hdn_grad[inp_mt] = hdn_grad
-            dict_hdn_to_kdn[hdn_grad] = kdn_grad
-            inputs_grad.add(hdn_grad)
-            hg.list_hdn.append(hdn_grad)
-            hg.dict_hn[hdn_grad.name] = hdn_grad
-    hg.interfaces = (
-        hg.inputs_hdn_data
-        | hg.inputs_hdn_grad
-        | hg.outputs_hdn_data
-        | hg.outputs_hdn_grad
-    )
-
-    #  =* loss_hcn *=
-    hg.loss_hcn = loss_hcn = H_C_node(f"Loss_hcn_of_{hg.name}")
-    hg.loss_hcn.main_target = "loss"
-    hg.list_hcn.append(hg.loss_hcn)
-
+    # ** loss_hcn **
+    hg.loss_hcn = loss_hcn = H_C_node(
+        f"Loss_hcn_of_{hg.name}",
+        main_target = "loss"
+        )
+    
+    # ** register nodes **
     hg.list_hdn = list(dict_hdn_to_kdn.keys())
+    hg.list_hcn = list(dict_kcn_to_hcn.values())
+    hg.list_hcn.append(loss_hcn)
+    hg.dict_hn = dict(
+        [(hdn.name,hdn) for hdn in hg.list_hdn]
+      + [(hcn.name,hcn) for hcn in hg.list_hdn]
+    )
 
-    #  =* register hdn.kdn and hg.all_kcn_inside *=
-    for hdn, kdn in dict_hdn_to_kdn.items():
-        hdn.kdn = kdn
-    hg.all_kcn_inside = set(dict_kcn_to_hcn.keys())
-
-    #  ===* Second, build the edges *===
+    # ** interfaces **
+    hg.inputs_hdn_data \
+        = set(dict_mt_to_hdn_data[mt] for mt in main_p_cluster.inputs_mt)
+    hg.outputs_hdn_data \
+        = set(dict_mt_to_hdn_data[mt] for mt in main_p_cluster.outputs_mt)
+    hg.inputs_hdn_data \
+        = set(dict_mt_to_hdn_grad[mt] 
+            for mt in main_p_cluster.inputs_mt \
+            if mt in dict_mt_to_hdn_grad)
+    hg.outputs_hdn_data \
+        = set(dict_mt_to_hdn_grad[mt] 
+            for mt in main_p_cluster.outputs_mt \
+            if mt in dict_mt_to_hdn_grad)
+    
+    # === Build the edges ===
     for hdn in hg.list_hdn:
         kdn = dict_hdn_to_kdn[hdn]
         for kcn in kdn.deps:
@@ -458,65 +413,13 @@ def P_graph_to_H_graph(pg : P_graph, kg : K_graph):
         hdn.deps.add(loss_hcn)
         loss_hcn.users.add(hdn)
 
-    # ** special input "source" **
-    if "sources" in pg.input_targets:
-        hdn_data = dict_mt_to_hdn_data["sources"]
-        kdn_data = dict_hdn_to_kdn[hdn_data]
-        for kcn in kdn_data.users_global:
-            if kcn in dict_kcn_to_hcn:
-                hcn = dict_kcn_to_hcn[kcn]
-                hdn_data.users.add(hcn)
-                hcn.deps.add(hdn_data)
-        hdn_grad = dict_mt_to_hdn_grad["sources"]
-        kdn_grad = dict_hdn_to_kdn[hdn_grad]
-        if kdn_grad.deps_global == set():
-            hg.list_hdn.remove(hdn_grad)
-        else:
-            for kcn in kdn_grad.deps_global:
-                if kcn in dict_kcn_to_hcn:
-                    hcn = dict_kcn_to_hcn[kcn]
-                    hdn_grad.deps.add(hcn)
-                    hcn.users.add(hdn_grad)
     hg.sort_list_hcn()
-
     return hg
-    """
 
 
 def P_and_K_to_H(ps : P_structure, kg : K_graph):
-    return H_cluster(ps.main_cluster,kg)
-
-    
-
-
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-# =====================================================
-
-
-
-# ==========================
+    kg.make_kcns_number()
+    return P_cluster_to_H_cluster(ps.main_cluster,kg)
 
 
 # ==========================
@@ -533,11 +436,12 @@ color_edge = "black"
 def get_color(hn):
     if hn.main_target == "loss":
         return color_special
-    if isinstance(hn, H_D_node):
+    elif isinstance(hn, H_D_node):
         return color_hdn
-    if hn.is_fwd:
+    elif hn.is_fwd:
         return color_hcn_fwd
-    return color_hcn_bwd
+    else:
+        return color_hcn_bwd
 
 
 def print_H_graph(hg: H_graph, name=None, open=True, render_format="svg"):
@@ -552,33 +456,12 @@ def print_H_graph(hg: H_graph, name=None, open=True, render_format="svg"):
     dot = graphviz.Digraph(name, comment="H_graph = Hierarchical graph")
     # ----- Core -----
     # * nodes *
-    def print_hcn(hcn: H_C_node):
-        mt = hcn.main_target
-        dot.node(
-            hcn.name,
-            hcn.name,
-            color=get_color(hcn),
-            tooltip=(
-                f"Fast Forward Time : {hcn.fwd_time}"
-                f"Fast Forward Memory Overhead : "
-                f"{irotor.MemSize(hcn.fwd_overhead)}"
-            )
-            if hcn.is_fwd
-            else "",
-        )
-
-    def print_hdn(kdn):
-        dot.node(
-            kdn.name,
-            kdn.name,
-            color=get_color(kdn),
-            tooltip=f"Mem {irotor.MemSize(kdn.mem)}",
-        )
-
     for hcn in hg.list_hcn:
-        print_hcn(hcn)
+        dot.node(hcn.name,hcn.name,color=get_color(hcn))
     for hdn in hg.list_hdn:
-        print_hdn(hdn)
+        dot.node(hdn.name,hdn.name,
+            color=get_color(hdn),
+            tooltip=f"Mem {irotor.MemSize(hdn.mem)}")
 
     # * edges *
     for hcn in hg.list_hcn:

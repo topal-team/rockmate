@@ -182,9 +182,9 @@ class P_node(RK_node):
     is_protected_from_unwrap = None
     def __init__(self,
             main_graph,
-            sub_cluster  = None,
+            sub_cluster = None,
             main_target = None,
-            sub_graph    = None, # FOR DYNAMIC PARTITIONING
+            sub_graph   = None, # FOR DYNAMIC PARTITIONING
             sn          = None):
         super().__init__("P",main_graph)
         self.main_graph  = main_graph
@@ -232,6 +232,7 @@ class P_node(RK_node):
 
 
 class P_graph(RK_graph):
+    name : str = None
     pn_wrapping_it : P_node = None # -> pn representing self in an upper graph
     _first_nodes : list[P_node] = None
     cluster = None # just for debug + printing
@@ -242,10 +243,7 @@ class P_graph(RK_graph):
                 "a p_structure or an other_pg (since they both have a dict_info)."
             )
         other_obj = p_structure if other_pg is None else other_pg
-        if other_obj is None:
-            super().__init__("P")
-        else:
-            super().__init__("P",other_obj.node_unique_id_generator)
+        super().__init__("P",other_obj)
         self.dict_info = other_obj.dict_info if dict_info is None else dict_info
         self.output_nodes = set()
         # Note: self.nodes contains only the nodes of self
@@ -632,6 +630,11 @@ class P_structure():
                     = nb_unique_sns \
                     = nb_unique_sns + 1
             self.dict_sn_to_ano_sn_info[sn] = ano_sn_info
+
+    def make_graphs_names(self):
+        for cluster in self.dict_ano_cluster_id_to_representee_cluster.values():
+            for nb,pg in enumerate(cluster.possible_partitioning):
+                pg.name = f"Possible_pg_{nb}_of_{cluster.name}"
                 
 
 class P_Dynamic_manipulation(): # only contains staticmethod
@@ -1163,6 +1166,7 @@ def S_to_P(
     for partitioner in partitioners:
         main_cluster.partition(partitioner)
     main_cluster.make_sub_cluster_original()
+    p_structure.make_graphs_names()
     return p_structure
 
 

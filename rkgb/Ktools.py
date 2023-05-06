@@ -24,9 +24,9 @@ class K_C_node(RK_node):
             deps_real = None,
             deps_fake = None,
             deps_through_size_artefacts=None,
-            k_graph=None):
+            other_obj=None):
         # ** informative **
-        super().__init__("KC",k_graph,main_target=main_target)
+        super().__init__("KC",other_obj,main_target=main_target)
         mt = main_target
         atars = all_targets
         ttars = tensor_targets
@@ -124,11 +124,11 @@ class K_D_node(RK_node):
             tensor_targets    = None,
             inplace_targets   = None,
             container_targets = None,
-            info        = None,
-            deps        = None,
-            k_graph = None):
+            info      = None,
+            deps      = None,
+            other_obj = None):
         # ** informative **
-        super().__init__("KD",k_graph,main_target=main_target)
+        super().__init__("KD",other_obj,main_target=main_target)
         self.kdn_type = kdn_type # data, grad or phantoms
         mt = main_target
         atars = all_targets
@@ -254,10 +254,14 @@ class K_graph(RK_graph):
         for kcn in self.list_kcn:
             if not kcn.is_fwd and len(kcn.users) == 0:
                 leaves_kcn.add(kcn)
-        root_kdn = K_D_node(deps = leaves_kcn,k_graph=self)
-        root_kcn = K_C_node(deps_real=set([root_kdn]),k_graph=self)
+        root_kdn = K_D_node(deps = leaves_kcn,other_obj=self)
+        root_kcn = K_C_node(deps_real=set([root_kdn]),other_obj=self)
         self.list_kcn = l = RK_sort_based_on_deps(root_kcn)
         l.remove(root_kcn)
+
+    def make_kcns_number(self):
+        for i,kcn in enumerate(self.list_kcn):
+            setattr(kcn,"_number",i)
 
     def __eq__(self,g2,force_order=False,raise_exception=False):
         g1 = self
@@ -361,7 +365,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
             body_code    = sn.body_code,
             deps_real    = kcn_fwd_deps,
             deps_through_size_artefacts = kcn_deps_art_kcn,
-            k_graph = kg)
+            other_obj = kg)
         dict_KCN_fwd[mt] = kcn_fwd
 
         # -> KDN(data)
@@ -374,7 +378,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
             container_targets = sn.container_targets,
             info        = info,
             deps        = set([kcn_fwd]),
-            k_graph = kg)
+            other_obj = kg)
         dict_KDN_data[mt] = kdn_data
 
 
@@ -415,7 +419,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
                 is_fwd    = False,
                 deps_real = kcn_bwd_deps_real,
                 deps_fake = kcn_bwd_deps_fake,
-                k_graph = kg)
+                other_obj = kg)
             dict_KCN_bwd[mt] = kcn_bwd
 
             # -> phantom deps
@@ -453,7 +457,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
                     container_targets = sn.container_targets,
                     info        = info,
                     deps        = set([kcn_fwd]),
-                    k_graph = kg)
+                    other_obj = kg)
                 dict_KDN_phantoms[mt] = kdn_phantoms
                 kcn_bwd.deps_real.add(kdn_phantoms)
                 kcn_fwd.has_phantoms = True
@@ -468,7 +472,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
                 tensor_targets    = sn.tensor_targets,
                 inplace_targets   = sn.inplace_targets,
                 container_targets = sn.container_targets,
-                k_graph = kg)
+                other_obj = kg)
             dict_KDN_grad[mt] = kdn_grad
             kcn_bwd.deps_real.add(kdn_grad)
 
@@ -532,7 +536,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
         is_fwd    = True,
         main_code = ("loss",ast_add_on.make_ast_constant("LOSS")),
         deps_real = set(list_outputs_kdn_data),
-        k_graph = kg)
+        other_obj = kg)
     loss_kcn.time     = 0
     loss_kcn.overhead = 0
     dict_KCN_fwd[loss_kcn.main_target] = loss_kcn
@@ -575,11 +579,11 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
         kg.input_kdn_data=input_kdn_data = K_D_node(
             kdn_type = "data", main_target = inp_mt,
             all_targets = sg.inputs,
-            k_graph = kg)
+            other_obj = kg)
         kg.input_kdn_grad=input_kdn_grad = K_D_node(
             kdn_type = "grad", main_target = inp_mt,
             all_targets = sg.inputs,
-            k_graph = kg)
+            other_obj = kg)
     kg.dict_KDN_data[input_kdn_data.mt] = input_kdn_data
     kg.dict_KDN_grad[input_kdn_grad.mt] = input_kdn_grad
 
