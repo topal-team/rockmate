@@ -142,7 +142,7 @@ class OpSchedule:
             if (not op.is_del) and (not op.disabled):
                 for kdn in op.kn.deps_real:
                     if kdn in self.interfaces["inputs_kdn_data"]:
-                        self.dep_interfaces_data.add(kdn.name)
+                        self.dep_interfaces_data.add(self.list_kdn.index(kdn))
                     if kdn in self.interfaces["outputs_kdn_data"]:
                         for kcn in kdn.deps:
                             if (
@@ -151,7 +151,7 @@ class OpSchedule:
                                     :i
                                 ]
                             ):  # if not generated during bwd
-                                self.dep_interfaces_data.add(kdn.name)
+                                self.dep_interfaces_data.add(self.list_kdn.index(kdn))
 
         self.fwd_overhead_correction = []
         self.bwd_overhead_correction = []
@@ -164,13 +164,13 @@ class OpSchedule:
         interfaces_status = []
         for kdn in self.interfaces["inputs_kdn_data"]:  # Input of Fwd
             interfaces_status.append((kdn.name, self.loss_idx))  # After fwd
-            if kdn.name in self.dep_interfaces_data:
+            if self.list_kdn.index(kdn) in self.dep_interfaces_data:
                 interfaces_status.append(
                     (kdn.name, len(self.op_list))
                 )  # After Bwd
         for kdn in self.interfaces["outputs_kdn_data"]:  # Output of Fwd
             interfaces_status.append((kdn.name, 0))  # Before fwd?
-            if kdn.name in self.dep_interfaces_data:
+            if self.list_kdn.index(kdn) in self.dep_interfaces_data:
                 interfaces_status.append(
                     (kdn.name, len(self.op_list))
                 )  # After Bwd
@@ -201,7 +201,7 @@ class OpSchedule:
                     # Otherwise, add kdn to memory
                     if i > self.loss_idx and _alive_status[kdn_name] > 0:
                         correction_term["save"] += kdn.mem
-                        correction_term[(kdn.name, False)] = -kdn.mem
+                        correction_term[(self.list_kdn.index(kdn), False)] = -kdn.mem
                     continue
 
                 if (
@@ -218,9 +218,9 @@ class OpSchedule:
                     if (  # and not deleted in between
                         kdn_name not in self.op_name_list[index : i + 1]
                     ):
-                        correction_term[(kdn.name, True)] = -kdn.mem
+                        correction_term[(self.list_kdn.index(kdn), True)] = -kdn.mem
                     else:
-                        correction_term[(kdn.name, "always")] = -kdn.mem
+                        correction_term[(self.list_kdn.index(kdn), "always")] = -kdn.mem
                 else:  # if exist afterwards
                     if not (kdn in self.interfaces["outputs_kdn_data"]) and (
                         kdn.deps
@@ -230,11 +230,11 @@ class OpSchedule:
                         )
                     ):  # and not generated in between
                         # check if output_data is created after i
-                        correction_term[(kdn.name, False)] = -kdn.mem
+                        correction_term[(self.list_kdn.index(kdn), False)] = -kdn.mem
                     elif kdn in self.interfaces["inputs_kdn_data"]:
-                        correction_term[(kdn.name, False)] = -kdn.mem
+                        correction_term[(self.list_kdn.index(kdn), False)] = -kdn.mem
                     else:
-                        correction_term[(kdn.name, "always")] = -kdn.mem
+                        correction_term[(self.list_kdn.index(kdn), "always")] = -kdn.mem
 
             if (
                 i < self.loss_idx
