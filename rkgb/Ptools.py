@@ -7,7 +7,7 @@
 # ** Graph partitioning **
 
 from rkgb.utils import *
-from rkgb.Stools import S_graph, S_node
+from rkgb.Stools import S_graph, S_node, copy_S_graph
 from rkgb.Ktools import K_C_node, K_D_node
 
 # Class definitions :
@@ -1178,10 +1178,24 @@ class Partitioner_seq(Partitioner):
     def __call__(self, cluster : P_cluster):
         pg : P_graph = cluster.init_P_graph()
         pg.cluster = cluster
+        # ** Add a temporary global source before get separators**
+        tmp_global_source_pn = P_node(main_graph=pg,main_target="tmp_source")
+        pg.nodes.insert(0,tmp_global_source_pn)
+        tmp_global_source_pn.users = first_nodes = pg.first_nodes
+        for first_pn in first_nodes:
+            first_pn.deps.add(tmp_global_source_pn)
+
         seps_pn = RK_get_1_separators(pg)
+
+        # -> remove tmp_source
+        for first_pn in first_nodes:
+            first_pn.deps.discard(tmp_global_source_pn)
+        pg.nodes.remove(tmp_global_source_pn)
+
+        # -> multiple output_nodes
+        if not (seps_pn[-1] is pg.nodes[-1]):
+            seps_pn.append(pg.nodes[-1])
         seps_mt = [sep.mt for sep in seps_pn]
-        if seps_pn[0] in cluster.firsts_mt:
-            del seps_pn[0]
         seps_sn = [sn for sn in cluster.s_nodes if sn.mt in seps_mt]
         seps_index = [-1]+[cluster.s_nodes.index(sep) for sep in seps_sn]
         pg.nodes = p_nodes = []
@@ -1221,11 +1235,13 @@ def S_to_P(
         Partitioner_seq()
     ],
     min_size_to_trigger_partitioning = 4):
+    sg = copy_S_graph(sg)
+    sg.discard_all_artefacts()
     p_structure = P_structure(sg,
         min_size_to_trigger_partitioning = min_size_to_trigger_partitioning)
     p_structure.make_dict_mt_to_ano_info(model)
     p_structure.main_cluster = main_cluster \
-        = P_cluster([sn for sn in sg.nodes if not sn.is_artefact],p_structure)
+        = P_cluster(list(sg.nodes),p_structure)
     for partitioner in partitioners:
         main_cluster.partition(partitioner)
     main_cluster.make_sub_cluster_original()

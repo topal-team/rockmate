@@ -376,6 +376,20 @@ class S_graph(RK_graph):
                     raise Exception(
                       f"{user_sn.main_target} in {sn.main_target}.users "\
                       f"but one sided relation...")
+                
+    def discard_all_artefacts(self):
+        # Do this only once the order is fixed!
+        # And K_graph is generated
+        # -> better do a copy first
+        snodes = list(self.nodes)
+        nb_nodes = len(snodes)
+        for i,sn in enumerate(snodes[::-1]):
+            index = nb_nodes-i-1
+            if sn.is_artefact:
+                del self.nodes[index]
+                S_edges.discard_sn_from_deps_of_its_users(sn)
+                S_edges.discard_sn_from_users_of_its_deps(sn)
+
 
     def clear(self):
         # -- (re)-sorting nodes -- 
@@ -827,33 +841,41 @@ def copy_S_graph(sg : S_graph):
 
 def cut(sg : S_graph): # -> list of S_graph
     # Note: when this function is used, sg.init_node has been unhooked
-    main_sg = copy_S_graph(sg) # to protect from side effects
-    seps = RK_get_1_separators(main_sg)
-    if main_sg.nodes.index(seps[0]) == 0:
-        del seps[0] # we add init_node instead
-    main_sg.nodes.insert(0,sg.init_node)
+    sg = copy_S_graph(sg) # to protect from side effects
+    # -> Add a temporary global source before get separators 
+    sg.nodes.insert(0,sg.init_node) # it's not the original sg
+    for first_sn in sg.init_node.users.keys():
+        S_edges.add_inplace(first_sn.deps,sg.init_node,set())
+
+    seps = RK_get_1_separators(sg)
+    
+    # -> remove tmp_source
+    for first_sn in sg.init_node.users.keys():
+        S_edges.discard_inplace(first_sn.deps,sg.init_node)
+    
     seps = [sg.init_node] + seps
-    if not (seps[-1] is main_sg.nodes[-1]): # multiple output_nodes
-        seps.append(main_sg.nodes[-1])
-    print_debug(f"S separators : {[sep.main_target for sep in seps]}")
+    # multiple output_nodes
+    if not (seps[-1] is sg.nodes[-1]):
+        seps.append(sg.nodes[-1])
+
     list_sg = []
     for block_nb in range(1,len(seps)):
         new_sg = S_graph()
-        new_sg.node_unique_id_generator = copy(main_sg.node_unique_id_generator)
-        new_sg.inherit_base_attributes(main_sg)
+        new_sg.node_unique_id_generator = copy(sg.node_unique_id_generator)
+        new_sg.inherit_base_attributes(sg)
         list_sg.append(new_sg)
         # -- get nodes --
         first_node = seps[block_nb-1]
         last_node = seps[block_nb]
-        first_i = main_sg.nodes.index(first_node)
-        last_i = main_sg.nodes.index(last_node)
-        nodes = main_sg.nodes[first_i+1:last_i+1] # last IN, first NOT
+        first_i = sg.nodes.index(first_node)
+        last_i = sg.nodes.index(last_node)
+        nodes = sg.nodes[first_i+1:last_i+1] # last IN, first NOT
         new_sg.nodes = nodes
         print_debug(f"size of bloc {block_nb} : {last_i}-{first_i}")
         # -- input --
         if block_nb==1:
-            new_sg.init_node = main_sg.init_node
-            new_sg.inputs = main_sg.inputs
+            new_sg.init_node = sg.init_node
+            new_sg.inputs = sg.inputs
         else:
             ino = S_node(
                 main_target=f"init_node of bloc, should NEVER be used",
@@ -866,19 +888,19 @@ def cut(sg : S_graph): # -> list of S_graph
                 #S_edges.add_inplace(user_sn.deps,ino,str_set)
                 S_edges.add_inplace(ino.users,user_sn,str_set)
                 if user_sn.is_artefact:
-                    ino.insert(user_sn,strong=True,sg=main_sg)
+                    ino.insert(user_sn,strong=True,sg=sg)
             for user_sn in ino.users.keys(): # Unhook ino (need due to `ino.insert`)
                 S_edges.discard_inplace(user_sn.deps,ino)
             first_node.users = dict() # previous bloc's output node
             new_sg.inputs = list(inputs)
         # -- outputs --
         if block_nb == len(seps)-1:
-            new_sg.output_nodes = main_sg.output_nodes
+            new_sg.output_nodes = sg.output_nodes
         else:
             new_sg.output_nodes = [last_node]
     for i in range(len(list_sg)-1):
         list_sg[i].outputs = list(list_sg[i+1].inputs)
-    list_sg[-1].outputs = main_sg.outputs
+    list_sg[-1].outputs = sg.outputs
     return S_graph_list(list_sg)
 
 # ==========================

@@ -367,16 +367,17 @@ def RK_sort_based_on_deps(origin_node : RK_node):
 # the rule is: a separator must requires_grad.
 
 def RK_get_1_separators(g: RK_graph):
+    # DONT FORGET TO ADD A SOURCE IF NECESSARY
+
     # used on D (to protect), S (to cut), P (to partition)
     # returns the list of all 1-separators of the 'deps' relation
     to_be_visited = list(g.output_nodes)
     seen = set(to_be_visited)
     dict_nb_usages = dict([(m,len(m.get_users())) for m in g.nodes])
+
     separators = []
     while to_be_visited!=[]:
-        # n = to_be_visited.pop() # TO REMOVE
-        n = max(to_be_visited,key=lambda n : n.get_num())
-        to_be_visited.remove(n)
+        n = to_be_visited.pop()
         seen.remove(n)
         if seen==set():
             if g.does_node_requires_grad(n):

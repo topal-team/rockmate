@@ -778,7 +778,10 @@ def get_color(kn):
     return color_kcn_bwd
 
 def aux_print_K_graph_message(kg : K_graph):
-    return f"K_graph - Forward + Backward graph : {len(kg.nodes)} nodes"
+    return (
+        f"K_graph - Forward + Backward graph, "\
+        f"{len(kg.list_kcn)} K_C_nodes; {len(kg.list_kdn)} K_D_nodes"
+    )
 
 def aux_print_K_graph_list_message(lkg : K_graph_list):
     list_nb_kcn = [len(kg.list_kcn) for kg in lkg]
