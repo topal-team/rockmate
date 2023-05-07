@@ -343,6 +343,7 @@ class P_cluster():
     first_nodes = None
     output_nodes = None
     dict_first_mt_to_inputs_used = None
+    dict_first_mt_to_inputs_used_mt = None
     dict_output_mt_to_outputs_sent = None
 
     def __init__(self,group_s_nodes,p_structure):
@@ -416,6 +417,7 @@ class P_cluster():
         first_nodes = []
         output_nodes = []
         self.dict_first_mt_to_inputs_used = dict_inputs_used = dict()
+        self.dict_first_mt_to_inputs_used_mt = dict_inputs_used_mt = dict()
         self.dict_output_mt_to_outputs_sent = dict_outputs_sent = dict()
         # == for each sn, check its interfaces outside the cluster ==
         for sn in self.s_nodes:
@@ -426,8 +428,10 @@ class P_cluster():
                         firsts_mt.append(sn.mt)
                         first_nodes.append(sn)
                         dict_inputs_used[sn.mt] = set(used_targets)
+                        dict_inputs_used_mt[sn.mt] = set([req_sn.mt])
                     else:
                         dict_inputs_used[sn.mt].update(used_targets)
+                        dict_inputs_used_mt[sn.mt].add(req_sn.mt)
                     if req_sn.mt not in inputs_mt:
                         inputs_mt.append(req_sn.mt)
             for user_sn,used_targets in sn.users.items():
@@ -452,8 +456,10 @@ class P_cluster():
                     firsts_mt.append(user_sn.mt)
                     first_nodes.append(user_sn)
                     dict_inputs_used[user_sn.mt] = set(used_targets)
+                    dict_inputs_used_mt[user_sn.mt] = set([ino.mt])
                 else:
                     dict_inputs_used[user_sn.mt].update(used_targets)
+                    dict_inputs_used_mt[user_sn.mt].add(ino.mt)
 
         # == check if cluster contains sg.output_nodes ==
         if sg.special_output_node is None: # sg has only one output_node
@@ -1069,21 +1075,25 @@ class Partitioner_bottom_to_top(Partitioner):
         first_nodes = pg._first_nodes
         pg._first_nodes = None
         last_wrapping_graph = P_graph("-1",cluster.p_structure)
-        source_pn = P_node(
-            last_wrapping_graph,
-            main_target="sources"
-        )
         main_pn = P_node(
             last_wrapping_graph,
             sub_graph=pg
         )
+        inputs_pn = []
+        dict_input_mt_to_pn = dict()
+        for inp_mt in cluster.inputs_mt:
+            inp_pn = P_node(last_wrapping_graph,main_target=inp_mt)
+            inputs_pn.append(inp_pn)
+            dict_input_mt_to_pn[inp_mt] = inp_pn
+            inp_pn.users = set([main_pn])
         pg.pn_wrapping_it = main_pn
-        last_wrapping_graph.nodes = [source_pn,main_pn]
-        main_pn.deps = set([source_pn])
-        source_pn.users = set([main_pn])
+        last_wrapping_graph.nodes = inputs_pn + [main_pn]
         for fst_node in first_nodes:
-            fst_node.deps_global.add(source_pn)
-            source_pn.users_global.add(fst_node)
+            inputs_used = cluster.dict_first_mt_to_inputs_used_mt[fst_node.mt]
+            for inp_mt in inputs_used:
+                inp_pn = dict_input_mt_to_pn[inp_mt]
+                fst_node.deps_global.add(inp_pn)
+                inp_pn.users_global.add(fst_node)
 
         # === FIRST : Dynamic partitioning ===
         previous_size = -1

@@ -374,7 +374,9 @@ def RK_get_1_separators(g: RK_graph):
     dict_nb_usages = dict([(m,len(m.get_users())) for m in g.nodes])
     separators = []
     while to_be_visited!=[]:
-        n = to_be_visited.pop()
+        # n = to_be_visited.pop() # TO REMOVE
+        n = max(to_be_visited,key=lambda n : n.get_num())
+        to_be_visited.remove(n)
         seen.remove(n)
         if seen==set():
             if g.does_node_requires_grad(n):
