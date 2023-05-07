@@ -18,7 +18,7 @@ class ModelGurobi:
     def __init__(
         self,
         hgraph: H_graph,
-        budget: int,
+        peak_budget: int,
         save_budget: int,
         gurobi_params: Dict[str, Any] = {
             "LogToConsole": 0,
@@ -30,7 +30,7 @@ class ModelGurobi:
         protected_names=[],
     ):
         self.gcd = gcd if gcd else 1
-        self.peak_budget = budget / self.gcd
+        self.peak_budget = peak_budget / self.gcd
         self.save_budget = save_budget / self.gcd
         self.gurobi_params = gurobi_params
         self.feasible = None
@@ -38,8 +38,8 @@ class ModelGurobi:
 
         #############################
         self.hgraph = hgraph
-        self.hcn2sub_g = []
-        self.sub_gs = []
+        self.hcn2sub_c = []
+        self.sub_cs = []
         self.nOpts = []  # number of opts
         self.nR = []  # number to run R, =nOpts if bwd, =nOpts+1 if fwd
         self.time = []
@@ -48,69 +48,61 @@ class ModelGurobi:
         for i, hcn in enumerate(self.hgraph.list_hcn):
             if "Loss" in hcn.name:
                 self.loss_idx = i
-            if hcn.sub_graph is None:
+            if hcn.sub_cluster is None:
                 # only when hcn is fwd with requires_grad=False
-                self.hcn2sub_g.append(None)
+                self.hcn2sub_c.append(None)
                 self.nR.append(1)
                 self.nOpts.append(0)
-                self.time.append([hcn.fwd_time])
-                self.overhead.append([hcn.fwd_overhead / self.gcd])
+                self.time.append([hcn.ff_time])
+                self.overhead.append([hcn.ff_overhead / self.gcd])
             else:
-                if hcn.sub_graph not in self.sub_gs:
-                    self.sub_gs.append(hcn.sub_graph)
-                self.hcn2sub_g.append(self.sub_gs.index(hcn.sub_graph))
-                self.nR.append(
-                    len(hcn.sub_graph.list_sched) + (1 if hcn.is_fwd else 0)
-                )
-                self.nOpts.append(len(hcn.sub_graph.list_sched))
+                if hcn.sub_cluster not in self.sub_cs:
+                    self.sub_cs.append(hcn.sub_cluster)
+                self.hcn2sub_c.append(self.sub_cs.index(hcn.sub_cluster))
+                self.nR.append(len(hcn.list_sched) + (1 if hcn.is_fwd else 0))
+                self.nOpts.append(len(hcn.list_sched))
 
                 if hcn.is_fwd:
                     # add fast forward to the options (final one)
                     self.time.append(
-                        [
-                            h_sched.fwd_time
-                            for h_sched in hcn.sub_graph.list_sched
-                        ]
-                        + [hcn.fwd_time]
+                        [op_sched.fwd_time for op_sched in hcn.list_sched]
+                        + [hcn.ff_time]
                         if hcn.is_fwd
                         else []
                     )
                     self.overhead.append(
                         [
-                            h_sched.fwd_overhead / self.gcd
-                            for h_sched in hcn.sub_graph.list_sched
+                            op_sched.fwd_overhead / self.gcd
+                            for op_sched in hcn.list_sched
                         ]
-                        + [hcn.fwd_overhead / self.gcd]
+                        + [hcn.ff_overhead / self.gcd]
                     )
                 else:
                     self.time.append(
-                        [
-                            h_sched.bwd_time
-                            for h_sched in hcn.sub_graph.list_sched
-                        ]
+                        [op_sched.bwd_time for op_sched in hcn.list_sched]
                     )
                     self.overhead.append(
                         [
-                            h_sched.bwd_overhead / self.gcd
-                            for h_sched in hcn.sub_graph.list_sched
+                            op_sched.bwd_overhead / self.gcd
+                            for op_sched in hcn.list_sched
                         ]
                     )
-        self.sub_g2hcn = [
-            [] for _ in self.sub_gs
-        ]  # index of sub_graph to index of hcn
-        for i, j in enumerate(self.hcn2sub_g):
+        self.sub_c2hcn = [
+            [] for _ in self.sub_cs
+        ]  # index of sub_cluster to index of hcn
+        for i, j in enumerate(self.hcn2sub_c):
             if j is None:
                 continue
-            self.sub_g2hcn[j].append(i)
+            self.sub_c2hcn[j].append(i)
         self.mem = [hdn.mem / self.gcd for hdn in self.hgraph.list_hdn]
         self.saved_mem = [
-            [h_sched.mem / self.gcd for h_sched in sub_g.list_sched]
-            for sub_g in self.sub_gs
+            [op_sched.mem / self.gcd for op_sched in sub_c.list_sched]
+            for sub_c in self.sub_cs
         ]
 
         T = len(self.hgraph.list_hcn)
         I = len(self.hgraph.list_hdn)
-        J = len(self.sub_gs)
+        J = len(self.sub_cs)
 
         self.protected_indices = [
             i
@@ -147,19 +139,19 @@ class ModelGurobi:
         #### In certain schedules, BWD depends on input/output data
         for i in range(I):
             for k, hcn in enumerate(self.hgraph.list_hcn):
-                if hcn.sub_graph is None:
+                if hcn.sub_cluster is None:
                     continue
-                for h_sched in hcn.sub_graph.list_sched:
+                for op_sched in hcn.list_sched:
                     # Without specifying schedule, we assume it's possible to use hdn here
                     if (
                         self.hgraph.list_hdn[i].kdn.name
-                        in h_sched.dep_interfaces_data
+                        in op_sched.dep_interfaces_data
                     ) and k not in _users_d[i]:
                         _users_d[i].append(k)
 
         ##############################
 
-        self.md = Model(f"rockmateMILP_{T}_{budget}")
+        self.md = Model(f"rockmateMILP_{T}_{peak_budget}")
         if gurobi_params is not None:
             for k, v in gurobi_params.items():
                 setattr(self.md.Params, k, v)
@@ -175,7 +167,12 @@ class ModelGurobi:
         # ======build variables======
         # For every HCN[i], R[i] is of size T*nR[i]
         self.R = [
-            self.md.addVars(T, self.nR[i], name=f"R{i}", vtype=GRB.BINARY,)
+            self.md.addVars(
+                T,
+                self.nR[i],
+                name=f"R{i}",
+                vtype=GRB.BINARY,
+            )
             for i in range(T)
         ]
 
@@ -189,16 +186,19 @@ class ModelGurobi:
         # Sp for saved Phantoms, option-related
         self.Sp = [
             self.md.addVars(
-                T + 1, len(sub_g.list_sched), name=f"Sp{j}", vtype=GRB.BINARY,
+                T + 1,
+                len(sub_c.list_sched),
+                name=f"Sp{j}",
+                vtype=GRB.BINARY,
             )
-            for j, sub_g in enumerate(self.sub_gs)
+            for j, sub_c in enumerate(self.sub_cs)
         ]
         self.sumSp = {}
         for j in range(J):
             for t in range(T + 1):
                 self.sumSp[(j, t)] = quicksum(
                     self.Sp[j][t, o]
-                    for o in range(len(self.sub_gs[j].list_sched))
+                    for o in range(len(self.sub_cs[j].list_sched))
                 )
 
         # to present whether one saved tensor can be inheritaged from the last stage
@@ -228,10 +228,10 @@ class ModelGurobi:
         )
         self.md.addLConstr(
             quicksum(
-                self.sumSp[(self.hcn2sub_g[i], t)]
+                self.sumSp[(self.hcn2sub_c[i], t)]
                 for t in range(self.loss_idx)
                 for i in range(t + 1, self.loss_idx)
-                if self.hcn2sub_g[i]
+                if self.hcn2sub_c[i]
             ),
             GRB.EQUAL,
             0,
@@ -264,7 +264,7 @@ class ModelGurobi:
                     )
 
         for j in range(J):
-            bwd_i = max(self.sub_g2hcn[j])
+            bwd_i = max(self.sub_c2hcn[j])
             # Forward start with no phantoms
             self.md.addLConstr(
                 quicksum(
@@ -288,17 +288,23 @@ class ModelGurobi:
         for i in range(T):
             for t in range(T):
                 self.md.addLConstr(
-                    self.sumR[(i, t)], GRB.LESS_EQUAL, 1,
+                    self.sumR[(i, t)],
+                    GRB.LESS_EQUAL,
+                    1,
                 )
         for j in range(J):
             for t in range(T + 1):
                 self.md.addLConstr(
-                    self.sumSp[(j, t)], GRB.LESS_EQUAL, 1,
+                    self.sumSp[(j, t)],
+                    GRB.LESS_EQUAL,
+                    1,
                 )  # assuming two copies of saved tensors won't be kept at the same time
 
         #### Option-free constraints: from rk-checkmate
         self.md.addLConstr(
-            quicksum(self.sumR[(t, t)] for t in range(T)), GRB.EQUAL, T,
+            quicksum(self.sumR[(t, t)] for t in range(T)),
+            GRB.EQUAL,
+            T,
         )  # diagonal should be executed
         self.md.addLConstr(
             quicksum(self.sumR[(self.loss_idx, t)] for t in range(T)),
@@ -332,8 +338,8 @@ class ModelGurobi:
 
         #### Options-related constraints
         for j in range(J):
-            fwd_i = min(self.sub_g2hcn[j])
-            bwd_i = max(self.sub_g2hcn[j])
+            fwd_i = min(self.sub_c2hcn[j])
+            bwd_i = max(self.sub_c2hcn[j])
             for t in range(T):
                 for o in range(self.nOpts[fwd_i]):
                     self.md.addLConstr(
@@ -354,8 +360,8 @@ class ModelGurobi:
                         self.Sp[j][t, o] + self.R[fwd_i][t, o],
                     )
 
-                    sub_g = self.sub_gs[j]
-                    for name in sub_g.list_sched[o].dep_interfaces_data:
+                    sub_c = self.sub_cs[j]
+                    for name in sub_c.list_sched[o].dep_interfaces_data:
                         # Tensor req_i is required by BWD
                         req_i = [
                             hdn.kdn.name for hdn in self.hgraph.list_hdn
@@ -474,7 +480,7 @@ class ModelGurobi:
                     for o, save_mem in enumerate(self.saved_mem[j])
                 )
                 + quicksum(  # if the first fwd operation creates phantoms
-                    self.R[0][t, o] * self.saved_mem[self.hcn2sub_g[0]][o]
+                    self.R[0][t, o] * self.saved_mem[self.hcn2sub_c[0]][o]
                     for o in range(self.nOpts[0])
                 )
                 # - quicksum(
@@ -487,7 +493,7 @@ class ModelGurobi:
 
         for t in range(T):
             for k in range(1, T):
-                j = self.hcn2sub_g[k]
+                j = self.hcn2sub_c[k]
                 self.U[(t, k)] = (
                     self.U[(t, k - 1)]
                     + quicksum(
@@ -510,7 +516,7 @@ class ModelGurobi:
                 else:
                     if j is None:
                         continue
-                    fwd_i = min(self.sub_g2hcn[j])
+                    fwd_i = min(self.sub_c2hcn[j])
                     self.U[(t, k)] += quicksum(
                         (
                             self.Sp[j][t + 1, o]
@@ -522,10 +528,12 @@ class ModelGurobi:
                     )
         for t in range(T):
             for k in range(T):
-                j = self.hcn2sub_g[k]
+                j = self.hcn2sub_c[k]
                 self.md.addLConstr(self.U[(t, k)], GRB.GREATER_EQUAL, 0)
                 self.md.addLConstr(
-                    self.U[(t, k)], GRB.LESS_EQUAL, self.peak_budget,
+                    self.U[(t, k)],
+                    GRB.LESS_EQUAL,
+                    self.peak_budget,
                 )
                 if j is None or not accurate_mem:
                     # don't consider correction_term
@@ -545,16 +553,16 @@ class ModelGurobi:
                     )
                 else:
                     hcn = self.hgraph.list_hcn[k]
-                    for o, h_sched in enumerate(hcn.sub_graph.list_sched):
+                    for o, op_sched in enumerate(hcn.list_sched):
                         for correction in (
-                            h_sched.fwd_overhead_correction
+                            op_sched.fwd_overhead_correction
                             if hcn.is_fwd
-                            else h_sched.bwd_overhead_correction
+                            else op_sched.bwd_overhead_correction
                         ):
                             correction_term = 0
                             overhead = (
                                 correction["save"] + correction["overhead"]
-                            ) - (h_sched.mem if hcn.is_fwd else 0)
+                            ) - (op_sched.mem if hcn.is_fwd else 0)
                             for inter_position, inter_mem in correction.items():
                                 if (
                                     inter_position == "save"
@@ -600,9 +608,9 @@ class ModelGurobi:
                                 self.peak_budget,
                             )
                         if not (
-                            h_sched.fwd_overhead_correction
+                            op_sched.fwd_overhead_correction
                             if hcn.is_fwd
-                            else h_sched.bwd_overhead_correction
+                            else op_sched.bwd_overhead_correction
                         ):
                             self.md.addLConstr(
                                 self.U[(t, k)]
@@ -645,126 +653,7 @@ class ModelGurobi:
             self.feasible = True
 
     def schedule(self, hgraph=None):
-        """ 
-        Given the solution from HILP, we want to translate the result
-        to a H_option that can be used in a higher level.
         """
-        hgraph = hgraph if hgraph else self.hgraph
-        assert self.feasible, "Cannot schedule an infeasible model!"
-        T = len(hgraph.list_hcn)
-        I = len(hgraph.list_hdn)
-        J = len(self.sub_gs)
-
-        op_list = []
-        alive_list = []
-        # alive_status = np.zeros(I, dtype=bool)
-        alive_status = {}
-        sizes = {}
-        for hdn in hgraph.list_hdn:
-            alive_status[hdn.name] = (
-                0 if (hdn in hgraph.inputs_hdn_data) else -1
-            )
-            sizes[hdn.name] = [hdn.mem]
-
-        for sub_g in self.sub_gs:
-            alive_status[sub_g.name] = -1  # to represent phantom from sub_g
-            sizes[sub_g.name] = [h_sched.mem for h_sched in sub_g.list_sched]
-
-        for t in range(T):
-            for k in range(T):
-                j = self.hcn2sub_g[k]
-                if self.sumR[(k, t)].getValue() == 1:
-
-                    hcn = hgraph.list_hcn[k]
-
-                    opt = -1
-                    for o in range(self.nOpts[k]):
-                        if self.R[k][t, o].X == 1:
-                            opt = o
-                            break
-                    # if hcn.is_fwd and self.R[k][t, -1].X == 1:
-                    #     opt = -1
-                    if opt > -1:
-                        h_obj = hcn.sub_graph.list_sched[opt]
-                    else:
-                        h_obj = hcn
-
-                    for eidx, (k_, i) in enumerate(self.create_list):
-                        if k == k_ and self.create[t, eidx].X == 1:
-                            alive_status[hgraph.list_hdn[i].name] = 0
-
-                    # phantoms will be created when not ff
-                    if hcn.is_fwd and j is not None:
-                        alive_status[self.sub_gs[j].name] = opt
-
-                    op_list.append(
-                        H_op(hcn.name, h_obj, is_fwd=hcn.is_fwd, is_del=False,)
-                    )
-                    alive_list.append(alive_status.copy())
-
-                    if (
-                        not hcn.is_fwd
-                        and self.sumSp[(j, t + 1)].getValue() == 0
-                    ):
-                        op_list.append(
-                            H_op(
-                                "Del_" + hcn.sub_graph.name, h_obj, is_del=True,
-                            )
-                        )  # del hcn.name means del phantom
-                        alive_status[hcn.sub_graph.name] = -1
-                        alive_list.append(alive_status.copy())
-
-                for eidx, (k_, i) in enumerate(self.delete_list):
-                    if k == k_ and self.delete[t, eidx].X == 1:
-                        hdn = hgraph.list_hdn[i]
-                        alive_status[hdn.name] = -1
-                        op_list.append(
-                            H_op("Del_" + hdn.name, hdn, is_del=True)
-                        )
-                        alive_list.append(alive_status.copy())
-
-            # At the end of the stage
-            for j in range(J):
-                # hcn = hgraph.list_hcn[self.sub_g2hcn[j]]
-
-                if (
-                    alive_status[self.sub_gs[j].name] >= 0
-                    and self.sumSp[(j, t + 1)].getValue() == 0
-                ):
-                    # del phantom happens either after bwd or at the end of stage
-                    h_obj = self.sub_gs[j].list_sched[
-                        alive_status[self.sub_gs[j].name]
-                    ]
-                    alive_status[self.sub_gs[j].name] = -1
-                    op_list.append(
-                        H_op("Del_" + self.sub_gs[j].name, h_obj, is_del=True,)
-                    )
-                    alive_list.append(alive_status.copy())
-
-        h_sched = H_sched(op_list, alive_list, sizes, hgraph)
-        # fwd_sched = OpSchedule(
-        #     op_list[: self.loss_idx + 1],
-        #     alive_list[: self.loss_idx + 1],
-        #     hgraph,
-        # )
-        # bwd_sched = OpSchedule(
-        #     op_list[self.loss_idx + 1 :],
-        #     alive_list[self.loss_idx + 1 :],
-        #     hgraph,
-        # )
-        # fwd_sched.del_input(hgraph)
-        for i, op in enumerate(op_list):
-            if "Loss" in op.name:
-                loss_idx = i
-                break
-        h_sched.get_info()
-        # fwd_sched, bwd_sched = h_sched.split_sched(loss_idx)
-        # h_schedion = H_option(hgraph, h_sched)
-        # return fwd_sched, bwd_sched, h_schedion
-        return h_sched
-
-    def schedule_(self, hgraph=None):
-        """ 
         Given the solution from HILP, we want to translate the result
         to a OpSchedule that can be used in a higher level.
         """
@@ -772,7 +661,7 @@ class ModelGurobi:
         assert self.feasible, "Cannot schedule an infeasible model!"
         T = len(hgraph.list_hcn)
         I = len(hgraph.list_hdn)
-        J = len(self.sub_gs)
+        J = len(self.sub_cs)
 
         op_list = []
         for t in range(T):
@@ -781,7 +670,7 @@ class ModelGurobi:
                     # loss_idx = len(op_list)
                     loss_op = Op(K_C_node("loss"))
                     op_list.append(loss_op)
-                j = self.hcn2sub_g[k]
+                j = self.hcn2sub_c[k]
                 if self.sumR[(k, t)].getValue() == 1:
                     hcn = hgraph.list_hcn[k]
                     opt = -1
@@ -790,7 +679,7 @@ class ModelGurobi:
                             opt = o
                             break
                     if opt > -1:
-                        h_obj = hcn.sub_graph.list_sched[opt]
+                        h_obj = hcn.list_sched[opt]
                         if hcn.is_fwd:
                             sub_op_list = h_obj.op_list[: h_obj.loss_idx].copy()
                         else:
@@ -841,87 +730,216 @@ class ModelGurobi:
         # loss_idx =
         return OpSchedule(op_list, loss_idx=None, interfaces=interfaces)
 
+    # def schedule(self, hgraph=None):
+    #     """
+    #     Given the solution from HILP, we want to translate the result
+    #     to a H_option that can be used in a higher level.
+    #     """
+    #     hgraph = hgraph if hgraph else self.hgraph
+    #     assert self.feasible, "Cannot schedule an infeasible model!"
+    #     T = len(hgraph.list_hcn)
+    #     I = len(hgraph.list_hdn)
+    #     J = len(self.sub_cs)
+
+    #     op_list = []
+    #     alive_list = []
+    #     # alive_status = np.zeros(I, dtype=bool)
+    #     alive_status = {}
+    #     sizes = {}
+    #     for hdn in hgraph.list_hdn:
+    #         alive_status[hdn.name] = (
+    #             0 if (hdn in hgraph.inputs_hdn_data) else -1
+    #         )
+    #         sizes[hdn.name] = [hdn.mem]
+
+    #     for sub_c in self.sub_cs:
+    #         alive_status[sub_c.name] = -1  # to represent phantom from sub_c
+    #         sizes[sub_c.name] = [op_sched.mem for op_sched in sub_c.list_sched]
+
+    #     for t in range(T):
+    #         for k in range(T):
+    #             j = self.hcn2sub_c[k]
+    #             if self.sumR[(k, t)].getValue() == 1:
+    #                 hcn = hgraph.list_hcn[k]
+
+    #                 opt = -1
+    #                 for o in range(self.nOpts[k]):
+    #                     if self.R[k][t, o].X == 1:
+    #                         opt = o
+    #                         break
+    #                 # if hcn.is_fwd and self.R[k][t, -1].X == 1:
+    #                 #     opt = -1
+    #                 if opt > -1:
+    #                     h_obj = hcn.list_sched[opt]
+    #                 else:
+    #                     h_obj = hcn
+
+    #                 for eidx, (k_, i) in enumerate(self.create_list):
+    #                     if k == k_ and self.create[t, eidx].X == 1:
+    #                         alive_status[hgraph.list_hdn[i].name] = 0
+
+    #                 # phantoms will be created when not ff
+    #                 if hcn.is_fwd and j is not None:
+    #                     alive_status[self.sub_cs[j].name] = opt
+
+    #                 op_list.append(
+    #                     H_op(
+    #                         hcn.name,
+    #                         h_obj,
+    #                         is_fwd=hcn.is_fwd,
+    #                         is_del=False,
+    #                     )
+    #                 )
+    #                 alive_list.append(alive_status.copy())
+
+    #                 if (
+    #                     not hcn.is_fwd
+    #                     and self.sumSp[(j, t + 1)].getValue() == 0
+    #                 ):
+    #                     op_list.append(
+    #                         H_op(
+    #                             "Del_" + hcn.sub_cluster.name,
+    #                             h_obj,
+    #                             is_del=True,
+    #                         )
+    #                     )  # del hcn.name means del phantom
+    #                     alive_status[hcn.sub_cluster.name] = -1
+    #                     alive_list.append(alive_status.copy())
+
+    #             for eidx, (k_, i) in enumerate(self.delete_list):
+    #                 if k == k_ and self.delete[t, eidx].X == 1:
+    #                     hdn = hgraph.list_hdn[i]
+    #                     alive_status[hdn.name] = -1
+    #                     op_list.append(
+    #                         H_op("Del_" + hdn.name, hdn, is_del=True)
+    #                     )
+    #                     alive_list.append(alive_status.copy())
+
+    #         # At the end of the stage
+    #         for j in range(J):
+    #             # hcn = hgraph.list_hcn[self.sub_c2hcn[j]]
+
+    #             if (
+    #                 alive_status[self.sub_cs[j].name] >= 0
+    #                 and self.sumSp[(j, t + 1)].getValue() == 0
+    #             ):
+    #                 # del phantom happens either after bwd or at the end of stage
+    #                 h_obj = self.sub_cs[j].list_sched[
+    #                     alive_status[self.sub_cs[j].name]
+    #                 ]
+    #                 alive_status[self.sub_cs[j].name] = -1
+    #                 op_list.append(
+    #                     H_op(
+    #                         "Del_" + self.sub_cs[j].name,
+    #                         h_obj,
+    #                         is_del=True,
+    #                     )
+    #                 )
+    #                 alive_list.append(alive_status.copy())
+
+    #     op_sched = H_sched(op_list, alive_list, sizes, hgraph)
+    #     # fwd_sched = OpSchedule(
+    #     #     op_list[: self.loss_idx + 1],
+    #     #     alive_list[: self.loss_idx + 1],
+    #     #     hgraph,
+    #     # )
+    #     # bwd_sched = OpSchedule(
+    #     #     op_list[self.loss_idx + 1 :],
+    #     #     alive_list[self.loss_idx + 1 :],
+    #     #     hgraph,
+    #     # )
+    #     # fwd_sched.del_input(hgraph)
+    #     for i, op in enumerate(op_list):
+    #         if "Loss" in op.name:
+    #             loss_idx = i
+    #             break
+    #     op_sched.get_info()
+    #     # fwd_sched, bwd_sched = op_sched.split_sched(loss_idx)
+    #     # op_schedion = H_option(hgraph, op_sched)
+    #     # return fwd_sched, bwd_sched, op_schedion
+    #     return op_sched
+
 
 # def add_hilp_option(hgraph, budget, save_budget):
 #     md = ModelGurobi(hgraph, budget, save_budget)
 #     md.solve()
 #     if md.feasible:
-#         h_sched = md.schedule()
-#         hgraph.add_sched(h_sched)
+#         op_sched = md.schedule()
+#         hgraph.add_sched(op_sched)
 #         print(
 #             f"Solve Hgraph with {len(hgraph.list_hcn)} nodes takes {md.solve_time:03f}s"
 #         )
 
 
-def get_hg_budgets(hg, nb_bdg_peak=3, nb_bdg_save=6):
-    # return reasonable budget list
-    budgets = []
-    sizes = []
-    # fwd_hdns = set()
-    for hcn in hg.list_hcn:
-        # if hcn.is_fwd:
-        for hdn in hcn.users:
-            # if hdn not in hg.interfaces:
-            #     fwd_hdns.add(hdn)
-            if not hcn.sub_graph is None:
-                sizes.append(hcn.sub_graph.list_sched[0].mem)
-    sizes += [hdn.mem for hdn in hg.list_hdn]
+# def get_hg_budgets(hg, nb_bdg_peak=3, nb_bdg_save=6):
+#     # return reasonable budget list
+#     budgets = []
+#     sizes = []
+#     # fwd_hdns = set()
+#     for hcn in hg.list_hcn:
+#         # if hcn.is_fwd:
+#         for hdn in hcn.users:
+#             # if hdn not in hg.interfaces:
+#             #     fwd_hdns.add(hdn)
+#             if not hcn.sub_cluster is None:
+#                 sizes.append(hcn.list_sched[0].mem)
+#     sizes += [hdn.mem for hdn in hg.list_hdn]
 
-    overheads = [hcn.fwd_overhead for hcn in hg.list_hcn] + [
-        h_sched.bwd_overhead for h_sched in hg.list_sched
-    ]
-    max_bdg = sum(sizes) + max(overheads)
-    # max_bdg = hg.list_sched[0].mem + max(overheads)
+#     overheads = [hcn.sub_cluster.ff_overhead for hcn in hg.list_hcn] + [
+#         op_sched.bwd_overhead for op_sched in hg.list_sched
+#     ]
+#     max_bdg = sum(sizes) + max(overheads)
+#     # max_bdg = hg.list_sched[0].mem + max(overheads)
 
-    # TODO: find the minimum feasible budget
-    # min_bdg = hg.fast_fwd_overhead()[0]
-    min_bdg = min(h_sched.mem for h_sched in hg.list_sched) + max(overheads)
+#     # TODO: find the minimum feasible budget
+#     # min_bdg = hg.fast_fwd_overhead()[0]
+#     min_bdg = min(op_sched.mem for op_sched in hg.list_sched) + max(overheads)
 
-    l_bd_peak = np.linspace(min_bdg, max_bdg, nb_bdg_peak)
-    for bd_peak in l_bd_peak:
-        l_bd_save = np.linspace(
-            0, min(bd_peak, hg.list_sched[0].mem), nb_bdg_save,
-        ) + sum(hdn.mem for hdn in hg.interfaces)
-        # for bd_save in l_bd_save:
-        #     budgets.append((bd_peak, bd_save))
-        budgets.append((bd_peak, l_bd_save))
-    return budgets
-
-
-def solve_hg(hg: H_graph, print_info=False):
-    # print(f"solving hg {hg.name} with {len(hg.list_hcn)} nodes")
-    budgets = get_hg_budgets(hg)
-
-    for bdg_peak, l_bdg_save in budgets:
-        # print(bdg_peak)
-
-        md = ModelGurobi(hg, bdg_peak, save_budget=False)
-        # md = ModelGurobi(hg, 1e10, save_budget=False)
-        for bdg_save in np.sort(l_bdg_save)[::-1]:
-            # print(bdg_save)
-            md.add_abar_constraint(bdg_save)
-            md.solve()
-
-            # add_hilp_option(hg, bdg_peak, bdg_save)
-            if md.feasible:
-                h_sched = md.schedule_()
-                # print(h_sched.mem)
-                hg.add_sched(h_sched)
-                if print_info:
-                    print(
-                        f"Solve Hgraph {hg.name} with {len(hg.list_hcn)} nodes takes {md.solve_time:03f}s"
-                    )
-    hg.refine_scheds()
+#     l_bd_peak = np.linspace(min_bdg, max_bdg, nb_bdg_peak)
+#     for bd_peak in l_bd_peak:
+#         l_bd_save = np.linspace(
+#             0,
+#             min(bd_peak, hg.list_sched[0].mem),
+#             nb_bdg_save,
+#         ) + sum(hdn.mem for hdn in hg.interfaces)
+#         # for bd_save in l_bd_save:
+#         #     budgets.append((bd_peak, bd_save))
+#         budgets.append((bd_peak, l_bd_save))
+#     return budgets
 
 
-def solve_hg_recursive(hg: H_graph, solve_self=True, print_info=False):
+# def solve_hg(hg: H_graph, print_info=False):
+#     # print(f"solving hg {hg.name} with {len(hg.list_hcn)} nodes")
+#     budgets = get_hg_budgets(hg)
 
-    for hcn in hg.list_hcn:
-        if hcn.is_fwd and hcn.sub_graph is not None:
-            sub_g = hcn.sub_graph
-            if len(sub_g.list_sched) <= 1:
-                solve_hg_recursive(sub_g, print_info=print_info)
-    if solve_self and len(hg.list_hcn) >= 1:  # not bottom hgraph
-        # print(f"Try to solve Hgraph with size {len(hg.list_hcn)}")
-        solve_hg(hg, print_info=print_info)
+#     for bdg_peak, l_bdg_save in budgets:
+#         # print(bdg_peak)
 
+#         md = ModelGurobi(hg, bdg_peak, save_budget=False)
+#         # md = ModelGurobi(hg, 1e10, save_budget=False)
+#         for bdg_save in np.sort(l_bdg_save)[::-1]:
+#             # print(bdg_save)
+#             md.add_abar_constraint(bdg_save)
+#             md.solve()
+
+#             # add_hilp_option(hg, bdg_peak, bdg_save)
+#             if md.feasible:
+#                 op_sched = md.schedule_()
+#                 # print(op_sched.mem)
+#                 hg.add_sched(op_sched)
+#                 if print_info:
+#                     print(
+#                         f"Solve Hgraph {hg.name} with {len(hg.list_hcn)} nodes takes {md.solve_time:03f}s"
+#                     )
+#     hg.refine_scheds()
+
+
+# def solve_hg_recursive(hg: H_graph, solve_self=True, print_info=False):
+#     for hcn in hg.list_hcn:
+#         if hcn.is_fwd and hcn.sub_cluster is not None:
+#             sub_c = hcn.sub_cluster
+#             if len(sub_c.list_sched) <= 1:
+#                 solve_hg_recursive(sub_c, print_info=print_info)
+#     if solve_self and len(hg.list_hcn) >= 1:  # not bottom hgraph
+#         # print(f"Try to solve Hgraph with size {len(hg.list_hcn)}")
+#         solve_hg(hg, print_info=print_info)
