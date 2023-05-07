@@ -164,6 +164,8 @@ class Cluster_translator():
     dict_kdn_to_ano_triplet : dict[K_D_node, tuple[str,int,int]] = None
     dict_ano_triplet_to_kcn : dict[tuple[str,int,int], K_C_node] = None
     dict_ano_triplet_to_kdn : dict[tuple[str,int,int], K_D_node] = None
+    dict_name_to_ano_triplet : dict = None
+    dict_ano_triplet_to_name : dict = None
     def __init__(self):
         pass
 
@@ -530,6 +532,7 @@ class P_cluster():
             translator.dict_sn_to_ano_pair[sn] = pair
             translator.dict_ano_pair_to_sn[pair] = sn
 
+        # Experimental
         inputs_mt = list(self.inputs_mt) 
         inputs_mt.sort(key = RK_node.get_num_tar)
         for inp_nb,inp_mt in enumerate(inputs_mt):
