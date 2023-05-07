@@ -8,11 +8,14 @@ from collections import namedtuple
 class Op:
     def __init__(self, kn, fast_forward=False, disabled=False, detach=True):
         self.kn = kn
-        self.name = kn.name
         self.fast_forward = fast_forward
         self.disabled = disabled
         self.detach = detach
         self.is_del = isinstance(kn, K_D_node)
+
+    @property
+    def name(self):
+        return self.kn.name
 
     def __repr__(self):
         return "Disabled" * self.disabled + self.name
@@ -45,27 +48,31 @@ class OpSchedule:
             self.interfaces = cluster.interfaces
             self.list_kdn = cluster.list_kdn
             self.dict_kn = cluster.dict_kn
-        else:  # if cluster is not given, get info from op_list
-            self.interfaces = interfaces or {
-                "inputs_kdn_data": set(),
-                "outputs_kdn_data": set(),
-                "inputs_kdn_grad": set(),
-                "outputs_kdn_grad": set(),
-            }
-            self.list_kdn = []
-            for op in self.op_list:
-                if op.is_del:
-                    self.list_kdn.append(op.kn)
-                else:
-                    self.list_kdn.extend(op.kn.users_global)
-                    self.list_kdn.extend(op.kn.deps_global)
-            self.dict_kn = {
-                kdn.name: kdn for kdn in self.list_kdn
-            }  # kcn not used
+        # else:  # if cluster is not given, get info from op_list
+        #     self.interfaces = interfaces or {
+        #         "inputs_kdn_data": set(),
+        #         "outputs_kdn_data": set(),
+        #         "inputs_kdn_grad": set(),
+        #         "outputs_kdn_grad": set(),
+        #     }
+        #     self.list_kdn = []
+        #     for op in self.op_list:
+        #         if op.is_del:
+        #             self.list_kdn.append(op.kn)
+        #         else:
+        #             self.list_kdn.extend(op.kn.users_global)
+        #             self.list_kdn.extend(op.kn.deps_global)
+        #     self.dict_kn = {
+        #         kdn.name: kdn for kdn in self.list_kdn
+        #     }  # kcn not used
         self.all_interfaces = [
             kdn for inter in self.interfaces.values() for kdn in inter
         ]  # all interface KDN's
         self.interface_names = [kdn.name for kdn in self.all_interfaces]
+
+        self.op_name_list = [
+            (op.name if not op.disabled else "") for op in self.op_list
+        ]
 
         if refine:
             self.refine()
@@ -74,30 +81,30 @@ class OpSchedule:
             (op.name if not op.disabled else "") for op in self.op_list
         ]
 
-        _alive_status = {
+        alive_status = {
             kdn.name: kdn in self.interfaces["inputs_kdn_data"]
             for kdn in self.list_kdn
         }
 
-        self._alive_list = []
+        self.alive_list = []
         for op in self.op_list:
             if not op.disabled:
                 if op.is_del:
-                    _alive_status[op.kn.name] = False
+                    alive_status[op.kn.name] = False
                 else:
                     for kdn in op.kn.users:
                         if not ("phantoms" in kdn.name and op.fast_forward):
-                            _alive_status[kdn.name] = True
-            self._alive_list.append(_alive_status.copy())
+                            alive_status[kdn.name] = True
+            self.alive_list.append(alive_status.copy())
 
         L = len(self.op_list)
         self.time = np.zeros(L)
         self.save_mem = np.zeros(L)
         self.overhead = np.zeros(L)
 
-        def _sum_mem(_alive_status_, ignore_list=[]):
+        def _sum_mem(alive_status_, ignore_list=[]):
             mem = 0
-            for k, v in _alive_status_.items():
+            for k, v in alive_status_.items():
                 if k not in ignore_list and v:
                     d = self.dict_kn[k]
                     mem += d.mem
@@ -106,10 +113,10 @@ class OpSchedule:
         def get_overhead_(save, overhead):
             return max(save + overhead) - save[-1]
 
-        for i, (op, _alive_status) in enumerate(
-            zip(self.op_list, self._alive_list)
+        for i, (op, alive_status) in enumerate(
+            zip(self.op_list, self.alive_list)
         ):
-            self.save_mem[i] = _sum_mem(_alive_status, self.interface_names)
+            self.save_mem[i] = _sum_mem(alive_status, self.interface_names)
             if (not op.is_del) and (not op.disabled):
                 self.time[i] = op.kn.time
                 self.overhead[i] = op.kn.overhead
@@ -121,7 +128,7 @@ class OpSchedule:
         self.phantoms = set()
         for kdn in self.list_kdn:
             if (
-                self._alive_list[self.loss_idx][kdn.name]
+                self.alive_list[self.loss_idx][kdn.name]
                 and not kdn in self.all_interfaces
             ):
                 self.phantoms.add(kdn)
@@ -151,7 +158,9 @@ class OpSchedule:
                                     :i
                                 ]
                             ):  # if not generated during bwd
-                                self.dep_interfaces_data.add(self.list_kdn.index(kdn))
+                                self.dep_interfaces_data.add(
+                                    self.list_kdn.index(kdn)
+                                )
 
         self.fwd_overhead_correction = []
         self.bwd_overhead_correction = []
@@ -184,8 +193,8 @@ class OpSchedule:
                 (kdn.name, self.loss_idx + 1)
             )  # Before Bwd
         self.interfaces_status = interfaces_status
-        for i, (op, _alive_status) in enumerate(
-            zip(self.op_list, self._alive_list)
+        for i, (op, alive_status) in enumerate(
+            zip(self.op_list, self.alive_list)
         ):
             if i == self.loss_idx:
                 continue
@@ -197,20 +206,22 @@ class OpSchedule:
                 kdn = self.dict_kn[kdn_name]
                 if index == -1:
                     # special case: output_data in BWD without dependency
-                    # If outside is _alive, no need to correct;
+                    # If outside is alive, no need to correct;
                     # Otherwise, add kdn to memory
-                    if i > self.loss_idx and _alive_status[kdn_name] > 0:
+                    if i > self.loss_idx and alive_status[kdn_name] > 0:
                         correction_term["save"] += kdn.mem
-                        correction_term[(self.list_kdn.index(kdn), False)] = -kdn.mem
+                        correction_term[
+                            (self.list_kdn.index(kdn), False)
+                        ] = -kdn.mem
                     continue
 
                 if (
-                    _alive_status[kdn_name] > 0
+                    alive_status[kdn_name] > 0
                     or (index > self.loss_idx) != (i > self.loss_idx)
                     # or not kdn_name
                 ):
                     # interfaces_status is useful when:
-                    # 1. kdn is not _alive
+                    # 1. kdn is not alive
                     # 2. Fwd to Fwd, Bwd to Bwd
                     continue
 
@@ -218,9 +229,13 @@ class OpSchedule:
                     if (  # and not deleted in between
                         kdn_name not in self.op_name_list[index : i + 1]
                     ):
-                        correction_term[(self.list_kdn.index(kdn), True)] = -kdn.mem
+                        correction_term[
+                            (self.list_kdn.index(kdn), True)
+                        ] = -kdn.mem
                     else:
-                        correction_term[(self.list_kdn.index(kdn), "always")] = -kdn.mem
+                        correction_term[
+                            (self.list_kdn.index(kdn), "always")
+                        ] = -kdn.mem
                 else:  # if exist afterwards
                     if not (kdn in self.interfaces["outputs_kdn_data"]) and (
                         kdn.deps
@@ -230,11 +245,17 @@ class OpSchedule:
                         )
                     ):  # and not generated in between
                         # check if output_data is created after i
-                        correction_term[(self.list_kdn.index(kdn), False)] = -kdn.mem
+                        correction_term[
+                            (self.list_kdn.index(kdn), False)
+                        ] = -kdn.mem
                     elif kdn in self.interfaces["inputs_kdn_data"]:
-                        correction_term[(self.list_kdn.index(kdn), False)] = -kdn.mem
+                        correction_term[
+                            (self.list_kdn.index(kdn), False)
+                        ] = -kdn.mem
                     else:
-                        correction_term[(self.list_kdn.index(kdn), "always")] = -kdn.mem
+                        correction_term[
+                            (self.list_kdn.index(kdn), "always")
+                        ] = -kdn.mem
 
             if (
                 i < self.loss_idx

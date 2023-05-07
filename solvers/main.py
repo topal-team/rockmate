@@ -6,25 +6,30 @@ from solvers.op_schedule import Op, OpSchedule
 
 
 class Solver:
-    def Config():
-        pass
+    class Config:
+        def __init__(self):
+            pass
 
     def __init__(self, config=None):
         self.config = config if config is not None else type(self).Config()
 
     def __call__(self, cluster: H_cluster, budgets=None):
+        return self.solve(cluster, budgets)
+
+    def solve(self, cluster: H_cluster, budgets=None):
         # -> RETURN list of Op_sched
         pass
 
 
-def H_cluster_method_get_best_solutions(self, nb_sol):
+def H_cluster_method_get_sched(self):
     representee = self.representee_cluster
-    if self is not representee:
-        repr_sols = representee.get_best_solutions(self, nb_sol)
-        ano_sols = [representee.translator.translate(sol) for sol in repr_sols]
-        return [self.translator.reverse_translate(sol) for sol in ano_sols]
-    else:
-        return self.solutions[:nb_sol]  # TODO: apply selection function
+    return representee.list_sched
+    # if self is not representee:
+    #     repr_sols = representee.get_sched()
+    #     ano_sols = [representee.translator.translate(sol) for sol in repr_sols]
+    #     return [self.translator.reverse_translate(sol) for sol in ano_sols]
+    # else:
+    #     return self.list_sched
 
 
 def H_cluster_method_solve(self, solver: Solver):
@@ -33,45 +38,139 @@ def H_cluster_method_solve(self, solver: Solver):
     elif solver.stop_condition(self):
         pass
     else:
-        self.solutions.extend(solver(self))
+        self.sched.extend(solver(self))
 
 
-setattr(H_cluster, "get_best_solutions", H_cluster_method_get_best_solutions)
+setattr(H_cluster, "get_sched", H_cluster_method_get_sched)
 setattr(H_cluster, "solve", H_cluster_method_solve)
+
+
+def get_cluster_budget(
+    cluster: H_cluster, nb_bdg_peak=3, nb_bdg_save=6, overall_bdg=None
+):
+    # assuming solving budget does not based on lower level solution
+
+    hg = cluster
+    return [1e12]
+    # def get_hg_budgets(hg, nb_bdg_peak=3, nb_bdg_save=6):
+    # return reasonable budget list
+    budgets = []
+    sizes = []
+    # fwd_hdns = set()
+    for hcn in hg.list_hcn:
+        # if hcn.is_fwd:
+        for hdn in hcn.users:
+            # if hdn not in hg.interfaces:
+            #     fwd_hdns.add(hdn)
+            if not hcn.sub_cluster is None:
+                sizes.append(hcn.sub_cluster.list_sched[0].mem)
+    sizes += [hdn.mem for hdn in hg.list_hdn]
+
+    overheads = [hcn.sub_cluster.ff_overhead for hcn in hg.list_hcn] + [
+        op_sched.bwd_overhead for op_sched in hg.list_sched
+    ]
+    max_bdg = sum(sizes) + max(overheads)
+    # max_bdg = hg.list_sched[0].mem + max(overheads)
+
+    # TODO: find the minimum feasible budget
+    # min_bdg = hg.fast_fwd_overhead()[0]
+    min_bdg = min(op_sched.mem for op_sched in hg.list_sched) + max(overheads)
+
+    l_bd_peak = np.linspace(min_bdg, max_bdg, nb_bdg_peak)
+    for bd_peak in l_bd_peak:
+        l_bd_save = np.linspace(
+            0,
+            min(bd_peak, hg.list_sched[0].mem),
+            nb_bdg_save,
+        ) + sum(hdn.mem for hdn in hg.interfaces)
+        # for bd_save in l_bd_save:
+        #     budgets.append((bd_peak, bd_save))
+        budgets.append((bd_peak, l_bd_save))
+    return budgets
+
+
+def solve_recursive(h_cluster: H_cluster, list_solvers=[]):
+    # assume it's representee
+    for hg in h_cluster.possible_hg:
+        for sub_cluster in hg.sub_clusterraphs:
+            if not stop_condition(
+                sub_cluster.representee, h_cluster
+            ):  # e.g. already solved/bottom level
+                solve_recursive(sub_cluster.representee)
+    for solver in list_solvers:
+        h_cluster.solve(solver)
+        h_cluster.list_sched.extend(solver(h_cluster))
 
 
 # Preprocessing Cluster: add fast_forward and autograd option
 def preprocess_rec(cluster: H_cluster):
-    for hcn in cluster.list_hcn:
-        if hcn.is_fwd and hcn.sub_cluster is not None:
-            sub_cluster = hcn.sub_cluster
-            if not sub_cluster.list_sched:
-                preprocess_rec(sub_cluster)
-    return preprocess(cluster)
+    if cluster is cluster.representee_cluster:
+        if not cluster.is_bottom:
+            for hg in cluster.possible_hg:
+                for hcn in hg.list_hcn:
+                    if hcn.is_fwd and hcn.sub_cluster is not None:
+                        # if not hcn.sub_cluster.list_sched:
+                        preprocess_rec(hcn.sub_cluster)
+            preprocess(cluster)
 
 
 def preprocess(cluster: H_cluster, protect_names=[]):
     if cluster is cluster.representee_cluster:
-        assert cluster.solutions == []  # only visit representee once
-        autograd_op_list, autograd_loss_idx = get_single_compute_op_list(
-            cluster, with_bwd=True, protect_names=protect_names
-        )
-        cluster.solutions.append(
-            OpSchedule(autograd_op_list, autograd_loss_idx, cluster=cluster)
-        )
-        ff_op_list, ff_loss_idx = get_single_compute_op_list(
-            cluster, with_bwd=False, protect_names=protect_names
-        )
-        ff_op_sched = OpSchedule(
-            ff_op_list, ff_loss_idx, cluster=cluster
-        )  # not real sched, only for info
-        cluster.ff_time = ff_op_sched.fwd_time
-        cluster.ff_overhead = ff_op_sched.fwd_overhead
-        cluster.ff_olist = ff_op_list
+        # assert cluster.list_sched == []  # only visit representee once
+        # autograd_op_list, autograd_loss_idx = get_single_compute_op_list(
+        #     cluster, with_bwd=True, protect_names=protect_names
+        # )
+        # cluster.list_sched.append(
+        #     OpSchedule(autograd_op_list, autograd_loss_idx, cluster=cluster)
+        # )
+        for hg in cluster.possible_hg:
+            for hcn in hg.list_hcn:
+                if hcn.sub_cluster is None:  # fwd with no grad
+                    if hcn.name in cluster.dict_kn:
+                        kcn = cluster.dict_kn[hcn.name]
+                        ff_op_list = [Op(kcn, fast_forward=True)]
+                        hcn.ff_time = kcn.time
+                        hcn.ff_overhead = kcn.overhead
+                    else:  # loss node
+                        ff_op_list = []
+                        hcn.ff_time = 0
+                        hcn.ff_overhead = 0
+                else:
+                    if (
+                        hcn.sub_cluster.representee_cluster is hcn.sub_cluster
+                        and hcn.sub_cluster.list_sched == []
+                    ):
+                        (
+                            autograd_op_list,
+                            autograd_loss_idx,
+                        ) = get_single_compute_op_list(
+                            hcn.sub_cluster,
+                            with_bwd=True,
+                            protect_names=protect_names,
+                        )
+                        hcn.sub_cluster.list_sched.append(
+                            OpSchedule(
+                                autograd_op_list,
+                                autograd_loss_idx,
+                                cluster=hcn.sub_cluster,
+                            )
+                        )
+                    ff_op_list, ff_loss_idx = get_single_compute_op_list(
+                        hcn.sub_cluster,
+                        with_bwd=False,
+                        protect_names=protect_names,
+                        ff=True,
+                    )
+                    ff_op_sched = OpSchedule(
+                        ff_op_list, ff_loss_idx, cluster=cluster
+                    )  # not real sched, only for info
+                    hcn.ff_time = ff_op_sched.fwd_time
+                    hcn.ff_overhead = ff_op_sched.fwd_overhead
+                hcn.ff_op_list = ff_op_list
 
 
 def get_single_compute_op_list(
-    cluster: H_cluster, with_bwd=True, protect_names=[]
+    cluster: H_cluster, with_bwd=True, protect_names=[], ff=False
 ):
     list_kcn = cluster.list_kcn.copy()
     if not with_bwd:
@@ -99,7 +198,14 @@ def get_single_compute_op_list(
             loss_idx = len(op_list)
         for kdn in kcn.users:
             alive_status[kdn.name] = 1
-        op_list.append(Op(kcn, detach=True, disabled=("loss" in kcn.name)))
+        op_list.append(
+            Op(
+                kcn,
+                detach=True,#not with_bwd,
+                fast_forward=ff,
+                disabled=("loss" in kcn.name),
+            )
+        )
         # alive_list.append(alive_status.copy())
 
         for kdn_name, alive in alive_status.items():
@@ -112,77 +218,64 @@ def get_single_compute_op_list(
     return op_list, loss_idx
 
 
-def add_autograd_sched(cluster: H_cluster, protect_names=[]):
-    if cluster is cluster.representee_cluster:
-        op_list, loss_idx = get_single_compute_op_list(
-            cluster, with_bwd=True, protect_names=protect_names
-        )
-        cluster.solutions.append(
-            OpSchedule(op_list, loss_idx=loss_idx, cluster=cluster)
-        )
+# def add_autograd_sched(cluster: H_cluster, protect_names=[]):
+#     if cluster is cluster.representee_cluster:
+#         op_list, loss_idx = get_single_compute_op_list(
+#             cluster, with_bwd=True, protect_names=protect_names
+#         )
+#         cluster.list_sched.append(
+#             OpSchedule(op_list, loss_idx=loss_idx, cluster=cluster)
+#         )
 
-    list_kcn = cluster.list_kcn
+#     list_kcn = cluster.list_kcn
 
-    def _can_del(i, kdn):
-        if kdn.name in protect_names:
-            return False
-        for kcn in cluster.list_kcn[i + 1 :]:
-            if kdn in kcn.deps_real:
-                return False
-        # for kcn in kdn.users_real:
-        #     if cluster.list_kcn.index(kcn) > i:
-        #         return False
-        return True
+#     def _can_del(i, kdn):
+#         if kdn.name in protect_names:
+#             return False
+#         for kcn in cluster.list_kcn[i + 1 :]:
+#             if kdn in kcn.deps_real:
+#                 return False
+#         # for kcn in kdn.users_real:
+#         #     if cluster.list_kcn.index(kcn) > i:
+#         #         return False
+#         return True
 
-    if len(list_kcn) == 3:  # leaf nodes: fwd+bwd pair & loss
-        op_list = [
-            Op(list_kcn[0], detach=True),
-            Op(list_kcn[1], disabled=True),
-            Op(list_kcn[2], detach=True),
-        ]
-        for kdn in list_kcn[2].deps_real:
-            if "phantoms" in kdn.name:
-                op_list.append(Op(kdn))
-        loss_idx = 1
-    else:
-        op_list = []
-        alive_list = []
-        alive_status = {}
-        for kdn in cluster.list_kdn:
-            # if hdn not in cluster.interfaces:
-            alive_status[kdn.name] = (
-                1 if (kdn in cluster.interfaces["inputs_kdn_data"]) else 0
-            )
+#     if len(list_kcn) == 3:  # leaf nodes: fwd+bwd pair & loss
+#         op_list = [
+#             Op(list_kcn[0], detach=True),
+#             Op(list_kcn[1], disabled=True),
+#             Op(list_kcn[2], detach=True),
+#         ]
+#         for kdn in list_kcn[2].deps_real:
+#             if "phantoms" in kdn.name:
+#                 op_list.append(Op(kdn))
+#         loss_idx = 1
+#     else:
+#         op_list = []
+#         alive_list = []
+#         alive_status = {}
+#         for kdn in cluster.list_kdn:
+#             # if hdn not in cluster.interfaces:
+#             alive_status[kdn.name] = (
+#                 1 if (kdn in cluster.interfaces["inputs_kdn_data"]) else 0
+#             )
 
-        for i, kcn in enumerate(cluster.list_kcn):
-            if i == cluster.loss_idx:
-                loss_idx = len(op_list)
-            for kdn in kcn.users:
-                alive_status[kdn.name] = 1
-            op_list.append(Op(kcn, detach=True, disabled=("loss" in kcn.name)))
-            alive_list.append(alive_status.copy())
+#         for i, kcn in enumerate(cluster.list_kcn):
+#             if i == cluster.loss_idx:
+#                 loss_idx = len(op_list)
+#             for kdn in kcn.users:
+#                 alive_status[kdn.name] = 1
+#             op_list.append(Op(kcn, detach=True, disabled=("loss" in kcn.name)))
+#             alive_list.append(alive_status.copy())
 
-            for kdn_name, alive in alive_status.items():
-                kdn = cluster.dict_kn[kdn_name]
-                if alive and _can_del(i, kdn):
-                    op_list.append(Op(kdn))
-                    alive_status[kdn_name] = 0
-                    alive_list.append(alive_status.copy())
+#             for kdn_name, alive in alive_status.items():
+#                 kdn = cluster.dict_kn[kdn_name]
+#                 if alive and _can_del(i, kdn):
+#                     op_list.append(Op(kdn))
+#                     alive_status[kdn_name] = 0
+#                     alive_list.append(alive_status.copy())
 
-    return OpSchedule(op_list, loss_idx, cluster.interfaces)
-
-
-def solve_recursive(h_cluster: H_cluster):
-    # assume it's representee
-    for hg in h_cluster.possible_hg:
-        for sub_cluster in hg.sub_clusterraphs:
-            if not stop_condition(
-                sub_cluster.representee, h_cluster
-            ):  # e.g. already solved/bottom level
-                solve_recursive(sub_cluster.representee)
-    for solver in list_solvers:
-        h_cluster.solve(solver)
-        h_cluster.solutions.extend(solver(h_cluster))
+#     return OpSchedule(op_list, loss_idx, cluster.interfaces)
 
 
 # save_all & fast_forward
