@@ -193,7 +193,7 @@ class P_node(RK_node):
             main_target = None,
             sub_graph   = None, # FOR DYNAMIC PARTITIONING
             sn          = None):
-        super().__init__("P",main_graph)
+        super().__init__("P")
         self.main_graph  = main_graph
         self.sub_cluster = sub_c = sub_cluster
         self.main_target = mt = main_target
@@ -1034,7 +1034,7 @@ class Partitioner_bottom_to_top(Partitioner):
                 if req_pn in dict_which_flow:
                     dict_which_flow[req_pn].update(continuing_flows)
                 else:
-                    dict_which_flow[req_pn] = continuing_flows
+                    dict_which_flow[req_pn] = set(continuing_flows)
                 dict_nb_usages[req_pn]-=1
                 if dict_nb_usages[req_pn]==0:
                     to_be_visited.append(req_pn)
@@ -1188,9 +1188,13 @@ class Partitioner_seq(Partitioner):
         for block_nb in range(len(seps_sn)):
             first_i = seps_index[block_nb]
             last_i = seps_index[block_nb+1]
-            block_s_nodes = cluster.s_nodes[first_i+1:last_i+1]
-            sub_cluster = P_cluster(block_s_nodes,cluster.p_structure)
-            block_pn = P_node(pg,sub_cluster=sub_cluster)
+            if last_i - first_i == 1:
+                sn = cluster.s_nodes[last_i]
+                block_pn = P_node(pg,main_target=sn.mt,sn=sn)
+            else:
+                block_s_nodes = cluster.s_nodes[first_i+1:last_i+1]
+                sub_cluster = P_cluster(block_s_nodes,cluster.p_structure)
+                block_pn = P_node(pg,sub_cluster=sub_cluster)
             p_nodes.append(block_pn)
             if block_nb > 0:
                 prev_pn : P_node = p_nodes[-2]
@@ -1203,8 +1207,9 @@ class Partitioner_seq(Partitioner):
         pg.output_nodes = set([p_nodes[-1]])
         # -- sub partition --
         for block_pn in p_nodes:
-            sub_cluster : P_cluster = block_pn.sub_cluster
-            sub_cluster.partition(self.config.sub_partitioner)
+            if block_pn.sub_cluster is not None:
+                sub_cluster : P_cluster = block_pn.sub_cluster
+                sub_cluster.partition(self.config.sub_partitioner)
         return pg
 
 

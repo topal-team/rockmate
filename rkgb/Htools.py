@@ -231,8 +231,8 @@ def P_cluster_to_H_cluster(p_cluster : P_cluster, kg : K_graph):
         dict_kdn_to_ano[kdn] = ano_triplet
         dict_ano_to_kdn[ano_triplet] = kdn
     translator.dict_name_to_ano_triplet = dict(
-        *[(kn.name,ano) for (kn,ano) in dict_kcn_to_ano],
-        *[(kn.name,ano) for (kn,ano) in dict_kdn_to_ano],
+        [(kn.name,ano) for (kn,ano) in dict_kcn_to_ano.items()]
+    +   [(kn.name,ano) for (kn,ano) in dict_kdn_to_ano.items()]
     )
     translator.dict_ano_triplet_to_name = dict(
         (kdn,hdn) for (hdn,kdn) in translator.dict_name_to_ano_triplet.items()
