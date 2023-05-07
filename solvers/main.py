@@ -1,7 +1,7 @@
 import rkgb
+import numpy as np
 from rkgb.Htools import H_C_node, H_D_node, H_graph, H_cluster
 from rkgb.Ktools import K_C_node, K_D_node
-
 from solvers.op_schedule import Op, OpSchedule
 
 
@@ -13,8 +13,8 @@ class Solver:
     def __init__(self, config=None):
         self.config = config if config is not None else type(self).Config()
 
-    def __call__(self, cluster: H_cluster, budgets=None):
-        return self.solve(cluster, budgets)
+    def __call__(self, cluster: H_cluster, budgets=None, accurate_mem=False):
+        return self.solve(cluster, budgets, accurate_mem=accurate_mem)
 
     def solve(self, cluster: H_cluster, budgets=None):
         # -> RETURN list of Op_sched
@@ -50,39 +50,60 @@ def get_cluster_budget(
 ):
     # assuming solving budget does not based on lower level solution
 
-    hg = cluster
-    return [1e12]
+    # hg = cluster
+    # return [1e12]
     # def get_hg_budgets(hg, nb_bdg_peak=3, nb_bdg_save=6):
     # return reasonable budget list
     budgets = []
     sizes = []
     # fwd_hdns = set()
-    for hcn in hg.list_hcn:
-        # if hcn.is_fwd:
-        for hdn in hcn.users:
-            # if hdn not in hg.interfaces:
-            #     fwd_hdns.add(hdn)
-            if not hcn.sub_cluster is None:
-                sizes.append(hcn.sub_cluster.list_sched[0].mem)
-    sizes += [hdn.mem for hdn in hg.list_hdn]
+    # for hcn in hg.list_hcn:
+    #     # if hcn.is_fwd:
+    #     for hdn in hcn.users:
+    #         # if hdn not in hg.interfaces:
+    #         #     fwd_hdns.add(hdn)
+    #         if not hcn.sub_cluster is None:
+    #             sizes.append(hcn.sub_cluster.list_sched[0].mem)
+    # sizes += [hdn.mem for hdn in hg.list_hdn]
+    sizes = [kdn.mem for kdn in cluster.list_kdn]
+    overheads = [kcn.overhead for kcn in cluster.list_kcn if kcn.overhead]
 
-    overheads = [hcn.sub_cluster.ff_overhead for hcn in hg.list_hcn] + [
-        op_sched.bwd_overhead for op_sched in hg.list_sched
-    ]
-    max_bdg = sum(sizes) + max(overheads)
+    # overheads = [hcn.sub_cluster.ff_overhead for hcn in hg.list_hcn] + [
+    #     op_sched.bwd_overhead for op_sched in hg.list_sched
+    # ]
+    # max_bdg = sum(sizes) + max(overheads)
+    if cluster.representee_cluster.list_sched == []:
+        autograd_op_list= get_single_compute_op_list(
+            cluster,
+            with_bwd=True,
+        )
+        autograd_sched = OpSchedule(
+            autograd_op_list,
+            cluster=cluster,
+        )
+    else:
+        autograd_sched = cluster.representee_cluster.list_sched[0]
+    interfaces_mem = sum(kdn.mem for kdn in cluster.all_interfaces)
+    max_bdg = autograd_sched.mem + autograd_sched.bwd_overhead
+    if overall_bdg is not None:
+        max_bdg = min(max_bdg, overall_bdg)
+    min_bdg = max(overheads)
     # max_bdg = hg.list_sched[0].mem + max(overheads)
 
     # TODO: find the minimum feasible budget
     # min_bdg = hg.fast_fwd_overhead()[0]
-    min_bdg = min(op_sched.mem for op_sched in hg.list_sched) + max(overheads)
+    # min_bdg = min(op_sched.mem for op_sched in hg.list_sched) + max(overheads)
 
-    l_bd_peak = np.linspace(min_bdg, max_bdg, nb_bdg_peak)
+    l_bd_peak = np.linspace(min_bdg, max_bdg, nb_bdg_peak) + interfaces_mem
     for bd_peak in l_bd_peak:
-        l_bd_save = np.linspace(
-            0,
-            min(bd_peak, hg.list_sched[0].mem),
-            nb_bdg_save,
-        ) + sum(hdn.mem for hdn in hg.interfaces)
+        l_bd_save = (
+            np.linspace(
+                0,
+                min(bd_peak, autograd_sched.mem),
+                nb_bdg_save,
+            )
+            + interfaces_mem
+        )
         # for bd_save in l_bd_save:
         #     budgets.append((bd_peak, bd_save))
         budgets.append((bd_peak, l_bd_save))
@@ -92,14 +113,21 @@ def get_cluster_budget(
 def solve_recursive(h_cluster: H_cluster, list_solvers=[]):
     # assume it's representee
     for hg in h_cluster.possible_hg:
-        for sub_cluster in hg.sub_clusterraphs:
-            if not stop_condition(
-                sub_cluster.representee, h_cluster
-            ):  # e.g. already solved/bottom level
-                solve_recursive(sub_cluster.representee)
+        for hcn in hg.list_hcn:
+            if (
+                hcn.is_fwd
+                and hcn.sub_cluster is not None
+                and not hcn.sub_cluster.is_bottom
+            ):
+                sub_cluster = hcn.sub_cluster
+                # if not stop_condition(
+                #     sub_cluster.representee, h_cluster
+                # ):  # e.g. already solved/bottom level
+                solve_recursive(sub_cluster, list_solvers)
     for solver in list_solvers:
-        h_cluster.solve(solver)
-        h_cluster.list_sched.extend(solver(h_cluster))
+        # h_cluster.solve(solver)
+        if h_cluster is h_cluster.representee_cluster:
+            h_cluster.list_sched.extend(solver(h_cluster))
 
 
 # Preprocessing Cluster: add fast_forward and autograd option
@@ -140,10 +168,7 @@ def preprocess(cluster: H_cluster, protect_names=[]):
                         hcn.sub_cluster.representee_cluster is hcn.sub_cluster
                         and hcn.sub_cluster.list_sched == []
                     ):
-                        (
-                            autograd_op_list,
-                            autograd_loss_idx,
-                        ) = get_single_compute_op_list(
+                        autograd_op_list = get_single_compute_op_list(
                             hcn.sub_cluster,
                             with_bwd=True,
                             protect_names=protect_names,
@@ -151,18 +176,17 @@ def preprocess(cluster: H_cluster, protect_names=[]):
                         hcn.sub_cluster.list_sched.append(
                             OpSchedule(
                                 autograd_op_list,
-                                autograd_loss_idx,
                                 cluster=hcn.sub_cluster,
                             )
                         )
-                    ff_op_list, ff_loss_idx = get_single_compute_op_list(
+                    ff_op_list = get_single_compute_op_list(
                         hcn.sub_cluster,
                         with_bwd=False,
                         protect_names=protect_names,
                         ff=True,
                     )
                     ff_op_sched = OpSchedule(
-                        ff_op_list, ff_loss_idx, cluster=cluster
+                        ff_op_list+[Op(K_C_node("loss"))], cluster=cluster, correct_overhead=False
                     )  # not real sched, only for info
                     hcn.ff_time = ff_op_sched.fwd_time
                     hcn.ff_overhead = ff_op_sched.fwd_overhead
@@ -174,7 +198,7 @@ def get_single_compute_op_list(
 ):
     list_kcn = cluster.list_kcn.copy()
     if not with_bwd:
-        list_kcn = list_kcn[: cluster.loss_idx + 1]
+        list_kcn = list_kcn[: cluster.loss_idx]
 
     def _can_del(i, kdn):
         if kdn.name in protect_names:
@@ -194,14 +218,14 @@ def get_single_compute_op_list(
         )
 
     for i, kcn in enumerate(list_kcn):
-        if i == cluster.loss_idx:
-            loss_idx = len(op_list)
+        # if i == cluster.loss_idx:
+        #     loss_idx = len(op_list)
         for kdn in kcn.users:
             alive_status[kdn.name] = 1
         op_list.append(
             Op(
                 kcn,
-                detach=True,#not with_bwd,
+                detach=True,  # not with_bwd,
                 fast_forward=ff,
                 disabled=("loss" in kcn.name),
             )
@@ -215,7 +239,7 @@ def get_single_compute_op_list(
                 alive_status[kdn_name] = 0
                 # alive_list.append(alive_status.copy())
 
-    return op_list, loss_idx
+    return op_list  # , loss_idx
 
 
 # def add_autograd_sched(cluster: H_cluster, protect_names=[]):

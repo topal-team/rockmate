@@ -23,10 +23,12 @@ class HILP(Solver):
                 "IntegralityFocus": 1,
             },
             protected_names=["sources data", "sources grad"],
+            total_sched=200,
         ):
             self.mem_unit = mem_unit
             self.gurobi_params = gurobi_params
             self.protected_names = protected_names
+            self.total_sched = total_sched
 
     def __init__(
         self,
@@ -36,55 +38,84 @@ class HILP(Solver):
 
     def _select_sched(self, hg):
         nb_sched = 200 // len(hg.list_hcn)
+        weights = []
         for hcn in hg.list_hcn:
+            if hcn.sub_cluster is None:
+                weights.append(0)
+            else:
+                weights.append(len(hcn.sub_cluster.list_kcn))
+
+        for hcn, w in zip(hg.list_hcn, weights):
+            nb_sched = self.config.total_sched * w // sum(weights)
             if hcn.sub_cluster is not None:
                 hcn.list_sched = hcn.sub_cluster.get_sched().copy()[:nb_sched]
             else:
                 hcn.list_sched = []
 
-    def solve(self, cluster: H_cluster, budgets=None):
+    def solve(self, cluster: H_cluster, budgets=None, accurate_mem=False):
+        self.config.protected_names.extend(
+            [kdn.name for kdn in cluster.interfaces["outputs_kdn_data"]]
+        )
+        list_op_sched = []
         if budgets is None:
             self.budgets = get_cluster_budget(cluster.representee_cluster)
         else:
             self.budgets = budgets
-        self.config.protected_names.extend(
-            [kdn.name for kdn in cluster.interfaces["outputs_kdn_data"]]
-        )
-        return self.solve_hg(
-            cluster.representee_cluster.possible_hg[0],
-            self.budgets[0],
-            self.budgets[0],
-        )
+
+        for budget in self.budgets:
+            if not hasattr(budget, "__iter__"):
+                budget = [budget]
+            # for hg in
+            # if isinstance(budget, )
+            list_op_sched.extend(
+                self.solve_hg(
+                    cluster.representee_cluster.possible_hg[0],
+                    *budget,
+                    accurate_mem=accurate_mem,
+                )
+            )
+        return list_op_sched
 
     def solve_hg(
         self,
         hg: H_graph,
         peak_budget,
-        save_budget,
+        save_budget=None,
         accurate_mem=False,
         print_result=False,
     ):
-        self._select_sched(hg)
-        self.md = ModelGurobi(
-            hg,
-            peak_budget=peak_budget,
-            save_budget=save_budget,
-            gurobi_params=self.config.gurobi_params,
-            accurate_mem=accurate_mem,
-            protected_names=self.config.protected_names,
-        )
-        self.md.solve()
-        if not self.md.feasible:
-            # if print_result:
-            print("Not feasible solution")
-            return None
+        if save_budget is not None:
+            save_budget = save_budget
         else:
-            if print_result:
-                print(
-                    f"Solution with obj: {self.md.md.getObjective().getValue()}"
-                )
-            self.op_sched = self.md.schedule()
-            return self.op_sched
+            save_budget = peak_budget
+
+        list_op_sched = []
+        self._select_sched(hg)
+        if not hasattr(save_budget, "__iter__"):
+            save_budget = [save_budget]
+        for sv_budget in save_budget:
+            self.md = ModelGurobi(
+                hg,
+                peak_budget=peak_budget,
+                save_budget=sv_budget,
+                gurobi_params=self.config.gurobi_params,
+                accurate_mem=accurate_mem,
+                protected_names=self.config.protected_names,
+            )
+
+            self.md.solve()
+            # if not self.md.feasible:
+            # if print_result:
+            # print("Not feasible solution")
+            # return []
+            if self.md.feasible:
+                if print_result:
+                    print(
+                        f"Solution with obj: {self.md.md.getObjective().getValue()}"
+                    )
+                self.op_sched = self.md.schedule()
+                list_op_sched.append(self.op_sched)
+        return list_op_sched
 
     # def solve(
     #     self,

@@ -20,7 +20,7 @@ class ModelGurobi:
         self,
         hgraph: H_graph,
         peak_budget: int,
-        save_budget: int,
+        save_budget=None,
         gurobi_params: Dict[str, Any] = {
             "LogToConsole": 0,
             "IntegralityFocus": 1,
@@ -32,7 +32,11 @@ class ModelGurobi:
     ):
         self.gcd = gcd if gcd else 1
         self.peak_budget = peak_budget / self.gcd
-        self.save_budget = save_budget / self.gcd
+        if save_budget:
+            self.save_budget = save_budget / self.gcd
+        else:
+            self.save_budget = peak_budget / self.gcd
+
         self.gurobi_params = gurobi_params
         self.feasible = None
         self.solve_time = None
