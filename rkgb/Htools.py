@@ -242,7 +242,15 @@ def P_cluster_to_H_cluster(p_cluster : P_cluster, kg : K_graph):
             possible_hg.append(hg)
     else:
         h_cluster.representee_cluster \
+            = representee \
             = P_cluster_to_H_cluster(p_cluster.representee_cluster,kg)
+        # === make list_kdn order match ===
+        assert(len(representee.list_kdn) == len(h_cluster.list_kdn))
+        old_list = h_cluster.list_kdn
+        ano_list_kdn = [representee.translator.dict_kdn_to_ano_triplet[kdn] for kdn in representee.list_kdn]
+        h_cluster.list_kdn = [h_cluster.translator.dict_ano_triplet_to_kdn[ano] for ano in ano_list_kdn]
+        assert(set(old_list) == set(h_cluster.list_kdn))
+        
 
     return h_cluster
 

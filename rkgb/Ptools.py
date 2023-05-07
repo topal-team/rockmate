@@ -124,29 +124,34 @@ class Ano_S_node_Info():
         self.ano_code = str_code
     # ============================
 
+
+    # ============================
+    @staticmethod
+    def make_charac_info(info : def_info.Var_info):
+        if info.ttype is tuple or info.ttype is list:
+            return (
+                info.ttype,
+                [Ano_S_node_Info.make_charac_info(sub) for sub in info.sub_info]
+            )
+        else:
+            return (
+                info.ttype,
+                info.dtype if hasattr(info,"dtype") else None,
+                info.tsize if hasattr(info,"tsize") else None,
+                info.requires_grad if hasattr(info,"requires_grad") else None,
+                info.memsize if hasattr(info,"memsize") else None,
+            )
+    # ============================
+
     # ============================
     def make_charac_string(self):
-        def make_charac_info(info : def_info.Var_info):
-            if info.ttype is tuple or info.ttype is list:
-                return (
-                    info.ttype,
-                    [make_charac_info(sub) for sub in info.sub_info]
-                )
-            else:
-                return (
-                    info.ttype,
-                    info.dtype if hasattr(info,"dtype") else None,
-                    info.tsize if hasattr(info,"tsize") else None,
-                    info.requires_grad if hasattr(info,"requires_grad") else None,
-                    info.memsize if hasattr(info,"memsize") else None,
-                )
         charac_list = [self.ano_code]
         for atar,info in self.dict_ano_tar_to_basic_info.items():
-            charac_list.append((atar,make_charac_info(info)))
+            charac_list.append((atar,Ano_S_node_Info.make_charac_info(info)))
         for acst,info in self.dict_ano_cst_to_basic_info.items():
-            charac_list.append((acst,make_charac_info(info)))
+            charac_list.append((acst,Ano_S_node_Info.make_charac_info(info)))
         for aparam,info in self.dict_ano_param_to_basic_info.items():
-            charac_list.append((aparam,make_charac_info(info)))
+            charac_list.append((aparam,Ano_S_node_Info.make_charac_info(info)))
         return str(charac_list)
     # ============================
 
@@ -342,6 +347,7 @@ class P_cluster():
     # Tmp attributes :
     first_nodes = None
     output_nodes = None
+    dict_input_mt_to_inputs_sent = None
     dict_first_mt_to_inputs_used = None
     dict_first_mt_to_inputs_used_mt = None
     dict_output_mt_to_outputs_sent = None
@@ -416,6 +422,7 @@ class P_cluster():
         outputs_mt = []
         first_nodes = []
         output_nodes = []
+        self.dict_input_mt_to_inputs_sent = dict_inputs_sent = dict()
         self.dict_first_mt_to_inputs_used = dict_inputs_used = dict()
         self.dict_first_mt_to_inputs_used_mt = dict_inputs_used_mt = dict()
         self.dict_output_mt_to_outputs_sent = dict_outputs_sent = dict()
@@ -434,6 +441,9 @@ class P_cluster():
                         dict_inputs_used_mt[sn.mt].add(req_sn.mt)
                     if req_sn.mt not in inputs_mt:
                         inputs_mt.append(req_sn.mt)
+                        dict_inputs_sent[req_sn.mt] = set(used_targets)
+                    else:
+                        dict_inputs_sent[req_sn.mt].update(used_targets)
             for user_sn,used_targets in sn.users.items():
                 if not (user_sn in self.s_nodes):
                     outputs.update(used_targets)
@@ -452,6 +462,9 @@ class P_cluster():
                 inputs.update(used_targets)
                 if ino.mt not in inputs_mt:
                     inputs_mt.append(ino.mt)
+                    dict_inputs_sent[ino.mt] = set(used_targets)
+                else:
+                    dict_inputs_sent[ino.mt].update(used_targets)
                 if user_sn.mt not in firsts_mt:
                     firsts_mt.append(user_sn.mt)
                     first_nodes.append(user_sn)
@@ -498,6 +511,7 @@ class P_cluster():
         # ATTRIBUTES NEEDED : s_nodes, p_structure
         # DO : translator
         dict_mt_to_ano_info = self.p_structure.dict_mt_to_ano_sn_info
+        dict_tar_to_ano_tar_id = self.p_structure.dict_tar_to_ano_tar_id 
         self.translator = translator = Cluster_translator()
         translator.dict_mt_to_ano_pair = dict()
         translator.dict_sn_to_ano_pair = dict()
@@ -515,10 +529,16 @@ class P_cluster():
             translator.dict_mt_to_ano_pair[sn.mt] = pair
             translator.dict_sn_to_ano_pair[sn] = pair
             translator.dict_ano_pair_to_sn[pair] = sn
-        
-        for inp_mt in self.inputs_mt:
-            ano_id = dict_mt_to_ano_info[inp_mt].ano_id
-            translator.dict_mt_to_ano_pair[inp_mt] = (ano_id,"input")
+
+        inputs_mt = list(self.inputs_mt) 
+        inputs_mt.sort(key = RK_node.get_num_tar)
+        for inp_nb,inp_mt in enumerate(inputs_mt):
+            assert(inp_mt not in translator.dict_mt_to_ano_pair)
+            inputs_sent = self.dict_input_mt_to_inputs_sent[inp_mt]
+            inputs_num = [dict_tar_to_ano_tar_id[inp] for inp in inputs_sent]
+            inputs_num.sort()
+            translator.dict_mt_to_ano_pair[inp_mt] \
+                = (str(inputs_num),f"input_{inp_nb}")
     # =============================
 
     # =============================
@@ -603,6 +623,7 @@ class P_structure():
     main_cluster : P_cluster = None
     sg : S_graph = None
     dict_info : dict = None
+    dict_tar_to_ano_tar_id : dict[str, int] = None
     dict_mt_to_ano_sn_info : dict[str, Ano_S_node_Info] = None
     dict_cluster_charac_string_to_cluster : dict[str, P_cluster] = None
     dict_cluster_ano_charac_string_to_ano_cluster_id : dict[str,int] = None
@@ -615,6 +636,7 @@ class P_structure():
         self.dict_info = sg.dict_info
         self.nb_clusters = 0
         self.nb_unique_clusters = 0
+        self.dict_tar_to_ano_tar_id = dict()
         self.dict_mt_to_ano_sn_info = dict()
         self.dict_cluster_charac_string_to_cluster = dict()
         self.dict_cluster_ano_charac_string_to_ano_cluster_id = dict()
@@ -628,6 +650,8 @@ class P_structure():
         # DO : dict_mt_to_ano_sn_info
         # -> generate ano_sn_info for all the s_nodes
         self.dict_sn_charac_string_to_ano_id = dict_sn_charac_string_to_ano_id = dict()
+        self.dict_tar_to_ano_tar_id = dict_tar_to_ano_tar_id = dict()
+        dict_charac_info_to_ano_id = dict()
         nb_unique_sns = 0
         for sn in [self.sg.init_node] + self.sg.nodes:
             ano_sn_info = Ano_S_node_Info(sn,self.sg,model)
@@ -641,6 +665,19 @@ class P_structure():
                     = nb_unique_sns \
                     = nb_unique_sns + 1
             self.dict_mt_to_ano_sn_info[sn.mt] = ano_sn_info
+
+        nb_unique_tar = 0
+        for tar,info in self.sg.dict_info.items():
+            charac_info = str(Ano_S_node_Info.make_charac_info(info))
+            if charac_info in dict_charac_info_to_ano_id:
+                dict_tar_to_ano_tar_id[tar] \
+                    = dict_charac_info_to_ano_id[charac_info]
+            else:
+                dict_tar_to_ano_tar_id[tar] \
+                    = dict_charac_info_to_ano_id[charac_info] \
+                    = nb_unique_tar \
+                    = nb_unique_tar +1
+        
 
     def make_graphs_names(self):
         for cluster in self.dict_ano_cluster_id_to_representee_cluster.values():
