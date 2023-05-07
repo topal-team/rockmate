@@ -12,7 +12,7 @@ import inspect
 # ====== OUTPUT CLASS ======
 # ==========================
 
-class rkgb_res():
+class rkGB_res():
     def __init__(self,bg,dg,sg,kg,ps,hc,list_sg,list_kg,cc,list_ano_S):
         self.B_graph = bg
         self.D_graph = dg
@@ -223,7 +223,7 @@ def make_all_graphs(model,
         m.running_mean = r_mean
         m.running_var  = r_var
 
-    return rkgb_res(bg,dg,sg,kg,ps,hc,list_sg,list_kg,cc,list_ano_S)
+    return rkGB_res(bg,dg,sg,kg,ps,hc,list_sg,list_kg,cc,list_ano_S)
 
 # ==========================
 
@@ -233,10 +233,170 @@ def make_all_graphs(model,
 # === printing functions ===
 # ==========================
 
+def RK_print(*args,
+        name=None,
+        open=True,
+        render_format="svg",
+        **kwargs):
+    r"""Overwrite python default print function,
+    Render rk-GB graphs using Graphviz.
+    - Given a rk-GB graph, this function creates a .gv file, 
+      then external Graphviz's dot tool renders it, as a .pdf or .svg file.
+      The result is stored in "graphviz_dir" sub-directory.
+    - Given a list of rk-GB graphs, render all graphs next to each other in a single file.
+    - Given a `rkGB_res`, render all the graphs in separate files.
+    - Given a cluster, render all the possible partitioning in separate files.
+    - Given a P_structure, render main_cluster.
+    - For any other object, call python default print.
+
+    Note: /!\ You need external Graphviz tool to generate the pdf/svg /!\
+    -> On Ubuntu : sudo apt-get install graphviz
+
+    kwargs:
+        - name : str | list[str] | tuple[str] = None:
+            To name .gv and .pdf file(s).
+            By default named after the type of the graph.
+        - render_format : str = "svg":
+            Render format wanted for the generated file
+        - open : bool = True:
+            To automatically open the file with the default reader.
+    """
+
+    # === Names ===
+    except_msg = (
+        "Unsupported type for kwarg `name`.\n"\
+        "Can be None, a string, a list or tuple of strings")
+    if name is None:
+        names = []
+    elif isinstance(name,str):
+        names = [str]
+    elif isinstance(name,list) or isinstance(name,tuple):
+        names = list(name)
+        for s in name:
+            if not isinstance(s,str):
+                raise Exception(except_msg)
+    else:
+        raise Exception(except_msg)
+    def get_name(name):
+        if name is None:
+            if names == []:
+                return None
+            else:
+                return names.pop(0)
+        else: return name
+    # ===============
+
+    graphs_to_render = []
+    filtered_args = []
+    def process_arg(arg,to_render,indent=0,pre_msg="",post_msg="",name=None):
+        msg = pre_msg + " "*indent
+        if isinstance(arg,Btools.B_graph):
+            msg += f"B_graph cannot be rendered, just raw edges"
+        elif isinstance(arg,Dtools.D_graph):
+            msg += Dtools.aux_print_D_graph_message(arg)
+            name = Dtools.aux_print_D_graph_name(arg,get_name(name))
+            to_render.append((name,arg,Dtools.print_D_graph))
+        elif isinstance(arg,Stools.S_graph):
+            msg += Stools.aux_print_S_graph_message(arg)
+            name = Stools.aux_print_S_graph_name(arg,get_name(name))
+            to_render.append((name,arg,Stools.print_S_graph))
+        elif isinstance(arg,Ktools.K_graph):
+            msg += Ktools.aux_print_K_graph_message(arg)
+            name = Ktools.aux_print_K_graph_name(arg,get_name(name))
+            to_render.append((name,arg,Ktools.print_K_graph))
+        elif isinstance(arg,Ptools.P_graph):
+            msg += Ptools.aux_print_P_graph_message(arg)
+            name = Ptools.aux_print_P_graph_name(arg,get_name(name))
+            to_render.append((name,arg,Ptools.print_P_graph))
+        elif isinstance(arg,Htools.H_graph):
+            msg += Htools.aux_print_H_graph_message(arg)
+            name = Htools.aux_print_H_graph_name(arg,get_name(name))
+            to_render.append((name,arg,Htools.print_H_graph))
+        elif isinstance(arg,Stools.S_graph_list):
+            msg += Stools.aux_print_S_graph_list_message(arg)
+            name = Stools.aux_print_S_graph_list_name(arg,get_name(name))
+            to_render.append((name,arg,Stools.print_S_graph_list))
+        elif isinstance(arg,Ktools.K_graph_list):
+            msg += Ktools.aux_print_K_graph_list_message(arg)
+            name = Ktools.aux_print_K_graph_list_name(arg,get_name(name))
+            to_render.append((name,arg,Ktools.print_K_graph_list))
+        elif ((isinstance(arg,list) or isinstance(arg,tuple))
+                and len(arg) != 1
+                and all(isinstance(a,RK_graph) for a in arg)):
+            msg += f"List of {len(arg)} RK graphs:\n"
+            sub_msgs = []
+            list_sub = []
+            for a in arg:
+                sub_msgs.append(
+                    process_arg(a,list_sub,
+                        indent=2,pre_msg="",post_msg="",name="Empty")
+                )
+            name = get_name(name)
+            name = name if name is not None else f"List_of_{len(arg)}_RK_graphs"
+            to_render.append((name,[c[1] for c in list_sub],[c[2] for c in list_sub]))
+            msg += "\n".join(sub_msgs)
+        elif isinstance(arg,Ptools.P_cluster):
+            msg += Ptools.aux_print_P_cluster_message(arg)+"\n"
+            names[:0] = Ptools.aux_print_P_cluster_names(arg,get_name(name))
+            sub_msgs = []
+            for pg in arg.representee_cluster.possible_partitioning:
+                sub_msgs.append(process_arg(pg,to_render,2))
+            msg += "\n".join(sub_msgs)
+        elif isinstance(arg,Htools.H_cluster):
+            msg += Htools.aux_print_H_cluster_message(arg)+"\n"
+            names[:0] = Htools.aux_print_H_cluster_names(arg,get_name(name))
+            sub_msgs = []
+            for pg in arg.representee_cluster.possible_hg:
+                sub_msgs.append(process_arg(pg,to_render,2))
+            msg += "\n".join(sub_msgs)
+        elif isinstance(arg,Ptools.P_structure):
+            msg += "P_structure's main cluster :\n"
+            msg += process_arg(arg.main_cluster,to_render)
+        elif isinstance(arg,rkGB_res):
+            msg += "rkGB_res : all graphs\n"
+            sub_msgs = []
+            for at in [
+                "B_graph",
+                "D_graph",
+                "S_graph",
+                "K_graph",
+                "S_graph_list",
+                "K_graph_list",
+                "P_structure",
+                "H_cluster"]:
+                if getattr(arg,at) is None: continue
+                sub_msgs.append(
+                    process_arg(getattr(arg,at),to_render,0,"="*3+"\n","\n")
+                )
+            msg += "\n".join(sub_msgs)
+        else:
+            return arg
+        return msg + post_msg
+
+    for arg in args:
+        msg = process_arg(arg,graphs_to_render,0,"="*10+"\n","\n"+"="*10)
+        filtered_args.append(msg)
+
+    print(*filtered_args, **kwargs)
+
+    if len(graphs_to_render) != 0:
+        print("*** START TO RENDER ***")
+    for name,obj,print_fct in graphs_to_render:
+        if not isinstance(print_fct,list):
+            print_fct(obj,name=name,open=open,render_format=render_format)
+        else:
+            dot = graphviz.Digraph(name,comment=name)
+            for i,fct in enumerate(print_fct):
+                fct(obj[i],dot=dot,uniq_num=i)
+            small_fcts.graph_render(dot,open,"various",render_format)
+
+
+
+
 def print_graph(g,name=None,open=True,render_format="svg"):
-    r"""To visualize D, S or K graph.
-    This function creates a .gv file, and using
-    Graphviz's dot function builds a .pdf file.
+    r"""To visualize rk-GB graphs,
+    This function creates a .gv file, then the external Graphviz's
+    dot tool renders the graph, as a .pdf or .svg file.
     They are stored in "graphviz_dir" sub-directory.
     inputs:
     name (string):
@@ -263,7 +423,7 @@ def print_graph(g,name=None,open=True,render_format="svg"):
 
 def print_graph_list(gl,name=None,open=True,render_format="svg"):
     r"""The equivalent of rkgb.print_graph for a list of graph.
-    Generates all graphs next to each other in a single pdf.
+    Generates all graphs next to each other in a single file.
     Note:
          Originally intended to visualize a sequentialized graph :
          i.e. one graph cut by rkgb in blocks

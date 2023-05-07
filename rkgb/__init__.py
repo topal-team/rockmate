@@ -1,8 +1,7 @@
 __all__ = [
     "Btools","Dtools","Stools","Ktools","Atools_for_S_and_K","Ptools","Htools",
     "print_inputs","make_inputs",
-    "make_all_graphs","print_all_graphs",
-    "print_graph","print_graph_list",
+    "make_all_graphs","print",
     "test_rkgb"]
 
 from . import Btools
@@ -14,4 +13,4 @@ from . import Ptools
 from . import Htools
 from .main import print_inputs,make_inputs
 from .main import make_all_graphs,test_rkgb
-from .main import print_all_graphs,print_graph,print_graph_list
+from .main import RK_print as print

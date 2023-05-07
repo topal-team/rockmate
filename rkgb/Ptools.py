@@ -1086,6 +1086,7 @@ class Partitioner_bottom_to_top(Partitioner):
             inputs_pn.append(inp_pn)
             dict_input_mt_to_pn[inp_mt] = inp_pn
             inp_pn.users = set([main_pn])
+        main_pn.deps = set(inputs_pn)
         pg.pn_wrapping_it = main_pn
         last_wrapping_graph.nodes = inputs_pn + [main_pn]
         for fst_node in first_nodes:
@@ -1196,36 +1197,55 @@ color_sub_graph = "blueviolet"
 color_special  = "green"
 color_edge     = color_leaf
 
-def print_P_graph(pg : P_graph,name=None,open=True,render_format="svg"):
+def aux_print_P_graph_message(pg : P_graph):
+    return f"P_graph - Partitioned forward graph : of size {len(pg.nodes)}"
+def aux_print_P_graph_name(pg,name=None):
+    if name is not None: return name
+    else: return "Partitioned_Forward_P_graph"
+
+def aux_print_P_cluster_message(pc : P_cluster):
+    possible_pg = pc.representee_cluster.possible_partitioning
+    return f"{pc.name}, with {len(possible_pg)} possible partitioning"
+def aux_print_P_cluster_names(pc : P_cluster,name=None):
+    if name is None: name = pc.name
+    parti_used = pc.representee_cluster.partitioners_already_used
+    return [f"P_graph_{i}_via_{type(parti)}_of_{name}" for i,parti in enumerate(parti_used)]
+
+def print_P_graph(pg : P_graph,name=None,open=True,render_format="svg",dot=None,uniq_num=0):
     # ----- init -----
-    print(f"Partitioned forward graph : {len(pg.nodes)} nodes")
-    if name is None: name = "Partitioned_forward_graph"
-    dot = graphviz.Digraph(
-        name,
-        comment="P_graph = Partitioned forward graph")
+    if dot is None:
+        render = True
+        if name is None: name = aux_print_P_graph_name(pg)
+        dot = graphviz.Digraph(name,comment=name)
+    else:
+        render = False
+    def uni(tar): return f"_{uniq_num}_{tar}"
+    def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
+    def edge(i1,i2,**kwargs): dot.edge(uni(i1),uni(i2), **kwargs)
     # ----- Core -----
     cluster : P_cluster = pg.cluster
-    dot.node(
+    node(
         "inputs",
         f"INPUTS:\n"+"\n".join(cluster.inputs_mt),
         color=color_special, style="dashed")
-    dot.node(
+    node(
         "outputs",
         f"OUTPUTS:\n"+"\n".join(cluster.outputs_mt),
         color=color_special, style="dashed")
     for pn in pg.nodes:
         if pn.is_leaf:
-            dot.node(pn.name,pn.name,color=color_leaf)
+            node(pn.name,pn.name,color=color_leaf)
         else:
-            dot.node(
+            node(
                 pn.name,
                 f"{pn.name}\nCluster size: {pn.size}",
                 color=color_sub_graph)
         for req_pn in pn.deps:
-            dot.edge(req_pn.name,pn.name,color=color_edge)
+            edge(req_pn.name,pn.name,color=color_edge)
     for pn in pg.first_nodes:
-        dot.edge("inputs",pn.name,color=color_edge)
+        edge("inputs",pn.name,color=color_edge)
     for pn in pg.output_nodes:
-        dot.edge(pn.name,"outputs",color=color_edge)
+        edge(pn.name,"outputs",color=color_edge)
     # ----- render -----
-    small_fcts.graph_render(dot,open,"P",render_format)
+    if render:
+        small_fcts.graph_render(dot,open,"P",render_format)
