@@ -336,21 +336,33 @@ def print_fw_code(dg : D_graph):
         if not dn.is_input: print(f"\t{dn.get_code()}")
     print(f"\treturn {dg.output}")
 
-def print_D_graph(dg : D_graph,name=None,open=True,render_format="svg"):
-    print(len(dg.nodes))
-    if name is None:
-        name = "Forward_graph"
-    dot = graphviz.Digraph(name,comment="D_graph = forward graph")
+def aux_print_D_graph_message(dg : D_graph):
+    return f"D_graph - Forward graph : of size {len(dg.nodes)}"
+def aux_print_D_graph_name(dg,name=None):
+    if name is not None: return name
+    else: return "Forward_D_graph"
+
+def print_D_graph(dg : D_graph,name=None,open=True,render_format="svg",dot=None,uniq_num=0):
+    if dot is None:
+        render = True
+        if name is None: name = aux_print_D_graph_name(dg)
+        dot = graphviz.Digraph(name,comment=name)
+    else:
+        render = False
+    def uni(tar): return f"_{uniq_num}_{tar}"
+    def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
+    def edge(i1,i2,**kwargs): dot.edge(uni(i1),uni(i2), **kwargs)
     for dn in dg.nodes:
         if dn.is_input:
-            dot.node(dn.target,dn.get_code(),color="blue")
+            node(dn.target,dn.get_code(),color="blue")
         elif dn.target in dg.outputs:
-            dot.node(dn.target,dn.get_code(),color="red")
-        else: dot.node(dn.target,dn.get_code())
+            node(dn.target,dn.get_code(),color="red")
+        else: node(dn.target,dn.get_code())
     for dn in dg.nodes:
         for req_dn in dn.deps:
-            dot.edge(req_dn.target,dn.target)
-    small_fcts.graph_render(dot,open,"D",render_format)
+            edge(req_dn.target,dn.target)
+    if render:
+        small_fcts.graph_render(dot,open,"D",render_format)
 
 # ==========================
 

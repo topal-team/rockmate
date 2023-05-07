@@ -617,6 +617,9 @@ def S_to_K(sg : S_graph,model,verbose=None,device=None):
     aux_init_S_to_K(model,verbose,device)
     return aux_build_S_to_K(sg,model,prev_kg = None)
 
+class K_graph_list(list):
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
 
 def S_list_to_K_list(list_sg,model,verbose=None,device=None):
     aux_init_S_to_K(model,verbose,device)
@@ -625,7 +628,7 @@ def S_list_to_K_list(list_sg,model,verbose=None,device=None):
     for sg in list_sg:
         prev_kg = kg = aux_build_S_to_K(sg,model,prev_kg)
         list_kg.append(kg)
-    return list_kg
+    return K_graph_list(list_kg)
 
 
 # ==========================
@@ -692,10 +695,16 @@ def copy_K_graph(kg : K_graph):
         [copy_K_C_node(kcn) for kcn in kg.list_kcn])
     new_kg.list_kdn = new_list_kdn = (
         [copy_K_D_node(kdn) for kdn in kg.list_kdn])
-    all_nodes = set(new_list_kcn+new_list_kdn)
-    all_nodes.update(set(kg.dict_KDN_data.values())) # to add inputs
-    all_nodes.update(set(kg.dict_KDN_grad.values()))
-    for kn in all_nodes: new_dict_kn[kn.name]=kn
+    for kn in new_list_kcn+new_list_kdn:
+        new_dict_kn[kn.name]=kn
+
+    # Some inputs may be missing (sources...)
+    for kdn in (
+            list(kg.dict_KDN_data.values())
+        +   list(kg.dict_KDN_grad.values())):
+        if kdn.name not in new_dict_kn:
+            new_dict_kn[kdn.name] = copy_K_D_node(kdn)
+
     new_kg.dict_KCN_fwd = dict(
         (kn.mt,new_dict_kn[kn.name]) for kn in kg.dict_KCN_fwd.values())
     new_kg.dict_KCN_bwd = dict(
@@ -768,6 +777,32 @@ def get_color(kn):
     if kn.is_fwd: return color_kcn_fwd
     return color_kcn_bwd
 
+def aux_print_K_graph_message(kg : K_graph):
+    return f"K_graph - Forward + Backward graph : {len(kg.nodes)} nodes"
+
+def aux_print_K_graph_list_message(lkg : K_graph_list):
+    list_nb_kcn = [len(kg.list_kcn) for kg in lkg]
+    list_nb_kdn = [len(kg.list_kdn) for kg in lkg]
+    tot_nb_kcn = sum(list_nb_kcn)
+    tot_nb_kdn = sum(list_nb_kdn)
+    str_list_nb_kcn = "+".join(str(i) for i in list_nb_kcn)
+    str_list_nb_kdn = "+".join(str(i) for i in list_nb_kdn)
+    return (
+        f"K_graph_list - Sequentialized Forward + Backward graphs, "\
+        f"{len(lkg)} blocks, with :\n"\
+        f"     -> {str_list_nb_kcn} = {tot_nb_kcn} Comp nodes\n"\
+        f"     -> {str_list_nb_kdn} = {tot_nb_kdn} Data nodes\n"\
+        f"     => total of {tot_nb_kcn + tot_nb_kdn} nodes"
+    )
+
+def aux_print_K_graph_name(kg : K_graph,name=None):
+    if name is not None: return name
+    else: return "Forward_and_Backward_K_graph"
+
+def aux_print_K_graph_list_name(lkg : K_graph_list,name=None):
+    if name is not None: return name
+    else: return "Sequentialized_Forward_and_Backward_K_graph_list"
+
 def aux_print_graph(dot,kg,uniq_num):
     def uni(tar): return f"_{uniq_num}_{tar}"
     def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
@@ -814,35 +849,23 @@ def aux_print_graph(dot,kg,uniq_num):
         edge(req_inp_grad.name,inp_grad.name,**kwargs)
 
 
-def print_K_graph(kg : K_graph,name=None,open=True,render_format="svg"):
-    if name is None: name = "Fwd_and_bwd_graph"
-    print(
-        f"Forward + Backward graph with Computation and "\
-        f"Data nodes: {len(kg.list_kcn)} + {len(kg.list_kdn)}")
-    dot = graphviz.Digraph(name,
-        comment="K_graph = Forward + Backward with Comp and Data nodes")
-    aux_print_graph(dot,kg,0)
-    small_fcts.graph_render(dot,open,"K",render_format)
+def print_K_graph(kg : K_graph,name=None,open=True,render_format="svg",dot=None,uniq_num=0):
+    if dot is None:
+        render = True
+        name = aux_print_K_graph_name(kg,name)
+        dot = graphviz.Digraph(name,comment=name)
+    else:
+        render = False
+    aux_print_graph(dot,kg,uniq_num)
+    if render:
+        small_fcts.graph_render(dot,open,"K",render_format)
 
 
-def print_K_graph_list(list_kg,name=None,open=True,render_format="svg"):
-    if name is None: name = "Sequentialized_Fwd_Bwd_graph"
-    list_nb_kcn = [len(kg.list_kcn) for kg in list_kg]
-    list_nb_kdn = [len(kg.list_kdn) for kg in list_kg]
-    tot_nb_kcn = sum(list_nb_kcn)
-    tot_nb_kdn = sum(list_nb_kdn)
-    str_list_nb_kcn = "+".join(str(i) for i in list_nb_kcn)
-    str_list_nb_kdn = "+".join(str(i) for i in list_nb_kdn)
-    print(
-        f"{len(list_kg)} K_graphs in seq, with :\n"\
-        f"{str_list_nb_kcn} = {tot_nb_kcn} Comp nodes\n"\
-        f"{str_list_nb_kdn} = {tot_nb_kdn} Data nodes\n"\
-        f"=> total of {tot_nb_kcn + tot_nb_kdn} nodes")
-    dot = graphviz.Digraph(
-        name,
-        comment="K_graph list : sequentialized fwd+bwd with Comp and Data nodes")
-    for i in range(len(list_kg)):
-        aux_print_graph(dot,list_kg[i],i)
+def print_K_graph_list(lkg : K_graph_list,name=None,open=True,render_format="svg"):
+    name = aux_print_K_graph_list_name(lkg,name)
+    dot = graphviz.Digraph(name,comment=name)
+    for i in range(len(lkg)):
+        aux_print_graph(dot,lkg[i],i)
     small_fcts.graph_render(dot,open,"K",render_format)
 
 # ==========================

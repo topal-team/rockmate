@@ -775,6 +775,10 @@ def D_to_S(dg,model=None,device=None):
 # ==== sequential parts ====
 # ==========================
 
+class S_graph_list(list):
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
+
 def copy_S_node(sn : S_node): # aux for copy_S_graph
     new_sn = S_node()
     new_sn.is_artefact       = sn.is_artefact
@@ -812,6 +816,9 @@ def copy_S_graph(sg : S_graph):
             new_req_sn = dict_nodes[req_sn.main_target]
             S_edges.add_inplace(new_req_sn.users,new_sn,set_str)
             S_edges.add_inplace(new_sn.deps,new_req_sn,set_str)
+    new_init.users = dict(
+        (dict_nodes[u.mt],set_str) \
+        for u,set_str in sg.init_node.users.items())
     new_sg.output_nodes = [dict_nodes[out.mt] for out in sg.output_nodes]
     new_sg.init_node    = new_init
     new_sg.nodes        = new_nodes
@@ -872,7 +879,7 @@ def cut(sg : S_graph): # -> list of S_graph
     for i in range(len(list_sg)-1):
         list_sg[i].outputs = list(list_sg[i+1].inputs)
     list_sg[-1].outputs = main_sg.outputs
-    return list_sg
+    return S_graph_list(list_sg)
 
 # ==========================
 
@@ -881,6 +888,26 @@ def cut(sg : S_graph): # -> list of S_graph
 # ==========================
 # === printing functions ===
 # ==========================
+
+def aux_print_S_graph_message(sg : S_graph):
+    return f"S_graph - Simplified forward graph : {len(sg.nodes)} nodes"
+
+def aux_print_S_graph_list_message(lsg : S_graph_list):
+    s = "+".join([str(len(sg.nodes)) for sg in lsg])
+    return (
+        f"S_graph_list - Sequentialized simplified forward graphs, "\
+        f"{len(lsg)} blocks,\n     -> with {s} = "\
+        f"{sum([len(sg.nodes) for sg in lsg])} nodes"
+    )
+
+def aux_print_S_graph_name(sg : S_graph,name=None):
+    if name is not None: return name
+    else: return "Simplified_forward_S_graph"
+
+def aux_print_S_graph_list_name(lsg : S_graph_list,name=None):
+    if name is not None: return name
+    else: return "Sequentialized_Simplified_Forward_S_graph_list"
+
 
 def aux_print_graph(dot,sg : S_graph,uniq_num):
     def uni(tar): return f"_{uniq_num}_{tar}"
@@ -920,27 +947,23 @@ def aux_print_graph(dot,sg : S_graph,uniq_num):
             edge(out.mt,"output",sg.special_output_node.deps[out])
 
 
-def print_S_graph(sg : S_graph,name=None,open=True,render_format="svg"):
-    print(f"Simplified forward graph : {len(sg.nodes)} nodes")
-    if name is None: name = "Simplified_forward_graph"
-    dot = graphviz.Digraph(
-        name,
-        comment="S_graph = Simplified forward graph")
-    aux_print_graph(dot,sg,0)
-    small_fcts.graph_render(dot,open,"S",render_format)
+def print_S_graph(sg : S_graph,name=None,open=True,render_format="svg",dot=None,uniq_num=0):
+    if dot is None:
+        render = True
+        name = aux_print_S_graph_name(sg,name)
+        dot = graphviz.Digraph(name,comment=name)
+    else:
+        render = False
+    aux_print_graph(dot,sg,uniq_num)
+    if render:
+        small_fcts.graph_render(dot,open,"S",render_format)
 
 
-def print_S_graph_list(list_sg,name=None,open=True,render_format="svg"):
-    s = "+".join([str(len(sg.nodes)) for sg in list_sg])
-    print(
-        f"{len(list_sg)} blocs of S_graph, with {s} = "\
-        f"{sum([len(sg.nodes) for sg in list_sg])} nodes")
-    if name is None: name = "Sequentialized_Simplified_Forward_graph"
-    dot = graphviz.Digraph(
-        name,
-        comment="S_graph_list: sequentialized simplified forward graph")
-    for i in range(len(list_sg)):
-        aux_print_graph(dot,list_sg[i],i)
+def print_S_graph_list(lsg : S_graph_list,name=None,open=True,render_format="svg"):
+    name = aux_print_S_graph_list_name(lsg,name)
+    dot = graphviz.Digraph(name,comment=name)
+    for i in range(len(lsg)):
+        aux_print_graph(dot,lsg[i],i)
     small_fcts.graph_render(dot,open,"S",render_format)
 
 # ==========================

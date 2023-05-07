@@ -135,6 +135,8 @@ class H_cluster():
     dict_kn : dict = None
     interfaces : dict[str, set[K_D_node]]
     translator : Cluster_translator = None
+    p_cluster : P_cluster = None
+    p_node : P_node = None
     all_clusters : set = None
     representee_cluster = None # : H_cluster
     possible_hg : list[H_graph] = None
@@ -161,6 +163,7 @@ class H_cluster():
 def P_cluster_to_H_cluster(p_cluster : P_cluster, kg : K_graph):
     if hasattr(p_cluster,"h_cluster"): return p_cluster.h_cluster
     h_cluster = H_cluster(p_cluster.name.replace("P","H"),False)
+    h_cluster.p_cluster = p_cluster
     p_cluster.h_cluster = h_cluster
     all_computation_mt = set(sn.mt for sn in p_cluster.s_nodes)
 
@@ -234,7 +237,7 @@ def P_cluster_to_H_cluster(p_cluster : P_cluster, kg : K_graph):
         h_cluster.possible_hg = possible_hg = []
         h_cluster.list_sched = []
         for pg in p_cluster.possible_partitioning:
-            hg = P_graph_to_H_graph(pg,p_cluster,kg)
+            hg = P_graph_to_H_graph(pg,h_cluster,kg)
             h_cluster.all_clusters.update(hg.all_clusters)
             possible_hg.append(hg)
     else:
@@ -251,6 +254,7 @@ def P_node_to_H_cluster(pn : P_node, kg : K_graph):
         return None
     else:
         h_cluster = H_cluster(f"H_Cluster_bottom_{pn.mt}",True)
+        h_cluster.p_node = pn
         h_cluster.list_sched = []
         h_cluster.representee_cluster = h_cluster
         loss_kcn = h_cluster.loss_kcn
@@ -286,11 +290,13 @@ def P_node_to_H_cluster(pn : P_node, kg : K_graph):
         return h_cluster
 
 
+
+
 def P_graph_to_H_graph(
         pg : P_graph, 
-        main_p_cluster : P_cluster,
+        h_cluster : H_cluster,
         kg : K_graph):
-    hg = H_graph(pg.name.replace("pg","hg"),main_p_cluster.h_cluster)
+    hg = H_graph(pg.name.replace("pg","hg"),h_cluster)
 
     # -> Useful for interfaces
     dict_mt_to_hdn_data = dict()
@@ -312,7 +318,7 @@ def P_graph_to_H_graph(
             # ** HCN_fwd **
             kcn_fwd = kg.dict_KCN_fwd[mt]
             hcn_fwd = H_C_node(
-                f"fwd_{mt}",
+                kcn_fwd.name,
                 main_target = mt,
                 sub_cluster = sub_cluster, # = None if no grad
                 is_fwd = True,
@@ -330,7 +336,7 @@ def P_graph_to_H_graph(
                 # ** HCN_bwd **
                 kcn_bwd = kg.dict_KCN_bwd[mt]
                 hcn_bwd = H_C_node(
-                    f"bwd_{mt}",
+                    kcn_bwd.name,
                     main_target = mt,
                     sub_cluster = sub_cluster,
                     is_fwd = False,
@@ -387,8 +393,8 @@ def P_graph_to_H_graph(
         main_target = "loss"
         )
     
-    # ** missing H_D_nodes -> inputs **
-    for inp_mt in main_p_cluster.inputs_mt:
+    # ** missing H_D_nodes -> inputs of bottom sub nodes**
+    for inp_mt in h_cluster.p_cluster.inputs_mt:
         if inp_mt not in dict_mt_to_hdn_data:
             kdn_data = kg.dict_KDN_data[inp_mt]
             hdn_data = H_D_node(kdn_data)
@@ -396,9 +402,10 @@ def P_graph_to_H_graph(
             dict_mt_to_hdn_data[hdn_data.mt] = kdn_data
             if inp_mt in kg.dict_KDN_grad:
                 kdn_grad = kg.dict_KDN_grad[inp_mt]
-                hdn_grad = H_D_node(kdn_grad)
-                dict_hdn_to_kdn[hdn_grad] = kdn_grad
-                dict_mt_to_hdn_grad[hdn_grad.mt] = kdn_grad
+                if kdn_grad in h_cluster.all_interfaces:
+                    hdn_grad = H_D_node(kdn_grad)
+                    dict_hdn_to_kdn[hdn_grad] = kdn_grad
+                    dict_mt_to_hdn_grad[hdn_grad.mt] = kdn_grad
     
     # ** register nodes **
     hg.list_hdn = list(dict_hdn_to_kdn.keys())
@@ -410,18 +417,12 @@ def P_graph_to_H_graph(
     )
 
     # ** interfaces **
-    hg.inputs_hdn_data \
-        = set(dict_mt_to_hdn_data[mt] for mt in main_p_cluster.inputs_mt)
-    hg.outputs_hdn_data \
-        = set(dict_mt_to_hdn_data[mt] for mt in main_p_cluster.outputs_mt)
-    hg.inputs_hdn_data \
-        = set(dict_mt_to_hdn_grad[mt] 
-            for mt in main_p_cluster.inputs_mt \
-            if mt in dict_mt_to_hdn_grad)
-    hg.outputs_hdn_grad \
-        = set(dict_mt_to_hdn_grad[mt] 
-            for mt in main_p_cluster.outputs_mt \
-            if mt in dict_mt_to_hdn_grad)
+    dict_kdn_to_hdn = dict((kdn,hdn) for (hdn,kdn) in dict_hdn_to_kdn.items())
+    hg.inputs_hdn_data = set(dict_kdn_to_hdn[kdn] for kdn in h_cluster.interfaces["inputs_kdn_data"])
+    hg.outputs_hdn_data = set(dict_kdn_to_hdn[kdn] for kdn in h_cluster.interfaces["outputs_kdn_data"])
+    hg.inputs_hdn_grad = set(dict_kdn_to_hdn[kdn] for kdn in h_cluster.interfaces["inputs_kdn_grad"])
+    hg.outputs_hdn_grad = set(dict_kdn_to_hdn[kdn] for kdn in h_cluster.interfaces["outputs_kdn_grad"])
+    
     
     # === Build the edges ===
     for hdn in hg.list_hdn:
@@ -477,33 +478,51 @@ def get_color(hn):
     else:
         return color_hcn_bwd
 
-
-def print_H_graph(hg: H_graph, name=None, open=True, render_format="svg"):
-    # ----- init -----
-    print(
-        f"Hierarchical graph : \n"
-        f"{len(hg.list_hcn)} H_C_nodes,\n"
-        f"{len(hg.list_hdn)} H_D_nodes"
+def aux_print_H_graph_message(hg : H_graph):
+    return (
+        f"H_graph - Hierarchical forward+backward graph, "\
+        f"{len(hg.list_hcn)} H_C_nodes; {len(hg.list_hdn)} H_D_nodes"
     )
-    if name is None:
-        name = "Hierarchical_graph"
-    dot = graphviz.Digraph(name, comment="H_graph = Hierarchical graph")
+def aux_print_H_graph_name(hg,name=None):
+    if name is not None: return name
+    else: return "Hierarchical_H_graph"
+
+def aux_print_H_cluster_message(hc : H_cluster):
+    possible_hg = hc.representee_cluster.possible_hg
+    return f"{hc.name}, with {len(possible_hg)} possible H_graphs"
+def aux_print_H_cluster_names(hc : H_cluster,name=None):
+    if name is None: name = hc.name
+    nb_hg = len(hc.representee_cluster.possible_hg)
+    return [f"H_graph_{i}_of_{name}" for i in range(nb_hg)]
+
+def print_H_graph(hg: H_graph, name=None, open=True, render_format="svg",dot=None,uniq_num=0):
+    # ----- init -----
+    if dot is None:
+        render = True
+        if name is None: name = aux_print_H_graph_name(hg)
+        dot = graphviz.Digraph(name,comment=name)
+    else:
+        render = False
+    def uni(tar): return f"_{uniq_num}_{tar}"
+    def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
+    def edge(i1,i2,**kwargs): dot.edge(uni(i1),uni(i2), **kwargs)
     # ----- Core -----
     # * nodes *
     for hcn in hg.list_hcn:
-        dot.node(hcn.name,hcn.name,color=get_color(hcn))
+        node(hcn.name,hcn.name,color=get_color(hcn))
     for hdn in hg.list_hdn:
-        dot.node(hdn.name,hdn.name,
+        node(hdn.name,hdn.name,
             color=get_color(hdn),
             tooltip=f"Mem {irotor.MemSize(hdn.mem)}")
 
     # * edges *
     for hcn in hg.list_hcn:
         for req_hdn in hcn.deps:
-            dot.edge(req_hdn.name, hcn.name, color=color_edge)
+            edge(req_hdn.name, hcn.name, color=color_edge)
         for user_hdn in hcn.users:
-            dot.edge(hcn.name, user_hdn.name, color=color_edge)
+            edge(hcn.name, user_hdn.name, color=color_edge)
 
     #  ----- render -----
-    small_fcts.graph_render(dot, open, "H", render_format)
+    if render:
+        small_fcts.graph_render(dot, open, "H", render_format)
 

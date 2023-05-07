@@ -421,7 +421,7 @@ def S_list_to_K_list_eco(
         # about how inputs were generated. But it implies
         # that we cannot trust fake_inp_data targets.
 
-    return cc,list_kg,tab_S_repr_cc
+    return cc,Ktools.K_graph_list(list_kg),tab_S_repr_cc
 
 
 
