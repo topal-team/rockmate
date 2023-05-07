@@ -56,9 +56,10 @@ class ModelGurobi:
                 self.time.append([hcn.ff_time])
                 self.overhead.append([hcn.ff_overhead / self.gcd])
             else:
-                if hcn.sub_cluster not in self.sub_cs:
-                    self.sub_cs.append(hcn.sub_cluster)
-                self.hcn2sub_c.append(self.sub_cs.index(hcn.sub_cluster))
+                if hcn.is_fwd:
+                    self.sub_cs.append(hcn.list_sched)
+                # self.hcn2sub_c.append(self.sub_cs.index(hcn.sub_cluster))
+                self.hcn2sub_c.append(len(self.sub_cs) - 1)
                 self.nR.append(len(hcn.list_sched) + (1 if hcn.is_fwd else 0))
                 self.nOpts.append(len(hcn.list_sched))
 
@@ -96,7 +97,7 @@ class ModelGurobi:
             self.sub_c2hcn[j].append(i)
         self.mem = [hdn.mem / self.gcd for hdn in self.hgraph.list_hdn]
         self.saved_mem = [
-            [op_sched.mem / self.gcd for op_sched in sub_c.list_sched]
+            [op_sched.mem / self.gcd for op_sched in sub_c]
             for sub_c in self.sub_cs
         ]
 
@@ -143,11 +144,13 @@ class ModelGurobi:
                     continue
                 for op_sched in hcn.list_sched:
                     # Without specifying schedule, we assume it's possible to use hdn here
-                    if (
-                        self.hgraph.list_hdn[i].kdn.name
-                        in op_sched.dep_interfaces_data
-                    ) and k not in _users_d[i]:
-                        _users_d[i].append(k)
+                    for i_ in op_sched.dep_interfaces_data:
+                        if (
+                            op_sched.list_kdn[i_]
+                            == self.hgraph.list_hdn[i].kdn.name
+                            and k not in _users_d[i]
+                        ):
+                            _users_d[i].append(k)
 
         ##############################
 
@@ -187,7 +190,7 @@ class ModelGurobi:
         self.Sp = [
             self.md.addVars(
                 T + 1,
-                len(sub_c.list_sched),
+                len(sub_c),
                 name=f"Sp{j}",
                 vtype=GRB.BINARY,
             )
@@ -197,8 +200,7 @@ class ModelGurobi:
         for j in range(J):
             for t in range(T + 1):
                 self.sumSp[(j, t)] = quicksum(
-                    self.Sp[j][t, o]
-                    for o in range(len(self.sub_cs[j].list_sched))
+                    self.Sp[j][t, o] for o in range(len(self.sub_cs[j]))
                 )
 
         # to present whether one saved tensor can be inheritaged from the last stage
@@ -361,7 +363,8 @@ class ModelGurobi:
                     )
 
                     sub_c = self.sub_cs[j]
-                    for name in sub_c.list_sched[o].dep_interfaces_data:
+                    for i in sub_c[o].dep_interfaces_data:
+                        name = sub_c[o].list_kdn[i].name
                         # Tensor req_i is required by BWD
                         req_i = [
                             hdn.kdn.name for hdn in self.hgraph.list_hdn
@@ -572,7 +575,9 @@ class ModelGurobi:
 
                                 i_ = [
                                     hdn.kdn.name for hdn in self.hgraph.list_hdn
-                                ].index(inter_position[0])
+                                ].index(
+                                    op_sched.list_kdn[inter_position[0]].name
+                                )
                                 if inter_position[1] == "always":
                                     not_kept_alive = 1
                                 elif not inter_position[1]:  # ending status
@@ -754,7 +759,7 @@ class ModelGurobi:
 
     #     for sub_c in self.sub_cs:
     #         alive_status[sub_c.name] = -1  # to represent phantom from sub_c
-    #         sizes[sub_c.name] = [op_sched.mem for op_sched in sub_c.list_sched]
+    #         sizes[sub_c.name] = [op_sched.mem for op_sched in sub_c]
 
     #     for t in range(T):
     #         for k in range(T):
@@ -938,7 +943,7 @@ class ModelGurobi:
 #     for hcn in hg.list_hcn:
 #         if hcn.is_fwd and hcn.sub_cluster is not None:
 #             sub_c = hcn.sub_cluster
-#             if len(sub_c.list_sched) <= 1:
+#             if len(sub_c) <= 1:
 #                 solve_hg_recursive(sub_c, print_info=print_info)
 #     if solve_self and len(hg.list_hcn) >= 1:  # not bottom hgraph
 #         # print(f"Try to solve Hgraph with size {len(hg.list_hcn)}")
