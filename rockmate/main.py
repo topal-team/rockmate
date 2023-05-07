@@ -82,13 +82,13 @@ class CheckpointedModule(torch.nn.Module):
             original_mod,
             dict_inputs,
             verbose=verbose,
-            wanted_graphs={"Kl", "K"},
+            wanted_graphs={"Kl", "H"},
         )  # we don't need the whole K_graph
         self.list_kg = self.rkgb_res.K_graph_list
-        self.dict_constants = self.rkgb_res.K_graph_list[0].dict_constants
+        self.dict_constants = self.rkgb_res.K_graph.dict_constants
         self.eq_classes = self.rkgb_res.equivalent_classes
-        self.init_code = ast_to_str(self.list_kg[0].init_code)
-        self.output = self.list_kg[-1].output_kdn_data
+        self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)
+        self.output = self.rkgb_res.K_graph.list_outputs_kdn_data[0]
         self.mem_limit = mem_limit
         self.gd = make_gd(self.device, self.original_mod, self.dict_constants)
         if get_chain:
@@ -430,7 +430,7 @@ class CheckpointedModule(torch.nn.Module):
                     for l in RkMod.fwd_fct_list:
                         RkMod._exec(l)
                 # -> Get the output
-                out = RkMod.compiler.get_val(RkMod.rkgb_res.D_graph.output)
+                out = RkMod.compiler.get_val(RkMod.rkgb_res.D_graph.outputs[0])
                 out_d = out.detach().requires_grad_(out.requires_grad)
                 # TODO multiple outputs
                 #  -> Clear the compiler
@@ -467,7 +467,7 @@ class CheckpointedModule(torch.nn.Module):
                 storage = ctx.RK_Storage
                 RkMod.compiler.storage = storage
                 # -> Put grad_out in out.grad (Rem 4)
-                out = RkMod.compiler.get_val(RkMod.rkgb_res.D_graph.output)
+                out = RkMod.compiler.get_val(RkMod.rkgb_res.D_graph.outputs[0])
                 out.backward(grad_out_d)  #  -> set out.grad cleanly
                 # remember that forward returned out_d not out
 
