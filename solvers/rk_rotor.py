@@ -2,7 +2,7 @@ import time
 import warnings
 import rkgb
 from rkgb.utils import np
-from rkgb.Htools import H_graph
+from rkgb.Htools import H_graph, H_cluster
 import math
 from solvers.main import Solver, get_cluster_budget
 from solvers.def_chain import RK_Chain
@@ -48,15 +48,19 @@ class RK_rotor(Solver):
         budgets=None,
     ):
         if budgets is None:
-            self.budgets = get_cluster_budget(cluster.representee_cluster)
+            budgets = get_cluster_budget(cluster.representee_cluster)
         # self.budget = budgets
         if isinstance(cluster, RK_Chain) or isinstance(cluster, RK_Chain_):
             list_seq = []
             for budget in budgets:
                 list_seq.append(self.solve_rk_chain(cluster, budget))
             return list_seq
-        elif isinstance(cluster, rkgb.Htools.H_graph):
-            return self.solve_hg(cluster, budgets)
+        elif isinstance(cluster, H_cluster):
+            list_seq = []
+            for hg in cluster.possible_hg:
+                list_seq.extend(self.solve_hg(hg, budgets))
+            return list_seq
+
         else:
             warnings.warn(f"Unrecognized input type {type(cluster)}")
 
@@ -67,7 +71,13 @@ class RK_rotor(Solver):
             list_op_sched = []
             for budget in budgets:
                 self.chain = self.hg_to_rk_chain(hg)
-                _ = self.solve_rk_chain(self.chain, budget)
+                try:
+                    _ = self.solve_rk_chain(self.chain, budget)
+                except Exception as e:
+                    if not "budget" in str(e):  # not enough budget
+                        raise e
+                    else:
+                        continue
                 self.fwd_seq, self.bwd_seq = self.seq.cut_fwd_bwd()
                 self.fwd_op_sched_list = [
                     seq.op_sched for seq in self.fwd_seq.seq
@@ -93,7 +103,7 @@ class RK_rotor(Solver):
                         cluster=hg.cluster,
                     )
                 )
-        return list_op_sched
+            return list_op_sched
 
     def solve_rk_chain(self, chain, budget):
         self.opt_table = None
@@ -104,9 +114,10 @@ class RK_rotor(Solver):
         )
         self.seq = seq_builder(
             chain,
-            (budget) // self.mem_unit - chain.cw[chain.ln],
+            budget // self.mem_unit - chain.cw[chain.ln],
             self.opt_table,
         )
+
         end = time.time()
         self.DP_solve_time = end - start
         return self.seq
@@ -156,14 +167,14 @@ class RK_rotor(Solver):
                 Fn_sched = OpSchedule(
                     fn_op_list,
                     len(fn_op_list) - 1,
-                    cluster=hcn.sub_cluster,
+                    # cluster=hcn.sub_cluster,
                     refine=False,
                     correct_overhead=False,
                 )
                 Fc_sched = OpSchedule(
                     fc_op_list,
                     len(fc_op_list) - 1,
-                    cluster=hcn.sub_cluster,
+                    # cluster=hcn.sub_cluster,
                     refine=False,
                     correct_overhead=False,
                 )
@@ -186,7 +197,7 @@ class RK_rotor(Solver):
                     Fwd_sched = OpSchedule(
                         fwd_op_list,
                         len(fwd_op_list) - 1,
-                        cluster=hcn.sub_cluster,
+                        # cluster=hcn.sub_cluster,
                         refine=False,
                         correct_overhead=False,
                     )
@@ -195,7 +206,7 @@ class RK_rotor(Solver):
                     Bwd_sched = OpSchedule(
                         bwd_op_list,
                         0,
-                        cluster=hcn.sub_cluster,
+                        # cluster=hcn.sub_cluster,
                         refine=False,
                         correct_overhead=False,
                     )  # so that solution can be read
