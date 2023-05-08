@@ -14,8 +14,8 @@ class Solver:
     def __init__(self, config=None):
         self.config = config if config is not None else type(self).Config()
 
-    def __call__(self, cluster: H_cluster, budgets=None, accurate_mem=False):
-        return self.solve(cluster, budgets, accurate_mem=accurate_mem)
+    def __call__(self, cluster: H_cluster, budgets=None, *args, **kargs):
+        return self.solve(cluster, budgets, *args, **kargs)
 
     def solve(self, cluster: H_cluster, budgets=None):
         # -> RETURN list of Op_sched
@@ -75,7 +75,11 @@ setattr(H_cluster, "translate_op_list", H_cluster_method_translate_op_list)
 
 
 def get_cluster_budget(
-    cluster: H_cluster, nb_bdg_peak=3, nb_bdg_save=6, overall_bdg=None
+    cluster: H_cluster,
+    nb_bdg_peak=3,
+    nb_bdg_save=6,
+    overall_bdg=None,
+    with_save_budget=False,
 ):
     # assuming solving budget does not based on lower level solution
 
@@ -124,6 +128,8 @@ def get_cluster_budget(
     # min_bdg = min(op_sched.mem for op_sched in hg.list_sched) + max(overheads)
 
     l_bd_peak = np.linspace(min_bdg, max_bdg, nb_bdg_peak) + interfaces_mem
+    if not with_save_budget:
+        return l_bd_peak
     for bd_peak in l_bd_peak:
         l_bd_save = (
             np.linspace(
