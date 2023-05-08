@@ -3,6 +3,7 @@ from rkgb.Ptools import P_graph, P_node
 from rkgb.Ktools import K_graph, K_C_node, K_D_node
 from rkgb.Htools import *
 from collections import namedtuple
+from copy import deepcopy
 
 
 class Op:
@@ -19,6 +20,24 @@ class Op:
 
     def __repr__(self):
         return "Disabled" * self.disabled + self.name
+
+    def __copy__(self):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        result.__dict__.update(self.__dict__)
+        return result
+
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            if k == "kn":  # do not deepcopy kn
+                setattr(result, k, v)
+            else:
+                setattr(result, k, deepcopy(v, memo))
+
+        return result
 
 
 class OpSchedule:
