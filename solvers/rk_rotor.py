@@ -1,9 +1,10 @@
 import time
 import warnings
-from rkgb.utils import np
-
 import rkgb
+from rkgb.utils import np
+from rkgb.Htools import H_graph
 import math
+from solvers.main import Solver, get_cluster_budget
 from solvers.def_chain import RK_Chain
 from solvers.def_sequence import SeqBlockBwd, SeqBlockFe, RK_Sequence
 from solvers.rotor_solver import seq_builder, solve_dp_functional
@@ -27,59 +28,83 @@ class RK_Chain_:
         pass
 
 
-class RK_rotor:
+class RK_rotor(Solver):
     def __init__(
-        self, mem_unit=1024 ** 2,
+        self,
+        mem_unit=1024**2,
     ):
         self.mem_unit = mem_unit
 
+    def is_sequential(self, hg: H_graph):
+        loss_idx = hg.list_hcn.index(hg.loss_hcn)
+        for i, hcn in enumerate(hg.list_hcn[:loss_idx]):  # toposorted
+            if len(hcn.users) > 1:
+                return False
+        return True
+
     def solve(
-        self, graph, mem_limit,
+        self,
+        cluster,
+        budgets=None,
     ):
-        self.mem_limit = mem_limit
-        if isinstance(graph, RK_Chain) or isinstance(graph, RK_Chain_):
-            return self.solve_rk_chain(graph)
-        elif isinstance(graph, rkgb.Htools.H_graph):
-            try:
-                self.chain = self.hg_to_rk_chain(graph)
-                if not self.chain:
-                    raise Exception("Input graph is not a chain")
-            except Exception as e:
-                raise Exception("Input graph is not a chain")
-            _ = self.solve_rk_chain(self.chain)
-            self.fwd_seq, self.bwd_seq = self.seq.cut_fwd_bwd()
-            self.fwd_op_sched_list = [seq.op_sched for seq in self.fwd_seq.seq]
-            self.bwd_op_sched_list = [seq.op_sched for seq in self.bwd_seq.seq]
-
-            self.fwd_op_list = [
-                op
-                for op_sched in self.fwd_op_sched_list
-                for op in op_sched.op_list
-            ]
-            self.bwd_op_list = [
-                op
-                for op_sched in self.bwd_op_sched_list
-                for op in op_sched.op_list
-            ]
-            return OpSchedule(
-                (self.fwd_op_list + self.bwd_op_list).copy(),
-                loss_idx=len(self.fwd_op_list),
-            )
+        if budgets is None:
+            self.budgets = get_cluster_budget(cluster.representee_cluster)
+        # self.budget = budgets
+        if isinstance(cluster, RK_Chain) or isinstance(cluster, RK_Chain_):
+            list_seq = []
+            for budget in budgets:
+                list_seq.append(self.solve_rk_chain(cluster, budget))
+            return list_seq
+        elif isinstance(cluster, rkgb.Htools.H_graph):
+            return self.solve_hg(cluster, budgets)
         else:
-            warnings.warn(f"Unrecognized chain type {type(chain)}")
+            warnings.warn(f"Unrecognized input type {type(cluster)}")
 
-    def solve_rk_chain(self, chain):
+    def solve_hg(self, hg: H_graph, budgets=[]):
+        if not self.is_sequential(hg):
+            return []
+        else:
+            list_op_sched = []
+            for budget in budgets:
+                self.chain = self.hg_to_rk_chain(hg)
+                _ = self.solve_rk_chain(self.chain, budget)
+                self.fwd_seq, self.bwd_seq = self.seq.cut_fwd_bwd()
+                self.fwd_op_sched_list = [
+                    seq.op_sched for seq in self.fwd_seq.seq
+                ]
+                self.bwd_op_sched_list = [
+                    seq.op_sched for seq in self.bwd_seq.seq
+                ]
+
+                self.fwd_op_list = [
+                    op
+                    for op_sched in self.fwd_op_sched_list
+                    for op in op_sched.op_list
+                ]
+                self.bwd_op_list = [
+                    op
+                    for op_sched in self.bwd_op_sched_list
+                    for op in op_sched.op_list
+                ]
+                list_op_sched.append(
+                    OpSchedule(
+                        (self.fwd_op_list + self.bwd_op_list).copy(),
+                        loss_idx=len(self.fwd_op_list),
+                        cluster=hg.cluster,
+                    )
+                )
+        return list_op_sched
+
+    def solve_rk_chain(self, chain, budget):
         self.opt_table = None
         start = time.time()
-        mmax = (
-            self.mem_limit // self.mem_unit - chain.cw[0] - chain.cw[chain.ln]
-        )
+        mmax = budget // self.mem_unit - chain.cw[0] - chain.cw[chain.ln]
         self.opt_table = solve_dp_functional(
             chain, mmax, self.opt_table, force_python=True
         )
         self.seq = seq_builder(
             chain,
-            (self.mem_limit) // self.mem_unit - chain.cw[chain.ln],
+            (budget) // self.mem_unit - chain.cw[chain.ln],
             self.opt_table,
         )
         end = time.time()
@@ -105,7 +130,7 @@ class RK_rotor:
         for i, hcn in enumerate(hg.list_hcn[:loss_idx]):  # toposorted
             if len(hcn.users) > 1:
                 return False
-            if hcn.sub_graph is None:
+            if hcn.sub_cluster is None:
                 # WARNING: if hcn has no bwd, it has to be merged with the next one
                 no_grad_hcns.append(hcn)
             else:
@@ -131,12 +156,14 @@ class RK_rotor:
                 Fn_sched = OpSchedule(
                     fn_op_list,
                     len(fn_op_list) - 1,
+                    cluster=hcn.sub_cluster,
                     refine=False,
                     correct_overhead=False,
                 )
                 Fc_sched = OpSchedule(
                     fc_op_list,
                     len(fc_op_list) - 1,
+                    cluster=hcn.sub_cluster,
                     refine=False,
                     correct_overhead=False,
                 )
@@ -145,13 +172,13 @@ class RK_rotor:
 
                 sols = []
 
-                for op_sched in hcn.sub_graph.list_sched:
-                    fwd_op_list = (
+                for op_sched in hcn.sub_cluster.get_sched():
+                    fwd_op_list = hcn.sub_cluster.translate_op_list(
                         ff_op_list + op_sched.op_list[: op_sched.loss_idx + 1]
                     )
-                    bwd_op_list = op_sched.op_list[
-                        op_sched.loss_idx :
-                    ]  # start with loss op
+                    bwd_op_list = hcn.sub_cluster.translate_op_list(
+                        op_sched.op_list[op_sched.loss_idx :]
+                    )  # start with loss op
                     for op in bwd_op_list:
                         # By default, bwd does not delete input data/grad
                         if op.kn.main_target == input_kdn_data.main_target:
@@ -159,17 +186,23 @@ class RK_rotor:
                     Fwd_sched = OpSchedule(
                         fwd_op_list,
                         len(fwd_op_list) - 1,
+                        cluster=hcn.sub_cluster,
                         refine=False,
                         correct_overhead=False,
                     )
                     set_op_sched(Fwd_sched)
 
                     Bwd_sched = OpSchedule(
-                        bwd_op_list, 0, refine=False, correct_overhead=False
+                        bwd_op_list,
+                        0,
+                        cluster=hcn.sub_cluster,
+                        refine=False,
+                        correct_overhead=False,
                     )  # so that solution can be read
                     Full_sched = OpSchedule(
                         fwd_op_list[:-1] + bwd_op_list,
                         len(fwd_op_list) - 1,
+                        # cluster=hcn.sub_cluster,
                         refine=False,
                         correct_overhead=False,
                         interfaces={
@@ -237,7 +270,7 @@ class RK_rotor:
         setattr(chain, "ff_fw", [None] * (chain.ln + 1))
 
         chain.nb_sol = []
-        for (i, b) in enumerate(chain.body):
+        for i, b in enumerate(chain.body):
             chain.nb_sol.append(len(b.sols))
             if chain.nb_sol[-1] == 0:
                 raise Exception(
@@ -293,4 +326,3 @@ class RK_rotor:
 
     #     op_sched_new = OpSchedule_old(op_list)
     #     return op_sched_new
-
