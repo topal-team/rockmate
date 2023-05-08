@@ -819,9 +819,8 @@ def copy_S_graph(sg : S_graph):
     new_sg.inherit_base_attributes(sg)
     new_sg.node_unique_id_generator = copy(sg.node_unique_id_generator)
     dict_nodes = {}
-    new_init = copy_S_node(sg.init_node)
-    new_nodes = []
-    dict_nodes[new_init.main_target] = new_init
+    new_sg.nodes = new_nodes = []
+    # dict_nodes[new_init.main_target] = new_init # TO REMOVE
     for sn in sg.nodes:
         new_sn = copy_S_node(sn)
         new_nodes.append(new_sn)
@@ -830,12 +829,25 @@ def copy_S_graph(sg : S_graph):
             new_req_sn = dict_nodes[req_sn.main_target]
             S_edges.add_inplace(new_req_sn.users,new_sn,set_str)
             S_edges.add_inplace(new_sn.deps,new_req_sn,set_str)
+
+    # * init_node *
+    new_sg.init_node \
+        = new_init \
+        = copy_S_node(sg.init_node)
     new_init.users = dict(
         (dict_nodes[u.mt],set_str) \
         for u,set_str in sg.init_node.users.items())
+    
+    # * output_nodes *
     new_sg.output_nodes = [dict_nodes[out.mt] for out in sg.output_nodes]
-    new_sg.init_node    = new_init
-    new_sg.nodes        = new_nodes
+    if sg.special_output_node is not None:
+        new_sg.special_output_node \
+            = special_out \
+            = copy_S_node(sg.special_output_node)
+        special_out.deps = dict(
+            (dict_nodes[r.mt],set_str) \
+            for r,set_str in sg.special_output_node.deps.items())
+
     return new_sg
 
 

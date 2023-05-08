@@ -135,7 +135,7 @@ def make_all_graphs(model,
     model_kwargs=None,
     wanted_graphs = {"B","D","S","K","P","H","Sl","Kl"},
     partitioners = [
-        Ptools.Partitioner_bottom_to_top(),
+        Ptools.Partitioner_bottom_to_top_1(),
         Ptools.Partitioner_seq()
     ],
     verbose=False,
@@ -392,68 +392,6 @@ def RK_print(*args,
                 fct(obj[i],dot=dot,uniq_num=i)
             small_fcts.graph_render(dot,open,"various",render_format)
 
-
-
-
-def print_graph(g,name=None,open=True,render_format="svg"):
-    r"""To visualize rk-GB graphs,
-    This function creates a .gv file, then the external Graphviz's
-    dot tool renders the graph, as a .pdf or .svg file.
-    They are stored in "graphviz_dir" sub-directory.
-    inputs:
-    name (string):
-        To name .gv and .pdf files.
-        By default named after the type of the graph.
-    render_format (string):
-        Render format wanted for the output file
-    open (boolean):
-        To automatically open the file with the default reader.
-    """
-    if g is None: pass
-    elif isinstance(g,Dtools.D_graph):
-        Dtools.print_D_graph(g,name,open,render_format)
-    elif isinstance(g,Stools.S_graph):
-        Stools.print_S_graph(g,name,open,render_format)
-    elif isinstance(g,Ktools.K_graph):
-        Ktools.print_K_graph(g,name,open,render_format)
-    elif isinstance(g,Ptools.P_graph):
-        Ptools.print_P_graph(g,name,open,render_format)
-    elif isinstance(g,Htools.H_graph):
-        Htools.print_H_graph(g,name,open,render_format)
-    else: raise Exception(
-        "The graph given is neither of type D_graph, S_graph nor K_graph")
-
-def print_graph_list(gl,name=None,open=True,render_format="svg"):
-    r"""The equivalent of rkgb.print_graph for a list of graph.
-    Generates all graphs next to each other in a single file.
-    Note:
-         Originally intended to visualize a sequentialized graph :
-         i.e. one graph cut by rkgb in blocks
-         i.e. S_graph_list of K_graph_list
-    """
-    if gl is None: pass
-    elif len(gl) == 0: print("Empty list, no graph to visualize")
-    else:
-        t = type(gl[0])
-        for i in range(1,len(gl)):
-            if type(gl[i]) != t: raise Exception(
-              f"All graphs in the list must share the same type"\
-              f"type(gl[{i}])={type(gl[i])} and type(gl[0])={t}")
-        if t == Stools.S_graph:
-            Stools.print_S_graph_list(gl,name,open,render_format)
-        elif t == Ktools.K_graph:
-            Ktools.print_K_graph_list(gl,name,open,render_format)
-        else: raise Exception(
-            "The list given is neither a S_graph list nor K_graph list")
-
-def print_all_graphs(a,name="",open=True,render_format="svg"):
-    print_graph(a.D_graph,f"{name}_D_graph",open,render_format)
-    print_graph(a.S_graph,f"{name}_S_graph",open,render_format)
-    print_graph(a.K_graph,f"{name}_K_graph",open,render_format)
-    print_graph(a.P_graph,f"{name}_P_graph",open,render_format)
-    print_graph(a.H_graph,f"{name}_H_graph",open,render_format)
-    print_graph_list(a.S_graph_list,f"{name}_seq_S_graph",open,render_format)
-    print_graph_list(a.K_graph_list,f"{name}_seq_K_graph",open,render_format)
 
 # ==========================
 

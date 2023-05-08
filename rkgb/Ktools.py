@@ -230,6 +230,54 @@ class K_graph(RK_graph):
         else:
             self.outputs_wrapping_code = ast.parse("")
 
+    @property # FOR ORIGINAL ROCKMATE COMPATIBILITY
+    def output_kdn_data(self):
+        if len(self.list_outputs_kdn_data) != 1:
+            warnings.warn(
+                "Several output nodes, you shouldn't use "\
+                "`output_kdn_data` but `list_outputs_kdn_data")
+        return self.list_outputs_kdn_data[0]
+    @property # FOR ORIGINAL ROCKMATE COMPATIBILITY
+    def output_kdn_grad(self):
+        if len(self.list_outputs_kdn_grad) != 1:
+            warnings.warn(
+                "Several output nodes, you shouldn't use "\
+                "`output_kdn_grad` but `list_outputs_kdn_grad")
+        return self.list_outputs_kdn_grad[0]
+    
+
+    # FOR ORIGINAL ROCKMATE COMPATIBILITY 
+    def fake_input_kdn_grad(self):
+        if self.input_kdn_grad:
+            self.fake_input_kdn_grad = False
+        else:
+            self.fake_input_kdn_grad = True
+            self.input_kdn_grad=input_kdn_grad = K_D_node(
+                kdn_type = "grad", main_target = "sources",
+                all_targets = self.sg.inputs,
+                other_obj = self)
+            firsts_mt = [sn.mt for sn in self.sg.init_node.users]
+            self.dict_KDN_grad[input_kdn_grad.mt] = input_kdn_grad
+            self.dict_kn[input_kdn_grad.name] = input_kdn_grad
+            input_kdn_grad_deps = set(
+                self.dict_KCN_bwd[mt] for mt in firsts_mt
+                if mt in self.dict_KCN_bwd)
+            input_kdn_grad.deps_global.update(input_kdn_grad_deps)
+            for user_kcn in input_kdn_grad_deps:
+                user_kcn.users_global.add(input_kdn_grad)
+
+    def release_fake_input_kdn_grad(self):
+        if self.fake_input_kdn_grad:
+            self.fake_input_kdn_grad = False
+            input_kdn_grad = self.input_kdn_grad
+            self.input_kdn_grad = None
+            del self.dict_KDN_grad[input_kdn_grad.mt]
+            del self.dict_kn[input_kdn_grad.name]
+            for first_kcn in input_kdn_grad.deps_global:
+                first_kcn.users_global.remove(input_kdn_grad)
+
+
+
     def make_users(self):
         for kcn in self.list_kcn:
             for req_kdn in kcn.deps_real: req_kdn.users_real.add(kcn)
@@ -607,7 +655,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None,is_really_first_g
     if not is_sources or sg.sources_req_grad or not is_really_first_graph:
         kg.dict_KDN_grad[input_kdn_grad.mt] = input_kdn_grad
         kg.dict_kn[input_kdn_grad.name] = input_kdn_grad
-        input_kdn_grad_deps  = set(
+        input_kdn_grad_deps = set(
             dict_KCN_bwd[mt] for mt in firsts_mt
             if mt in dict_KCN_bwd)
         input_kdn_grad.deps_global.update(input_kdn_grad_deps)
@@ -694,6 +742,7 @@ def copy_K_D_node(kdn : K_D_node):
 def copy_K_graph(kg : K_graph):
     new_kg = K_graph(kg.sg)
     new_kg.inherit_base_attributes(kg)
+    new_kg.fake_input_kdn_grad = kg.fake_input_kdn_grad
     new_kg.init_code = kg.init_code
     new_kg.outputs_wrapping_code = kg.outputs_wrapping_code
 

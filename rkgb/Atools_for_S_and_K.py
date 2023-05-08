@@ -24,7 +24,7 @@ from rkgb import Ktools
 # ==================
 
 class Graph_Translator():
-    def __init__(self,sg=None,model=None,reverse_translator=None):
+    def __init__(self,sg : Stools.S_graph=None,model=None,reverse_translator=None):
         """ There are two ways to __init__ a graph_translator,
         either you give a S_graph and it creates a translator to
         anonymize the graph, or you give it a translator and it
@@ -75,6 +75,8 @@ class Graph_Translator():
                     for sub_a in a: search_through(sub_a)
 
             s_nodes = [sg.init_node] + sg.nodes
+            if sg.special_output_node:
+                s_nodes.append(sg.special_output_node)
             for sn in s_nodes:
                 search_through(sn.get_code_ast())
 
@@ -238,6 +240,7 @@ class Graph_Translator():
             sg = Stools.copy_S_graph(x) # to protect x : NOT inplace
             s_nodes = [sg.init_node] + sg.nodes
             translate(s_nodes)
+            translate(sg.special_output_node)
             # dict_info is currently shared by all the graphs
             # thus it contains unknown names for each block
             # -> impossible to translate -> so I clean it up.
@@ -266,22 +269,43 @@ class Graph_Translator():
         # -- K_GRAPH --
         elif isinstance(x,Ktools.K_graph):
             kg = Ktools.copy_K_graph(x)
+            # translate each node
             translate(kg.list_kcn)
             translate(kg.list_kdn)
             translate(kg.input_kdn_data)
             translate(kg.input_kdn_grad)
+
+            # rebuilt dicts of nodes
             dkn = list(kg.dict_kn.values()) ; kg.dict_kn.clear()
             for kn in dkn: kg.dict_kn[kn.name] = kn
+            for at in [
+                "dict_KCN_fwd",
+                "dict_KCN_bwd",
+                "dict_KDN_data",
+                "dict_KDN_grad",
+                "dict_KDN_phantoms",
+            ]:
+                d = getattr(kg,at)
+                new_d = dict()
+                for kn in d.values():
+                    new_d[kn.mt] = kn
+                setattr(kg,at,new_d)
+
+            # dict_info
             dict_info_keys = set(kg.dict_info.keys())
-            if len(self.main_dict) != 0: # to avoid special case
+            if len(self.main_dict) != 0: # to avoid special translators
                 for k in dict_info_keys:
                     if k not in self.main_dict: del kg.dict_info[k]
             for attr in ["init_code","dict_info"]:
                 setattr(kg,attr,translate(getattr(kg,attr)))
+            
+            # dict_constants
             new_dict_constants = dict()
             for old,new in self.const_dict.items():
                 new_dict_constants[new] = x.dict_constants[old]
             kg.dict_constants = new_dict_constants
+
+            # `users_impossible_to_restore`, attributes never needed
             for kdn in kg.list_kdn:
                 kdn.info = kg.dict_info[kdn.main_target]
                 new_set = set()
