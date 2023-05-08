@@ -23,12 +23,12 @@ class HILP(Solver):
                 "IntegralityFocus": 1,
             },
             protected_names=["sources data", "sources grad"],
-            total_sched=200,
+            nb_total_sched=100,
         ):
             self.mem_unit = mem_unit
             self.gurobi_params = gurobi_params
             self.protected_names = protected_names
-            self.total_sched = total_sched
+            self.nb_total_sched = nb_total_sched
 
     def __init__(
         self,
@@ -36,19 +36,26 @@ class HILP(Solver):
     ):
         super().__init__(config)
 
-    def _select_sched(self, hg):
-        nb_sched = 200 // len(hg.list_hcn)
+    def _select_sched(self, hg, overall_budget=None):
+        # for fwd hcn, select sched from hcn.sub_cluster and put in hcn.list_sched
         weights = []
         for hcn in hg.list_hcn:
-            if hcn.sub_cluster is None:
-                weights.append(0)
-            else:
-                weights.append(len(hcn.sub_cluster.list_kcn))
+            if hcn.is_fwd:
+                if hcn.sub_cluster is None:
+                    weights.append(0)
+                else:
+                    weights.append(len(hcn.sub_cluster.list_kcn))
 
         for hcn, w in zip(hg.list_hcn, weights):
-            nb_sched = self.config.total_sched * w // sum(weights)
+            nb_sched = self.config.nb_total_sched * w // sum(weights)
             if hcn.sub_cluster is not None:
-                hcn.list_sched = hcn.sub_cluster.get_sched().copy()[:nb_sched]
+                list_sched = hcn.sub_cluster.get_sched(pareto=True)
+                list_sched = [
+                    op_sched
+                    for op_sched in list_sched
+                    if op_sched.mem <= overall_budget
+                ]
+                hcn.list_sched = list_sched[:nb_sched]
             else:
                 hcn.list_sched = []
 
@@ -90,19 +97,22 @@ class HILP(Solver):
             save_budget = peak_budget
 
         list_op_sched = []
-        self._select_sched(hg)
+        self._select_sched(hg, overall_budget=peak_budget)
         if not hasattr(save_budget, "__iter__"):
             save_budget = [save_budget]
-        for sv_budget in save_budget:
-            self.md = ModelGurobi(
-                hg,
-                peak_budget=peak_budget,
-                save_budget=sv_budget,
-                gurobi_params=self.config.gurobi_params,
-                accurate_mem=accurate_mem,
-                protected_names=self.config.protected_names,
-            )
-
+        # start = time.time()
+        self.md = ModelGurobi(
+            hg,
+            peak_budget=peak_budget,
+            save_budget=max(save_budget),
+            gurobi_params=self.config.gurobi_params,
+            accurate_mem=accurate_mem,
+            protected_names=self.config.protected_names,
+        )
+        # print(f"model building: {time.time()-start}")
+        sols = set()
+        for sv_budget in np.sort(save_budget)[::-1]:
+            self.md.add_abar_constraint(sv_budget)
             self.md.solve()
             # if not self.md.feasible:
             # if print_result:
@@ -110,11 +120,26 @@ class HILP(Solver):
             # return []
             if self.md.feasible:
                 if print_result:
+                    # if True:
+                    # print(
+                    #     f"Solution with obj: {self.md.md.getObjective().getValue()}"
+                    # )
                     print(
-                        f"Solution with obj: {self.md.md.getObjective().getValue()}"
+                        f"Solve Hgraph {hg.name} with {len(hg.list_hcn)} nodes takes {self.md.solve_time:03f}s"
                     )
-                self.op_sched = self.md.schedule()
-                list_op_sched.append(self.op_sched)
+                loss_idx = self.md.loss_idx
+                time_mem = (
+                    self.md.md.getObjective().getValue(),  # time
+                    self.md.U[(loss_idx, loss_idx)].getValue(),  # save_mem
+                )
+                if not time_mem in sols:
+                    # start = time.time()
+
+                    sols.add(time_mem)
+                    self.op_sched = self.md.schedule()
+                    list_op_sched.append(self.op_sched)
+                    # print(f"scheduling: {time.time()-start}")
+
         return list_op_sched
 
     # def solve(

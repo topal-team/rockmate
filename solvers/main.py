@@ -21,9 +21,20 @@ class Solver:
         pass
 
 
-def H_cluster_method_get_sched(self):
+def H_cluster_method_get_sched(self, pareto=False):
     representee = self.representee_cluster
-    return representee.list_sched
+    if not pareto:
+        return representee.list_sched
+    else:
+        list_sched = representee.list_sched
+        time_mem = np.array(
+            [(sum(op_sched.time), op_sched.mem) for op_sched in list_sched]
+        )
+        is_pareto = np.ones(len(list_sched), dtype=bool)
+        for i, c in enumerate(time_mem):
+            is_pareto[i] = np.all(np.any(time_mem >= c, axis=1))
+
+    return [list_sched[i] for i, p in enumerate(is_pareto) if p]
     # if self is not representee:
     #     repr_sols = representee.get_sched()
     #     ano_sols = [representee.translator.translate(sol) for sol in repr_sols]
@@ -73,7 +84,7 @@ def get_cluster_budget(
     # ]
     # max_bdg = sum(sizes) + max(overheads)
     if cluster.representee_cluster.list_sched == []:
-        autograd_op_list= get_single_compute_op_list(
+        autograd_op_list = get_single_compute_op_list(
             cluster,
             with_bwd=True,
         )
@@ -113,6 +124,7 @@ def get_cluster_budget(
 def solve_recursive(h_cluster: H_cluster, list_solvers=[]):
     # assume it's representee
     for hg in h_cluster.possible_hg:
+        print(hg.name)
         for hcn in hg.list_hcn:
             if (
                 hcn.is_fwd
@@ -123,7 +135,11 @@ def solve_recursive(h_cluster: H_cluster, list_solvers=[]):
                 # if not stop_condition(
                 #     sub_cluster.representee, h_cluster
                 # ):  # e.g. already solved/bottom level
-                solve_recursive(sub_cluster, list_solvers)
+                if (
+                    not sub_cluster.is_bottom
+                    and sub_cluster is sub_cluster.representee_cluster
+                ):
+                    solve_recursive(sub_cluster, list_solvers)
     for solver in list_solvers:
         # h_cluster.solve(solver)
         if h_cluster is h_cluster.representee_cluster:
@@ -186,7 +202,9 @@ def preprocess(cluster: H_cluster, protect_names=[]):
                         ff=True,
                     )
                     ff_op_sched = OpSchedule(
-                        ff_op_list+[Op(K_C_node("loss"))], cluster=cluster, correct_overhead=False
+                        ff_op_list + [Op(K_C_node("loss"))],
+                        cluster=cluster,
+                        correct_overhead=False,
                     )  # not real sched, only for info
                     hcn.ff_time = ff_op_sched.fwd_time
                     hcn.ff_overhead = ff_op_sched.fwd_overhead

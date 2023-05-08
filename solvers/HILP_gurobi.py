@@ -65,15 +65,19 @@ class ModelGurobi:
                 if hcn.is_fwd:
                     self.list_list_sched.append(hcn.list_sched)
                     self.sub_clusters.append(hcn.sub_cluster)
-                self.hcn2sub_c.append(self.sub_clusters.index(hcn.sub_cluster))
+                j = self.sub_clusters.index(hcn.sub_cluster)
+                list_sched = self.list_list_sched[
+                    j
+                ]  # hcn bwd does not have list_sched
+                self.hcn2sub_c.append(j)
                 # self.hcn2sub_c.append(len(self.list_list_sched) - 1)
-                self.nR.append(len(hcn.list_sched) + (1 if hcn.is_fwd else 0))
-                self.nOpts.append(len(hcn.list_sched))
+                self.nR.append(len(list_sched) + (1 if hcn.is_fwd else 0))
+                self.nOpts.append(len(list_sched))
 
                 if hcn.is_fwd:
                     # add fast forward to the options (final one)
                     self.time.append(
-                        [op_sched.fwd_time for op_sched in hcn.list_sched]
+                        [op_sched.fwd_time for op_sched in list_sched]
                         + [hcn.ff_time]
                         if hcn.is_fwd
                         else []
@@ -81,18 +85,18 @@ class ModelGurobi:
                     self.overhead.append(
                         [
                             op_sched.fwd_overhead / self.gcd
-                            for op_sched in hcn.list_sched
+                            for op_sched in list_sched
                         ]
                         + [hcn.ff_overhead / self.gcd]
                     )
                 else:
                     self.time.append(
-                        [op_sched.bwd_time for op_sched in hcn.list_sched]
+                        [op_sched.bwd_time for op_sched in list_sched]
                     )
                     self.overhead.append(
                         [
                             op_sched.bwd_overhead / self.gcd
-                            for op_sched in hcn.list_sched
+                            for op_sched in list_sched
                         ]
                     )
         self.sub_c2hcn = [
@@ -578,7 +582,7 @@ class ModelGurobi:
                     )
                 else:
                     hcn = self.hgraph.list_hcn[k]
-                    for o, op_sched in enumerate(hcn.list_sched):
+                    for o, op_sched in enumerate(self.list_list_sched[j]):
                         for correction in (
                             op_sched.fwd_overhead_correction
                             if hcn.is_fwd
@@ -708,15 +712,15 @@ class ModelGurobi:
                             opt = o
                             break
                     if opt > -1:
-                        h_obj = hcn.list_sched[opt]
+                        h_obj = self.list_list_sched[j][opt]
                         if hcn.is_fwd:
-                            sub_op_list = deepcopy(
-                                h_obj.op_list[: h_obj.loss_idx]
-                            )
+                            # sub_op_list = deepcopy(
+                            #     h_obj.op_list[: h_obj.loss_idx]
+                            # )
+                            sub_op_list = h_obj.op_list[: h_obj.loss_idx]
                         else:
-                            sub_op_list = deepcopy(
-                                h_obj.op_list[h_obj.loss_idx + 1 :]
-                            )
+                            sub_op_list = h_obj.op_list[h_obj.loss_idx + 1 :]
+
                             # if self.sumSp[(j, t + 1)].getValue() == 0:
                             # sub_op_list.append()
                         # if (
@@ -733,6 +737,7 @@ class ModelGurobi:
                         #             # Only the last del should be disabled
                         #             op.disabled = True
                         #             phantoms_to_keep.remove(op.kn)
+                        sub_op_list = deepcopy(sub_op_list)
 
                         # translating sub_op_list
                         if (
