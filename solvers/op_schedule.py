@@ -67,23 +67,23 @@ class OpSchedule:
             self.interfaces = cluster.interfaces
             self.list_kdn = cluster.list_kdn
             self.dict_kn = cluster.dict_kn
-        # else:  # if cluster is not given, get info from op_list
-        #     self.interfaces = interfaces or {
-        #         "inputs_kdn_data": set(),
-        #         "outputs_kdn_data": set(),
-        #         "inputs_kdn_grad": set(),
-        #         "outputs_kdn_grad": set(),
-        #     }
-        #     self.list_kdn = []
-        #     for op in self.op_list:
-        #         if op.is_del:
-        #             self.list_kdn.append(op.kn)
-        #         else:
-        #             self.list_kdn.extend(op.kn.users_global)
-        #             self.list_kdn.extend(op.kn.deps_global)
-        #     self.dict_kn = {
-        #         kdn.name: kdn for kdn in self.list_kdn
-        #     }  # kcn not used
+        else:  # if cluster is not given, get info from op_list
+            self.interfaces = interfaces or {
+                "inputs_kdn_data": set(),
+                "outputs_kdn_data": set(),
+                "inputs_kdn_grad": set(),
+                "outputs_kdn_grad": set(),
+            }
+            self.list_kdn = []
+            for op in self.op_list:
+                if op.is_del:
+                    self.list_kdn.append(op.kn)
+                else:
+                    self.list_kdn.extend(op.kn.users_global)
+                    self.list_kdn.extend(op.kn.deps_global)
+            self.dict_kn = {
+                kdn.name: kdn for kdn in self.list_kdn
+            }  # kcn not used
         self.all_interfaces = [
             kdn for inter in self.interfaces.values() for kdn in inter
         ]  # all interface KDN's

@@ -1,5 +1,6 @@
 import rkgb
 import numpy as np
+from copy import deepcopy
 from rkgb.Htools import H_C_node, H_D_node, H_graph, H_cluster
 from rkgb.Ktools import K_C_node, K_D_node
 from solvers.op_schedule import Op, OpSchedule
@@ -43,6 +44,22 @@ def H_cluster_method_get_sched(self, pareto=False):
     #     return self.list_sched
 
 
+def H_cluster_method_translate_op_list(self, op_list):
+    if self is self.representee_cluster:
+        return op_list
+    translator_re = self.representee_cluster.translator
+    translator = self.translator
+    translated_op_list = deepcopy(op_list)
+    for op in translated_op_list:
+        if op.is_del:
+            ana_kn = translator_re.dict_name_to_ano_triplet[op.kn.name]
+            op.kn = translator.dict_ano_triplet_to_kdn[ana_kn]
+        else:
+            ana_kn = translator_re.dict_name_to_ano_triplet[op.kn.name]
+            op.kn = translator.dict_ano_triplet_to_kcn[ana_kn]
+    return translated_op_list
+
+
 def H_cluster_method_solve(self, solver: Solver):
     if self is not self.representee_cluster:
         self.representee_cluster.solve(solver)
@@ -54,6 +71,7 @@ def H_cluster_method_solve(self, solver: Solver):
 
 setattr(H_cluster, "get_sched", H_cluster_method_get_sched)
 setattr(H_cluster, "solve", H_cluster_method_solve)
+setattr(H_cluster, "translate_op_list", H_cluster_method_translate_op_list)
 
 
 def get_cluster_budget(

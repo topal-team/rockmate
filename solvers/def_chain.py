@@ -8,7 +8,7 @@ from rkgb.utils import imports_from_rotor as irotor
 
 # if solver_name[0] != "gurobi":
 #     from rockmate.ILP_MIP import ModelMIP
-from solvers.ILP_gurobi_solver import ModelGurobi
+from solvers.ILP_gurobi import ModelGurobi
 from solvers.def_op import RunOp, DelOp, OpSchedule
 import math
 import numpy as np
@@ -19,7 +19,6 @@ import numpy as np
 
 
 def get_rk_solution(list_kg, l_bd_abar, budget_all):
-
     if solver_name[0] == "gurobi":
         param_dict = {
             "LogToConsole": 0,
@@ -34,7 +33,12 @@ def get_rk_solution(list_kg, l_bd_abar, budget_all):
         )
 
     else:
-        md = ModelMIP(list_kg[0], budget_all, max(l_bd_abar), gcd=10000,)
+        md = ModelMIP(
+            list_kg[0],
+            budget_all,
+            max(l_bd_abar),
+            gcd=10000,
+        )
         md.md.verbose = 0
     list_list_sols = []
     for bd_abar in np.sort(l_bd_abar)[::-1]:
@@ -104,6 +108,7 @@ class RK_Block:
             f"Block[{kg.input_kdn_data.name}->{kg.output_kdn_data.name}]"
         )
         self.sols = []
+
         # == build Fc/Fn schedule
         def _fast_fwd_sched():
             def _can_del(i, kdn):
@@ -193,7 +198,7 @@ class RK_Chain:
         if mem_unit:
             self.mem_unit = mem_unit
         else:
-            self.mem_unit = 1024 ** 2
+            self.mem_unit = 1024**2
         self.body = [None] * len(list_kg)
         for cls in eq_classes:
             l_kg = [list_kg[i] for i in cls]
@@ -228,7 +233,7 @@ class RK_Chain:
         nb_sol = []
 
         # -- extract info from each block
-        for (i, b) in enumerate(self.body):
+        for i, b in enumerate(self.body):
             nb_sol.append(len(b.sols))
             if nb_sol[-1] == 0:
                 raise Exception(
