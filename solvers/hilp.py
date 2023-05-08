@@ -24,11 +24,13 @@ class HILP(Solver):
             },
             protected_names=["sources data", "sources grad"],
             nb_total_sched=100,
+            nb_total_nodes=20,
         ):
             self.mem_unit = mem_unit
             self.gurobi_params = gurobi_params
             self.protected_names = protected_names
             self.nb_total_sched = nb_total_sched
+            self.nb_total_nodes = nb_total_nodes
 
     def __init__(
         self,
@@ -36,9 +38,13 @@ class HILP(Solver):
     ):
         super().__init__(config)
 
+    def can_solve(self, hg: H_graph):
+        return len(hg.list_hcn) // 2 < self.config.nb_total_nodes
+
     def _select_sched(self, hg, overall_budget=None):
         # for fwd hcn, select sched from hcn.sub_cluster and put in hcn.list_sched
         weights = []
+        overall_budget = overall_budget or np.inf
         for hcn in hg.list_hcn:
             if hcn.is_fwd:
                 if hcn.sub_cluster is None:
@@ -47,7 +53,9 @@ class HILP(Solver):
                     weights.append(len(hcn.sub_cluster.list_kcn))
 
         for hcn, w in zip(hg.list_hcn, weights):
-            nb_sched = self.config.nb_total_sched * w // sum(weights)
+            nb_sched = max(
+                self.config.nb_total_sched * w // sum(weights), 1
+            )  # at least 1 sched
             if hcn.sub_cluster is not None:
                 list_sched = hcn.sub_cluster.get_sched(pareto=True)
                 list_sched = [
@@ -55,7 +63,28 @@ class HILP(Solver):
                     for op_sched in list_sched
                     if op_sched.mem <= overall_budget
                 ]
-                hcn.list_sched = list_sched[:nb_sched]
+                if nb_sched >= len(list_sched):
+                    hcn.list_sched = list_sched
+                    continue
+                indices = np.array(
+                    [(i, op_sched.mem) for i, op_sched in enumerate(list_sched)]
+                )
+                sel_sched = [list_sched[0]]
+                sel_mem = [list_sched[0].mem]
+
+                while len(sel_sched) <nb_sched:
+                    # add the one with most different .mem with all selected sched
+                    argmax_diff = np.argmax(
+                        [
+                            min(abs(x - y) for y in sel_mem)
+                            for x in indices[:, 1]
+                        ]
+                    )
+                    sel_mem.append(indices[argmax_diff][1])
+                    sel_sched.append(list_sched[argmax_diff])
+                    indices[argmax_diff][1] = 0
+                hcn.list_sched = sel_sched
+                # hcn.list_sched = list_sched[:nb_sched]
             else:
                 hcn.list_sched = []
 
@@ -65,7 +94,9 @@ class HILP(Solver):
         )
         list_op_sched = []
         if budgets is None:
-            self.budgets = get_cluster_budget(cluster.representee_cluster)
+            self.budgets = get_cluster_budget(
+                cluster.representee_cluster, with_save_budget=True
+            )
         else:
             self.budgets = budgets
 
@@ -91,6 +122,8 @@ class HILP(Solver):
         accurate_mem=False,
         print_result=False,
     ):
+        if not self.can_solve(hg):
+            return []
         if save_budget is not None:
             save_budget = save_budget
         else:
@@ -139,7 +172,8 @@ class HILP(Solver):
                     self.op_sched = self.md.schedule()
                     list_op_sched.append(self.op_sched)
                     # print(f"scheduling: {time.time()-start}")
-
+            else:  # if infeasible, no need to try smaller budget
+                return list_op_sched
         return list_op_sched
 
     # def solve(
