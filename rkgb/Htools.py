@@ -276,7 +276,7 @@ def P_node_to_H_cluster(pn : P_node, kg : K_graph):
         mt = pn.mt
         # -- list_kcn part --
         kcn_fwd : K_C_node = kg.dict_KCN_fwd[mt]
-        kcn_bwd : K_C_node = kg.dict_KCN_fwd[mt]
+        kcn_bwd : K_C_node = kg.dict_KCN_bwd[mt]
         kdn_data = kg.dict_KDN_data[mt]
         kdn_grad = kg.dict_KDN_grad[mt]
         loss_kcn.deps_real = set([kdn_data])
