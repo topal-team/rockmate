@@ -170,6 +170,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
     our_global["device"] = device
     our_global.update(bg.dict_constants)
 
+    sources_req_grad = False
     for bn in b_nodes:
         # -- translate B node to D --
         dn = D_node(bn.target,bn.ast_code,bn.fct,
@@ -179,9 +180,11 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
         if bn.is_input:
             inputs.append(bn.target)
             dn.is_input = True
-            dict_info[bn.target] = def_info.Var_info(
+            dict_info[bn.target] = input_info = def_info.Var_info(
                 dict_inputs[bn.target],
                 data_owner_name = bn.target)
+            if input_info.requires_grad:
+                sources_req_grad = True
         for req_bn in bn.deps:
             req_dn = dict_nodes[req_bn.target]
             dn.deps.add(req_dn)
@@ -189,7 +192,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
         dict_nodes[bn.target] = dn
         d_nodes.append(dn)
 
-        # -- compute the forward to get info --
+        # -- run local forward to get info --
         if dont_build_dict_info:
             dict_info[bn.target] = def_info.Var_info()
         elif not bn.is_input:
@@ -275,6 +278,8 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
                 data_owner_name = data_owner_name,
                 data_direct_parent_name = data_direct_parent_name)
             del tmp_local
+
+    dg.sources_req_grad = sources_req_grad 
 
     # --- translate output ---
     o_var = bg.output_var

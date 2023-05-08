@@ -715,6 +715,7 @@ class P_Dynamic_manipulation(): # only contains staticmethod
             # ** link new_pn with global edges **
             new_pn.deps_global.update(pn.deps_global)
             new_pn.users_global.update(pn.users_global)
+            # -> remove edges to inside at the end
             # -> reciprocal at the end
 
             # -> change pn.main_graph
@@ -762,6 +763,7 @@ class P_Dynamic_manipulation(): # only contains staticmethod
         if not main_out.isdisjoint(set_group):
             main_out.add(new_pn)
         main_pg.output_nodes -= set_group
+
         return new_pn
 
 
@@ -792,11 +794,12 @@ class P_Dynamic_manipulation(): # only contains staticmethod
             sub_pn.main_graph = main_pg
         # -> use the property : deps = deps_global inter nodes 
         main_spn = set(main_pg.nodes)
+        all_p_nodes_inside = main_pg.all_p_nodes_inside()
         to_update = group + list(pn.deps) + list(pn.users)
         for sub_pn in to_update:
             sub_pn.deps  = sub_pn.deps_global.intersection(main_spn)
             sub_pn.users = sub_pn.users_global.intersection(main_spn)
-            if len(sub_pn.users) != len(sub_pn.users_global):
+            if not sub_pn.users_global.issubset(all_p_nodes_inside):
                 main_pg.output_nodes.add(sub_pn)
 
         if pn in main_pg.output_nodes:

@@ -272,7 +272,12 @@ class K_graph(RK_graph):
             raise Exception("K_graphs diff init_code")
         for attr in ["input_kdn_grad","list_outputs_kdn_grad",
             "loss_kcn","input_kdn_data","list_outputs_kdn_data"]:
-            b *= eq_node(getattr(g1,attr),getattr(g2,attr))
+            n1 = getattr(g1,attr)
+            n2 = getattr(g2,attr)
+            if (n1 is None) != (n2 is None):
+                b = False
+            else:
+                b *= eq_node(getattr(g1,attr),getattr(g2,attr))
         for attr in ["list_kcn","list_kdn"]:
             for kn1,kn2 in zip(getattr(g1,attr),getattr(g2,attr)):
                 b *= eq_node(kn1,kn2)
@@ -308,7 +313,7 @@ def aux_init_S_to_K(model,verbose,d):
             p.grad = torch.zeros_like(p)
 
 # the function that does it all
-def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
+def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None,is_really_first_graph=False):
     kg = K_graph(sg)
     dict_KCN_fwd = kg.dict_KCN_fwd
     dict_KCN_bwd = kg.dict_KCN_bwd
@@ -561,7 +566,9 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
 
     # ** input nodes **
     # -> get input_kdn_data/grad from prev_kg
+    sources_mt = "sources"
     if prev_kg:
+        is_sources = False
         nb_input_kdn = len(prev_kg.list_outputs_kdn_data)
         if nb_input_kdn != 1:
             raise Exception(
@@ -573,39 +580,39 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
         kg.input_kdn_grad=input_kdn_grad = prev_kg.list_outputs_kdn_grad[0]
     # -> or create fresh vars in case kg is a standalone graph
     else:
-        inp_mt = "sources"
-        # TO REMOVE
-        # if len(sg.hidden_inputs) != 1: inp_mt = "sources"
-        # else: inp_mt = sg.hidden_inputs[0]
+        is_sources = True
         kg.input_kdn_data=input_kdn_data = K_D_node(
-            kdn_type = "data", main_target = inp_mt,
+            kdn_type = "data", main_target = sources_mt,
             all_targets = sg.inputs,
             other_obj = kg)
-        kg.input_kdn_grad=input_kdn_grad = K_D_node(
-            kdn_type = "grad", main_target = inp_mt,
-            all_targets = sg.inputs,
-            other_obj = kg)
+        if sg.sources_req_grad or not is_really_first_graph:
+            kg.input_kdn_grad=input_kdn_grad = K_D_node(
+                kdn_type = "grad", main_target = sources_mt,
+                all_targets = sg.inputs,
+                other_obj = kg)
+        else:
+            kg.input_kdn_grad = None
+
+    # ** make deps/users_global with inputs **
+    # -> users of inp_data
     kg.dict_KDN_data[input_kdn_data.mt] = input_kdn_data
-    kg.dict_KDN_grad[input_kdn_grad.mt] = input_kdn_grad
     kg.dict_kn[input_kdn_data.name] = input_kdn_data
-    kg.dict_kn[input_kdn_grad.name] = input_kdn_grad
-
-    # -> users of inp_data and deps of inp_grad
-    input_sn_users_mt = [
-        sn.main_target for sn in sg.init_node.users.keys()]
-    input_kdn_data_users = set(
-        dict_KCN_fwd[mt] for mt in input_sn_users_mt)
-    input_kdn_grad_deps  = set(
-        dict_KCN_bwd[mt] for mt in input_sn_users_mt
-        if mt in dict_KCN_bwd)
-
-    # -> make deps/users_global
+    firsts_mt = [sn.mt for sn in sg.init_node.users]
+    input_kdn_data_users = set(dict_KCN_fwd[mt] for mt in firsts_mt)
     input_kdn_data.users_global.update(input_kdn_data_users)
     for user_kcn in input_kdn_data_users:
         user_kcn.deps_global.add(input_kdn_data)
-    input_kdn_grad.deps_global.update(input_kdn_grad_deps)
-    for user_kcn in input_kdn_grad_deps:
-        user_kcn.users_global.add(input_kdn_grad)
+
+    # -> deps of inp_grad
+    if not is_sources or sg.sources_req_grad or not is_really_first_graph:
+        kg.dict_KDN_grad[input_kdn_grad.mt] = input_kdn_grad
+        kg.dict_kn[input_kdn_grad.name] = input_kdn_grad
+        input_kdn_grad_deps  = set(
+            dict_KCN_bwd[mt] for mt in firsts_mt
+            if mt in dict_KCN_bwd)
+        input_kdn_grad.deps_global.update(input_kdn_grad_deps)
+        for user_kcn in input_kdn_grad_deps:
+            user_kcn.users_global.add(input_kdn_grad)
 
     # -> TOPOSORT list_kcn
     kg.sort_list_kcn()
@@ -615,7 +622,7 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None):
 
 def S_to_K(sg : S_graph,model,verbose=None,device=None):
     aux_init_S_to_K(model,verbose,device)
-    return aux_build_S_to_K(sg,model,prev_kg = None)
+    return aux_build_S_to_K(sg,model,prev_kg = None,is_really_first_graph=True)
 
 class K_graph_list(list):
     def __init__(self,*args,**kwargs):
@@ -626,7 +633,8 @@ def S_list_to_K_list(list_sg,model,verbose=None,device=None):
     list_kg = []
     prev_kg = None
     for sg in list_sg:
-        prev_kg = kg = aux_build_S_to_K(sg,model,prev_kg)
+        prev_kg = kg = aux_build_S_to_K(sg,model,prev_kg,
+            is_really_first_graph=(prev_kg is None))
         list_kg.append(kg)
     return K_graph_list(list_kg)
 
@@ -742,15 +750,18 @@ def copy_K_graph(kg : K_graph):
     old_inp_data = kg.input_kdn_data
     old_inp_grad = kg.input_kdn_grad
     new_kg.input_kdn_data=new_inp_data = copy_K_D_node(old_inp_data)
-    new_kg.input_kdn_grad=new_inp_grad = copy_K_D_node(old_inp_grad)
     for old_fst_kcn in old_inp_data.users_only_global:
         new_fst_kcn = new_dict_kn[old_fst_kcn.name]
         new_fst_kcn.deps_global.add(new_inp_data)
         new_inp_data.users_global.add(new_fst_kcn)
-    for old_lst_kcn in old_inp_grad.deps_only_global:
-        new_lst_kcn = new_dict_kn[old_lst_kcn.name]
-        new_lst_kcn.users_global.add(new_inp_grad)
-        new_inp_grad.deps_global.add(new_lst_kcn)
+    if old_inp_grad is None:
+        new_kg.input_kdn_grad = None
+    else:
+        new_kg.input_kdn_grad=new_inp_grad = copy_K_D_node(old_inp_grad)
+        for old_lst_kcn in old_inp_grad.deps_only_global:
+            new_lst_kcn = new_dict_kn[old_lst_kcn.name]
+            new_lst_kcn.users_global.add(new_inp_grad)
+            new_inp_grad.deps_global.add(new_lst_kcn)
 
     new_kg.list_outputs_kdn_data \
         = [new_dict_kn[out.name] for out in kg.list_outputs_kdn_data]
@@ -841,15 +852,16 @@ def aux_print_graph(dot,kg,uniq_num):
             edge(req_kcn.name,kdn.name,color=get_color(req_kcn))
 
     # *** io - global relations ***
-    inp_data = kg.input_kdn_data
-    inp_grad = kg.input_kdn_grad
     kwargs = {"color":color_special , "style":"dashed"}
+    inp_data = kg.input_kdn_data
     node(inp_data.name,inp_data.name,**kwargs)
-    node(inp_grad.name,inp_grad.name,**kwargs)
     for user_inp_data in inp_data.users_only_global:
         edge(inp_data.name,user_inp_data.name,**kwargs)
-    for req_inp_grad in inp_grad.deps_only_global:
-        edge(req_inp_grad.name,inp_grad.name,**kwargs)
+    inp_grad = kg.input_kdn_grad
+    if inp_grad is not None:
+        node(inp_grad.name,inp_grad.name,**kwargs)
+        for req_inp_grad in inp_grad.deps_only_global:
+            edge(req_inp_grad.name,inp_grad.name,**kwargs)
 
 
 def print_K_graph(kg : K_graph,name=None,open=True,render_format="svg",dot=None,uniq_num=0):

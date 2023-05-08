@@ -331,7 +331,7 @@ def S_list_to_K_list_eco(
         ano_sg = translator.translate(sg)
         b = False ; cc_num = 0 ; nb_cc = len(tab_S_repr_cc)
         while not b and cc_num < nb_cc:
-            if ano_sg == tab_S_repr_cc[cc_num]:
+            if ano_sg == tab_S_repr_cc[cc_num]: # CHECK GRAPH EQ
                 # -> We also need to manually check param_info equalities
                 sort_key = lambda v : int(v[0][11:])
                 repr_tr = list_translator[cc_num_to_repr_sg_num[cc_num]]
@@ -377,7 +377,8 @@ def S_list_to_K_list_eco(
         ano_sg = tmp_trans_to_handle_params.reverse_translate(ano_sg)
         ano_sg.dict_info.update(dict_info_global)
         ano_sg.dict_constants = save_dict_constants
-        ano_kg = Ktools.aux_build_S_to_K(ano_sg,model,None)
+        ano_kg = Ktools.aux_build_S_to_K(ano_sg,model,None,
+            is_really_first_graph=(cc_num==0))
         ano_kg = tmp_trans_to_handle_params.translate(ano_kg)
         ano_kg.dict_constants = save_dict_constants
         tab_K_repr_cc.append(ano_kg)

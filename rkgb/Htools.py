@@ -288,8 +288,10 @@ def P_node_to_H_cluster(pn : P_node, kg : K_graph):
         set_kdn = set([kdn_data,kdn_grad])
         if mt in kg.dict_KDN_phantoms:
             set_kdn.add(kg.dict_KDN_phantoms[mt])
-        inputs_data = set(req_kdn for req_kdn in kcn_fwd.deps_real)
-        inputs_grad = set(user_kdn for user_kdn in kcn_bwd.users)
+        inputs_data = set(
+            req_kdn for req_kdn \
+            in (kcn_fwd.deps_global - kcn_fwd.deps_fake))
+        inputs_grad = set(user_kdn for user_kdn in kcn_bwd.users_global)
         set_kdn.update(inputs_data)
         set_kdn.update(inputs_grad)
         h_cluster.list_kdn = list(set_kdn)

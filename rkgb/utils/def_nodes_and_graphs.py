@@ -252,6 +252,7 @@ class RK_graph():
         self.graph_type = graph_type # string: B, D, S, P, K, H
         # - base attribute -
         self.inputs = [] ; self.outputs = [] # str list -> interfaces
+        self.sources_req_grad = None
         self.dict_constants = dict()
         self.dict_info = dict()
         self.dict_rand = dict() # empty after S
@@ -291,6 +292,7 @@ class RK_graph():
         for attr in [
             "inputs",
             "outputs",
+            "sources_req_grad",
             "dict_constants",
             "dict_info",
             "dict_rand"

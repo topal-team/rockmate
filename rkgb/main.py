@@ -269,7 +269,7 @@ def RK_print(*args,
     if name is None:
         names = []
     elif isinstance(name,str):
-        names = [str]
+        names = [name]
     elif isinstance(name,list) or isinstance(name,tuple):
         names = list(name)
         for s in name:
@@ -282,7 +282,9 @@ def RK_print(*args,
             if names == []:
                 return None
             else:
-                return names.pop(0)
+                n = names.pop(0)
+                return n
+                # return names.pop(0)
         else: return name
     # ===============
 
