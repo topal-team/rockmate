@@ -233,7 +233,7 @@ def pseq_builder(chain, memory_limit, opt_table):
 # ===================================
 
 # The C version produces 'csequence' SeqOps, we have to convert them
-import rockmate.csequence as cs
+import solvers.csequence as cs
 
 try:
     import rockmate_csolver as rs
