@@ -150,11 +150,6 @@ def get_data_ptr(value):
 # ==========================
 
 def graph_render(dot,open,graph_type,render_format):
-    dot.render(directory="graphviz_dir",
-        format=render_format,
-        quiet=True,
-        view=open)
-    return ()
     try:
         dot.render(directory="graphviz_dir",
             format=render_format,

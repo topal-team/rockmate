@@ -426,7 +426,12 @@ def P_graph_to_H_graph(
                     dict_mt_to_hdn_grad[hdn_grad.mt] = kdn_grad
     
     # ** register nodes **
-    hg.list_hdn = list(dict_hdn_to_kdn.keys())
+    all_kdn_inside = set.union(
+        *[kcn.deps_real.union(kcn.users) \
+        for kcn in dict_kcn_to_hcn.keys()])
+    hg.list_hdn = list(
+        hdn for hdn in dict_hdn_to_kdn.keys() \
+        if hdn.kdn in all_kdn_inside)
     hg.list_hcn = list(dict_kcn_to_hcn.values())
     hg.list_hcn.append(loss_hcn)
     hg.dict_hn = dict(
