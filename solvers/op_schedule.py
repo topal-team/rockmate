@@ -335,6 +335,9 @@ class OpSchedule:
                 if max(src_i) > next_used_i:  # try to use before regenerate
                     op.disabled = True
 
+    def __repr__(self):
+        return f"OpSchedule takes {sum(self.time):.2f}ms and cost {self.mem//1024**2} MiB"
+
 
 # def hg_to_cluster(hg: H_graph, kg: K_graph):
 #     interfaces = dict()

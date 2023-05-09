@@ -145,8 +145,9 @@ def get_cluster_budget(
     return budgets
 
 
-def solve_recursive(h_cluster: H_cluster, list_solvers=[]):
+def solve_recursive(h_cluster: H_cluster, list_solvers=[], skip_self=False):
     # assume it's representee
+    print(h_cluster.name)
     for hg in h_cluster.possible_hg:
         print(hg.name)
         for hcn in hg.list_hcn:
@@ -154,20 +155,15 @@ def solve_recursive(h_cluster: H_cluster, list_solvers=[]):
                 hcn.is_fwd
                 and hcn.sub_cluster is not None
                 and not hcn.sub_cluster.is_bottom
+                and hcn.sub_cluster is hcn.sub_cluster.representee_cluster
             ):
                 sub_cluster = hcn.sub_cluster
-                # if not stop_condition(
-                #     sub_cluster.representee, h_cluster
-                # ):  # e.g. already solved/bottom level
-                if (
-                    not sub_cluster.is_bottom
-                    and sub_cluster is sub_cluster.representee_cluster
-                ):
-                    solve_recursive(sub_cluster, list_solvers)
-    for solver in list_solvers:
-        # h_cluster.solve(solver)
-        if h_cluster is h_cluster.representee_cluster:
-            h_cluster.list_sched.extend(solver(h_cluster))
+                solve_recursive(sub_cluster, list_solvers)
+    if not skip_self:
+        for solver in list_solvers:
+            # h_cluster.solve(solver)
+            if h_cluster is h_cluster.representee_cluster:
+                h_cluster.list_sched.extend(solver(h_cluster))
 
 
 # Preprocessing Cluster: add fast_forward and autograd option
