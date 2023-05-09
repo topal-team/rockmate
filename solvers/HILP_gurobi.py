@@ -615,11 +615,7 @@ class ModelGurobi:
                                     else:  # when output_data is not deps, but we care about it
                                         # eidx = self.delete_list.index((k, i_))
                                         k_ = max(
-                                            [
-                                                kk
-                                                for kk in _users_d[i_]
-                                                if kk < k
-                                            ]
+                                            [kk for kk in _deps_d[i_] if kk < k]
                                         )
                                         not_kept_alive = self.alive[(t, k_, i_)]
                                 else:  # start status
@@ -723,50 +719,54 @@ class ModelGurobi:
 
                             # if self.sumSp[(j, t + 1)].getValue() == 0:
                             # sub_op_list.append()
-                        # if (
-                        #     not hcn.is_fwd
-                        #     and self.sumSp[(j, t + 1)].getValue() > 0
-                        # ):  # phantoms should be kept
-                        #     phantoms_to_keep = h_obj.phantoms
-                        #     for op in sub_op_list[::-1]:
-                        #         if (
-                        #             op.is_del
-                        #             and not op.disabled
-                        #             and op.kn in phantoms_to_keep
-                        #         ):
-                        #             # Only the last del should be disabled
-                        #             op.disabled = True
-                        #             phantoms_to_keep.remove(op.kn)
                         sub_op_list = deepcopy(sub_op_list)
+
+                        if (
+                            not hcn.is_fwd
+                            and self.sumSp[(j, t + 1)].getValue() > 0
+                        ):  # phantoms should be kept
+                            phantoms_to_keep = h_obj.phantoms
+                            for op in sub_op_list[::-1]:
+                                if (
+                                    op.is_del
+                                    and not op.disabled
+                                    and op.kn in phantoms_to_keep
+                                ):
+                                    # Only the last del should be disabled
+                                    op.disabled = True
+                                    phantoms_to_keep.remove(op.kn)
 
                         # translating sub_op_list
                         if (
                             hcn.sub_cluster
                             is not hcn.sub_cluster.representee_cluster
                         ):
-                            translator_re = (
-                                hcn.sub_cluster.representee_cluster.translator
+                            sub_op_list = hcn.sub_cluster.translate_op_list(
+                                sub_op_list
                             )
-                            translator = hcn.sub_cluster.translator
-                            for op in sub_op_list:
-                                if op.is_del:
-                                    ana_kn = (
-                                        translator_re.dict_name_to_ano_triplet[
-                                            op.kn.name
-                                        ]
-                                    )
-                                    op.kn = translator.dict_ano_triplet_to_kdn[
-                                        ana_kn
-                                    ]
-                                else:
-                                    ana_kn = (
-                                        translator_re.dict_name_to_ano_triplet[
-                                            op.kn.name
-                                        ]
-                                    )
-                                    op.kn = translator.dict_ano_triplet_to_kcn[
-                                        ana_kn
-                                    ]
+                            # translator_re = (
+                            #     hcn.sub_cluster.representee_cluster.translator
+                            # )
+                            # translator = hcn.sub_cluster.translator
+                            # for op in sub_op_list:
+                            #     if op.is_del:
+                            #         ana_kn = (
+                            #             translator_re.dict_name_to_ano_triplet[
+                            #                 op.kn.name
+                            #             ]
+                            #         )
+                            #         op.kn = translator.dict_ano_triplet_to_kdn[
+                            #             ana_kn
+                            #         ]
+                            #     else:
+                            #         ana_kn = (
+                            #             translator_re.dict_name_to_ano_triplet[
+                            #                 op.kn.name
+                            #             ]
+                            #         )
+                            #         op.kn = translator.dict_ano_triplet_to_kcn[
+                            #             ana_kn
+                            #         ]
 
                     else:
                         h_obj = hcn
@@ -793,6 +793,13 @@ class ModelGurobi:
         #     hdn.kdn for hdn in hgraph.outputs_hdn_grad
         # )
         # loss_idx =
+        ### debug
+        # no_bwd = True
+        # for op in op_list:
+        #     if "bwd" in op.name:
+        #         no_bwd = False
+        # if no_bwd:
+        #     raise("wrong solution")
         return OpSchedule(op_list, loss_idx=None, cluster=self.hgraph.cluster)
 
     # def schedule(self, hgraph=None):
