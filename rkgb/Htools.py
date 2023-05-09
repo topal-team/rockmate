@@ -24,6 +24,7 @@ class H_C_node(RK_node):
         self.is_leaf = bool(main_target is None)
         self.deps = set()  # HDN set
         self.users = set()  # HDN set
+        self.deps_through_size_artefacts = set()  # HCN set
         self.number = number
         # About self.number :
         # When toposorting list_hcn we want to respect as much as possible
@@ -458,12 +459,23 @@ def P_graph_to_H_graph(
                         hdn.users.add(hcn)
                         hcn.deps.add(hdn)
 
+    # -> loss edges
     for hdn in hg.outputs_hdn_data:
         hdn.users.add(loss_hcn)
         loss_hcn.deps.add(hdn)
     for hdn in hg.outputs_hdn_grad:
         hdn.deps.add(loss_hcn)
         loss_hcn.users.add(hdn)
+
+    # -> artefacts edges
+    for kcn,hcn in dict_kcn_to_hcn.items():
+        for req_via_art_kcn in kcn.deps_through_size_artefacts:
+            if req_via_art_kcn in dict_kcn_to_hcn:
+                req_via_art_hcn = dict_kcn_to_hcn[req_via_art_kcn]
+                if req_via_art_hcn is not hcn:
+                    hcn.deps_through_size_artefacts.add(
+                        req_via_art_hcn
+                    )
 
     hg.sort_list_hcn()
     return hg

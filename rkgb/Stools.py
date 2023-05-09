@@ -387,8 +387,11 @@ class S_graph(RK_graph):
             index = nb_nodes-i-1
             if sn.is_artefact:
                 del self.nodes[index]
-                S_edges.discard_sn_from_deps_of_its_users(sn)
-                S_edges.discard_sn_from_users_of_its_deps(sn)
+                real_sn = list(sn.deps.keys())[0]
+                for user_sn,used_targets in sn.users.items():
+                    S_edges.discard_inplace(user_sn.deps,sn)
+                    S_edges.add_inplace(user_sn.deps,real_sn,used_targets)
+                S_edges.discard_inplace(real_sn.users,sn)
 
 
     def clear(self):

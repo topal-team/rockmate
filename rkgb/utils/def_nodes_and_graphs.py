@@ -131,7 +131,8 @@ class RK_node():
         elif nt == "KD": return set().union(
                                     *[kcn.deps_real for kcn in self.deps])
         elif nt == "HC": return set().union(
-                                    *[hdn.deps for hdn in self.deps])
+                                    *[hdn.deps for hdn in self.deps],
+                                    self.deps_through_size_artefacts)
         elif nt == "HD": return set().union(
                                     *[hcn.deps for hcn in self.deps])
         else: raise Exception(f"Unrecognized node type : {nt}")
