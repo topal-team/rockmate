@@ -2,6 +2,7 @@
 # import math
 from typing import Dict, Any
 import numpy as np
+import os
 from gurobipy import GRB, Model, quicksum
 from solvers.def_op import RunOp, DelOp, OpSchedule
 
@@ -14,15 +15,22 @@ class ModelGurobi:
     def __init__(
         self,
         kg,
-        budget: int,
+        peak_budget: int,
         save_budget: int,
-        gurobi_params: Dict[str, Any] = {},
+        gurobi_params: Dict[str, Any] = {
+            "LogToConsole": 1,
+            "IntegralityFocus": 1,
+            "TimeLimit": 4 * 60,
+            "Threads": os.cpu_count(),
+            "OptimalityTol": 1e-4,
+            "IntFeasTol": 1e-5,
+        },
         gcd=None,
     ):
         self.kg = kg
         self.time = [kcn.time for kcn in self.kg.list_kcn]
         self.gcd = gcd if gcd else 1
-        self.budget = budget / self.gcd
+        self.peak_budget = peak_budget / self.gcd
         self.save_budget = save_budget / self.gcd
         self.overhead = [kcn.overhead / self.gcd for kcn in self.kg.list_kcn]
         self.mem = [kdn.mem / self.gcd for kdn in self.kg.list_kdn]
@@ -30,16 +38,16 @@ class ModelGurobi:
         self.feasible = None
         self.solve_time = None
 
-        self.output_indices = [
-            self.kg.list_kdn.index(n) for n in [self.kg.output_kdn_grad]
-        ]
+        # self.output_indices = [
+        #     self.kg.list_kdn.index(n) for n in self.kg.list_outputs_kdn_grad
+        # ]
         #  self.kg.output_kdn_data]]
         self.protected_indices = []
         self.loss_idx = self.kg.list_kcn.index(self.kg.loss_kcn)
         T = len(self.kg.list_kcn)
         I = len(self.kg.list_kdn)
 
-        self.md = Model(f"rockmateMILP_{T}_{budget}")
+        self.md = Model(f"rockmateMILP_{T}_{peak_budget}")
         if gurobi_params is not None:
             for k, v in gurobi_params.items():
                 setattr(self.md.Params, k, v)
@@ -279,7 +287,7 @@ class ModelGurobi:
                         if k == k_
                     ),
                     GRB.LESS_EQUAL,
-                    self.budget,
+                    self.peak_budget,
                 )
                 if t == T // 2 and self.save_budget:
                     self.md.addLConstr(
@@ -294,7 +302,6 @@ class ModelGurobi:
             self.md.addLConstr(self.U[(t, k)], GRB.LESS_EQUAL, self.save_budget)
 
     def solve(self):
-
         self.md.message("\n\nRestarting solve\n\n")
         self.md.optimize()
 
