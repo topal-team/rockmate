@@ -107,9 +107,10 @@ class OpSchedule:
 
         self.alive_list = []
         for op in self.op_list:
-            if op.is_del and not op.disabled:
-                alive_status[op.kn.name] = False
-            else:# compute op should not be disabled except loss which is useful for alive status
+            if op.is_del:
+                if not op.disabled:
+                    alive_status[op.kn.name] = False
+            else:  # compute op should not be disabled except loss which is useful for alive status
                 for kdn in op.kn.users:
                     if not ("phantoms" in kdn.name and op.fast_forward):
                         alive_status[kdn.name] = True
