@@ -1,4 +1,4 @@
-__all__ = ["rkgb", "Rockmate", "HILP", "RK_rotor"]
+__all__ = ["rkgb", "RK_checkmate", "HILP", "RK_rotor"]
 
 # from .rockmate import Rockmate
 from .hilp import HILP
