@@ -72,7 +72,7 @@ class HILP(Solver):
                 sel_sched = [list_sched[0]]
                 sel_mem = [list_sched[0].mem]
 
-                while len(sel_sched) <nb_sched:
+                while len(sel_sched) < nb_sched:
                     # add the one with most different .mem with all selected sched
                     argmax_diff = np.argmax(
                         [
@@ -103,15 +103,15 @@ class HILP(Solver):
         for budget in self.budgets:
             if not hasattr(budget, "__iter__"):
                 budget = [budget]
-            # for hg in
-            # if isinstance(budget, )
-            list_op_sched.extend(
-                self.solve_hg(
-                    cluster.representee_cluster.possible_hg[0],
-                    *budget,
-                    accurate_mem=accurate_mem,
+            for hg in cluster.representee_cluster.possible_hg:
+                # if isinstance(budget, )
+                list_op_sched.extend(
+                    self.solve_hg(
+                        hg,
+                        *budget,
+                        accurate_mem=accurate_mem,
+                    )
                 )
-            )
         return list_op_sched
 
     def solve_hg(
@@ -120,7 +120,7 @@ class HILP(Solver):
         peak_budget,
         save_budget=None,
         accurate_mem=False,
-        print_result=False,
+        print_result=True,
     ):
         if not self.can_solve(hg):
             return []
