@@ -120,7 +120,7 @@ class HILP(Solver):
         peak_budget,
         save_budget=None,
         accurate_mem=False,
-        print_result=True,
+        print_result=False,
     ):
         if not self.can_solve(hg):
             return []
