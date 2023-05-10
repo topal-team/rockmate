@@ -67,6 +67,7 @@ class K_C_node(RK_node):
     def users_only_global(self):
         return self.users_global - self.users
 
+    """ # NOT MAINTAINED 
     def __eq__(self,kcn2,force_order=False,raise_exception=False):
         kcn1 = self
         try:
@@ -110,6 +111,7 @@ class K_C_node(RK_node):
             return bool(b)
         except AttributeError as a: return kcn1.__hash__() == kcn2.__hash__()
     __hash__ = RK_node.__hash__
+    """
 
 
 # ************
@@ -160,6 +162,7 @@ class K_D_node(RK_node):
     def users_only_global(self):
         return self.users_global - self.users_real.union(self.users_fake)
 
+    """ # NOT MAINTAINED 
     def __eq__(self,kdn2,force_order=False,raise_exception=False):
         kdn1 = self
         try:
@@ -188,6 +191,7 @@ class K_D_node(RK_node):
             return bool(b)
         except AttributeError as a: return kdn1.__hash__() == kdn2.__hash__()
     __hash__ = RK_node.__hash__
+    """
 
 
 # ***********
@@ -311,6 +315,7 @@ class K_graph(RK_graph):
         for i,kcn in enumerate(self.list_kcn):
             setattr(kcn,"_number",i)
 
+    """ # NOT MAINTAINED 
     def __eq__(self,g2,force_order=False,raise_exception=False):
         g1 = self
         eq_node= lambda n1,n2 : n1.__eq__(n2,force_order,raise_exception)
@@ -342,6 +347,7 @@ class K_graph(RK_graph):
         b *= small_fcts.check_attr(g1,g2,
             ["dict_info","dict_constants"],raise_exception)
         return bool(b)
+    """
 # ==========================
 
 
@@ -818,6 +824,92 @@ def copy_K_graph(kg : K_graph):
         = [new_dict_kn[out.name] for out in kg.list_outputs_kdn_grad]
     new_kg.loss_kcn = new_dict_kn[kg.loss_kcn.name]
     return new_kg
+
+# ==========================
+
+# ====================
+# /!\ NOT WORKING /!\ 
+# TODO :
+# -> Need better edges for input_kdn_data/grad
+# -> 1) include kcn bwd nodes
+# -> 2) deps_real or fake
+# -> Recognize inputs in def_inspection when opening grad_fn
+def K_list_to_K(kl : K_graph_list,sg : S_graph) -> K_graph:
+    kl = [copy_K_graph(block_kg) for block_kg in kl]
+    nb_block = len(kl)
+    whole_kg = K_graph(sg)
+    whole_list_kdn \
+        = whole_kg.list_kdn \
+        = sum([kg.list_kdn for kg in kl],[])
+    whole_list_kcn \
+        = whole_kg.list_kcn \
+        = sum([kg.list_kcn for kg in kl],[])
+    whole_kg.loss_kcn = kl[-1].loss_kcn
+    whole_kg.input_kdn_data = kl[0].input_kdn_data
+    whole_kg.list_outputs_kdn_data = kl[-1].list_outputs_kdn_data
+    whole_kg.list_outputs_kdn_grad = kl[-1].list_outputs_kdn_grad
+    whole_kg.input_kdn_grad = kl[0].input_kdn_grad
+
+    # == Merge output of one block with input of the next one ==
+    for index in range(nb_block-1):
+        block_kg : K_graph = kl[index]
+        next_kg  : K_graph = kl[index+1]
+        # only one output since not last block
+        output_kdn_data : K_D_node = block_kg.output_kdn_data
+        output_kdn_grad : K_D_node = block_kg.output_kdn_grad
+
+        # -> Unplug the loss_kcn
+        loss_kcn = block_kg.loss_kcn
+        whole_list_kcn.remove(loss_kcn)
+        output_kdn_data.users_real.discard(loss_kcn)
+        output_kdn_data.users_fake.discard(loss_kcn)
+        output_kdn_data.users_global.discard(loss_kcn)
+        output_kdn_grad.deps.discard(loss_kcn)
+        output_kdn_grad.deps_global.discard(loss_kcn)
+
+        # Unplug next_input_kdns
+        next_input_data : K_D_node = next_kg.input_kdn_data
+        next_input_grad : K_D_node = next_kg.input_kdn_grad
+
+        # merge output with next_input
+        for next_user_of_inp_data in next_input_data.users_global:
+            next_user_of_inp_data.deps_global.add(output_kdn_data)
+            next_user_of_inp_data.deps_real.add(output_kdn_data)
+            next_user_of_inp_data.deps_global.remove(next_input_data)
+            output_kdn_data.users_global.add(next_user_of_inp_data)
+            output_kdn_data.users_real.add(next_user_of_inp_data)
+        for next_req_of_inp_grad in next_input_grad.deps_global:
+            next_req_of_inp_grad.users_global.add(output_kdn_grad)
+            next_req_of_inp_grad.users.add(output_kdn_grad)
+            next_req_of_inp_grad.users_global.remove(next_input_grad)
+            output_kdn_grad.deps_global.add(next_req_of_inp_grad)
+            output_kdn_grad.deps.add(next_req_of_inp_grad)
+
+    # make dicts of K_nodes
+    inputs_kdn = [whole_kg.input_kdn_data]
+    if whole_kg.input_kdn_grad is not None:
+        inputs_kdn.append(whole_kg.input_kdn_grad)
+
+    for kdn in whole_list_kdn + inputs_kdn:
+        whole_kg.dict_kn[kdn.name] = kdn
+        if kdn.kdn_type == "data":
+            whole_kg.dict_KDN_data[kdn.mt] = kdn
+        elif kdn.kdn_type == "grad":
+            whole_kg.dict_KDN_grad[kdn.mt] = kdn
+        else:
+            whole_kg.dict_KDN_phantoms[kdn.mt] = kdn
+    for kcn in whole_list_kcn:
+        whole_kg.dict_kn[kcn.name] = kcn
+        if kcn.is_fwd:
+            whole_kg.dict_KCN_fwd[kcn.mt] = kcn
+        else:
+            whole_kg.dict_KCN_bwd[kcn.mt] = kcn
+
+    # toposort the whole graph
+    whole_kg.sort_list_kcn()
+
+    return whole_kg
+
 
 # ==========================
 

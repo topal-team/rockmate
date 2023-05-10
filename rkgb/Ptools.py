@@ -1695,9 +1695,9 @@ def S_to_P(
     sg : S_graph,
     model : torch.nn.Module,
     partitioners = [
+        Partitioner(),
         Partitioner_bottom_to_top_1(),
         Partitioner_bottom_to_top_2(),
-        # Partitioner_bottom_to_top_2(can_use_rotor=False),
         Partitioner_seq()
     ],
     min_size_to_trigger_partitioning = 4):

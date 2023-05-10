@@ -301,8 +301,8 @@ def P_node_to_H_cluster(pn : P_node, kg : K_graph):
         h_cluster.interfaces = {
             "inputs_kdn_data"  : inputs_data,
             "outputs_kdn_data" : set([kdn_data]),
-            "inputs_kdn_grad"  : set([kdn_grad]),
-            "outputs_kdn_grad" : inputs_grad
+            "outputs_kdn_grad" : set([kdn_grad]),
+            "inputs_kdn_grad"  : inputs_grad
         }
 
         return h_cluster

@@ -136,6 +136,7 @@ def make_all_graphs(model,
     model_kwargs=None,
     wanted_graphs = {"B","D","S","K","P","H","Sl","Kl"},
     partitioners = [
+        Ptools.Partitioner(),
         Ptools.Partitioner_bottom_to_top_1(),
         Ptools.Partitioner_bottom_to_top_2(),
         Ptools.Partitioner_seq()
@@ -229,12 +230,12 @@ def make_all_graphs(model,
     list_sg = Stools.cut(sg) if bool_list_sg else None
     print_time("S_cut")
     if bool_list_kg:
-        cc,list_kg,list_ano_S = Atools_for_S_and_K.S_list_to_K_list_eco(list_sg,model,device=device)
+        cc,list_kg,list_ano_S = Atools_for_S_and_K.S_list_to_K_list_eco(
+            list_sg,model,device=device)
     else: list_kg = None ; cc = None ; list_ano_S = None
     print_time("S_list_to_K_list via Atools")
     # -- hierarchical --
-    # ps = Ptools.S_to_P(sg,model,partitioners) if bool_pg else None
-    ps = Ptools.S_to_P(sg,model) if bool_pg else None
+    ps = Ptools.S_to_P(sg,model,partitioners) if bool_pg else None
     print_time("S_to_P")
     hc = Htools.P_and_K_to_H(ps,kg) if bool_hg else None
     print_time("P_and_K_to_H")
