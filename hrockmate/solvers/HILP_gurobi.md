@@ -164,14 +164,14 @@ a constraint for each substep of the schedule, and this provides a
 more precise assessment of the memory usage of the solution.  The case
 of output values is the same, except that we care whether the output
 value is created during the computation of node $k$, which is
-represented with variable $C_{k, t, d}$
+represented with variable $C_{k, t, d}$.
 
 An interesting remark is that it is not necessary to write one
 constraint for each substep: if the set of inputs not needed after
 substeps $i$ and $j$ are the same, we can keep only one of both
 constraints (the one with larger overhead $O$). The number of
 constraints is thus bounded by $\min(\text{schedule length},
-2^{|\{\text{inputs}\}| + |\{\text{inputs}\}|})$. In practice, the
+2^{|\{\text{inputs}\}| + |\{\text{outputs}\}|})$. In practice, the
 number of different constraints remain low.
 
 
@@ -231,7 +231,7 @@ number of different constraints remain low.
 
 # Expressions
 * `sumR`: dict with $T*T$ values, containing $\sum_o R[\cdot][\cdot, o]$
-* `sumSp`: dict with $J*(T+1)$ values, containing $\sum_o R[\cdot][\cdot, o]$
+* `sumSp`: dict with $J*(T+1)$ values, containing $\sum_o Sp[\cdot][\cdot, o]$
 * `alive`: dictionary indexed by $(t, k, i)$: phase $t$, edge $(k, i)$
   + equals 1 iff data node $i$ alive after computing node $k$ in phase $t$
 * `U`: dictionary indexed by phase $t$ and compute node $k$
