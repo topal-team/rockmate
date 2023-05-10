@@ -237,10 +237,14 @@ class Graph_Translator():
 
         # -- S_GRAPH --
         elif isinstance(x,Stools.S_graph):
-            sg = Stools.copy_S_graph(x) # to protect x : NOT inplace
+            sg = Stools.copy_S_graph(x) # to protect x => NOT inplace
             s_nodes = [sg.init_node] + sg.nodes
             translate(s_nodes)
             translate(sg.special_output_node)
+            # * artefact_edges *
+            for (_,_,str_set) in sg.artefact_edges:
+                translate(str_set)
+
             # dict_info is currently shared by all the graphs
             # thus it contains unknown names for each block
             # -> impossible to translate -> so I clean it up.

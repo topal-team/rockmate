@@ -311,11 +311,13 @@ class S_node(RK_node):
 # ***********
 
 class S_graph(RK_graph):
+    artefact_edges : list[tuple[S_node,S_node,set[str]]] = None
     def __init__(self,dg : D_graph = None):
         super().__init__("S")
         if not (dg is None): self.inherit_base_attributes(dg)
         self.init_node = None # NOT in self.nodes
         self.special_output_node = None # NOT in self.nodes
+        self.artefact_edges = []
 
     def __eq__(self,sg2,force_order=False,raise_exception=False):
         sg1 = self
@@ -377,12 +379,14 @@ class S_graph(RK_graph):
                       f"{user_sn.main_target} in {sn.main_target}.users "\
                       f"but one sided relation...")
                 
+    # === To handle artefacts in Ptools ===
     def discard_all_artefacts(self):
         # Do this only once the order is fixed!
         # And K_graph is generated
         # -> better do a copy first
         snodes = list(self.nodes)
         nb_nodes = len(snodes)
+        artefact_edges = self.artefact_edges
         for i,sn in enumerate(snodes[::-1]):
             index = nb_nodes-i-1
             if sn.is_artefact:
@@ -390,8 +394,13 @@ class S_graph(RK_graph):
                 real_sn = list(sn.deps.keys())[0]
                 for user_sn,used_targets in sn.users.items():
                     S_edges.discard_inplace(user_sn.deps,sn)
-                    S_edges.add_inplace(user_sn.deps,real_sn,used_targets)
+                    S_edges.add_edge_inplace(real_sn,user_sn,used_targets)
+                    artefact_edges.append((real_sn,user_sn,used_targets))
                 S_edges.discard_inplace(real_sn.users,sn)
+    def delete_artefact_edges(self):
+        for (used_sn,user_sn,_) in self.artefact_edges:
+            S_edges.discard_edge_inplace(used_sn,user_sn)
+        # We do NOT set self.artefact_edges = []
 
 
     def clear(self):
@@ -692,7 +701,7 @@ def simplify_view(sg : S_graph):
                 # so I must share the code with artifacts' parent
                 # It's not a problem to insert the code in different 
                 # nodes because view operations are cheap.
-                # But I must avoid creating cycle dependancies, so
+                # But I must avoid creating cycle dependencies, so
                 # for the moment I assert len(sn.deps)==1
                 if sn_info.is_inplace: raise Exception(
                     f"Sorry we do not support inplace operations over "\
@@ -850,6 +859,15 @@ def copy_S_graph(sg : S_graph):
         special_out.deps = dict(
             (dict_nodes[r.mt],set_str) \
             for r,set_str in sg.special_output_node.deps.items())
+        
+    # * artefact edges *
+    new_artefact_edges = new_sg.artefact_edges
+    for (req_sn,user_sn,used_targets) in sg.artefact_edges:
+        new_artefact_edges.append((
+            dict_nodes[req_sn.mt],
+            dict_nodes[user_sn.mt],
+            set(used_targets)
+        ))
 
     return new_sg
 

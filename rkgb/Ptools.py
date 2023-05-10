@@ -333,6 +333,38 @@ class P_graph(RK_graph):
                 else:
                     pn.sub_cluster = sub_c
 
+    def recompute_edges(self,sg : S_graph):
+        # NOT OPTIMAL AT ALL -> To improve if to slow
+        # find artefact_edges in P_graph
+        all_related_to_artefacts = set().union(
+            set(e[0] for e in sg.artefact_edges),
+            set(e[1] for e in sg.artefact_edges),
+        )
+        dict_where = dict()
+        for sn in all_related_to_artefacts:
+            for pn in self.nodes:
+                pn : P_node
+                if pn.sn is sn:
+                    dict_where[sn] = pn
+                elif (pn.sub_cluster is not None
+                    and sn in pn.sub_cluster.s_nodes):
+                    dict_where[sn] = pn
+        
+        # delete this edges
+        for (req_sn,user_sn,_) in sg.artefact_edges:
+            if req_sn in dict_where and user_sn in dict_where:
+                req_pn = dict_where[req_sn]
+                user_pn = dict_where[user_sn]
+                if req_pn is not user_pn:
+                    user_pn.deps.remove(req_pn)
+                    req_pn.users.remove(user_pn)
+
+        # recursive call
+        for pn in self.nodes:
+            if pn.sub_cluster is not None:
+                pn.sub_cluster.recompute_all_interfaces_and_edges()
+        
+
 class P_cluster():
     s_nodes = None
     p_structure = None
@@ -377,7 +409,6 @@ class P_cluster():
                 = ps_dict_charac_to_cluster[charac_string] \
                 = self
             self.make_io()
-            self.make_translator()
             self.make_ano_cluster_id()
             self.name = f"P_Cluster_{cluster_nb}_Ano_id_{self.ano_cluster_id}"
 
@@ -624,6 +655,21 @@ class P_cluster():
         if self.possible_partitioning is not None:
             for pg in self.possible_partitioning:
                 pg.make_sub_cluster_original()
+
+    def recompute_all_interfaces_and_edges(self):
+        # It's useless to compute translator before
+        # so we do it only now, and it help us know
+        # if we already run this method on self
+        if self.translator is None:
+            self.make_io() # recompute interfaces
+            self.make_translator()
+            if self.representee_cluster is self:
+                for pg in self.possible_partitioning:
+                    pg.recompute_edges(self.p_structure.sg)
+
+
+
+
 
 
 class P_structure():
@@ -1657,7 +1703,12 @@ def S_to_P(
         main_cluster.partition(partitioner)
     main_cluster.make_sub_cluster_original()
     p_structure.make_graphs_names()
+    sg.delete_artefact_edges()
+    main_cluster.recompute_all_interfaces_and_edges()
     return p_structure
+
+
+
 
 
 # ==========================
