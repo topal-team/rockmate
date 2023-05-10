@@ -1,7 +1,7 @@
 # ====================
 # = global variables =
 # ====================
-from rkgb.utils.imports import torch, sys
+from .imports import torch, sys
 
 time_min_duration = 0
 time_min_repeat = 5

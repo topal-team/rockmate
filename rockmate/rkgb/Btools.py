@@ -21,7 +21,7 @@
 #  one target obtained with a primitive operation
 #  .code attributes are AST objects
 
-from rkgb.utils import *
+from .utils import *
 
 # **********
 # * B_node *

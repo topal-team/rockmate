@@ -6,20 +6,9 @@
 
 # ** Graph partitioning **
 
-from rkgb.utils import *
-from rkgb.Stools import S_graph, S_node, copy_S_graph
-from rkgb.Ktools import K_C_node, K_D_node
-
-# Class definitions :
-# - Ano_S_node_Info (done)
-# - Cluster_translator (P part done)
-# - P_cluster (done)
-# - P_node (TODO)
-# - P_graph (TODO)
-# - P_structure (done)
-# - Partitioner (base class, empty)
-# - Partitioner_bottom_to_top (TODO)
-# - Partitioner_seq (TODO)
+from .utils import *
+from .Stools import S_graph, S_node, copy_S_graph
+from .Ktools import K_C_node, K_D_node
 
 
 # *************

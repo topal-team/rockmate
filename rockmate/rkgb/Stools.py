@@ -2,8 +2,8 @@
 # ====== S structure =======
 # ==========================
 
-from rkgb.utils import *
-from rkgb.Dtools import D_node,D_graph
+from .utils import *
+from .Dtools import D_node,D_graph
 
 # ***********
 # * S_edges *

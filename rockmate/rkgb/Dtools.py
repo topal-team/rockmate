@@ -2,8 +2,8 @@
 # ====== D structure =======
 # ==========================
 
-from rkgb.utils import *
-from rkgb.Btools import B_node,B_graph
+from .utils import *
+from .Btools import B_node,B_graph
 
 # **********
 # * D_node *

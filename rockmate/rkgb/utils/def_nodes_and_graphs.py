@@ -3,9 +3,9 @@
 # =      with some useful methods      =
 # ======================================
 
-from rkgb.utils.imports import *
-from rkgb.utils.global_vars import print_debug
-from rkgb.utils import ast_add_on
+from .imports import *
+from .global_vars import print_debug
+from . import ast_add_on
 
 # ==============================================
 # = Auxiliary class : Node_unique_id_generator =

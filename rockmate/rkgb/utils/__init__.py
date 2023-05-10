@@ -18,7 +18,21 @@ __all__ = [
     "irotor",
     "copy"]
 
+from .imports import *
+from . import global_vars
+from . import small_fcts
+from . import ast_add_on
+from . import def_info
+from . import def_inspection
+from .def_nodes_and_graphs import (
+    RK_node,
+    RK_graph,
+    Node_unique_id_generator,
+    RK_sort_based_on_deps,
+    RK_get_1_separators)
+from .global_vars import print_debug
 
+"""
 from rkgb.utils.imports import *
 from rkgb.utils import global_vars
 from rkgb.utils import small_fcts
@@ -32,3 +46,4 @@ from rkgb.utils.def_nodes_and_graphs import (
     RK_sort_based_on_deps,
     RK_get_1_separators)
 from rkgb.utils.global_vars import print_debug
+"""

@@ -4,9 +4,9 @@
 
 # A way to recognize similar blocks
 # e.g. for GPT2 -> Transformer blocks
-from rkgb.utils import *
-from rkgb import Stools
-from rkgb import Ktools
+from .utils import *
+from . import Stools
+from . import Ktools
 
 # Note that this file is build on top of S and K structures
 # and is used in rkgb/main.py, not in Stools nor Ktools.

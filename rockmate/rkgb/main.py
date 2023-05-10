@@ -1,11 +1,11 @@
-from rkgb.utils import *
-from rkgb import Btools
-from rkgb import Dtools
-from rkgb import Stools
-from rkgb import Ktools
-from rkgb import Atools_for_S_and_K
-from rkgb import Ptools
-from rkgb import Htools
+from .utils import *
+from . import Btools
+from . import Dtools
+from . import Stools
+from . import Ktools
+from . import Atools_for_S_and_K
+from . import Ptools
+from . import Htools
 import inspect
 import time
 

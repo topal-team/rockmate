@@ -2,8 +2,8 @@
 # ====== K structure =======
 # ==========================
 
-from rkgb.utils import *
-from rkgb.Stools import S_node,S_graph
+from .utils import *
+from .Stools import S_node,S_graph
 
 # ************
 # * K_C_node *

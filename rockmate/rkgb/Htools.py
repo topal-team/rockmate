@@ -1,10 +1,10 @@
 # ==========================
-#  ====== H structure =======
+# ====== H structure =======
 # ==========================
 
-from rkgb.utils import *
-from rkgb.Ptools import P_structure, P_cluster, P_graph, P_node, Cluster_translator 
-from rkgb.Ktools import K_graph, K_C_node, K_D_node
+from .utils import *
+from .Ptools import P_structure, P_cluster, P_graph, P_node, Cluster_translator 
+from .Ktools import K_graph, K_C_node, K_D_node
 
 
 # ************

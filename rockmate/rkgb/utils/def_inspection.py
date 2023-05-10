@@ -2,9 +2,9 @@
 # = INSPECTION OF KCN =
 # =====================
 
-from rkgb.utils.imports import *
-from rkgb.utils import def_info,ast_add_on,small_fcts,global_vars
-from rkgb.utils.global_vars import print_debug
+from .imports import *
+from . import def_info,ast_add_on,small_fcts,global_vars
+from .global_vars import print_debug
 import gc
 
 # ======================

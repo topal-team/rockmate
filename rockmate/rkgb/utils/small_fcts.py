@@ -1,7 +1,7 @@
 # ==========================
 # ==== Useful functions ====
 # ==========================
-from rkgb.utils.imports import *
+from .imports import *
 import inspect
 
 # -> to raise exceptions with lambda functions

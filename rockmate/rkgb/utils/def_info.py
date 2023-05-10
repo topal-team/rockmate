@@ -2,9 +2,9 @@
 # ====== Tensor INFO =======
 # ==========================
 
-from rkgb.utils.imports import *
-from rkgb.utils import small_fcts
-from rkgb.utils import global_vars
+from .imports import *
+from . import small_fcts
+from . import global_vars
 
 # -> all the info concerning a variable/tensor which might be useful
 # -> e.g. to regenerate it, using def_info.generate_val(info,device)

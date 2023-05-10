@@ -2,9 +2,9 @@
 # = Useful functions for ast objects =
 # ====================================
 import inspect
-from rkgb.utils.imports import *
-from rkgb.utils.global_vars import default_forced_kwargs 
-from rkgb.utils.small_fcts import remove_prefix,remove_suffix
+from .imports import *
+from .global_vars import default_forced_kwargs 
+from .small_fcts import remove_prefix,remove_suffix
 
 # -- general --
 
