@@ -1,11 +1,11 @@
 import time
-from rkgb.utils import np
+from rockmate.rkgb.utils import np
 
-from solvers.def_chain import RK_Chain
-from solvers.rotor_solver import seq_builder, solve_dp_functional
-from solvers.rk_rotor import RK_rotor
-from solvers.def_op import OpSchedule
-from solvers.def_sequence import (
+from .def_chain import RK_Chain
+from .rotor_solver import seq_builder, solve_dp_functional
+from .rk_rotor import RK_rotor
+from .def_op import OpSchedule
+from .def_sequence import (
     SeqBlockBwd,
     SeqBlockFe,
 )

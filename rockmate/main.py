@@ -2,34 +2,32 @@
 # = ROCKMATE =
 # ============
 
-import rkgb
-from rkgb.main import make_inputs
-from rkgb.utils import print_debug, np, irotor
-from rkgb.utils.global_vars import ref_verbose, solver_name
-from rkgb.utils.small_fcts import get_device
-from rkgb.utils.ast_add_on import ast_to_str
-from solvers.def_op import OpSchedule as OpSchedule_old
-from solvers.def_chain import RK_Chain
-from solvers.def_sequence import (
-    SeqBlockBwd,
-    SeqBlockFc,
-    SeqBlockFn,
-    SeqBlockFe,
-)
-from solvers.HILP_gurobi import *
-from solvers.rotor_solver import seq_builder, solve_dp_functional
-from rockmate.compiler import Compiler, RK_Storage, make_gd
-
-
-import solvers
-from solvers.op_schedule import *
-
 import torch
 from torch import tensor
 import ast
 import time
 import warnings
 from os import environ
+
+from . import rkgb
+from .rkgb.main import make_inputs
+from .rkgb.utils import print_debug, np, irotor
+from .rkgb.utils.global_vars import ref_verbose, solver_name
+from .rkgb.utils.small_fcts import get_device
+from .rkgb.utils.ast_add_on import ast_to_str
+from .solvers.def_op import OpSchedule as OpSchedule_old
+from .solvers.def_chain import RK_Chain
+from .solvers.def_sequence import (
+    SeqBlockBwd,
+    SeqBlockFc,
+    SeqBlockFn,
+    SeqBlockFe,
+)
+from .solvers.op_schedule import *
+from .solvers.HILP_gurobi import *
+from .solvers.rotor_solver import seq_builder, solve_dp_functional
+from .compiler import Compiler, RK_Storage, make_gd
+
 
 
 def print_memsizes(list_kg):

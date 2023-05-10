@@ -4,9 +4,9 @@
 # based on rotor/algorithms/persistent.py
 # ==========================
 
-from rkgb.utils import print_debug
-from solvers.def_chain import RK_Chain
-from solvers.def_sequence import (
+from rockmate.rkgb.utils import print_debug
+from .def_chain import RK_Chain
+from .def_sequence import (
     SeqBlockFn,
     SeqBlockFc,
     SeqBlockFe,
@@ -233,7 +233,7 @@ def pseq_builder(chain, memory_limit, opt_table):
 # ===================================
 
 # The C version produces 'csequence' SeqOps, we have to convert them
-import solvers.csequence as cs
+from . import csequence as cs
 
 try:
     import rockmate_csolver as rs

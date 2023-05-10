@@ -4,7 +4,7 @@ from typing import Dict, Any
 import numpy as np
 import os
 from gurobipy import GRB, Model, quicksum
-from solvers.def_op import RunOp, DelOp, OpSchedule
+from .def_op import RunOp, DelOp, OpSchedule
 
 
 class ModelGurobi:

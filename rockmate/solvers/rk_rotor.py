@@ -1,16 +1,16 @@
 import time
 import warnings
 import rkgb
-from rkgb.utils import np
-from rkgb.Htools import H_graph, H_cluster
+from rockmate.rkgb.utils import np
+from rockmate.rkgb.Htools import H_graph, H_cluster
 import math
-from solvers.main import Solver, get_cluster_budget
-from solvers.def_chain import RK_Chain
-from solvers.def_sequence import SeqBlockBwd, SeqBlockFe, RK_Sequence
-from solvers.rotor_solver import seq_builder, solve_dp_functional
-from solvers.op_schedule import OpSchedule, Op
-from solvers.def_op import OpSchedule as OpSchedule_old
-from solvers.def_op import RunOp, DelOp
+from .main import Solver, get_cluster_budget
+from .def_chain import RK_Chain
+from .def_sequence import SeqBlockBwd, SeqBlockFe, RK_Sequence
+from .rotor_solver import seq_builder, solve_dp_functional
+from .op_schedule import OpSchedule, Op
+from .def_op import OpSchedule as OpSchedule_old
+from .def_op import RunOp, DelOp
 
 
 class RK_block_:

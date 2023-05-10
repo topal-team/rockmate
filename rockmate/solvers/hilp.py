@@ -1,16 +1,13 @@
 import time
 import torch
-import rkgb
-from rkgb.utils import print_debug, np, irotor
-from rkgb.utils.global_vars import ref_verbose, solver_name
-from rkgb.utils.small_fcts import get_device
-from rkgb.utils.ast_add_on import ast_to_str
-from rkgb.Htools import H_cluster, H_graph, H_C_node
+import rockmate.rkgb as rkgb
+import numpy as np
+from rockmate.rkgb.Htools import H_cluster, H_graph, H_C_node
 
-from solvers.main import Solver, get_cluster_budget
-from solvers.HILP_gurobi import ModelGurobi
-from solvers.rotor_solver import seq_builder, solve_dp_functional
-from solvers.op_schedule import OpSchedule
+from .main import Solver, get_cluster_budget
+from .HILP_gurobi import ModelGurobi
+from .rotor_solver import seq_builder, solve_dp_functional
+from .op_schedule import OpSchedule
 
 
 class HILP(Solver):

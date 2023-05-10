@@ -1,4 +1,5 @@
-__all__ = ["rkgb","CheckpointedModule"]
+__all__ = ["rkgb", "solvers", "CheckpointedModule"]
 
 from .main import CheckpointedModule
 import rkgb
+import solvers

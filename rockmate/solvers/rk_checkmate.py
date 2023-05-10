@@ -2,16 +2,16 @@ import time
 import torch
 import rkgb
 import os
-from rkgb.utils import print_debug, np, irotor
-from rkgb.utils.global_vars import ref_verbose, solver_name
-from rkgb.utils.small_fcts import get_device
-from rkgb.utils.ast_add_on import ast_to_str
-from rkgb.Htools import H_cluster, H_graph, H_C_node
-from rkgb.Ktools import K_graph
+from rockmate.rkgb.utils import print_debug, np, irotor
+from rockmate.rkgb.utils.global_vars import ref_verbose, solver_name
+from rockmate.rkgb.utils.small_fcts import get_device
+from rockmate.rkgb.utils.ast_add_on import ast_to_str
+from rockmate.rkgb.Htools import H_cluster, H_graph, H_C_node
+from rockmate.rkgb.Ktools import K_graph
 
-from solvers.main import Solver, get_cluster_budget
-from solvers.ILP_gurobi import ModelGurobi
-from solvers.op_schedule import OpSchedule
+from .main import Solver, get_cluster_budget
+from .ILP_gurobi import ModelGurobi
+from .op_schedule import OpSchedule
 
 
 class RK_checkmate(Solver):

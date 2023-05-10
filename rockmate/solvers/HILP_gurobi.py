@@ -6,8 +6,8 @@ from copy import deepcopy
 from gurobipy import GRB, Model, quicksum
 
 # from rockmate.def_op import RunOp, DelOp, OpSchedule
-from solvers.op_schedule import Op, OpSchedule
-from rkgb.Htools import *
+from .op_schedule import Op, OpSchedule
+from rockmate.rkgb.Htools import *
 
 
 class ModelGurobi:

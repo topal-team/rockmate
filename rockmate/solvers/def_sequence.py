@@ -3,7 +3,7 @@
 # based on rotor/algorithms/sequence.py
 # ==========================
 
-from solvers.def_op import OpSchedule
+from .def_op import OpSchedule
 
 ref_print_atoms = [True]
 

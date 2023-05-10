@@ -3,13 +3,13 @@
 # also contains RK_Chain builder -> depends on use_chk.py
 #  based on rotor/algorithms/parameters.py
 # ==========================
-from rkgb.utils.global_vars import solver_name
-from rkgb.utils import imports_from_rotor as irotor
+from rockmate.rkgb.utils.global_vars import solver_name
+from rockmate.rkgb.utils import imports_from_rotor as irotor
 
 # if solver_name[0] != "gurobi":
 #     from rockmate.ILP_MIP import ModelMIP
-from solvers.ILP_gurobi import ModelGurobi
-from solvers.def_op import RunOp, DelOp, OpSchedule
+from .ILP_gurobi import ModelGurobi
+from .def_op import RunOp, DelOp, OpSchedule
 import math
 import numpy as np
 
