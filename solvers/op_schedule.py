@@ -107,13 +107,12 @@ class OpSchedule:
 
         self.alive_list = []
         for op in self.op_list:
-            if not op.disabled:
-                if op.is_del:
-                    alive_status[op.kn.name] = False
-                else:
-                    for kdn in op.kn.users:
-                        if not ("phantoms" in kdn.name and op.fast_forward):
-                            alive_status[kdn.name] = True
+            if op.is_del and not op.disabled:
+                alive_status[op.kn.name] = False
+            else:# compute op should not be disabled except loss which is useful for alive status
+                for kdn in op.kn.users:
+                    if not ("phantoms" in kdn.name and op.fast_forward):
+                        alive_status[kdn.name] = True
             self.alive_list.append(alive_status.copy())
 
         L = len(self.op_list)
