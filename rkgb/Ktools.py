@@ -199,6 +199,7 @@ class K_D_node(RK_node):
 # ***********
 
 class K_graph(RK_graph):
+    has_fake_input_kdn_grad = False
     def __init__(self,sg : S_graph):
         super().__init__("K")
         if not (sg is None): self.inherit_base_attributes(sg)
@@ -252,10 +253,10 @@ class K_graph(RK_graph):
 
     # FOR ORIGINAL ROCKMATE COMPATIBILITY 
     def fake_input_kdn_grad(self):
-        if self.input_kdn_grad:
-            self.fake_input_kdn_grad = False
+        if self.input_kdn_grad is not None:
+            self.has_fake_input_kdn_grad = False
         else:
-            self.fake_input_kdn_grad = True
+            self.has_fake_input_kdn_grad = True
             self.input_kdn_grad=input_kdn_grad = K_D_node(
                 kdn_type = "grad", main_target = "sources",
                 all_targets = self.sg.inputs,
@@ -269,10 +270,11 @@ class K_graph(RK_graph):
             input_kdn_grad.deps_global.update(input_kdn_grad_deps)
             for user_kcn in input_kdn_grad_deps:
                 user_kcn.users_global.add(input_kdn_grad)
+        assert self.input_kdn_grad is not None
 
     def release_fake_input_kdn_grad(self):
-        if self.fake_input_kdn_grad:
-            self.fake_input_kdn_grad = False
+        if self.has_fake_input_kdn_grad:
+            self.has_fake_input_kdn_grad = False
             input_kdn_grad = self.input_kdn_grad
             self.input_kdn_grad = None
             del self.dict_KDN_grad[input_kdn_grad.mt]
@@ -748,7 +750,7 @@ def copy_K_D_node(kdn : K_D_node):
 def copy_K_graph(kg : K_graph):
     new_kg = K_graph(kg.sg)
     new_kg.inherit_base_attributes(kg)
-    new_kg.fake_input_kdn_grad = kg.fake_input_kdn_grad
+    new_kg.has_fake_input_kdn_grad = kg.has_fake_input_kdn_grad
     new_kg.init_code = kg.init_code
     new_kg.outputs_wrapping_code = kg.outputs_wrapping_code
 
@@ -805,6 +807,8 @@ def copy_K_graph(kg : K_graph):
     old_inp_data = kg.input_kdn_data
     old_inp_grad = kg.input_kdn_grad
     new_kg.input_kdn_data=new_inp_data = copy_K_D_node(old_inp_data)
+    new_kg.dict_KDN_data[new_inp_data.mt] = new_inp_data
+    new_kg.dict_kn[new_inp_data.name] = new_inp_data
     for old_fst_kcn in old_inp_data.users_only_global:
         new_fst_kcn = new_dict_kn[old_fst_kcn.name]
         new_fst_kcn.deps_global.add(new_inp_data)
@@ -813,6 +817,8 @@ def copy_K_graph(kg : K_graph):
         new_kg.input_kdn_grad = None
     else:
         new_kg.input_kdn_grad=new_inp_grad = copy_K_D_node(old_inp_grad)
+        new_kg.dict_KDN_grad[new_inp_grad.mt] = new_inp_grad
+        new_kg.dict_kn[new_inp_grad.name] = new_inp_grad
         for old_lst_kcn in old_inp_grad.deps_only_global:
             new_lst_kcn = new_dict_kn[old_lst_kcn.name]
             new_lst_kcn.users_global.add(new_inp_grad)
