@@ -875,18 +875,21 @@ def copy_S_graph(sg : S_graph):
 def cut(sg : S_graph): # -> list of S_graph
     # Note: when this function is used, sg.init_node has been unhooked
     sg = copy_S_graph(sg) # to protect from side effects
-    # -> Add a temporary global source before get separators 
-    sg.nodes.insert(0,sg.init_node) # it's not the original sg
-    for first_sn in sg.init_node.users.keys():
-        S_edges.add_inplace(first_sn.deps,sg.init_node,set())
+    # -> Add a temporary global source before get separators
+    # -> Above all the node which don't have any deps
+    tmp_source = S_node(other_obj=sg)
+    sg.nodes.insert(0,tmp_source) # it's not the original sg, no risk
+    for first_sn,str_set in sg.init_node.users.items():
+        if first_sn.deps == dict():
+            S_edges.add_edge_inplace(tmp_source,first_sn,str_set)
 
     seps = RK_get_1_separators(sg)
     
     # -> remove tmp_source
     for first_sn in sg.init_node.users.keys():
-        S_edges.discard_inplace(first_sn.deps,sg.init_node)
+        S_edges.discard_inplace(first_sn.deps,tmp_source)
     
-    seps = [sg.init_node] + seps
+    seps = [tmp_source] + seps
     # multiple output_nodes
     if not (seps[-1] is sg.nodes[-1]):
         seps.append(sg.nodes[-1])

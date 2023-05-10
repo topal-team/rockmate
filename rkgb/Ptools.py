@@ -242,6 +242,7 @@ class P_graph(RK_graph):
     pn_wrapping_it : P_node = None # -> pn representing self in an upper graph
     _first_nodes : list[P_node] = None
     cluster = None # just for debug + printing
+    without_artefacts = False
     def __init__(self,graph_id,p_structure=None,other_pg=None,dict_info=None):
         if p_structure is None and other_pg is None and dict_info is None:
             raise Exception(
@@ -336,33 +337,37 @@ class P_graph(RK_graph):
     def recompute_edges(self,sg : S_graph):
         # NOT OPTIMAL AT ALL -> To improve if to slow
         # find artefact_edges in P_graph
-        all_related_to_artefacts = set().union(
-            set(e[0] for e in sg.artefact_edges),
-            set(e[1] for e in sg.artefact_edges),
-        )
-        dict_where = dict()
-        for sn in all_related_to_artefacts:
-            for pn in self.nodes:
-                pn : P_node
-                if pn.sn is sn:
-                    dict_where[sn] = pn
-                elif (pn.sub_cluster is not None
-                    and sn in pn.sub_cluster.s_nodes):
-                    dict_where[sn] = pn
-        
-        # delete this edges
-        for (req_sn,user_sn,_) in sg.artefact_edges:
-            if req_sn in dict_where and user_sn in dict_where:
-                req_pn = dict_where[req_sn]
-                user_pn = dict_where[user_sn]
-                if req_pn is not user_pn:
-                    user_pn.deps.remove(req_pn)
-                    req_pn.users.remove(user_pn)
+        if not self.without_artefacts:
+            self.without_artefacts = True
+            all_related_to_artefacts = set().union(
+                set(e[0] for e in sg.artefact_edges),
+                set(e[1] for e in sg.artefact_edges),
+            )
+            dict_where = dict()
+            for sn in all_related_to_artefacts:
+                for pn in self.nodes:
+                    pn : P_node
+                    if pn.sn is sn:
+                        dict_where[sn] = pn
+                    elif (pn.sub_cluster is not None
+                        and sn in pn.sub_cluster.s_nodes):
+                        dict_where[sn] = pn
+            
+            # delete this edges
+            for (req_sn,user_sn,_) in sg.artefact_edges:
+                if req_sn in dict_where and user_sn in dict_where:
+                    req_pn = dict_where[req_sn]
+                    user_pn = dict_where[user_sn]
+                    if req_pn is not user_pn:
+                        user_pn.deps.discard(req_pn)
+                        req_pn.users.discard(user_pn)
+                        # `discard` not `remove` because several sg.artefact_edges
+                        # might be redundant in a P_graph (two edges sharing an extremity)
 
-        # recursive call
-        for pn in self.nodes:
-            if pn.sub_cluster is not None:
-                pn.sub_cluster.recompute_all_interfaces_and_edges()
+            # recursive call
+            for pn in self.nodes:
+                if pn.sub_cluster is not None:
+                    pn.sub_cluster.recompute_all_interfaces_and_edges()
         
 
 class P_cluster():
@@ -1634,9 +1639,11 @@ class Partitioner_seq(Partitioner):
         # ** Add a temporary global source before get separators**
         tmp_global_source_pn = P_node(main_graph=pg,main_target="tmp_source")
         pg.nodes.insert(0,tmp_global_source_pn)
-        tmp_global_source_pn.users = first_nodes = pg.first_nodes
+        first_nodes = pg.first_nodes
         for first_pn in first_nodes:
-            first_pn.deps.add(tmp_global_source_pn)
+            if first_pn.deps == set():
+                first_pn.deps.add(tmp_global_source_pn)
+                tmp_global_source_pn.users.add(first_pn)
 
         seps_pn = RK_get_1_separators(pg)
 

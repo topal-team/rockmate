@@ -7,6 +7,7 @@ from rkgb import Atools_for_S_and_K
 from rkgb import Ptools
 from rkgb import Htools
 import inspect
+import time
 
 # ==========================
 # ====== OUTPUT CLASS ======
@@ -141,7 +142,8 @@ def make_all_graphs(model,
     ],
     verbose=False,
     impose_device=True,
-    check_device_is_gpu = True):
+    check_device_is_gpu = True,
+    print_time_rkgb=False):
     r"""
     ***** this function returns an objet with attributes *****
      -> .B_graph, .D_graph, .S_graph and .K_graph of the whole module
@@ -203,22 +205,39 @@ def make_all_graphs(model,
                     r_var.clone() if r_var is not None else None,
                 )
 
+    # -- measure time in each part --
+    last_time = time.time()
+    def print_time(where):
+        nonlocal last_time
+        if print_time_rkgb:
+            print(f"Time passed in {where} : {time.time()-last_time}")
+            last_time = time.time()
+
+
     # ============
     # === CORE ===
     # -- whole module --
     bg = Btools.make_B(model,dict_inputs,impose_device=impose_device,device=device) if bool_bg else None
+    print_time("make_B")
     dg = Dtools.B_to_D(bg,model,dict_inputs,device=device) if bool_dg else None
+    print_time("B_to_D")
     sg = Stools.D_to_S(dg,model=model,device=device) if bool_sg else None
+    print_time("D_to_S")
     kg = Ktools.S_to_K(sg,model,device=device) if bool_kg else None
+    print_time("S_to_K")
     # -- sequentialized --
     list_sg = Stools.cut(sg) if bool_list_sg else None
+    print_time("S_cut")
     if bool_list_kg:
         cc,list_kg,list_ano_S = Atools_for_S_and_K.S_list_to_K_list_eco(list_sg,model,device=device)
     else: list_kg = None ; cc = None ; list_ano_S = None
+    print_time("S_list_to_K_list via Atools")
     # -- hierarchical --
     # ps = Ptools.S_to_P(sg,model,partitioners) if bool_pg else None
     ps = Ptools.S_to_P(sg,model) if bool_pg else None
+    print_time("S_to_P")
     hc = Htools.P_and_K_to_H(ps,kg) if bool_hg else None
+    print_time("P_and_K_to_H")
 
     # -- restore running_stats --
     for (m,(r_mean,r_var)) in saved_running_stats.items():
