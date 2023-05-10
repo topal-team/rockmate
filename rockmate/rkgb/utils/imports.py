@@ -14,7 +14,7 @@ import warnings
 from copy import copy
 
 # == rotor == for utils/def_inspection
-import rkgb.utils.imports_from_rotor as irotor
+from . import imports_from_rotor as irotor
 #import rotor.timing # -> use .make_timer
 #import rotor.memory # -> use .MeasureMemory
 #from rotor.memory import MemSize as rotor_MemSize
