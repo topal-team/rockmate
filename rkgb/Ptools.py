@@ -595,7 +595,9 @@ class P_cluster():
         for sn in self.s_nodes:
             ano_info : Ano_S_node_Info = dict_mt_to_ano_info[sn.mt]
             charac_edges = []
-            for req_sn,used_targets in sn.deps.items():
+            sn_deps = list(sn.deps.items())
+            sn_deps.sort(key = lambda c : dict_mt_to_ano_info[c[0].mt].ano_id)
+            for req_sn,used_targets in sn_deps:
                 if req_sn not in self.s_nodes: continue
                 charac_used_targets = []
                 sort_key = lambda tar : ano_info.dict_tar_to_ano_nb[tar]
