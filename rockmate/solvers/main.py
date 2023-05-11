@@ -1,4 +1,4 @@
-import rkgb
+from rockmate import rkgb
 import numpy as np
 from copy import deepcopy
 from rockmate.rkgb.Htools import H_C_node, H_D_node, H_graph, H_cluster

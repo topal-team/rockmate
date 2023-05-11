@@ -354,7 +354,6 @@ class HRemat(torch.nn.Module):
                     grads = (torch.ones(1),) + grad_inputs
                     #  -> Clear the compiler (and Autograd clears ctx)
                     RkMod.compiler.storage = None
-                    print(grad_out_d.shape)
                     return grads
 
             # === END OF BACKWARD FUNCTION ===
