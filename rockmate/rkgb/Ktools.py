@@ -1001,9 +1001,11 @@ def aux_print_graph(dot,kg,uniq_num):
     # *** io - global relations ***
     kwargs = {"color":color_special , "style":"dashed"}
     inp_data = kg.input_kdn_data
-    node(inp_data.name,inp_data.name,**kwargs)
-    for user_inp_data in inp_data.users_only_global:
-        edge(inp_data.name,user_inp_data.name,**kwargs)
+    inp_users = list(inp_data.users_only_global)
+    if len(inp_users)!=0:
+        node(inp_data.name,inp_data.name,**kwargs)
+        for user_inp_data in inp_users:
+            edge(inp_data.name,user_inp_data.name,**kwargs)
     inp_grad = kg.input_kdn_grad
     if inp_grad is not None:
         node(inp_grad.name,inp_grad.name,**kwargs)
