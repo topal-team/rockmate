@@ -1,6 +1,6 @@
 import time
 import warnings
-from rockmate. import rkgb
+from rockmate import rkgb
 from rockmate.rkgb.utils import np
 from rockmate.rkgb.Htools import H_graph, H_cluster
 import math
