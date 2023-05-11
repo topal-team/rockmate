@@ -130,7 +130,6 @@ class Compiler:
         main_code = main_code.replace(op.main_target, f"_{op.main_target}")
 
         if not last_before_bwd:
-
             # inplace_code = inplace_code.replace(
             #     op.main_target, f"_{op.main_target}"
             # )
@@ -217,9 +216,9 @@ class Compiler:
         if rec:
             prev_i = i - self.op_name_list[:i][::-1].index(op.name) - 1
             input_names = []
-            for kdn_name in op.users_global:
-                if f"{kdn_name}" in self.op_name_list[prev_i:i]:
-                    input_names.append(kdn_name.split(" ")[0])
+            for kdn in op.users_global:
+                if f"{kdn.name}" in self.op_name_list[prev_i:i]:
+                    input_names.append(kdn.name.split(" ")[0])
             if input_names:
                 l.append(
                     self.fct_run_backward_with_inputs(
@@ -695,4 +694,3 @@ def save_all(kg):
                 alive_status[j] = 0
                 alive_list.append(alive_status.copy())
     return kn_list, alive_list
-
