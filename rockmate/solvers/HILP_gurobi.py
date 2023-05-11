@@ -121,6 +121,13 @@ class ModelGurobi:
             for i, hdn in enumerate(self.hgraph.list_hdn)
             if hdn.kdn.name in protected_names
         ]
+        if accurate_mem:
+            self.protected_indices += [
+                i
+                for i, hdn in enumerate(self.hgraph.list_hdn)
+                if hdn.kdn in self.hgraph.cluster.interfaces["outputs_kdn_data"]
+            ]
+
         self.input_grad_indices = [
             self.hgraph.list_hdn.index(hdn)
             for hdn in self.hgraph.inputs_hdn_grad
@@ -697,8 +704,9 @@ class ModelGurobi:
             for k in range(T):
                 if t == self.loss_idx and k == self.loss_idx:
                     # loss_idx = len(op_list)
-                    loss_op = Op(K_C_node("loss"))
-                    op_list.append(loss_op)
+                    # loss_op = Op(K_C_node("loss"))
+
+                    op_list.append(Op(self.hgraph.cluster.loss_kcn))
                 j = self.hcn2sub_c[k]
                 if self.sumR[(k, t)].getValue() == 1:
                     hcn = hgraph.list_hcn[k]

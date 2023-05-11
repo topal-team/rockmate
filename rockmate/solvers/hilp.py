@@ -35,6 +35,9 @@ class HILP(Solver):
     ):
         super().__init__(config)
 
+    # def __repr__(self):
+    #     return f"HILP solver"
+
     def can_solve(self, hg: H_graph):
         return len(hg.list_hcn) // 2 < self.config.nb_total_nodes
 
@@ -86,9 +89,6 @@ class HILP(Solver):
                 hcn.list_sched = []
 
     def solve(self, cluster: H_cluster, budgets=None, accurate_mem=False):
-        self.config.protected_names.extend(
-            [kdn.name for kdn in cluster.interfaces["outputs_kdn_data"]]
-        )
         list_op_sched = []
         if budgets is None:
             self.budgets = get_cluster_budget(

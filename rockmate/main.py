@@ -130,9 +130,7 @@ class HRemat(torch.nn.Module):
             warnings.warn("no feasible schedule is found")
         else:
             self.op_sched = list_solutions[
-                np.argmin(
-                    sum(op_sched.time) for op_sched in self.list_solutions
-                )
+                np.argmin(sum(op_sched.time) for op_sched in list_solutions)
             ]
             self.get_compiled_fct()
         self.list_solutions.extend(list_solutions)
@@ -309,7 +307,19 @@ class HRemat(torch.nn.Module):
                 RkMod.compiler.storage = storage
                 # -> Put grad_out in out.grad (Rem 4)
                 out = RkMod.compiler.get_val(RkMod.rkgb_res.D_graph.outputs[0])
-                out.backward(grad_out_d)  #  -> set out.grad cleanly
+                # out.backward(grad_out_d)  #  -> set out.grad cleanly
+                # save_before = torch.cuda.memory_allocated()
+                out.grad = grad_out_d.as_strided(
+                    out.shape, out.stride(), out.storage_offset()
+                )
+                # print(torch.cuda.memory_allocated() - save_before)
+                # if (
+                #     hasattr(grad_out_d, "_base")
+                #     and grad_out_d._base is not None
+                # ):
+                #     print("has base")
+                grad_out_d.data = torch.empty(0)
+                # print(out.grad.shape)
                 # remember that forward returned out_d not out
 
                 #  * record_mem stuff *
@@ -344,6 +354,7 @@ class HRemat(torch.nn.Module):
                     grads = (torch.ones(1),) + grad_inputs
                     #  -> Clear the compiler (and Autograd clears ctx)
                     RkMod.compiler.storage = None
+                    print(grad_out_d.shape)
                     return grads
 
             # === END OF BACKWARD FUNCTION ===

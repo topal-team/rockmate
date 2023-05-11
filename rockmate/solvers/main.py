@@ -147,9 +147,9 @@ def get_cluster_budget(
 
 def solve_recursive(h_cluster: H_cluster, list_solvers=[], skip_self=False):
     # assume it's representee
-    print(h_cluster.name)
+    # print(h_cluster.name)
     for hg in h_cluster.possible_hg:
-        print(hg.name)
+        # print(hg.name)
         for hcn in hg.list_hcn:
             if (
                 hcn.is_fwd
