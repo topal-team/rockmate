@@ -1,6 +1,6 @@
 import time
 import torch
-import rkgb
+from rockmate. import rkgb
 import os
 from rockmate.rkgb.utils import print_debug, np, irotor
 from rockmate.rkgb.utils.global_vars import ref_verbose, solver_name
