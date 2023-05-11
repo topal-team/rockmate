@@ -342,6 +342,15 @@ class S_graph(RK_graph):
             if all(not dict_info[used_tgt].requires_grad
                    for used_tgt in used_targets):
                 S_edges.discard_inplace(self.init_node.users,user_sn)
+        # We need at least one first node = one user of init_node
+        # -> Otherwise weird graph 
+        # -> And dangerous for Rk_get_1_separators
+        if len(self.init_node.users)==0:
+            all_without_deps = [
+                sn for sn in self.nodes 
+                if len(sn.deps)==0 ]
+            first_sn = min(all_without_deps,key=lambda sn : sn.get_num())
+            self.init_node.users[first_sn] = set()
                 
 
     def unhook_special_output_node(self):
@@ -1004,7 +1013,7 @@ def aux_print_graph(dot,sg : S_graph,uniq_num):
         else:
             # "input" -> first_nodes
             for user_sn,used_targets in ino_users:
-                edge("input",user_sn.mt,used_targets,style="dashed")
+                edge("in)put",user_sn.mt,used_targets,style="dashed")
 
     # -- outputs --
     node("output",f"OUTPUT",color="green",style="dashed")

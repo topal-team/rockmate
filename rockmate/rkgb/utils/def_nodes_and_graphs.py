@@ -380,7 +380,8 @@ def RK_get_1_separators(g: RK_graph):
 
     separators = []
     while to_be_visited!=[]:
-        n = to_be_visited.pop()
+        n = max(to_be_visited,key=lambda n : n.get_num())
+        to_be_visited.remove(n)
         seen.remove(n)
         if seen==set():
             if g.does_node_requires_grad(n):

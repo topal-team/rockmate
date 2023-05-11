@@ -1197,10 +1197,13 @@ class Partitioner_bottom_to_top_1(Partitioner):
         _all_options = set(all_options)
         dict_info = pg.dict_info
         for opt in _all_options:
+            set_group = set(opt.group)
             if all(not pn.does_requires_grad(dict_info)
                    for pn in opt.group):
                 all_options.remove(opt)
-
+            elif all(pn.deps.issubset(set_group)
+                     for pn in opt.group):
+                all_options.remove(opt)
 
         # ** main loop **
         while all_options != set():
@@ -1566,6 +1569,9 @@ class Partitioner_bottom_to_top_2(Partitioner):
         for opt in _all_options:
             if all(not pn.does_requires_grad(dict_info)
                    for pn in opt.group):
+                all_options.remove(opt)
+            elif all(pn.deps.issubset(opt.set_group)
+                     for pn in opt.group):
                 all_options.remove(opt)
 
 
