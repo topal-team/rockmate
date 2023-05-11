@@ -1013,7 +1013,7 @@ def aux_print_graph(dot,sg : S_graph,uniq_num):
         else:
             # "input" -> first_nodes
             for user_sn,used_targets in ino_users:
-                edge("in)put",user_sn.mt,used_targets,style="dashed")
+                edge("input",user_sn.mt,used_targets,style="dashed")
 
     # -- outputs --
     node("output",f"OUTPUT",color="green",style="dashed")

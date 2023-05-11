@@ -181,7 +181,7 @@ class P_node(RK_node):
             main_target = None,
             sub_graph   = None, # FOR DYNAMIC PARTITIONING
             sn          = None):
-        super().__init__("P")
+        super().__init__("P",other_obj=main_graph)
         self.main_graph  = main_graph
         self.sub_cluster = sub_c = sub_cluster
         self.main_target = mt = main_target
@@ -969,7 +969,10 @@ class P_Dynamic_manipulation(): # only contains staticmethod
         return all_snodes
             
 
-class Partitioner_bottom_to_top_1(Partitioner):
+class Partitioner_bottom_to_top_1(Partitioner): 
+    # /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\
+    # /!\ NOT DETERMINISTIC AND SOON NO LONGER MAINTAINED /!\
+    # /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\
     class Option():
         def __init__(self,group):
             self.group = group
@@ -1059,23 +1062,6 @@ class Partitioner_bottom_to_top_1(Partitioner):
         for seq_nb,sequence in all_sequences:
             if not pg.does_node_requires_grad(sequence[-1]):
                 del dict_sequences[seq_nb]
-
-        """ # NOT MAINTAINED
-        for seq_nb,sequence in all_sequences:
-            seq_len = len(sequence)
-            if seq_len > self.config.max_nodes_per_sub_graph:
-                del dict_sequences[seq_nb]
-                nb_seq = math.ceil(seq_len/self.config.max_nodes_per_sub_graph)
-                sub_seq_len = math.ceil(seq_len/nb_seq)
-                for first in range(0,seq_len,sub_seq_len):
-                    end = min(first + sub_seq_len,seq_len)
-                    sub_seq = sequence[first:end]
-                    tot_nb_seq += 1
-                    sub_seq_nb = tot_nb_seq
-                    dict_sequences[sub_seq_nb] = sub_seq
-                    for pn in sub_seq:
-                        dict_seq_nb[pn.main_target] = sub_seq_nb
-        """
 
         # ** Group each sequence **
         for seq_nb,sequence in dict_sequences.items():
@@ -1361,10 +1347,13 @@ class Partitioner_bottom_to_top_2(Partitioner):
                 not_last_nodes,tot_mem_internal \
                     = option.get_not_last_nodes_and_tot_mem_internal()
                 if len(not_last_nodes)==0:
-                    return 0
+                    value = 0
                 else: 
-                    return (tot_mem_internal
+                    value = (tot_mem_internal
                     * len(not_last_nodes)**-value_power_not_last)
+                # effort for determinism -> we break ties
+                num_determinism = min(pn.unique_id for pn in option.group)
+                return (value,num_determinism)
             return value_fct
         
         def get_default_option_stop_fct(self):
