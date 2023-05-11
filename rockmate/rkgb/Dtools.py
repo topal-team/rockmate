@@ -75,11 +75,9 @@ class D_graph(RK_graph):
 
     def prepare_cut(self):
         # in case, after simplifications, we will cut / sequentialize
-        # we need to protect the separators from simplifications
-        # but in case of chain of separators, we only protect
-        # the last one (we will keep a good structure, while reducing
-        # the number of blocs)
-        all_seps = RK_get_1_separators(self)
+        # we need to protect the separators from "cheap" simplifications
+        seps = RK_get_1_separators(self)
+        """ # TO REMOVE
         important_sep = []
         for i in range(len(all_seps)-1):
             sep = all_seps[i]
@@ -88,6 +86,8 @@ class D_graph(RK_graph):
         important_sep.append(all_seps[-1])
         print_debug([sep.target for sep in important_sep])
         for sep in important_sep: sep.protected = True
+        """
+        for sep in seps: sep.protected = True
 
 # ==========================
 

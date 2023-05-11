@@ -24,7 +24,11 @@ from . import Ktools
 # ==================
 
 class Graph_Translator():
-    def __init__(self,sg : Stools.S_graph=None,model=None,reverse_translator=None):
+    def __init__(self,
+                 sg : Stools.S_graph=None,
+                 model=None,
+                 reverse_translator=None
+        ):
         """ There are two ways to __init__ a graph_translator,
         either you give a S_graph and it creates a translator to
         anonymize the graph, or you give it a translator and it
@@ -261,7 +265,7 @@ class Graph_Translator():
                         info.is_inplace = False
                         info.is_view = False
             for attr in [
-                "inputs","outputs",
+                "inputs","whole_model_inputs","outputs",
                 "dict_info","dict_rand"]:
                 setattr(sg,attr,translate(getattr(sg,attr)))
             new_dict_constants = dict()
@@ -354,8 +358,9 @@ def S_list_to_K_list_eco(
     cc_num_to_repr_sg_num = []
     for sg_num in range(nb_sg):
         sg = list_sg[sg_num]
-        list_translator[sg_num] = translator = (
-            Graph_Translator(sg,model=model))
+        list_translator[sg_num] \
+            = translator \
+            = Graph_Translator(sg,model=model)
         ano_sg = translator.translate(sg)
         b = False ; cc_num = 0 ; nb_cc = len(tab_S_repr_cc)
         while not b and cc_num < nb_cc:

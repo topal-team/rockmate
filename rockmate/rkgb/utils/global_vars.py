@@ -57,17 +57,15 @@ list_rand_fct = [
 # -> ONLY used for root nodes
 # -> ie nodes without dependencies
 
-list_cheap_fct = [
+list_optional_cheap_fct = [
     "torch.add",
     "torch.sub",
     "torch.mul",
     "torch.div",
     "torch.floor_divide",
 ]
-# -> OPTIONAL
 
-list_cheap_fct.extend(["list constructor", "tuple constructor"])
-# because we treat them in the same way
+list_cheap_fct = ["list constructor", "tuple constructor"]
 
 list_view_fct = [
     "torch.adjoint",

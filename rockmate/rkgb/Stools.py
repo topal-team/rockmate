@@ -262,9 +262,7 @@ class S_node(RK_node):
         S_edges.make_users_using_deps(self)
         S_edges.make_deps_using_users(self)
         if aux_sn in sg.output_nodes:
-            raise Exception(
-                "An output_node has been inserted/simplified ?! Shouldn't happen")
-            #sg.output_nodes[sg.output_nodes.index(aux_sn)] = self
+            sg.output_nodes[sg.output_nodes.index(aux_sn)] = self
     # -----
 
     def clear_children_artefact(self):
@@ -312,6 +310,7 @@ class S_node(RK_node):
 
 class S_graph(RK_graph):
     artefact_edges : list[tuple[S_node,S_node,set[str]]] = None
+    whole_model_inputs = []
     def __init__(self,dg : D_graph = None):
         super().__init__("S")
         if not (dg is None): self.inherit_base_attributes(dg)
@@ -333,10 +332,18 @@ class S_graph(RK_graph):
             inputs.update(used_targets)
             # -> labels over the edges
         self.inputs = list(inputs)
+        self.whole_model_inputs = self.inputs
 
     def unhook_init_node(self):
-        for user_sn in self.init_node.users.keys():
-            del user_sn.deps[self.init_node]
+        dict_info = self.dict_info
+        init_node_users = list(self.init_node.users.items())
+        for user_sn,used_targets in init_node_users:
+            S_edges.discard_inplace(user_sn.deps,self.init_node)
+            if all(not dict_info[used_tgt].requires_grad
+                   for used_tgt in used_targets):
+                S_edges.discard_inplace(self.init_node.users,user_sn)
+                
+
     def unhook_special_output_node(self):
         assert(len(self.output_nodes)==1)
         output_node = self.output_nodes[0]
@@ -586,8 +593,10 @@ def simplify_cheap(sg : S_graph):
     # from root to leaves
     for sn in sg.nodes:
         if ( not (sn in sg.output_nodes)
-         and sn.main_fct in global_vars.list_cheap_fct
-         and not sn.protected):
+         and    (sn.main_fct in global_vars.list_cheap_fct
+            or 
+                (sn.main_fct in global_vars.list_optional_cheap_fct and not sn.protected)
+         )):
             simplify_node(sn)
     sg.clear()
 
@@ -656,7 +665,6 @@ def simplify_view(sg : S_graph):
     # from root to leaves
     sg.init_node.is_artefact = True
     for sn in sg.nodes:
-        if sn in sg.output_nodes: continue
         sn_info = sg.dict_info[sn.main_target]
         if (sn_info.is_view
         or  sn.main_fct in global_vars.list_view_fct # -> in case of viewing operations over parameters
@@ -829,6 +837,7 @@ def copy_S_graph(sg : S_graph):
     # -> a copy of sg with fresh nodes
     new_sg = S_graph()
     new_sg.inherit_base_attributes(sg)
+    new_sg.whole_model_inputs = sg.whole_model_inputs
     new_sg.node_unique_id_generator = copy(sg.node_unique_id_generator)
     dict_nodes = {}
     new_sg.nodes = new_nodes = []
@@ -877,19 +886,17 @@ def cut(sg : S_graph): # -> list of S_graph
     sg = copy_S_graph(sg) # to protect from side effects
     # -> Add a temporary global source before get separators
     # -> Above all the node which don't have any deps
-    tmp_source = S_node(other_obj=sg)
-    sg.nodes.insert(0,tmp_source) # it's not the original sg, no risk
+    sg.nodes.insert(0,sg.init_node) # it's not the original sg, no risk
     for first_sn,str_set in sg.init_node.users.items():
-        if first_sn.deps == dict():
-            S_edges.add_edge_inplace(tmp_source,first_sn,str_set)
+        S_edges.add_inplace(first_sn.deps,sg.init_node,str_set)
 
     seps = RK_get_1_separators(sg)
     
     # -> remove tmp_source
     for first_sn in sg.init_node.users.keys():
-        S_edges.discard_inplace(first_sn.deps,tmp_source)
+        S_edges.discard_inplace(first_sn.deps,sg.init_node)
     
-    seps = [tmp_source] + seps
+    seps = [sg.init_node] + seps
     # multiple output_nodes
     if not (seps[-1] is sg.nodes[-1]):
         seps.append(sg.nodes[-1])
@@ -897,6 +904,7 @@ def cut(sg : S_graph): # -> list of S_graph
     list_sg = []
     for block_nb in range(1,len(seps)):
         new_sg = S_graph()
+        new_sg.whole_model_inputs = sg.whole_model_inputs
         new_sg.node_unique_id_generator = copy(sg.node_unique_id_generator)
         new_sg.inherit_base_attributes(sg)
         list_sg.append(new_sg)
@@ -913,18 +921,19 @@ def cut(sg : S_graph): # -> list of S_graph
             new_sg.init_node = sg.init_node
             new_sg.inputs = sg.inputs
         else:
-            ino = S_node(
-                main_target=f"init_node of bloc, should NEVER be used",
-                other_obj=new_sg)
+            ino = copy_S_node(sg.init_node)
+            # -> we want the init_code but NOT the deps
             new_sg.init_node = ino
             inputs = set()
-            for (user_sn,str_set) in first_node.users.items():
+            first_node_users = list(first_node.users.items())
+            for (user_sn,str_set) in first_node_users:
                 inputs.update(str_set)
                 S_edges.discard_inplace(user_sn.deps,first_node)
                 #S_edges.add_inplace(user_sn.deps,ino,str_set)
                 S_edges.add_inplace(ino.users,user_sn,str_set)
                 if user_sn.is_artefact:
                     ino.insert(user_sn,strong=True,sg=sg)
+                    nodes.remove(user_sn)
             for user_sn in ino.users.keys(): # Unhook ino (need due to `ino.insert`)
                 S_edges.discard_inplace(user_sn.deps,ino)
             first_node.users = dict() # previous bloc's output node
@@ -970,8 +979,8 @@ def aux_print_S_graph_list_name(lsg : S_graph_list,name=None):
 def aux_print_graph(dot,sg : S_graph,uniq_num):
     def uni(tar): return f"_{uniq_num}_{tar}"
     def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
-    def edge(i1,i2,str_set):
-        dot.edge(uni(i1),uni(i2),label="\n".join(str_set))
+    def edge(i1,i2,str_set,**kwargs):
+        dot.edge(uni(i1),uni(i2),label="\n".join(str_set),**kwargs)
     for sn in sg.nodes:
         if sn.is_artefact:
             node(sn.main_target,sn.get_code(),style="dashed")
@@ -981,19 +990,21 @@ def aux_print_graph(dot,sg : S_graph,uniq_num):
             edge(req_sn.main_target,sn.main_target,str_set)
 
     # -- inputs --
-    node("input",f"INPUT",color="green",style="dashed")
     ino_mt = sg.init_node.main_target
     ino_code = sg.init_node.get_code()
-    if ino_code != "":
-        # "input" -> init_node -> first_nodes
-        node(ino_mt,ino_code,style="dashed")
-        edge("input",ino_mt,sg.inputs)
-        for user_sn,used_targets in sg.init_node.users.items():
-            edge(ino_mt,user_sn.mt,used_targets)
-    else:
-        # "input" -> first_nodes
-        for user_sn,used_targets in sg.init_node.users.items():
-            edge("input",user_sn.mt,used_targets)
+    ino_users = list(sg.init_node.users.items())
+    if len(ino_users)!=0:
+        node("input",f"INPUT",color="green",style="dashed")
+        if ino_code != "":
+            # "input" -> init_node -> first_nodes
+            node(ino_mt,ino_code,style="dashed")
+            edge("input",ino_mt,sg.inputs)
+            for user_sn,used_targets in ino_users:
+                edge(ino_mt,user_sn.mt,used_targets,style="dashed")
+        else:
+            # "input" -> first_nodes
+            for user_sn,used_targets in ino_users:
+                edge("input",user_sn.mt,used_targets,style="dashed")
 
     # -- outputs --
     node("output",f"OUTPUT",color="green",style="dashed")

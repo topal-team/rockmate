@@ -14,10 +14,9 @@ import gc
 def generate_our_global(sg,model,device):
     our_global = globals().copy()
     our_global.update(sg.dict_constants)
-    #print([s for s in our_global if s[:5]=="_cst_"])
     our_global["self"] = model
     our_global["device"] = device
-    for inp in sg.inputs:
+    for inp in sg.inputs+sg.whole_model_inputs:
         info = sg.dict_info[inp]
         x = def_info.generate_val(info,device)
         our_global[inp]=x

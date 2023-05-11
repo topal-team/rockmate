@@ -326,6 +326,9 @@ class P_graph(RK_graph):
     def recompute_edges(self,sg : S_graph):
         # NOT OPTIMAL AT ALL -> To improve if to slow
         # find artefact_edges in P_graph
+        # Moreover, recomputing edges is not necessary
+        # it's just that it's cleaner to have an accurate P_graph
+        # at the end
         if not self.without_artefacts:
             self.without_artefacts = True
             all_related_to_artefacts = set().union(
@@ -342,16 +345,35 @@ class P_graph(RK_graph):
                         and sn in pn.sub_cluster.s_nodes):
                         dict_where[sn] = pn
             
-            # delete this edges
+            # search edges we might have to delete
+            suspicious_edges : set[tuple[P_node,P_node]] = set()
             for (req_sn,user_sn,_) in sg.artefact_edges:
                 if req_sn in dict_where and user_sn in dict_where:
                     req_pn = dict_where[req_sn]
                     user_pn = dict_where[user_sn]
                     if req_pn is not user_pn:
-                        user_pn.deps.discard(req_pn)
-                        req_pn.users.discard(user_pn)
-                        # `discard` not `remove` because several sg.artefact_edges
-                        # might be redundant in a P_graph (two edges sharing an extremity)
+                        suspicious_edges.add((req_pn,user_pn))
+
+            # for suspicious edges, we need to see if there is any
+            # S edge from one to the other (all artefact edges have
+            # been deleted, that's why we need to recompute P edges)
+            for req_pn,user_pn in suspicious_edges:
+                if req_pn.sub_cluster is not None:
+                    all_sn_req_pn = req_pn.sub_cluster.s_nodes
+                else:
+                    all_sn_req_pn = [req_pn.sn]
+                if user_pn.sub_cluster is not None:
+                    all_sn_user_pn = user_pn.sub_cluster.s_nodes
+                else:
+                    all_sn_user_pn = [user_pn.sn]
+                bool_keep_edge = False
+                for sn_in_req_pn in all_sn_req_pn:
+                    for user_sn in sn_in_req_pn.users:
+                        if user_sn in all_sn_user_pn:
+                            bool_keep_edge = True
+                if not bool_keep_edge:
+                    req_pn.users.remove(user_pn)
+                    user_pn.deps.remove(req_pn)
 
             # recursive call
             for pn in self.nodes:
@@ -1033,6 +1055,12 @@ class Partitioner_bottom_to_top_1(Partitioner):
                     dict_sequences[tot_nb_seq] = [pn,user_pn]
         # ** split too long sequences **
         all_sequences = list(dict_sequences.items())
+
+        for seq_nb,sequence in all_sequences:
+            if not pg.does_node_requires_grad(sequence[-1]):
+                del dict_sequences[seq_nb]
+
+        """ # NOT MAINTAINED
         for seq_nb,sequence in all_sequences:
             seq_len = len(sequence)
             if seq_len > self.config.max_nodes_per_sub_graph:
@@ -1047,6 +1075,7 @@ class Partitioner_bottom_to_top_1(Partitioner):
                     dict_sequences[sub_seq_nb] = sub_seq
                     for pn in sub_seq:
                         dict_seq_nb[pn.main_target] = sub_seq_nb
+        """
 
         # ** Group each sequence **
         for seq_nb,sequence in dict_sequences.items():
@@ -1165,8 +1194,13 @@ class Partitioner_bottom_to_top_1(Partitioner):
                     else:
                         dict_options_pn_is_part_of[pn] = set([opt])
 
-        # for opt in all_options:
-            # print(math.exp((config.option_value_fct(opt)+config.max_nodes_per_sub_graph)/5))
+        _all_options = set(all_options)
+        dict_info = pg.dict_info
+        for opt in _all_options:
+            if all(not pn.does_requires_grad(dict_info)
+                   for pn in opt.group):
+                all_options.remove(opt)
+
 
         # ** main loop **
         while all_options != set():
@@ -1181,6 +1215,7 @@ class Partitioner_bottom_to_top_1(Partitioner):
                 for pn in best_group:
                     opts = list(dict_options_pn_is_part_of[pn])
                     for opt in opts:
+                        if opt not in all_options: continue
                         group = opt.group
                         # Case 1: one element of this group has already been replaced
                         if new_pn in group: 
@@ -1526,6 +1561,14 @@ class Partitioner_bottom_to_top_2(Partitioner):
             +   self.find_flow_options(pg)
         )
 
+        _all_options = list(all_options)
+        dict_info = pg.dict_info
+        for opt in _all_options:
+            if all(not pn.does_requires_grad(dict_info)
+                   for pn in opt.group):
+                all_options.remove(opt)
+
+
         dict_options_pn_is_part_of = dict((pn,set()) for pn in pg.nodes)
         # P_node -> Option set
         # After each merge, we actualize all the options which 
@@ -1745,14 +1788,6 @@ def print_P_graph(pg : P_graph,name=None,open=True,render_format="svg",dot=None,
     def edge(i1,i2,**kwargs): dot.edge(uni(i1),uni(i2), **kwargs)
     # ----- Core -----
     cluster : P_cluster = pg.cluster
-    node(
-        "inputs",
-        f"INPUTS:\n"+"\n".join(cluster.inputs_mt),
-        color=color_special, style="dashed")
-    node(
-        "outputs",
-        f"OUTPUTS:\n"+"\n".join(cluster.outputs_mt),
-        color=color_special, style="dashed")
     for pn in pg.nodes:
         if pn.is_leaf:
             node(pn.name,pn.name,color=color_leaf)
@@ -1763,10 +1798,25 @@ def print_P_graph(pg : P_graph,name=None,open=True,render_format="svg",dot=None,
                 color=color_sub_graph)
         for req_pn in pn.deps:
             edge(req_pn.name,pn.name,color=color_edge)
-    for pn in pg.first_nodes:
-        edge("inputs",pn.name,color=color_edge)
+    
+    # -> input
+    first_nodes = list(pg.first_nodes)
+    kwargs = dict(color = color_edge,style="dashed")
+    if first_nodes != []:
+        node(
+            "inputs",
+            f"INPUTS:\n"+"\n".join(cluster.inputs_mt),
+            color=color_special, style="dashed")
+        for pn in first_nodes:
+            edge("inputs",pn.name,**kwargs)
+
+    # -> output
+    node(
+        "outputs",
+        f"OUTPUTS:\n"+"\n".join(cluster.outputs_mt),
+        color=color_special, style="dashed")
     for pn in pg.output_nodes:
-        edge(pn.name,"outputs",color=color_edge)
+        edge(pn.name,"outputs",**kwargs)
     # ----- render -----
     if render:
         small_fcts.graph_render(dot,open,"P",render_format)
