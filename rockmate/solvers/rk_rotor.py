@@ -2,6 +2,7 @@ import time
 import warnings
 from rockmate import rkgb
 from rockmate.rkgb.utils import np
+from rockmate.rkgb.Ktools import K_C_node
 from rockmate.rkgb.Htools import H_graph, H_cluster
 import math
 from .main import Solver, get_cluster_budget
@@ -185,7 +186,9 @@ class RK_rotor(Solver):
 
                 for op_sched in hcn.sub_cluster.get_sched():
                     fwd_op_list = hcn.sub_cluster.translate_op_list(
-                        ff_op_list + op_sched.op_list[: op_sched.loss_idx + 1]
+                        ff_op_list
+                        + op_sched.op_list[: op_sched.loss_idx]
+                        + [Op(K_C_node("loss"))]
                     )
                     bwd_op_list = hcn.sub_cluster.translate_op_list(
                         op_sched.op_list[op_sched.loss_idx :]
