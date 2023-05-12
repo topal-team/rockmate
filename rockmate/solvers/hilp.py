@@ -27,8 +27,8 @@ class HILP(Solver):
             protected_names=["sources data", "sources grad"],
             nb_total_sched=100,
             nb_total_nodes=20,
-            nb_bdg_save = 6,
-            nb_bdg_peak = 4
+            nb_bdg_save=6,
+            nb_bdg_peak=4,
         ):
             self.mem_unit = mem_unit
             self.gurobi_params = gurobi_params
@@ -48,7 +48,7 @@ class HILP(Solver):
     #     return f"HILP solver"
 
     def can_solve(self, hg: H_graph):
-        return len(hg.list_hcn) // 2 < self.config.nb_total_nodes
+        return len(hg.list_hcn) // 2 <= self.config.nb_total_nodes
 
     def get_budget_list(self, hgraph: H_graph):
         min_bdg = get_hgraph_budget_lb(hgraph)
