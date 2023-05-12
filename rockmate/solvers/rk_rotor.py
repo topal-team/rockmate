@@ -151,7 +151,7 @@ class RK_rotor(Solver):
                     ff_op_list += f_hcn.ff_op_list
 
                 fwd_loss = Op(rkgb.Ktools.K_C_node("loss"), disabled=True)
-                fn_op_list = ff_op_list.copy() + hcn.ff_op_list + [fwd_loss]
+                fn_op_list = ff_op_list.copy() + hcn.ff_op_list  # + [fwd_loss]
                 first_hcn = hcn if not no_grad_hcns else no_grad_hcns[0]
                 # assume single input
 
@@ -161,7 +161,7 @@ class RK_rotor(Solver):
                     if op.kn.name == input_kdn_data.name:
                         print(op.kn.name)
                         op.disabled = True
-                fc_op_list = ff_op_list.copy() + hcn.ff_op_list + [fwd_loss]
+                fc_op_list = ff_op_list.copy() + hcn.ff_op_list  # + [fwd_loss]
 
                 no_grad_hcns = []
 
@@ -186,12 +186,10 @@ class RK_rotor(Solver):
 
                 for op_sched in hcn.sub_cluster.get_sched():
                     fwd_op_list = hcn.sub_cluster.translate_op_list(
-                        ff_op_list
-                        + op_sched.op_list[: op_sched.loss_idx]
-                        + [Op(K_C_node("loss"))]
-                    )
+                        ff_op_list + op_sched.op_list[: op_sched.loss_idx]
+                    )  # + [Op(K_C_node("loss"))]
                     bwd_op_list = hcn.sub_cluster.translate_op_list(
-                        op_sched.op_list[op_sched.loss_idx :]
+                        op_sched.op_list[op_sched.loss_idx + 1 :]
                     )  # start with loss op
                     for op in bwd_op_list:
                         # By default, bwd does not delete input data/grad
@@ -214,7 +212,9 @@ class RK_rotor(Solver):
                         correct_overhead=False,
                     )  # so that solution can be read
                     Full_sched = OpSchedule(
-                        fwd_op_list[:-1] + bwd_op_list,
+                        fwd_op_list
+                        + [Op(hcn.sub_cluster.loss_kcn)]
+                        + bwd_op_list,
                         len(fwd_op_list) - 1,
                         # cluster=hcn.sub_cluster,
                         refine=False,
