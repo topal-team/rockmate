@@ -90,7 +90,8 @@ class HRemat(torch.nn.Module):
         self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)
         self.dict_output_viewing_code = dict(
             (out_mt,ast_to_str(view_code)) 
-            for (out_mt,view_code) in self.rkgb_res.K_graph.dict_output_viewing_code)
+            for (out_mt,view_code) \
+            in self.rkgb_res.K_graph.dict_output_viewing_code.items())
         self.outputs_wrapping_code = \
             ast_to_str(self.rkgb_res.K_graph.outputs_wrapping_code)
         self.output = self.rkgb_res.K_graph.list_outputs_kdn_data[0]
@@ -279,8 +280,11 @@ class HRemat(torch.nn.Module):
                 # -> Get the output
                 outs = [RkMod.compiler.get_val(out_mt) 
                         for out_mt in RkMod.rkgb_res.S_graph.outputs]
+                if len(outs)==1:
+                    return outs[0]
+                else:
+                    return tuple(outs)
                 # -> Remember that out have been detached from the rest during exec
-                return outs
                 """
                 ctx.set_materialize_grads(True) # as the default
                 # -> so we don't have to check if grad_output is None
@@ -528,7 +532,8 @@ class CheckpointedModule(torch.nn.Module):
         self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)
         self.dict_output_viewing_code = dict(
             (out_mt,ast_to_str(view_code)) 
-            for (out_mt,view_code) in self.rkgb_res.K_graph.dict_output_viewing_code)
+            for (out_mt,view_code) \
+            in self.rkgb_res.K_graph.dict_output_viewing_code.items())
         self.output = self.rkgb_res.K_graph.list_outputs_kdn_data[0]
         self.mem_limit = mem_limit
         self.gd = make_gd(self.device, self.original_mod, self.dict_constants)
@@ -796,13 +801,12 @@ class CheckpointedModule(torch.nn.Module):
                     else:
                         storage.ld[k] = v
                 #  -> Initialize the storage
-                for kg in RkMod.list_kg:
-                    for kdn in kg.list_kdn:
-                        storage.ld[kdn.main_target] = torch.empty(
-                            0,
-                            device=RkMod.device,
-                            requires_grad=kdn.info.requires_grad,
-                        )
+                for kdn in RkMod.rkgb_res.K_graph.list_kdn:
+                    storage.ld[kdn.main_target] = torch.empty(
+                        0,
+                        device=RkMod.device,
+                        requires_grad=kdn.info.requires_grad,
+                    )
 
                 #  *** EXECUTION PART ***
                 # -> Autograd turns off itself before giving use the control.
@@ -814,13 +818,13 @@ class CheckpointedModule(torch.nn.Module):
                     for l in RkMod.fwd_fct_list:
                         RkMod._exec(l)
                 # -> Get the output
-                out = RkMod.compiler.get_val(RkMod.rkgb_res.D_graph.outputs[0])
-                out_d = out.detach().requires_grad_(out.requires_grad)
-                # TODO multiple outputs
-                #  -> Clear the compiler
-                RkMod.compiler.storage = None
+                outs = [RkMod.compiler.get_val(out_mt) 
+                        for out_mt in RkMod.rkgb_res.S_graph.outputs]
+                if len(outs)==1:
+                    return outs[0]
+                else:
+                    return tuple(outs)
                 # -> Remember that out have been detached from the rest during exec
-                return out_d
                 """
                 ctx.set_materialize_grads(True) # as the default
                 # -> so we don't have to check if grad_output is None
@@ -846,15 +850,16 @@ class CheckpointedModule(torch.nn.Module):
             # === OUR BACKWARD FUNCTION ===
             @staticmethod
             @torch.autograd.function.once_differentiable
-            def backward(ctx, grad_out_d):  #  TODO multiple outputs
+            def backward(ctx, *grad_outs):  #  TODO multiple outputs
                 #  -> Reload the storage and out
                 storage = ctx.RK_Storage
                 RkMod.compiler.storage = storage
                 # -> Put grad_out in out.grad (Rem 4)
-                out = RkMod.compiler.get_val(RkMod.rkgb_res.D_graph.outputs[0])
-                out.backward(grad_out_d)  #  -> set out.grad cleanly
-                # remember that forward returned out_d not out
-
+                for out_mt,out_grad in zip(RkMod.rkgb_res.S_graph.outputs,grad_outs):
+                    out = RkMod.compiler.get_val(out_mt)
+                    out.grad = out_grad.view(out_grad.shape)
+                    out_grad.data = torch.empty(0)
+                    
                 #  * record_mem stuff *
                 if RkMod.exec_with_record_mem:
                     RkMod.output_size = irotor.tensorMsize(
@@ -929,9 +934,19 @@ class CheckpointedModule(torch.nn.Module):
                 name_of_inputs_which_req_grad
             )
             dummy_input = torch.ones(1).requires_grad_()
-            return self.autograd_Function.apply(
+            output_mt_values = self.autograd_Function.apply(
                 dummy_input, *inputs_which_req_grad
             )
+            for out_mt,out_mt_value \
+                in zip(self.rkgb_res.S_graph.outputs,output_mt_values):
+                view_code = self.dict_output_viewing_code[out_mt]
+                exec(view_code,self.gd,self.compiler.storage.ld)
+                # -> We access to out_mt_value directly in the storage
+            exec(self.outputs_wrapping_code,self.gd,self.compiler.storage.ld)
+            final_output = self.compiler.get_val(self.rkgb_res.D_graph.outputs[0])
+            #  -> Clear the compiler
+            self.compiler.storage = None
+            return final_output
 
     # === end of forward ===
 

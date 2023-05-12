@@ -381,6 +381,9 @@ class S_graph(RK_graph):
             )
             dict_view_code[out.mt] = viewing_code
             out.body_code = []
+            out.tensor_targets = list(
+                set([out.mt]+out.inplace_targets)\
+                .intersection(set(out.tensor_targets)))
             outputs.append(out.mt)
             
 
