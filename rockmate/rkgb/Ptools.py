@@ -251,10 +251,8 @@ class P_graph(RK_graph):
         return len(self.nodes)
     @property
     def total_size(self):
-        tot = 0
-        for pn in self.nodes:
-            tot += pn.total_size
-        return tot
+        return sum(pn.total_size for pn in self.nodes)
+
     @property
     def input_nodes(self):
         if self.pn_wrapping_it is None:
@@ -1270,13 +1268,6 @@ class Partitioner_bottom_to_top_2(Partitioner):
         def nb_sub_graphs(self):
             return sum(pn.sub_graph is not None for pn in self.group)
         
-        def get_not_last_nodes_and_tot_mem_internal(self):
-            not_last_nodes = [
-                pn for pn in self.group if pn.users.issubset(self.group)
-            ]
-            tot_mem_internal = sum([pn.mem_out for pn in not_last_nodes])
-            return not_last_nodes,tot_mem_internal
-        
         @staticmethod
         def utils_is_seq(list_nodes):
             for i in range(len(list_nodes)-1):
@@ -1307,7 +1298,9 @@ class Partitioner_bottom_to_top_2(Partitioner):
                 can_use_rotor = True,
                 estimate_coeff_size = 1,
                 estimate_coeff_sub_graph = 1,
-                value_power_not_last = 1.1 # RECOMMEND between 0 and 2
+                value_coeff_input_interfaces = 1,
+                value_coeff_output_interfaces = 1,
+                value_power_total_size = 0.5,
         ):
             self.max_len_seq = max_len_seq
             self.can_use_rotor = can_use_rotor
@@ -1323,8 +1316,11 @@ class Partitioner_bottom_to_top_2(Partitioner):
                 estimate_coeff_sub_graph
             )
             self.option_value_fct = self.get_default_option_value_fct(
-                value_power_not_last
+                value_coeff_input_interfaces,
+                value_coeff_output_interfaces,
+                value_power_total_size,
             )
+            # self.option_value_fct = self.old_get_default_option_value_fct()
             self.option_stop_fct = self.get_default_option_stop_fct()
             self.is_top_graph_ok = self.get_default_is_top_graph_ok(
                 estimate_coeff_size,
@@ -1342,10 +1338,14 @@ class Partitioner_bottom_to_top_2(Partitioner):
                 )
             return estimate_fct
 
-        def get_default_option_value_fct(self,value_power_not_last):
+        def old_get_default_option_value_fct(self,
+                    value_power_not_last = 1.1, # RECOMMEND between 0 and 2
+                    ):
             def value_fct(option : Partitioner_bottom_to_top_2.Option):
-                not_last_nodes,tot_mem_internal \
-                    = option.get_not_last_nodes_and_tot_mem_internal()
+                not_last_nodes = [
+                    pn for pn in option.group if pn.users.issubset(option.group)
+                ]
+                tot_mem_internal = sum(pn.mem_out for pn in not_last_nodes)
                 if len(not_last_nodes)==0:
                     value = 0
                 else: 
@@ -1356,8 +1356,40 @@ class Partitioner_bottom_to_top_2(Partitioner):
                 return (value,num_determinism)
             return value_fct
         
+        def get_default_option_value_fct(self,
+                value_coeff_input_interfaces = 1,
+                value_coeff_output_interfaces = 1,
+                value_power_total_size = 0.5,
+                ):
+            def value_fct(option : Partitioner_bottom_to_top_2.Option):
+                inputs_pn = set().union(
+                    *[pn.deps_global - option.set_group 
+                      for pn in option.group]
+                )
+                outputs_pn = set(
+                    pn for pn in option.group
+                    if not pn.users_global.issubset(option.set_group)
+                )
+                inputs_mem = sum(pn.mem_out for pn in inputs_pn if pn.sn is not None)
+                outputs_mem = sum(pn.mem_out for pn in outputs_pn if pn.sn is not None)
+                total_size = sum(pn.total_size for pn in option.group)
+                # /!\ NEGATIVE VALUE
+                # -> We will take the max -> = the less negative one
+                value = - (
+                        (   inputs_mem * value_coeff_input_interfaces
+                        +  outputs_mem * value_coeff_output_interfaces)
+                    *
+                        total_size**value_power_total_size
+                )
+                # effort for determinism -> we break ties
+                num_determinism = min(pn.unique_id for pn in option.group)
+                return (value,num_determinism)
+            return value_fct
+        
         def get_default_option_stop_fct(self):
             def stop_round(option : Partitioner_bottom_to_top_2.Option):
+                if len(option.group)==1:
+                    return True
                 if self.can_use_rotor and option.is_seq():
                     return False
                 else:
