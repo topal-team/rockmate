@@ -567,8 +567,6 @@ def aux_build_S_to_K(sg : S_graph,
             kdn_data.mem = res.mem_run_fwd
         else:
             kdn_data.mem = res.mem_fgt_fwd
-        if do_inspection and kdn_data.mem < info.memsize:
-            print(f"PROBLEM WITH {kdn_data.mt}")
 
         # -> bwd ins
         if info.requires_grad:
