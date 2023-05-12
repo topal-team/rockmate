@@ -65,7 +65,7 @@ class HRemat(torch.nn.Module):
         rkgb_kwargs=dict(
             partitioners=[
                 Ptools.Partitioner_bottom_to_top_2(),
-                Ptools.Partitioner_seq(),
+                # Ptools.Partitioner_seq(),
             ],
         ),
     ):
@@ -120,12 +120,17 @@ class HRemat(torch.nn.Module):
                 self.solver_recursive()
         list_solutions = []
         for solver in list_solvers:
-            kwargs = (
-                dict(accurate_mem=True) if isinstance(solver, HILP) else dict()
-            )
-            list_solutions.extend(
-                solver(self.rkgb_res.H_cluster, [budget], **kwargs)
-            )
+            if isinstance(solver, HILP):
+                solver.config.nb_total_nodes = 30
+                list_solutions.extend(
+                    solver(self.rkgb_res.H_cluster, [budget], accurate_mem=True)
+                )
+                solver.config.nb_total_nodes = 20# in case further usage
+
+            else:
+                list_solutions.extend(
+                    solver(self.rkgb_res.H_cluster, [budget])
+                )
         if not list_solutions:
             warnings.warn("no feasible schedule is found")
         else:
