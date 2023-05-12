@@ -125,12 +125,10 @@ class HRemat(torch.nn.Module):
                 list_solutions.extend(
                     solver(self.rkgb_res.H_cluster, [budget], accurate_mem=True)
                 )
-                solver.config.nb_total_nodes = 20# in case further usage
+                solver.config.nb_total_nodes = 20  # in case further usage
 
             else:
-                list_solutions.extend(
-                    solver(self.rkgb_res.H_cluster, [budget])
-                )
+                list_solutions.extend(solver(self.rkgb_res.H_cluster, [budget]))
         if not list_solutions:
             warnings.warn("no feasible schedule is found")
         else:
@@ -499,6 +497,7 @@ class CheckpointedModule(torch.nn.Module):
         # because torch.nn.Module will register it as a submodule
         self.mem_unit = mem_unit if mem_unit else 1024**2
         # -- use pytorch graph builder to get the list of K_graphs --
+
         self.rkgb_res = rkgb.make_all_graphs(
             original_mod,
             dict_inputs,
@@ -506,6 +505,7 @@ class CheckpointedModule(torch.nn.Module):
             wanted_graphs={"Kl", "H"},
         )  # we don't need the whole K_graph
         self.list_kg = self.rkgb_res.K_graph_list
+        self.list_kg[0].fake_input_kdn_grad()
         self.dict_constants = self.rkgb_res.K_graph.dict_constants
         self.eq_classes = self.rkgb_res.equivalent_classes
         self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)
