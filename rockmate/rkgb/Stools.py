@@ -372,6 +372,7 @@ class S_graph(RK_graph):
             # keep special_output_node.deps
 
         # unhook viewing operations over the outputs
+        self.outputs = outputs = []
         self.dict_output_viewing_code = dict_view_code = dict() # mt -> ast code for viewing stuff
         for out in self.output_nodes:
             bc = out.make_body_code_ast()
@@ -380,6 +381,7 @@ class S_graph(RK_graph):
             )
             dict_view_code[out.mt] = viewing_code
             out.body_code = []
+            outputs.append(out.mt)
             
 
     def check_artefact(self):
@@ -1015,10 +1017,11 @@ def aux_print_graph(dot,sg : S_graph,uniq_num):
         else:
             code = sn.get_code()
             if sn in sg.output_nodes:
-                view_code = ast_add_on.ast_to_str(
-                    sg.dict_output_viewing_code[sn.mt])
-                if view_code != "":
-                    code += "\n# Viewing code :\n"+view_code
+                if sn.mt in sg.dict_output_viewing_code:
+                    view_code = ast_add_on.ast_to_str(
+                        sg.dict_output_viewing_code[sn.mt])
+                    if view_code != "":
+                        code += "\n# Viewing code :\n"+view_code
             node(sn.main_target,code)
     for sn in sg.nodes:
         for (req_sn,str_set) in sn.deps.items():

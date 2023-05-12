@@ -84,10 +84,15 @@ class HRemat(torch.nn.Module):
             verbose=verbose,
             wanted_graphs={"H"},
             **rkgb_kwargs,
-        )  # we don't need the whole K_graph
+        )  # we don't need K_graph_list
         self.list_solvers = list_solvers
         self.dict_constants = self.rkgb_res.K_graph.dict_constants
         self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)
+        self.dict_output_viewing_code = dict(
+            (out_mt,ast_to_str(view_code)) 
+            for (out_mt,view_code) in self.rkgb_res.K_graph.dict_output_viewing_code)
+        self.outputs_wrapping_code = \
+            ast_to_str(self.rkgb_res.K_graph.outputs_wrapping_code)
         self.output = self.rkgb_res.K_graph.list_outputs_kdn_data[0]
         self.budget = budget
         self.gd = make_gd(self.device, self.original_mod, self.dict_constants)
@@ -272,13 +277,10 @@ class HRemat(torch.nn.Module):
                     for l in RkMod.fwd_fct_list:
                         RkMod._exec(l)
                 # -> Get the output
-                out = RkMod.compiler.get_val(RkMod.rkgb_res.D_graph.outputs[0])
-                out_d = out.detach().requires_grad_(out.requires_grad)
-                # TODO multiple outputs
-                #  -> Clear the compiler
-                RkMod.compiler.storage = None
+                outs = [RkMod.compiler.get_val(out_mt) 
+                        for out_mt in RkMod.rkgb_res.S_graph.outputs]
                 # -> Remember that out have been detached from the rest during exec
-                return out_d
+                return outs
                 """
                 ctx.set_materialize_grads(True) # as the default
                 # -> so we don't have to check if grad_output is None
@@ -304,27 +306,16 @@ class HRemat(torch.nn.Module):
             # === OUR BACKWARD FUNCTION ===
             @staticmethod
             @torch.autograd.function.once_differentiable
-            def backward(ctx, grad_out_d):  #  TODO multiple outputs
+            def backward(ctx, *grad_outs):  #  TODO multiple outputs
                 #  -> Reload the storage and out
                 storage = ctx.RK_Storage
                 RkMod.compiler.storage = storage
                 # -> Put grad_out in out.grad (Rem 4)
-                out = RkMod.compiler.get_val(RkMod.rkgb_res.D_graph.outputs[0])
-                # out.backward(grad_out_d)  #  -> set out.grad cleanly
-                # save_before = torch.cuda.memory_allocated()
-                out.grad = grad_out_d.as_strided(
-                    out.shape, out.stride(), out.storage_offset()
-                )
-                # print(torch.cuda.memory_allocated() - save_before)
-                # if (
-                #     hasattr(grad_out_d, "_base")
-                #     and grad_out_d._base is not None
-                # ):
-                #     print("has base")
-                grad_out_d.data = torch.empty(0)
-                # print(out.grad.shape)
-                # remember that forward returned out_d not out
-
+                for out_mt,out_grad in zip(RkMod.rkgb_res.S_graph.outputs,grad_outs):
+                    out = RkMod.compiler.get_val(out_mt)
+                    out.grad = out_grad.view(out_grad.shape)
+                    out_grad.data = torch.empty(0)
+                    
                 #  * record_mem stuff *
                 if RkMod.exec_with_record_mem:
                     RkMod.output_size = irotor.tensorMsize(
@@ -399,9 +390,20 @@ class HRemat(torch.nn.Module):
                 name_of_inputs_which_req_grad
             )
             dummy_input = torch.ones(1).requires_grad_()
-            return self.autograd_Function.apply(
+            output_mt_values = self.autograd_Function.apply(
                 dummy_input, *inputs_which_req_grad
             )
+            for out_mt,out_mt_value \
+                in zip(self.rkgb_res.S_graph.outputs,output_mt_values):
+                view_code = self.dict_output_viewing_code[out_mt]
+                exec(view_code,self.gd,self.compiler.storage.ld)
+                # -> We access to out_mt_value directly in the storage
+            exec(self.outputs_wrapping_code,self.gd,self.compiler.storage.ld)
+            final_output = self.compiler.get_val(self.rkgb_res.D_graph.outputs[0])
+            #  -> Clear the compiler
+            self.compiler.storage = None
+            return final_output
+
 
     # === end of forward ===
 
@@ -466,6 +468,21 @@ class HRemat(torch.nn.Module):
                 self.__dict__[k] = v
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 class CheckpointedModule(torch.nn.Module):
     compiler = None
     autograd_Function = None
@@ -509,6 +526,9 @@ class CheckpointedModule(torch.nn.Module):
         self.dict_constants = self.rkgb_res.K_graph.dict_constants
         self.eq_classes = self.rkgb_res.equivalent_classes
         self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)
+        self.dict_output_viewing_code = dict(
+            (out_mt,ast_to_str(view_code)) 
+            for (out_mt,view_code) in self.rkgb_res.K_graph.dict_output_viewing_code)
         self.output = self.rkgb_res.K_graph.list_outputs_kdn_data[0]
         self.mem_limit = mem_limit
         self.gd = make_gd(self.device, self.original_mod, self.dict_constants)
@@ -668,63 +688,6 @@ class CheckpointedModule(torch.nn.Module):
         self.bwd_fct_list = self.fct_list[loss_idx:]
         self.define_autograd_Function()
         # TODO only one get_compiled
-
-    def get_compiled_fct_HILP(
-        self,
-        mem_limit=False,
-        recursive=True,
-        gurobi_params={
-            "LogToConsole": 0,
-            "IntegralityFocus": 1,
-        },
-        protect_names=["sources data", "sources grad"],
-    ):
-        # based only on rkgb
-        mem_limit = mem_limit or self.mem_limit
-        self.mem_limit = mem_limit
-        kg = self.rkgb_res.K_graph
-        sg = self.rkgb_res.S_graph
-        if recursive:
-            pg = rkgb.Ptools.S_to_P(sg, self.original_mod)
-            self.hg = rkgb.Htools.P_and_K_to_H(pg, kg)
-            print(f"Size of Hgraph {len(self.hg.list_hcn)}")
-
-            # save_all_sched = rkgb.Htools.get_save_all_option(self.hg)
-            save_all_sched = get_autograd_sched_rec(self.hg, kg)
-            self.hg.add_sched(save_all_sched)
-            solve_hg_recursive(self.hg, solve_self=False)
-            print("Low level finished")
-        self.md = ModelGurobi(
-            self.hg,
-            mem_limit,
-            mem_limit,
-            gurobi_params=gurobi_params,
-            accurate_mem=True,
-        )
-        self.md.solve()
-        if not self.md.feasible:
-            return "Not feasible solution"
-        else:
-            print(f"Solution with obj: {self.md.md.getObjective().getValue()}")
-        # self.h_sched = self.md.schedule_()
-        # self.bottom_op_list = self.h_sched.get_bottom_op_list()
-        # self.kn_list = rkgb.Htools.get_kn_list(self.bottom_op_list, kg)
-        # loss_idx = [op.name for op in self.bottom_op_list].index(
-        #     "Loss_hcn_of_Hg_0"
-        # )
-        self.op_sched = self.md.schedule_()
-        # self.op_sched.refine()
-        loss_idx = self.op_sched.loss_idx
-        for op in self.op_sched.op_list:
-            if op.name in protect_names:
-                op.disabled = True
-
-        self.compiler = Compiler(self.gd)
-        # fct_list = self.compiler.compile_from_KN_list(self.kn_list)
-        self.fct_list = self.compiler.compile_from_schedule(self.op_sched)
-        self.fwd_fct_list = self.fct_list[:loss_idx]
-        self.bwd_fct_list = self.fct_list[loss_idx + 1 :]
-        self.define_autograd_Function()
 
     def _exec(self, fct_list):
         if self.exec_with_record_mem:
