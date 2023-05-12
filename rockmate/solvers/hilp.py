@@ -4,7 +4,12 @@ import rockmate.rkgb as rkgb
 import numpy as np
 from rockmate.rkgb.Htools import H_cluster, H_graph, H_C_node
 
-from .main import Solver, get_cluster_budget
+from .main import (
+    Solver,
+    get_cluster_budget,
+    get_hgraph_budget_lb,
+    get_hgraph_budget_ub,
+)
 from .HILP_gurobi import ModelGurobi
 from .rotor_solver import seq_builder, solve_dp_functional
 from .op_schedule import OpSchedule
@@ -22,12 +27,16 @@ class HILP(Solver):
             protected_names=["sources data", "sources grad"],
             nb_total_sched=100,
             nb_total_nodes=20,
+            nb_bdg_save = 6,
+            nb_bdg_peak = 4
         ):
             self.mem_unit = mem_unit
             self.gurobi_params = gurobi_params
             self.protected_names = protected_names
             self.nb_total_sched = nb_total_sched
             self.nb_total_nodes = nb_total_nodes
+            self.nb_bdg_save = nb_bdg_save
+            self.nb_bdg_peak = nb_bdg_peak
 
     def __init__(
         self,
@@ -40,6 +49,30 @@ class HILP(Solver):
 
     def can_solve(self, hg: H_graph):
         return len(hg.list_hcn) // 2 < self.config.nb_total_nodes
+
+    def get_budget_list(self, hgraph: H_graph):
+        min_bdg = get_hgraph_budget_lb(hgraph)
+        max_bdg = get_hgraph_budget_ub(hgraph)
+        interfaces_mem = sum(kdn.mem for kdn in hgraph.cluster.all_interfaces)
+
+        budgets = []
+        l_bd_peak = (
+            np.linspace(min_bdg, max_bdg, self.config.nb_bdg_peak)
+            + interfaces_mem
+        )
+        for bd_peak in l_bd_peak:
+            l_bd_save = (
+                np.linspace(
+                    0,
+                    # min(bd_peak, autograd_sched.mem),
+                    bd_peak,
+                    self.config.nb_bdg_save,
+                )
+                + interfaces_mem
+            )
+
+            budgets.append((bd_peak, l_bd_save))
+        return budgets
 
     def _select_sched(self, hg, overall_budget=None):
         # for fwd hcn, select sched from hcn.sub_cluster and put in hcn.list_sched
@@ -90,18 +123,19 @@ class HILP(Solver):
 
     def solve(self, cluster: H_cluster, budgets=None, accurate_mem=False):
         list_op_sched = []
-        if budgets is None:
-            self.budgets = get_cluster_budget(
-                cluster.representee_cluster, with_save_budget=True
-            )
-        else:
-            self.budgets = budgets
 
-        for budget in self.budgets:
-            if not hasattr(budget, "__iter__"):
-                budget = [budget]
-            for hg in cluster.representee_cluster.possible_hg:
-                # if isinstance(budget, )
+        for hg in cluster.representee_cluster.possible_hg:
+            if budgets is None:
+                # self.budgets = get_cluster_budget(
+                #     cluster.representee_cluster, with_save_budget=True
+                # )
+                self.budgets = self.get_budget_list(hg)
+            else:
+                self.budgets = budgets
+
+            for budget in self.budgets:
+                if not hasattr(budget, "__iter__"):
+                    budget = [budget]
                 list_op_sched.extend(
                     self.solve_hg(
                         hg,
@@ -167,6 +201,7 @@ class HILP(Solver):
 
                     sols.add(time_mem)
                     self.op_sched = self.md.schedule()
+                    self.op_sched.solver = "HILP"
                     list_op_sched.append(self.op_sched)
                     # print(f"scheduling: {time.time()-start}")
             else:  # if infeasible, no need to try smaller budget

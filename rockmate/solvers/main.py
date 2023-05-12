@@ -74,6 +74,38 @@ setattr(H_cluster, "solve", H_cluster_method_solve)
 setattr(H_cluster, "translate_op_list", H_cluster_method_translate_op_list)
 
 
+def get_hgraph_budget_lb(hgraph: H_graph):
+    # Lower bound for minimum feasible budget given schedules
+    hcn_memory_budget = []
+    for hcn in hgraph.list_hcn:
+        if hcn.sub_cluster is not None:
+            list_sched = hcn.sub_cluster.get_sched()
+            hcn_memory_budget.append(
+                min(op_sched.peak_mem for op_sched in list_sched)
+            )
+        else:
+            hcn_memory_budget.append(hcn.ff_overhead)
+    return max(hcn_memory_budget)
+
+
+def get_hgraph_budget_ub(hgraph: H_graph):
+    # Upper bound for minimum feasible budget given schedules
+    cluster = hgraph.cluster
+    if cluster.representee_cluster.list_sched == []:
+        autograd_op_list = get_single_compute_op_list(
+            cluster,
+            with_bwd=True,
+        )
+        autograd_sched = OpSchedule(
+            autograd_op_list,
+            cluster=cluster,
+        )
+    else:
+        autograd_sched = cluster.representee_cluster.list_sched[0]
+    max_bdg = autograd_sched.mem + autograd_sched.bwd_overhead
+    return max_bdg
+
+
 def get_cluster_budget(
     cluster: H_cluster,
     nb_bdg_peak=3,

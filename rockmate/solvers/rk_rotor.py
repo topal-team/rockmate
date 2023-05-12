@@ -96,13 +96,13 @@ class RK_rotor(Solver):
                     for op_sched in self.bwd_op_sched_list
                     for op in op_sched.op_list
                 ]
-                list_op_sched.append(
-                    OpSchedule(
-                        (self.fwd_op_list + self.bwd_op_list).copy(),
-                        loss_idx=len(self.fwd_op_list),
-                        cluster=hg.cluster,
-                    )
+                op_sched = OpSchedule(
+                    (self.fwd_op_list + self.bwd_op_list).copy(),
+                    loss_idx=len(self.fwd_op_list),
+                    cluster=hg.cluster,
                 )
+                op_sched.solver = "rk-rotor"
+                list_op_sched.append(op_sched)
             return list_op_sched
 
     def solve_rk_chain(self, chain, budget):
