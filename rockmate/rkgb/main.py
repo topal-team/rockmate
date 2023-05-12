@@ -168,7 +168,7 @@ def make_all_graphs(model,
     bool_list_sg = ("Sl" in wanted_graphs) or bool_list_kg
     bool_hg = "H" in wanted_graphs
     bool_pg = ("P" in wanted_graphs) or bool_hg
-    bool_kg = ("K" in wanted_graphs) or bool_hg
+    bool_kg = ("K" in wanted_graphs) or bool_hg or bool_list_kg
     bool_sg = ("S" in wanted_graphs) or bool_kg or bool_list_sg or bool_pg
     bool_dg = ("D" in wanted_graphs) or bool_sg
     bool_bg = ("B" in wanted_graphs) or bool_dg
@@ -231,7 +231,7 @@ def make_all_graphs(model,
     print_time("S_cut")
     if bool_list_kg:
         cc,list_kg,list_ano_S = Atools_for_S_and_K.S_list_to_K_list_eco(
-            list_sg,model,device=device)
+            list_sg,kg,model,device=device)
     else: list_kg = None ; cc = None ; list_ano_S = None
     print_time("S_list_to_K_list via Atools")
     # -- hierarchical --

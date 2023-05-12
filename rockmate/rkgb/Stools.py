@@ -434,24 +434,8 @@ class S_graph(RK_graph):
         self.check_artefact()
         self.check_relations()
         self.make_inputs()
-
-    def make_targets_attrs(self):
-        # -> tensor_targets ; inplace_targets ; container_targets
-        dict_info = self.dict_info
-        for sn in self.nodes:
-            if not sn.is_artefact:
-                tensors = []
-                containers = []
-                for tar in sn.all_targets:
-                    ttype = dict_info[tar].ttype
-                    if ttype == torch.Tensor:
-                        tensors.append(tar)
-                    elif ttype == tuple or ttype == list:
-                        containers.append(tar)
-                sn.tensor_targets = tensors
-                sn.container_targets = containers
-                sn.inplace_targets = [c[0] for c in sn.inplace_code]
-
+        
+        
     def refresh_info_data_name(self):
         dict_info = self.dict_info
         # First we need to know where each var is :
@@ -467,7 +451,27 @@ class S_graph(RK_graph):
                 else:
                     info.data_owner_name = owner_sn.main_target
 
+                    
+    def make_targets_attrs(self):
+        # -> tensor_targets ; inplace_targets ; container_targets
+        dict_info = self.dict_info
+        for sn in self.nodes:
+            if not sn.is_artefact:
+                tensors = []
+                containers = []
+                for tar in sn.all_targets:
+                    info = dict_info[tar]
+                    ttype = info.ttype
+                    if ttype == torch.Tensor:
+                        if info.data_owner_name != "PARAM":
+                            tensors.append(tar)
+                    elif ttype == tuple or ttype == list:
+                        containers.append(tar)
+                sn.tensor_targets = tensors
+                sn.container_targets = containers
+                sn.inplace_targets = [c[0] for c in sn.inplace_code]
 
+                
     def assert_ready(self):
         # check if ready to be given to S_to_K
         # ie main_targets are tensors, except if artefact -> sizes
@@ -802,8 +806,8 @@ def D_to_S(dg,model=None,device=None):
     simplify_view(sg)
     create_random_snodes_from_dict_rand(sg,model,device)
     sg.check_relations()
-    sg.make_targets_attrs()
     sg.refresh_info_data_name()
+    sg.make_targets_attrs()
     sg.unhook_init_node()
     sg.unhook_special_output_node()
     sg.assert_ready()

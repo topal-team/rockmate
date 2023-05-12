@@ -348,7 +348,7 @@ class Graph_Translator():
 
 # cc : connected component
 def S_list_to_K_list_eco(
-        list_sg,model,verbose=None,
+        list_sg,whole_kg,model,verbose=None,
         device=None,print_cc = False):
     nb_sg = len(list_sg)
     # 1) anonymize S_graphs and recognize similar S_graphs
@@ -411,7 +411,8 @@ def S_list_to_K_list_eco(
         ano_sg.dict_info.update(dict_info_global)
         ano_sg.dict_constants = save_dict_constants
         ano_kg = Ktools.aux_build_S_to_K(ano_sg,model,None,
-            is_really_first_graph=(cc_num==0))
+            is_really_first_graph=(cc_num==0),
+            do_inspection=False)
         ano_kg = tmp_trans_to_handle_params.translate(ano_kg)
         ano_kg.dict_constants = save_dict_constants
         tab_K_repr_cc.append(ano_kg)
@@ -454,6 +455,17 @@ def S_list_to_K_list_eco(
         # translate hidden inputs because we don't care 
         # about how inputs were generated. But it implies
         # that we cannot trust fake_inp_data targets.
+        
+    # We didn't run inspection
+    # -> So we retrieve inspection result from the whole K_graph
+    for kg in list_kg:
+        for kdn in kg.list_kdn:
+            kdn.mem = whole_kg.dict_kn[kdn.name].mem
+        for kcn in kg.list_kcn:
+            if kcn is not kg.loss_kcn:
+                _kcn = whole_kg.dict_kn[kcn.name]
+                kcn.time = _kcn.time
+                kcn.overhead = _kcn.overhead
 
     return cc,Ktools.K_graph_list(list_kg),tab_S_repr_cc
 

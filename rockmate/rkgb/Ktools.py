@@ -369,7 +369,11 @@ def aux_init_S_to_K(model,verbose,d):
             p.grad = torch.zeros_like(p)
 
 # the function that does it all
-def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None,is_really_first_graph=False):
+def aux_build_S_to_K(sg : S_graph,
+        model,
+        prev_kg : K_graph=None,
+        is_really_first_graph=False,
+        do_inspection=True):
     kg = K_graph(sg)
     dict_KCN_fwd = kg.dict_KCN_fwd
     dict_KCN_bwd = kg.dict_KCN_bwd
@@ -546,8 +550,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None,is_really_first_g
 
 
         # *** inspection ***
-        if (device == torch.device("cpu")
-        or "torch.split_with_sizes" in sn.get_code()):
+        if (not do_inspection
+        or device == torch.device("cpu")):
             res = def_inspection.Inspection_result()
         else:
             ins = def_inspection.inspector(sn,sg,our_global,device)
@@ -563,6 +567,8 @@ def aux_build_S_to_K(sg : S_graph,model,prev_kg : K_graph=None,is_really_first_g
             kdn_data.mem = res.mem_run_fwd
         else:
             kdn_data.mem = res.mem_fgt_fwd
+        if do_inspection and kdn_data.mem < info.memsize:
+            print(f"PROBLEM WITH {kdn_data.mt}")
 
         # -> bwd ins
         if info.requires_grad:
