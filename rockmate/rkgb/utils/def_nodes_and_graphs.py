@@ -159,6 +159,13 @@ class RK_node():
     # =============================
     # === generate ast/str code ===
     # -> For B, D, S, KC
+    def make_body_code_ast(self):
+        dict_ic = dict(self.inplace_code)
+        bc = [
+            (tar,dict_ic[tar] if tar in dict_ic else acode)
+            for (tar,acode) in self.body_code]
+        return bc
+
     def get_code_ast(self,force_special_kwargs=False):
         nt = self.node_type
         if nt == "B" or nt == "D":
@@ -169,10 +176,7 @@ class RK_node():
         else:
             mc = self.main_code
             mc = [] if mc is None or mc[1] is None else [mc]
-            dict_ic = dict(self.inplace_code)
-            bc = [
-                (tar,dict_ic[tar] if tar in dict_ic else acode)
-                for (tar,acode) in self.body_code]
+            bc = self.make_body_code_ast()
             code = mc + bc
             return ast_add_on.make_ast_list_assign(code,
                 force_special_kwargs=force_special_kwargs)

@@ -316,6 +316,7 @@ class S_graph(RK_graph):
         if not (dg is None): self.inherit_base_attributes(dg)
         self.init_node = None # NOT in self.nodes
         self.special_output_node = None # NOT in self.nodes
+        self.dict_output_viewing_code = dict()
         self.artefact_edges = []
 
     def __eq__(self,sg2,force_order=False,raise_exception=False):
@@ -369,6 +370,17 @@ class S_graph(RK_graph):
             self.outputs = list(real_outputs)
             self.special_output_node = output_node
             # keep special_output_node.deps
+
+        # unhook viewing operations over the outputs
+        self.dict_output_viewing_code = dict_view_code = dict() # mt -> ast code for viewing stuff
+        for out in self.output_nodes:
+            bc = out.make_body_code_ast()
+            viewing_code = ast_add_on.make_ast_list_assign(
+                bc,force_special_kwargs=True
+            )
+            dict_view_code[out.mt] = viewing_code
+            out.body_code = []
+            
 
     def check_artefact(self):
         for sn in self.nodes:
@@ -873,6 +885,7 @@ def copy_S_graph(sg : S_graph):
         for u,set_str in sg.init_node.users.items())
     
     # * output_nodes *
+    new_sg.dict_output_viewing_code = dict(sg.dict_output_viewing_code )
     new_sg.output_nodes = [dict_nodes[out.mt] for out in sg.output_nodes]
     if sg.special_output_node is not None:
         new_sg.special_output_node \
@@ -954,6 +967,8 @@ def cut(sg : S_graph): # -> list of S_graph
         # -- outputs --
         if block_nb == len(seps)-1:
             new_sg.output_nodes = sg.output_nodes
+            new_sg.special_output_node = sg.special_output_node
+            new_sg.dict_output_viewing_code = sg.dict_output_viewing_code
         else:
             new_sg.output_nodes = [last_node]
     for i in range(len(list_sg)-1):
@@ -997,7 +1012,14 @@ def aux_print_graph(dot,sg : S_graph,uniq_num):
     for sn in sg.nodes:
         if sn.is_artefact:
             node(sn.main_target,sn.get_code(),style="dashed")
-        else: node(sn.main_target,sn.get_code())
+        else:
+            code = sn.get_code()
+            if sn in sg.output_nodes:
+                view_code = ast_add_on.ast_to_str(
+                    sg.dict_output_viewing_code[sn.mt])
+                if view_code != "":
+                    code += "\n# Viewing code :\n"+view_code
+            node(sn.main_target,code)
     for sn in sg.nodes:
         for (req_sn,str_set) in sn.deps.items():
             edge(req_sn.main_target,sn.main_target,str_set)
