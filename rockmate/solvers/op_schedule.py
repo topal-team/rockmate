@@ -41,6 +41,8 @@ class Op:
 
 
 class OpSchedule:
+    solver = None
+
     def __init__(
         self,
         op_list,
@@ -338,6 +340,9 @@ class OpSchedule:
     def __repr__(self):
         return f"OpSchedule takes {sum(self.time):.2f}ms and cost {self.mem//1024**2} MiB"
 
+    @property
+    def peak_mem(self):
+        return max(self.save_mem+self.overhead)
 
 # def hg_to_cluster(hg: H_graph, kg: K_graph):
 #     interfaces = dict()
