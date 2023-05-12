@@ -1559,7 +1559,7 @@ class Partitioner_bottom_to_top_2(Partitioner):
             if all(not pn.does_requires_grad(dict_info)
                    for pn in opt.group):
                 all_options.remove(opt)
-            elif all(pn.deps.issubset(opt.set_group)
+            elif all(pn.deps_global.issubset(opt.set_group)
                      for pn in opt.group):
                 all_options.remove(opt)
 
