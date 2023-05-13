@@ -238,6 +238,10 @@ class RK_node():
         if hasattr(self,"unique_id"): return self.unique_id
         else: return id(self) # When init via pickle
     # ================
+
+    def __repr__(self):
+        if hasattr(self,"name"): return self.name
+        else: return self.main_target
 # ============================
 
 
