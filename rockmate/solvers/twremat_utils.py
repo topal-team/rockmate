@@ -153,7 +153,11 @@ def get_twremat_graph(
     """
 
     node_info = {}
-    target = K_graph.list_kcn[-1].unique_id  # final computational node
+    # target = K_graph.list_kcn[-1].unique_id  # final computational node
+    targets = []
+    for kcn in K_graph.list_kcn:
+        if len([dn for dn in kcn.users if dn in K_graph.list_kdn]) == 0:
+            targets.append(kcn.unique_id)
 
     # for cnode in K_graph.list_kcn:
     #     mem_inputs = 0
@@ -195,7 +199,7 @@ def get_twremat_graph(
                     cnode_deps.append(cn.unique_id)
 
         # if (cnode.main_target != 'loss'):
-        if cnode.unique_id != target:
+        if not cnode.unique_id in targets:
             for dnode in cnode.users:
                 mem_outputs += dnode.mem
 
@@ -216,7 +220,7 @@ def get_twremat_graph(
     else:
         loss_node = []
 
-    return node_info, [target], loss_node
+    return node_info, targets, loss_node
 
 
 def twremat_to_rockmate_schedule(K_graph, steps):
