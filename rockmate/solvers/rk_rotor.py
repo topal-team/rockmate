@@ -39,7 +39,7 @@ class RK_rotor(Solver):
     def is_sequential(self, hg: H_graph):
         loss_idx = hg.list_hcn.index(hg.loss_hcn)
         for i, hcn in enumerate(hg.list_hcn[:loss_idx]):  # toposorted
-            if len(hcn.users) > 1:
+            if len(hcn.users) > 1 or len(hcn.deps) > 1:
                 return False
         return True
 
