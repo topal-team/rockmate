@@ -1314,114 +1314,91 @@ class Partitioner_bottom_to_top(Partitioner):
             self.max_estimate_for_main_graph \
                 = max_sub if main_graph_as_any_other \
                 else max_estimate_for_main_graph
-            self.option_estimate_fct = self.get_default_estimate_fct(
-                estimate_coeff_size,
-                estimate_coeff_sub_graph
-            )
+            # -- estimate_fct --
+            self.estimate_coeff_size = estimate_coeff_size
+            self.estimate_coeff_sub_graph = estimate_coeff_sub_graph
+            self.option_estimate_fct = self.default_estimate_fct
+            # -- value_fct --
+            self.old_value_fct_value_power_not_last = old_value_fct_value_power_not_last
+            self.value_coeff_input_interfaces = value_coeff_input_interfaces
+            self.value_coeff_output_interfaces = value_coeff_output_interfaces
+            self.value_power_total_size = value_power_total_size
             if old_value_fct:
-                self.option_value_fct = self.old_get_default_option_value_fct(
-                    old_value_fct_value_power_not_last
-                )
+                self.option_value_fct = self.old_default_option_value_fct
             else:
-                self.option_value_fct = self.get_default_option_value_fct(
-                    value_coeff_input_interfaces,
-                    value_coeff_output_interfaces,
-                    value_power_total_size,
-                )
-            # self.option_value_fct = self.old_get_default_option_value_fct()
-            self.option_stop_fct = self.get_default_option_stop_fct()
-            self.is_top_graph_ok = self.get_default_is_top_graph_ok(
-                estimate_coeff_size,
-                estimate_coeff_sub_graph
+                self.option_value_fct = self.default_option_value_fct
+            self.option_stop_fct = self.default_option_stop_fct
+            self.is_top_graph_ok = self.default_is_top_graph_ok
+
+        def default_estimate_fct(self,option):
+            option : self.__class__.Option
+            return (
+                option.size * self.estimate_coeff_size
+                + option.nb_sub_graphs * self.estimate_coeff_sub_graph
             )
 
-        def get_default_estimate_fct(self,
-                estimate_coeff_size,
-                estimate_coeff_sub_graph
-        ):
-            def estimate_fct(option : Partitioner_bottom_to_top.Option):
-                return (
-                    option.size * estimate_coeff_size
-                    + option.nb_sub_graphs * estimate_coeff_sub_graph
-                )
-            return estimate_fct
-
-        def old_get_default_option_value_fct(self,
-                    value_power_not_last = 1.1, # RECOMMEND between 0 and 2
-                    ):
-            def value_fct(option : Partitioner_bottom_to_top.Option):
-                not_last_nodes = [
-                    pn for pn in option.group if pn.users.issubset(option.group)
-                ]
-                tot_mem_internal = sum(pn.mem_out for pn in not_last_nodes)
-                if len(not_last_nodes)==0:
-                    value = 0
-                else: 
-                    value = (tot_mem_internal
-                    * len(not_last_nodes)**-value_power_not_last)
-                # effort for determinism -> we break ties
-                num_determinism = min(pn.unique_id for pn in option.group)
-                return (value,num_determinism)
-            return value_fct
+        def old_default_option_value_fct(self,option):
+            option : self.__class__.Option
+            not_last_nodes = [
+                pn for pn in option.group if pn.users.issubset(option.group)
+            ]
+            tot_mem_internal = sum(pn.mem_out for pn in not_last_nodes)
+            if len(not_last_nodes)==0:
+                value = 0
+            else: 
+                value = (tot_mem_internal
+                * len(not_last_nodes)**-self.value_power_not_last)
+            # effort for determinism -> we break ties
+            num_determinism = min(pn.unique_id for pn in option.group)
+            return (value,num_determinism)
         
-        def get_default_option_value_fct(self,
-                value_coeff_input_interfaces = 1,
-                value_coeff_output_interfaces = 1,
-                value_power_total_size = 0.5,
-                ):
-            def value_fct(option : Partitioner_bottom_to_top.Option):
-                inputs_pn = set().union(
-                    *[pn.deps_global - option.set_group 
-                      for pn in option.group]
-                )
-                outputs_pn = set(
-                    pn for pn in option.group
-                    if not pn.users_global.issubset(option.set_group)
-                )
-                inputs_mem = sum(pn.mem_out for pn in inputs_pn if pn.sn is not None)
-                outputs_mem = sum(pn.mem_out for pn in outputs_pn if pn.sn is not None)
-                total_size = sum(pn.total_size for pn in option.group)
-                # /!\ NEGATIVE VALUE
-                # -> We will take the max -> = the less negative one
-                value = - (
-                        (   inputs_mem * value_coeff_input_interfaces
-                        +  outputs_mem * value_coeff_output_interfaces)
-                    *
-                        total_size**value_power_total_size
-                )
-                # effort for determinism -> we break ties
-                num_determinism = min(pn.unique_id for pn in option.group)
-                return (value,num_determinism)
-            return value_fct
+        def default_option_value_fct(self, option):
+            option : self.__class__.Option
+            inputs_pn = set().union(
+                *[pn.deps_global - option.set_group 
+                  for pn in option.group]
+            )
+            outputs_pn = set(
+                pn for pn in option.group
+                if not pn.users_global.issubset(option.set_group)
+            )
+            inputs_mem = sum(pn.mem_out for pn in inputs_pn if pn.sn is not None)
+            outputs_mem = sum(pn.mem_out for pn in outputs_pn if pn.sn is not None)
+            total_size = sum(pn.total_size for pn in option.group)
+            # /!\ NEGATIVE VALUE
+            # -> We will take the max -> = the less negative one
+            value = - (
+                    (   inputs_mem * self.value_coeff_input_interfaces
+                    +  outputs_mem * self.value_coeff_output_interfaces)
+                *
+                    total_size**self.value_power_total_size
+            )
+            # effort for determinism -> we break ties
+            num_determinism = min(pn.unique_id for pn in option.group)
+            return (value,num_determinism)
         
-        def get_default_option_stop_fct(self):
-            def stop_round(option : Partitioner_bottom_to_top.Option):
-                if len(option.group)==1:
-                    return True
-                if self.can_use_rotor and option.is_seq():
-                    return False
-                else:
-                    return (self.option_estimate_fct(option) 
-                            > self.max_estimate_per_sub_graph)
-            return stop_round
+        def default_option_stop_fct(self, option):
+            option : self.__class__.Option
+            if len(option.group)==1:
+                return True
+            if self.can_use_rotor and option.is_seq():
+                return False
+            else:
+                return (self.option_estimate_fct(option) 
+                        > self.max_estimate_per_sub_graph)
         
-        def get_default_is_top_graph_ok(self,
-                estimate_coeff_size,
-                estimate_coeff_sub_graph
-        ):
-            def is_top_graph_ok(pg):
-                if (self.can_use_rotor
-                and Partitioner_bottom_to_top.Option.utils_is_seq(pg.nodes)):
-                    return True
-                else:
-                    size = len(pg.nodes)
-                    nb_sub_graphs = sum(pn.sub_graph is not None for pn in pg.nodes)
-                    estimate = (
-                            size * estimate_coeff_size
-                        +   nb_sub_graphs * estimate_coeff_sub_graph
-                    )
-                    return estimate <= self.max_estimate_for_main_graph
-            return is_top_graph_ok
+        def default_is_top_graph_ok(self,pg : P_graph):
+            if (self.can_use_rotor
+            and Partitioner_bottom_to_top.Option.utils_is_seq(pg.nodes)):
+                return True
+            else:
+                size = len(pg.nodes)
+                nb_sub_graphs = sum(pn.sub_graph is not None for pn in pg.nodes)
+                estimate = (
+                        size * self.estimate_coeff_size
+                    +   nb_sub_graphs * self.estimate_coeff_sub_graph
+                )
+                return estimate <= self.max_estimate_for_main_graph
             
 
     config : Config = None
