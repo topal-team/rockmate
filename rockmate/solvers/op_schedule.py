@@ -342,7 +342,23 @@ class OpSchedule:
 
     @property
     def peak_mem(self):
-        return max(self.save_mem+self.overhead)
+        return max(self.save_mem + self.overhead)
+
+    @property
+    def simulation_overhead(self):
+        all_kcn = set(
+            op.kn for op in self.op_list if (not op.disabled and not op.is_del)
+        )
+        return (
+            sum(
+                op.kn.time
+                for op in self.op_list
+                if (not op.disabled and not op.is_del)
+            )
+            / sum(kcn.time for kcn in all_kcn)
+            - 1
+        )
+
 
 # def hg_to_cluster(hg: H_graph, kg: K_graph):
 #     interfaces = dict()
