@@ -62,12 +62,10 @@ class HRemat(torch.nn.Module):
         verbose=False,
         ilp_solver="gurobi",
         model_kwargs=None,
-        rkgb_kwargs=dict(
-            partitioners=[
-                Ptools.Partitioner_bottom_to_top_2(),
-                # Ptools.Partitioner_seq(),
-            ],
-        ),
+        partitioners=[
+            Ptools.Partitioner_bottom_to_top(),
+            Ptools.Partitioner_seq(),
+        ],
     ):
         super().__init__()
         ref_verbose[0] = verbose
@@ -77,13 +75,13 @@ class HRemat(torch.nn.Module):
         dict_inputs = make_inputs(original_mod, model_inputs, model_kwargs)
         #  We don't want to use the default setattr
         # because torch.nn.Module will register it as a submodule
-        # -- use pytorch graph builder to get the list of K_graphs --
+        # -- use gkGB --
         self.rkgb_res = make_all_graphs(
             original_mod,
             dict_inputs,
             verbose=verbose,
             wanted_graphs={"H"},
-            **rkgb_kwargs,
+            partitioners=partitioners,
         )  # we don't need K_graph_list
         self.list_solvers = list_solvers
         self.dict_constants = self.rkgb_res.K_graph.dict_constants
@@ -517,7 +515,6 @@ class CheckpointedModule(torch.nn.Module):
         #  We don't want to use the default setattr
         # because torch.nn.Module will register it as a submodule
         self.mem_unit = mem_unit if mem_unit else 1024**2
-        # -- use pytorch graph builder to get the list of K_graphs --
 
         self.rkgb_res = rkgb.make_all_graphs(
             original_mod,

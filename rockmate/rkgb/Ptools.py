@@ -967,7 +967,7 @@ class P_Dynamic_manipulation(): # only contains staticmethod
         return all_snodes
             
 
-class Partitioner_bottom_to_top_1(Partitioner): 
+class Partitioner_OLD_bottom_to_top(Partitioner): 
     # /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\
     # /!\ NOT DETERMINISTIC AND SOON NO LONGER MAINTAINED /!\
     # /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\
@@ -1256,7 +1256,7 @@ class Partitioner_bottom_to_top_1(Partitioner):
 
 
 
-class Partitioner_bottom_to_top_2(Partitioner):
+class Partitioner_bottom_to_top(Partitioner):
     class Option():
         def __init__(self,group):
             self.group = group # list
@@ -1301,6 +1301,8 @@ class Partitioner_bottom_to_top_2(Partitioner):
                 value_coeff_input_interfaces = 1,
                 value_coeff_output_interfaces = 1,
                 value_power_total_size = 0.5,
+                old_value_fct = False,
+                old_value_fct_value_power_not_last = 1.1,
         ):
             self.max_len_seq = max_len_seq
             self.can_use_rotor = can_use_rotor
@@ -1315,11 +1317,16 @@ class Partitioner_bottom_to_top_2(Partitioner):
                 estimate_coeff_size,
                 estimate_coeff_sub_graph
             )
-            self.option_value_fct = self.get_default_option_value_fct(
-                value_coeff_input_interfaces,
-                value_coeff_output_interfaces,
-                value_power_total_size,
-            )
+            if old_value_fct:
+                self.option_value_fct = self.old_get_default_option_value_fct(
+                    old_value_fct_value_power_not_last
+                )
+            else:
+                self.option_value_fct = self.get_default_option_value_fct(
+                    value_coeff_input_interfaces,
+                    value_coeff_output_interfaces,
+                    value_power_total_size,
+                )
             # self.option_value_fct = self.old_get_default_option_value_fct()
             self.option_stop_fct = self.get_default_option_stop_fct()
             self.is_top_graph_ok = self.get_default_is_top_graph_ok(
@@ -1331,7 +1338,7 @@ class Partitioner_bottom_to_top_2(Partitioner):
                 estimate_coeff_size,
                 estimate_coeff_sub_graph
         ):
-            def estimate_fct(option : Partitioner_bottom_to_top_2.Option):
+            def estimate_fct(option : Partitioner_bottom_to_top.Option):
                 return (
                     option.size * estimate_coeff_size
                     + option.nb_sub_graphs * estimate_coeff_sub_graph
@@ -1341,7 +1348,7 @@ class Partitioner_bottom_to_top_2(Partitioner):
         def old_get_default_option_value_fct(self,
                     value_power_not_last = 1.1, # RECOMMEND between 0 and 2
                     ):
-            def value_fct(option : Partitioner_bottom_to_top_2.Option):
+            def value_fct(option : Partitioner_bottom_to_top.Option):
                 not_last_nodes = [
                     pn for pn in option.group if pn.users.issubset(option.group)
                 ]
@@ -1361,7 +1368,7 @@ class Partitioner_bottom_to_top_2(Partitioner):
                 value_coeff_output_interfaces = 1,
                 value_power_total_size = 0.5,
                 ):
-            def value_fct(option : Partitioner_bottom_to_top_2.Option):
+            def value_fct(option : Partitioner_bottom_to_top.Option):
                 inputs_pn = set().union(
                     *[pn.deps_global - option.set_group 
                       for pn in option.group]
@@ -1387,7 +1394,7 @@ class Partitioner_bottom_to_top_2(Partitioner):
             return value_fct
         
         def get_default_option_stop_fct(self):
-            def stop_round(option : Partitioner_bottom_to_top_2.Option):
+            def stop_round(option : Partitioner_bottom_to_top.Option):
                 if len(option.group)==1:
                     return True
                 if self.can_use_rotor and option.is_seq():
@@ -1403,7 +1410,7 @@ class Partitioner_bottom_to_top_2(Partitioner):
         ):
             def is_top_graph_ok(pg):
                 if (self.can_use_rotor
-                and Partitioner_bottom_to_top_2.Option.utils_is_seq(pg.nodes)):
+                and Partitioner_bottom_to_top.Option.utils_is_seq(pg.nodes)):
                     return True
                 else:
                     size = len(pg.nodes)
@@ -1683,7 +1690,7 @@ class Partitioner_seq(Partitioner):
     class Config():
         def __init__(self,sub_partitioner : Partitioner = None):
             if sub_partitioner is None:
-                sub_partitioner = Partitioner_bottom_to_top_2(
+                sub_partitioner = Partitioner_bottom_to_top(
                     main_graph_as_any_other = True
                 )
             self.sub_partitioner = sub_partitioner 
@@ -1755,8 +1762,8 @@ def S_to_P(
     model : torch.nn.Module,
     partitioners = [
         Partitioner(),
-        Partitioner_bottom_to_top_1(),
-        Partitioner_bottom_to_top_2(),
+        Partitioner_OLD_bottom_to_top(),
+        Partitioner_bottom_to_top(),
         Partitioner_seq()
     ],
     min_size_to_trigger_partitioning = 4):

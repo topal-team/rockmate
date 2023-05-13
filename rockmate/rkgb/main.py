@@ -136,9 +136,7 @@ def make_all_graphs(model,
     model_kwargs=None,
     wanted_graphs = {"B","D","S","K","P","H","Sl","Kl"},
     partitioners = [
-        #Ptools.Partitioner(),
-        #Ptools.Partitioner_bottom_to_top_1(),
-        Ptools.Partitioner_bottom_to_top_2(),
+        Ptools.Partitioner_bottom_to_top(),
         Ptools.Partitioner_seq()
     ],
     verbose=False,
