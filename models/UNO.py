@@ -3,17 +3,8 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-from integral_operators import *
-import matplotlib.pyplot as plt
-from utilities3 import *
+from .integral_operators import *
 
-import operator
-from functools import reduce
-from functools import partial
-
-from timeit import default_timer
-
-from Adam import Adam
 
 torch.manual_seed(0)
 np.random.seed(0)
