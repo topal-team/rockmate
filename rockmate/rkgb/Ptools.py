@@ -1275,6 +1275,7 @@ class Partitioner_bottom_to_top(Partitioner):
                 next_pn = list_nodes[i+1]
                 if len(pn.users) != 1: return False
                 if list(pn.users)[0] is not next_pn: return False
+                if len(next_pn.deps) != 1: return False
             return True
 
         def is_seq(self):
