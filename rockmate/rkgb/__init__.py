@@ -2,8 +2,10 @@ __all__ = [
     "Btools","Dtools","Stools","Ktools","Atools_for_S_and_K","Ptools","Htools",
     "print_inputs","make_inputs",
     "make_all_graphs","print",
-    "test_rkgb"]
+    "test_rkgb",
+    "utils"]
 
+from . import utils
 from . import Btools
 from . import Dtools
 from . import Stools

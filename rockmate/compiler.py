@@ -103,88 +103,92 @@ class Compiler:
                 l.append(self.fct_get_rng_state(op.name))
             else:
                 l.append(self.fct_restore_rng_state(op.name))
+        
+        if not op.proxy:
+            l = [self.fct_run_forward_with_grad(op.get_code())]
+        else:
+            # compile inplace code
+            inplace_code = make_str_list_assign(
+                op.inplace_code, force_special_kwargs=rec
+            )
+            # compile body code
+            body_code = ""
+            for bc in op.body_code:
+                suffix = ""
+                if rec and (bc[0] in op.tensor_targets):
+                    suffix = ".data"
+                body_code += (
+                    make_str_assign(bc, suffix=suffix, force_special_kwargs=rec)
+                    + "\n"
+                )
 
-        # compile inplace code
-        inplace_code = make_str_list_assign(
-            op.inplace_code, force_special_kwargs=rec
-        )
-        # compile body code
-        body_code = ""
-        for bc in op.body_code:
+            # compile main code
             suffix = ""
-            if rec and (bc[0] in op.tensor_targets):
-                suffix = ".data"
-            body_code += (
-                make_str_assign(bc, suffix=suffix, force_special_kwargs=rec)
+            main_code = (
+                make_str_assign(
+                    op.main_code, suffix=suffix, force_special_kwargs=rec
+                )
                 + "\n"
             )
+            main_code = main_code.replace(op.main_target, f"_{op.main_target}")
 
-        # compile main code
-        suffix = ""
-        main_code = (
-            make_str_assign(
-                op.main_code, suffix=suffix, force_special_kwargs=rec
-            )
-            + "\n"
-        )
-        main_code = main_code.replace(op.main_target, f"_{op.main_target}")
+            if not last_before_bwd:
+                # inplace_code = inplace_code.replace(
+                #     op.main_target, f"_{op.main_target}"
+                # )
 
-        if not last_before_bwd:
-            # inplace_code = inplace_code.replace(
-            #     op.main_target, f"_{op.main_target}"
-            # )
-
-            for target in op.tensor_targets:
-                inplace_code = inplace_code.replace(target, "_" + target)
-            l.append(
-                self.fct_run_forward_no_grad(
-                    main_code.replace("self.", "original_mod.").replace(
-                        "self[", "original_mod["
-                    ),
+                for target in op.tensor_targets:
+                    inplace_code = inplace_code.replace(target, "_" + target)
+                l.append(
+                    self.fct_run_forward_no_grad(
+                        main_code.replace("self.", "original_mod.").replace(
+                            "self[", "original_mod["
+                        ),
+                    )
                 )
-            )
-        else:
-            no_save_list = []
-            candidates = list(op.deps_global) + list(op.users_global)
-            candidates = self._get_names(candidates)
-            for kdn_name in candidates:
-                if kdn_name in self.op_name_list[i:next_bwd_idx]:
-                    no_save_list.append(kdn_name.split(" ")[0])
+            else:
+                no_save_list = []
+                candidates = list(op.deps_global) + list(op.users_global)
+                candidates = self._get_names(candidates)
+                for kdn_name in candidates:
+                    if kdn_name in self.op_name_list[i:next_bwd_idx]:
+                        no_save_list.append(kdn_name.split(" ")[0])
 
-            for target in op.tensor_targets:
-                inplace_code = inplace_code.replace(target, "_" + target)
+                for target in op.tensor_targets:
+                    inplace_code = inplace_code.replace(target, "_" + target)
 
+                l.append(
+                    self.fct_run_forward_with_grad(
+                        main_code.replace("self.", "original_mod.").replace(
+                            "self[", "original_mod["
+                        ),
+                        no_save_list=no_save_list,
+                    )
+                )
             l.append(
                 self.fct_run_forward_with_grad(
-                    main_code.replace("self.", "original_mod.").replace(
+                    inplace_code.replace("self.", "original_mod.").replace(
                         "self[", "original_mod["
                     ),
-                    no_save_list=no_save_list,
                 )
             )
-        l.append(
-            self.fct_run_forward_with_grad(
-                inplace_code.replace("self.", "original_mod.").replace(
-                    "self[", "original_mod["
-                ),
-            )
-        )
 
-        if detach:
-            l.append(self.fct_run_detach(op.main_target))
-        else:
-            l.append(self.fct_fake_detach(op.main_target))
-        l.append(
-            self.fct_run_forward_with_grad(
-                body_code.replace("self.", "original_mod.").replace(
-                    "self[", "original_mod["
-                ),
+            if detach:
+                l.append(self.fct_run_detach(op.main_target))
+            else:
+                l.append(self.fct_fake_detach(op.main_target))
+            l.append(
+                self.fct_run_forward_with_grad(
+                    body_code.replace("self.", "original_mod.").replace(
+                        "self[", "original_mod["
+                    ),
+                )
             )
-        )
 
         # get the shape of tensors
         if not rec:
-            l.append(self.fct_get_shapes(f"_{op.main_target}"))
+            if op.proxy:
+                l.append(self.fct_get_shapes(f"_{op.main_target}"))
             for target in op.tensor_targets:
                 l.append(self.fct_get_shapes(target))
         return l
