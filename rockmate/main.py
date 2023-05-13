@@ -534,6 +534,8 @@ class CheckpointedModule(torch.nn.Module):
             (out_mt,ast_to_str(view_code)) 
             for (out_mt,view_code) \
             in self.rkgb_res.K_graph.dict_output_viewing_code.items())
+        self.outputs_wrapping_code = \
+            ast_to_str(self.rkgb_res.K_graph.outputs_wrapping_code)
         self.output = self.rkgb_res.K_graph.list_outputs_kdn_data[0]
         self.mem_limit = mem_limit
         self.gd = make_gd(self.device, self.original_mod, self.dict_constants)
