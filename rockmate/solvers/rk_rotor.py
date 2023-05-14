@@ -211,11 +211,12 @@ class RK_rotor(Solver):
                         refine=False,
                         correct_overhead=False,
                     )  # so that solution can be read
+                    hcn.sub_cluster.loss_kcn.time = 0
                     Full_sched = OpSchedule(
                         fwd_op_list
                         + [Op(hcn.sub_cluster.loss_kcn)]
                         + bwd_op_list,
-                        len(fwd_op_list) - 1,
+                        len(fwd_op_list),
                         # cluster=hcn.sub_cluster,
                         refine=False,
                         correct_overhead=False,

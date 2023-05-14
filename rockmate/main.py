@@ -1,11 +1,13 @@
 # ============
 # = ROCKMATE =
 # ============
-
+import os
+import pickle
 import torch
 from torch import tensor
 import ast
 import time
+from datetime import datetime
 import warnings
 from os import environ
 
@@ -24,7 +26,7 @@ from .solvers.def_sequence import (
 )
 from .solvers.main import preprocess, solve_recursive
 from .solvers.op_schedule import *
-from .solvers.hilp import HILP
+from .solvers import RK_rotor, HILP, TwRemat
 from .solvers.HILP_gurobi import *
 from .solvers.rotor_solver import seq_builder, solve_dp_functional
 from .compiler import Compiler, RK_Storage, make_gd
@@ -63,6 +65,7 @@ class HRemat(torch.nn.Module):
         ilp_solver="gurobi",
         model_kwargs=None,
         partitioners=[
+            Ptools.Partitioner(),
             Ptools.Partitioner_bottom_to_top(),
             Ptools.Partitioner_seq(),
         ],
@@ -73,6 +76,10 @@ class HRemat(torch.nn.Module):
         self.device = get_device()
         object.__setattr__(self, "original_mod", original_mod)
         dict_inputs = make_inputs(original_mod, model_inputs, model_kwargs)
+        self.named_para_shape = dict()
+        for n, p in original_mod.named_parameters():
+            self.named_para_shape[n] = p.shape
+
         #  We don't want to use the default setattr
         # because torch.nn.Module will register it as a submodule
         # -- use gkGB --
@@ -87,11 +94,15 @@ class HRemat(torch.nn.Module):
         self.dict_constants = self.rkgb_res.K_graph.dict_constants
         self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)
         self.dict_output_viewing_code = dict(
-            (out_mt,ast_to_str(view_code)) 
-            for (out_mt,view_code) \
-            in self.rkgb_res.K_graph.dict_output_viewing_code.items())
-        self.outputs_wrapping_code = \
-            ast_to_str(self.rkgb_res.K_graph.outputs_wrapping_code)
+            (out_mt, ast_to_str(view_code))
+            for (
+                out_mt,
+                view_code,
+            ) in self.rkgb_res.K_graph.dict_output_viewing_code.items()
+        )
+        self.outputs_wrapping_code = ast_to_str(
+            self.rkgb_res.K_graph.outputs_wrapping_code
+        )
         self.output = self.rkgb_res.K_graph.list_outputs_kdn_data[0]
         self.budget = budget
         self.gd = make_gd(self.device, self.original_mod, self.dict_constants)
@@ -99,13 +110,14 @@ class HRemat(torch.nn.Module):
         if solve_sched:
             self.solve_sched()
 
-    def solver_recursive(self, list_solvers=None):
+    def solver_recursive(self, list_solvers=None, only_preprocess=False):
         list_solvers = list_solvers or self.list_solvers
         for cluster in self.rkgb_res.H_cluster.all_clusters:
             if not cluster.is_bottom:
                 preprocess(
                     cluster, protect_names=["sources data", "sources grad"]
                 )
+        
         solve_recursive(
             self.rkgb_res.H_cluster, list_solvers=list_solvers, skip_self=True
         )
@@ -118,7 +130,7 @@ class HRemat(torch.nn.Module):
         list_solvers = list_solvers or self.list_solvers
         for solver in list_solvers:
             if (
-                True in [isinstance(solver, HILP) for solver in list_solvers]
+                True in [isinstance(solver, HILP) or isinstance(solver, RK_rotor) for solver in list_solvers]
                 and rec
             ):
                 self.solver_recursive()
@@ -126,6 +138,7 @@ class HRemat(torch.nn.Module):
         for solver in list_solvers:
             if isinstance(solver, HILP):
                 solver.config.nb_total_nodes = 30
+                print("temporarily changing total_nodes for top level hilp")
                 list_solutions.extend(
                     solver(self.rkgb_res.H_cluster, [budget], accurate_mem=True)
                 )
@@ -133,11 +146,15 @@ class HRemat(torch.nn.Module):
 
             else:
                 list_solutions.extend(solver(self.rkgb_res.H_cluster, [budget]))
+
+        self.rkgb_res.H_cluster.list_sched.extend(list_solutions)
         if not list_solutions:
             warnings.warn("no feasible schedule is found")
         else:
+            # print([sum(op_sched.time) for op_sched in list_solutions])
+            # print(len(list_solutions))
             self.op_sched = list_solutions[
-                np.argmin(sum(op_sched.time) for op_sched in list_solutions)
+                np.argmin([sum(op_sched.time) for op_sched in list_solutions])
             ]
             self.get_compiled_fct()
         self.list_solutions.extend(list_solutions)
@@ -276,9 +293,11 @@ class HRemat(torch.nn.Module):
                     for l in RkMod.fwd_fct_list:
                         RkMod._exec(l)
                 # -> Get the output
-                outs = [RkMod.compiler.get_val(out_mt) 
-                        for out_mt in RkMod.rkgb_res.S_graph.outputs]
-                if len(outs)==1:
+                outs = [
+                    RkMod.compiler.get_val(out_mt)
+                    for out_mt in RkMod.rkgb_res.S_graph.outputs
+                ]
+                if len(outs) == 1:
                     return outs[0]
                 else:
                     return tuple(outs)
@@ -313,11 +332,13 @@ class HRemat(torch.nn.Module):
                 storage = ctx.RK_Storage
                 RkMod.compiler.storage = storage
                 # -> Put grad_out in out.grad (Rem 4)
-                for out_mt,out_grad in zip(RkMod.rkgb_res.S_graph.outputs,grad_outs):
+                for out_mt, out_grad in zip(
+                    RkMod.rkgb_res.S_graph.outputs, grad_outs
+                ):
                     out = RkMod.compiler.get_val(out_mt)
                     out.grad = out_grad.view(out_grad.shape)
                     out_grad.data = torch.empty(0)
-                    
+
                 #  * record_mem stuff *
                 if RkMod.exec_with_record_mem:
                     RkMod.output_size = irotor.tensorMsize(
@@ -395,17 +416,19 @@ class HRemat(torch.nn.Module):
             output_mt_values = self.autograd_Function.apply(
                 dummy_input, *inputs_which_req_grad
             )
-            for out_mt,out_mt_value \
-                in zip(self.rkgb_res.S_graph.outputs,output_mt_values):
+            for out_mt, out_mt_value in zip(
+                self.rkgb_res.S_graph.outputs, output_mt_values
+            ):
                 view_code = self.dict_output_viewing_code[out_mt]
-                exec(view_code,self.gd,self.compiler.storage.ld)
+                exec(view_code, self.gd, self.compiler.storage.ld)
                 # -> We access to out_mt_value directly in the storage
-            exec(self.outputs_wrapping_code,self.gd,self.compiler.storage.ld)
-            final_output = self.compiler.get_val(self.rkgb_res.D_graph.outputs[0])
+            exec(self.outputs_wrapping_code, self.gd, self.compiler.storage.ld)
+            final_output = self.compiler.get_val(
+                self.rkgb_res.D_graph.outputs[0]
+            )
             #  -> Clear the compiler
             self.compiler.storage = None
             return final_output
-
 
     # === end of forward ===
 
@@ -469,20 +492,23 @@ class HRemat(torch.nn.Module):
             ):
                 self.__dict__[k] = v
 
+    def save_to_local(
+        self, path, id=datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
+    ):
+        with open(f"{path}/{id}_rkgb_res.pkl", "wb") as f:
+            pickle.dump(self.rkgb_res, f)
 
+    def save_sched_to_local(
+        self, path, id=datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
+    ):
+        with open(f"{path}/{id}_sched.pkl", "wb") as f:
+            pickle.dump(self.op_sched, f)
 
-
-
-
-
-
-
-
-
-
-
-
-
+    def load_from_local(self, path, id, load_sched=True):
+        with open(f"{path}/{id}_rkgb_res.pkl", "rb") as f:
+            self.rkgb_res = pickle.load(f)
+            if load_sched:
+                self.list_solutions = self.rkgb_res.H_cluster.list_sched
 
 
 class CheckpointedModule(torch.nn.Module):
@@ -528,11 +554,15 @@ class CheckpointedModule(torch.nn.Module):
         self.eq_classes = self.rkgb_res.equivalent_classes
         self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)
         self.dict_output_viewing_code = dict(
-            (out_mt,ast_to_str(view_code)) 
-            for (out_mt,view_code) \
-            in self.rkgb_res.K_graph.dict_output_viewing_code.items())
-        self.outputs_wrapping_code = \
-            ast_to_str(self.rkgb_res.K_graph.outputs_wrapping_code)
+            (out_mt, ast_to_str(view_code))
+            for (
+                out_mt,
+                view_code,
+            ) in self.rkgb_res.K_graph.dict_output_viewing_code.items()
+        )
+        self.outputs_wrapping_code = ast_to_str(
+            self.rkgb_res.K_graph.outputs_wrapping_code
+        )
         self.output = self.rkgb_res.K_graph.list_outputs_kdn_data[0]
         self.mem_limit = mem_limit
         self.gd = make_gd(self.device, self.original_mod, self.dict_constants)
@@ -817,9 +847,11 @@ class CheckpointedModule(torch.nn.Module):
                     for l in RkMod.fwd_fct_list:
                         RkMod._exec(l)
                 # -> Get the output
-                outs = [RkMod.compiler.get_val(out_mt) 
-                        for out_mt in RkMod.rkgb_res.S_graph.outputs]
-                if len(outs)==1:
+                outs = [
+                    RkMod.compiler.get_val(out_mt)
+                    for out_mt in RkMod.rkgb_res.S_graph.outputs
+                ]
+                if len(outs) == 1:
                     return outs[0]
                 else:
                     return tuple(outs)
@@ -854,11 +886,13 @@ class CheckpointedModule(torch.nn.Module):
                 storage = ctx.RK_Storage
                 RkMod.compiler.storage = storage
                 # -> Put grad_out in out.grad (Rem 4)
-                for out_mt,out_grad in zip(RkMod.rkgb_res.S_graph.outputs,grad_outs):
+                for out_mt, out_grad in zip(
+                    RkMod.rkgb_res.S_graph.outputs, grad_outs
+                ):
                     out = RkMod.compiler.get_val(out_mt)
                     out.grad = out_grad.view(out_grad.shape)
                     out_grad.data = torch.empty(0)
-                    
+
                 #  * record_mem stuff *
                 if RkMod.exec_with_record_mem:
                     RkMod.output_size = irotor.tensorMsize(
@@ -936,13 +970,16 @@ class CheckpointedModule(torch.nn.Module):
             output_mt_values = self.autograd_Function.apply(
                 dummy_input, *inputs_which_req_grad
             )
-            for out_mt,out_mt_value \
-                in zip(self.rkgb_res.S_graph.outputs,output_mt_values):
+            for out_mt, out_mt_value in zip(
+                self.rkgb_res.S_graph.outputs, output_mt_values
+            ):
                 view_code = self.dict_output_viewing_code[out_mt]
-                exec(view_code,self.gd,self.compiler.storage.ld)
+                exec(view_code, self.gd, self.compiler.storage.ld)
                 # -> We access to out_mt_value directly in the storage
-            exec(self.outputs_wrapping_code,self.gd,self.compiler.storage.ld)
-            final_output = self.compiler.get_val(self.rkgb_res.D_graph.outputs[0])
+            exec(self.outputs_wrapping_code, self.gd, self.compiler.storage.ld)
+            final_output = self.compiler.get_val(
+                self.rkgb_res.D_graph.outputs[0]
+            )
             #  -> Clear the compiler
             self.compiler.storage = None
             return final_output
@@ -1008,3 +1045,14 @@ class CheckpointedModule(torch.nn.Module):
                 and k not in ["training"]
             ):
                 self.__dict__[k] = v
+
+    def save_sched_to_local(
+        self, path, id=datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
+    ):
+        with open(f"{path}/{id}_sched.pkl", "wb") as f:
+            pickle.dump(self.op_sched, f)
+
+    def load_scehd_from_local(self, path, id, load_sched=True):
+        with open(f"{path}/{id}_sched.pkl", "rb") as f:
+            self.op_sched = pickle.load(f)
+        self.get_compiled_fct()
