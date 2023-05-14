@@ -67,7 +67,11 @@ list_optional_cheap_fct = [
 
 list_cheap_fct = ["list constructor", "tuple constructor"]
 
+list_inplace_fct = [
+]
 list_view_fct = [
+    "torch.ops.aten.slice",
+    "torch.ops.aten.select",
     "torch.adjoint",
     "torch.Tensor.adjoint",
     "torch.as_strided",
