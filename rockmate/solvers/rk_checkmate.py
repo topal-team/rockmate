@@ -10,7 +10,7 @@ from rockmate.rkgb.Htools import H_cluster, H_graph, H_C_node
 from rockmate.rkgb.Ktools import K_graph
 
 from .main import Solver, get_cluster_budget
-from .ILP_gurobi import ModelGurobi
+from .HILP_gurobi import ModelGurobi
 from .op_schedule import OpSchedule
 
 
@@ -20,9 +20,8 @@ class RK_checkmate(Solver):
             self,
             mem_unit=1024**2,
             gurobi_params={
-                "LogToConsole": 1,
+                "LogToConsole": 0,
                 "IntegralityFocus": 1,
-                "TimeLimit": 4 * 60,
                 "Threads": os.cpu_count(),
                 "OptimalityTol": 1e-4,
                 "IntFeasTol": 1e-5,
@@ -31,9 +30,10 @@ class RK_checkmate(Solver):
             nb_total_nodes=100,
         ):
             self.mem_unit = mem_unit
-            self.gurobi_params = gurobi_params
             self.protected_names = protected_names
             self.nb_total_nodes = nb_total_nodes
+            self.time_limit = 20 * 60
+            self.gurobi_params = gurobi_params
 
     def __init__(
         self,
@@ -41,8 +41,14 @@ class RK_checkmate(Solver):
     ):
         super().__init__(config)
 
-    def can_solve(self, kg: K_graph):
-        return len(kg.list_kcn) // 2 < self.config.nb_total_nodes
+    def can_solve(self, hg: H_graph, cluster: H_cluster):
+        return len(hg.list_hcn) == len(cluster.list_kcn)
+
+    def _select_sched(self, hg):
+        # for fwd hcn, select sched from hcn.sub_cluster and put in hcn.list_sched
+        for hcn in hg.list_hcn:
+            if hcn.sub_cluster is not None:
+                hcn.list_sched = hcn.sub_cluster.get_sched()
 
     def solve(self, cluster: H_cluster, budgets=None, accurate_mem=False):
         self.config.protected_names.extend(
@@ -59,39 +65,44 @@ class RK_checkmate(Solver):
         for budget in self.budgets:
             if not hasattr(budget, "__iter__"):
                 budget = [budget]
-            list_op_sched.extend(
-                self.solve_kg(
-                    cluster,
-                    *budget,
-                    accurate_mem=accurate_mem,
-                )
-            )
+            for hg in cluster.possible_hg:
+                if self.can_solve(hg, cluster):
+                    list_op_sched.extend(
+                        self.solve_hg(
+                            hg,
+                            *budget,
+                            accurate_mem=accurate_mem,
+                        )
+                    )
         return list_op_sched
 
-    def solve_kg(
+    def solve_hg(
         self,
-        kg,
+        hg: H_graph,
         peak_budget,
         save_budget=None,
+        accurate_mem=False,
         print_result=False,
     ):
-        if not self.can_solve(kg):
-            return []
         if save_budget is not None:
             save_budget = save_budget
         else:
             save_budget = peak_budget
 
         list_op_sched = []
+        self._select_sched(hg)
         if not hasattr(save_budget, "__iter__"):
             save_budget = [save_budget]
         # start = time.time()
+        gurobi_params = self.config.gurobi_params
+        gurobi_params["TimeLimit"] = self.config.time_limit
         self.md = ModelGurobi(
-            kg,
+            hg,
             peak_budget=peak_budget,
             save_budget=max(save_budget),
-            gurobi_params=self.config.gurobi_params,
-            # protected_names=self.config.protected_names,
+            gurobi_params=gurobi_params,
+            accurate_mem=accurate_mem,
+            protected_names=self.config.protected_names,
         )
         # print(f"model building: {time.time()-start}")
         sols = set()
@@ -109,7 +120,7 @@ class RK_checkmate(Solver):
                     #     f"Solution with obj: {self.md.md.getObjective().getValue()}"
                     # )
                     print(
-                        f"Solve Kgraph {kg.name} with {len(kg.list_hcn)} nodes takes {self.md.solve_time:03f}s"
+                        f"Solve Hgraph {hg.name} with {len(hg.list_hcn)} nodes takes {self.md.solve_time:03f}s"
                     )
                 loss_idx = self.md.loss_idx
                 time_mem = (
@@ -121,6 +132,7 @@ class RK_checkmate(Solver):
 
                     sols.add(time_mem)
                     self.op_sched = self.md.schedule()
+                    self.op_sched.solver = "HILP"
                     list_op_sched.append(self.op_sched)
                     # print(f"scheduling: {time.time()-start}")
             else:  # if infeasible, no need to try smaller budget
