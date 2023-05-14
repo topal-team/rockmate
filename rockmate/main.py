@@ -14,7 +14,7 @@ from os import environ
 from . import rkgb
 from .rkgb.main import make_inputs, make_all_graphs
 from .rkgb.utils import print_debug, np, irotor
-from .rkgb.utils.global_vars import ref_verbose, solver_name
+from .rkgb.utils.global_vars import ref_verbose, solver_name, ExceptionModuleDoesNotReqGrad
 from .rkgb.utils.small_fcts import get_device
 from .rkgb.utils.ast_add_on import ast_to_str
 from .rkgb import Ptools
@@ -53,6 +53,7 @@ class HRemat(torch.nn.Module):
     backward_stop = False
     backward_add_output_grad = True
     op_sched = None
+    module_does_not_req_grad = False
 
     def __init__(
         self,
@@ -83,32 +84,35 @@ class HRemat(torch.nn.Module):
         #  We don't want to use the default setattr
         # because torch.nn.Module will register it as a submodule
         # -- use gkGB --
-        self.rkgb_res = make_all_graphs(
-            original_mod,
-            dict_inputs,
-            verbose=verbose,
-            wanted_graphs={"H"},
-            partitioners=partitioners,
-        )  # we don't need K_graph_list
-        self.list_solvers = list_solvers
-        self.dict_constants = self.rkgb_res.K_graph.dict_constants
-        self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)
-        self.dict_output_viewing_code = dict(
-            (out_mt, ast_to_str(view_code))
-            for (
-                out_mt,
-                view_code,
-            ) in self.rkgb_res.K_graph.dict_output_viewing_code.items()
-        )
-        self.outputs_wrapping_code = ast_to_str(
-            self.rkgb_res.K_graph.outputs_wrapping_code
-        )
-        self.output = self.rkgb_res.K_graph.list_outputs_kdn_data[0]
-        self.budget = budget
-        self.gd = make_gd(self.device, self.original_mod, self.dict_constants)
-        self.list_solutions = []
-        if solve_sched:
-            self.solve_sched()
+        try:
+            self.rkgb_res = make_all_graphs(
+                original_mod,
+                dict_inputs,
+                verbose=verbose,
+                wanted_graphs={"H"},
+                partitioners=partitioners,
+            )  # we don't need K_graph_list
+            self.list_solvers = list_solvers
+            self.dict_constants = self.rkgb_res.K_graph.dict_constants
+            self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)
+            self.dict_output_viewing_code = dict(
+                (out_mt, ast_to_str(view_code))
+                for (
+                    out_mt,
+                    view_code,
+                ) in self.rkgb_res.K_graph.dict_output_viewing_code.items()
+            )
+            self.outputs_wrapping_code = ast_to_str(
+                self.rkgb_res.K_graph.outputs_wrapping_code
+            )
+            self.output = self.rkgb_res.K_graph.list_outputs_kdn_data[0]
+            self.budget = budget
+            self.gd = make_gd(self.device, self.original_mod, self.dict_constants)
+            self.list_solutions = []
+            if solve_sched:
+                self.solve_sched()
+        except ExceptionModuleDoesNotReqGrad:
+            self.module_does_not_req_grad = True
 
     def solver_recursive(self, list_solvers=None, only_preprocess=False):
         list_solvers = list_solvers or self.list_solvers
@@ -379,6 +383,8 @@ class HRemat(torch.nn.Module):
 
     #  === nn.module's forward method wrapping self.autograd_Function.forward ===
     def forward(self, *args, record_mem=False, **kwargs):
+        if self.module_does_not_req_grad:
+            return self.original_mod(*args,**kwargs)
         self.exec_with_record_mem = record_mem
         self.max_mem = []
         self.allo_mem = []

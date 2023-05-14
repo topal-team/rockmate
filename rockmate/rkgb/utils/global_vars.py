@@ -223,10 +223,11 @@ default_forced_kwargs = dict(
         (("torch.instance_norm", [("momentum", 6, 0)])),
     ]
 )
-
-solver_name = [None]
 # This dict is used by default when force_special_kwargs=True
 # -> dict of : fct_name -> (arg_name,arg_value) list to inforce
 # We change some kwargs in the code to avoid changing values
 # due to recomputation. For instance batchnorm statistics.
 # ==========================
+
+solver_name = [None]
+
