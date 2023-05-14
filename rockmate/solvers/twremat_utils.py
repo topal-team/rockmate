@@ -156,7 +156,12 @@ def get_twremat_graph(
     # target = K_graph.list_kcn[-1].unique_id  # final computational node
     targets = []
     for kcn in K_graph.list_kcn:
-        if len([dn for dn in kcn.users if dn in K_graph.list_kdn]) == 0:
+        users_inside = [
+            dn
+            for dn in kcn.users
+            if (dn in K_graph.list_kdn and not dn in K_graph.interfaces["inputs_kdn_grad"])
+        ]
+        if len(users_inside) == 0:
             targets.append(kcn.unique_id)
 
     # for cnode in K_graph.list_kcn:
@@ -219,7 +224,12 @@ def get_twremat_graph(
         ]
     else:
         loss_node = []
-
+    if not targets:
+        raise ValueError("no targets")
+    if len(node_info) < 1:
+        raise ValueError("no node_info")
+    # if not loss_node:
+    #     raise ValueError("no loss_node")
     return node_info, targets, loss_node
 
 
