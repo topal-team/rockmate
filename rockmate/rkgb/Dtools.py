@@ -159,6 +159,34 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
     dict_nodes   = dict()
     b_nodes      = sort_nodes(bg)
 
+    # -- Fix B_nodes without users --
+    to_insert_back = [
+        bn for bn in bg.nodes
+        if (bn not in b_nodes
+        and len(bn.deps)!=0)]
+    while to_insert_back != []:
+        retry_list = []
+        for bn in to_insert_back:
+            index_deps = []
+            fail = False
+            for req_bn in bn.deps:
+                if req_bn not in b_nodes:
+                    fail = True
+                    break
+                else:
+                    index_deps.append(b_nodes.index(req_bn))
+            if fail:
+                retry_list.append(bn)
+                continue
+            else:
+                max_index = max(index_deps)
+                b_nodes.insert(max_index+1,bn)
+        if retry_list == to_insert_back:
+            to_insert_back = [] # -> Give up
+        else:
+            to_insert_back = retry_list
+    # ------
+            
     # --- translate B node to D and make dict_info ---
     # -> to make dict_info we need to run the forward !
     # -> we handle nodes one by one : 
@@ -237,6 +265,9 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
             is_view    = False # by default
             is_inplace = False # by default
             data_parents = set()
+
+            # === FIRST WAY TO RECOGNIZE A VIEW ===
+            # -> data_ptr
             if small_fcts.has_a_data_ptr(bn_value):
                 bn_data_ptr = small_fcts.get_data_ptr(bn_value)
                 for o_name,o_value in tmp_local.items():
@@ -248,6 +279,23 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
                         data_owner_name = o_name
                         if o_value is bn_value: is_inplace = True
                         else: is_view = True
+
+            # === SECOND WAY TO RECOGNIZE A VIEW ===
+            # -> main_fct is a view/inplace function
+            if not (is_inplace or is_view):
+                if (bn.fct in global_vars.list_view_fct
+                or bn.fct in global_vars.list_inplace_fct):
+                    data_parents = set()
+                    for req_bn in bn.deps:
+                        req_info = dict_info[req_bn.mt]
+                        if req_info.ttype is torch.Tensor:
+                            data_parents.add(req_bn.mt)
+                    if bn.fct in global_vars.list_inplace_fct:
+                        is_inplace = True
+                    else:
+                        is_view = True
+
+            # === register ===
             if is_inplace or is_view:
                 bn_deps_names = set(req_bn.target for req_bn in bn.deps)
                 data_direct_parents = bn_deps_names & data_parents
@@ -267,19 +315,23 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
                 if is_inplace:
                     data_owner = dict_nodes[data_owner_name]
                     data_owner.protected = True
-
             else:
                 data_owner_name = bn.target
                 data_direct_parent_name = bn.target
-            dict_info[bn.target] = def_info.Var_info(
+            dict_info[bn.target] = info = def_info.Var_info(
                 bn_value,
                 is_view    = is_view,
                 is_inplace = is_inplace,
                 data_owner_name = data_owner_name,
                 data_direct_parent_name = data_direct_parent_name)
+            # ** Correct req_grad of data_parent **
+            if info.requires_grad:
+                dict_info[info.data_owner_name].requires_grad = True
+
             del tmp_local
 
     dg.sources_req_grad = sources_req_grad 
+
 
     # --- translate output ---
     o_var = bg.output_var
@@ -306,6 +358,43 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
         else:
             dg.output_nodes = [output_node]
     dg.outputs = [str_val] # maybe just a tuple constructor...
+
+
+    # --- missing edges for inplace operations ---
+    dict_dn = dict((dn.mt,dn) for dn in d_nodes)
+    for index_dn,dn in enumerate(d_nodes):
+        if len(dn.users)==0 and dn.mt != str_val:
+            info : def_info.Var_info = dict_info[dn.mt]
+            assert(info.is_view or info.is_inplace)
+            data_owner_name = info.data_owner_name
+            data_owner_dn = dict_dn[data_owner_name]
+            for user_dn in data_owner_dn.users:
+                index_user = d_nodes.index(user_dn)
+                if index_user > index_dn:
+                    user_dn.deps.add(dn)
+                    dn.users.add(dn)
+
+
+    # --- Correct requires_grad ---
+    for dn in d_nodes:
+        info = dict_info[dn.mt]
+        if dict_info[info.data_owner_name].requires_grad:
+            info.requires_grad = True
+
+    # -> If none of users req_grad -> useless to req_grad
+    for dn in d_nodes[::-1]:
+        if dn.mt not in dg.outputs:
+            info = dict_info[dn.mt]
+            if info.requires_grad:
+                one_user_req_grad = False
+                for user_dn in dn.users:
+                    if dict_info[user_dn.mt].requires_grad:
+                        one_user_req_grad = True
+                        break
+                if not one_user_req_grad:
+                    info.requires_grad = False
+
+
 
     # -- prepares the sequencing --
     dg.prepare_cut()

@@ -468,6 +468,17 @@ class S_graph(RK_graph):
                 else:
                     info.data_owner_name = owner_sn.main_target
 
+
+    def correct_label_over_edges(self):
+        for sn in self.nodes:
+            sn_code = sn.get_code()
+            for req_sn,used_targets in sn.deps.items():
+                _used_target = list(used_targets)
+                for tar in _used_target:
+                    if not tar in sn_code:
+                        used_targets.discard(tar)
+                req_sn.users[sn] = set(used_targets)
+
                     
     def make_targets_attrs(self):
         # -> tensor_targets ; inplace_targets ; container_targets
@@ -825,6 +836,7 @@ def D_to_S(dg,model=None,device=None):
     sg.check_relations()
     sg.refresh_info_data_name()
     sg.make_targets_attrs()
+    sg.correct_label_over_edges()
     sg.unhook_init_node()
     sg.unhook_special_output_node()
     sg.assert_ready()
