@@ -55,7 +55,7 @@ class HRemat(torch.nn.Module):
     op_sched = None
     module_does_not_req_grad = False
 
-    def __init__(
+    def __init__( 
         self,
         original_mod,
         model_inputs,
@@ -65,11 +65,12 @@ class HRemat(torch.nn.Module):
         verbose=False,
         ilp_solver="gurobi",
         model_kwargs=None,
-        partitioners=[
-            Ptools.Partitioner(),
-            Ptools.Partitioner_bottom_to_top(),
-            Ptools.Partitioner_seq(),
-        ],
+        partitioners=None,
+        #[
+        #    Ptools.Partitioner(),
+        #    Ptools.Partitioner_bottom_to_top(),
+        #    Ptools.Partitioner_seq(),
+        #],
     ):
         super().__init__()
         ref_verbose[0] = verbose
@@ -80,6 +81,23 @@ class HRemat(torch.nn.Module):
         self.named_para_shape = dict()
         for n, p in original_mod.named_parameters():
             self.named_para_shape[n] = p.shape
+        if partitioners is None:
+            partitioners = []
+            can_use_rotor = False
+            can_use_checkmate = False
+            for solver in list_solvers:
+                if isinstance(solver, RK_rotor):
+                    can_use_rotor = True
+                elif isinstance(solver, RK_checkmate):
+                    can_use_checkmate = True
+            partitioners = [
+                Ptools.Partitioner_bottom_to_top(can_use_rotor=can_use_rotor)
+            ]
+            if can_use_rotor:
+                partitioners.append(Ptools.Partitioner_seq())
+            if can_use_checkmate:
+                partitioners.append(Ptools.Partitioner())
+                    
 
         #  We don't want to use the default setattr
         # because torch.nn.Module will register it as a submodule
