@@ -26,7 +26,7 @@ from .solvers.def_sequence import (
 )
 from .solvers.main import preprocess, solve_recursive
 from .solvers.op_schedule import *
-from .solvers import RK_rotor, HILP, TwRemat
+from .solvers import RK_rotor, HILP, TwRemat, RK_checkmate
 from .solvers.HILP_gurobi import *
 from .solvers.rotor_solver import seq_builder, solve_dp_functional
 from .compiler import Compiler, RK_Storage, make_gd
@@ -114,14 +114,17 @@ class HRemat(torch.nn.Module):
         except ExceptionModuleDoesNotReqGrad:
             self.module_does_not_req_grad = True
 
-    def solver_recursive(self, list_solvers=None, only_preprocess=False):
-        list_solvers = list_solvers or self.list_solvers
+    def preprocess(self):
         for cluster in self.rkgb_res.H_cluster.all_clusters:
             if not cluster.is_bottom:
                 preprocess(
                     cluster, protect_names=["sources data", "sources grad"]
                 )
-        
+
+    def solver_recursive(self, list_solvers=None, only_preprocess=False):
+        list_solvers = list_solvers or self.list_solvers
+        self.preprocess()
+
         solve_recursive(
             self.rkgb_res.H_cluster, list_solvers=list_solvers, skip_self=True
         )
@@ -132,17 +135,27 @@ class HRemat(torch.nn.Module):
         # will choose the one with minimum time
         budget = budget or self.budget
         list_solvers = list_solvers or self.list_solvers
-        for solver in list_solvers:
-            if (
-                True in [isinstance(solver, HILP) or isinstance(solver, RK_rotor) for solver in list_solvers]
-                and rec
-            ):
-                self.solver_recursive()
+        if (
+            True
+            in [
+                isinstance(solver, HILP) or isinstance(solver, RK_rotor)
+                for solver in list_solvers
+            ]
+            and rec
+        ):
+            self.solver_recursive()
+        elif (
+            True
+            in [isinstance(solver, RK_checkmate) for solver in list_solvers]
+            and rec
+        ):
+            self.preprocess()
+
         list_solutions = []
         for solver in list_solvers:
             if isinstance(solver, HILP):
                 solver.config.nb_total_nodes = 30
-                print("temporarily changing total_nodes for top level hilp")
+                # print("temporarily changing total_nodes for top level hilp")
                 list_solutions.extend(
                     solver(self.rkgb_res.H_cluster, [budget], accurate_mem=True)
                 )
@@ -534,7 +547,7 @@ class CheckpointedModule(torch.nn.Module):
         get_sequence=True,
         get_compiled_fct=True,
         nb_budget_abar=10,
-        nb_budget_all=2,
+        nb_budget_all=5,
         ilp_solver="gurobi",
         model_kwargs=None,
     ):
@@ -556,6 +569,8 @@ class CheckpointedModule(torch.nn.Module):
         )  # we don't need the whole K_graph
         self.list_kg = self.rkgb_res.K_graph_list
         self.list_kg[0].fake_input_kdn_grad()
+        print(f"List K_graph size: {[len(kg.list_kcn) for kg in self.list_kg]}")
+
         self.dict_constants = self.rkgb_res.K_graph.dict_constants
         self.eq_classes = self.rkgb_res.equivalent_classes
         self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)

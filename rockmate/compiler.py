@@ -103,7 +103,7 @@ class Compiler:
                 l.append(self.fct_get_rng_state(op.name))
             else:
                 l.append(self.fct_restore_rng_state(op.name))
-        
+
         if not op.proxy:
             l = [self.fct_run_forward_with_grad(op.get_code())]
         else:
@@ -197,7 +197,15 @@ class Compiler:
         if not detach:
             return []
         rec = op.name in self.op_name_list[:i]
-        last = not (op.name in self.op_name_list[i + 1 :])
+        last = True
+        if op.name in self.op_name_list[i + 1 :]:  # not the last bwd
+            next_bwd_idx = i + 1 + self.op_name_list[i + 1 :].index(op.name)
+            no_fwd_before_bwd = not (
+                op.name.replace("bwd", "fwd")
+                in self.op_name_list[i + 1 : next_bwd_idx]
+            )
+            if no_fwd_before_bwd:
+                last = False
         l = []
         l2 = []
 
