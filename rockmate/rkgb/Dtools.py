@@ -290,10 +290,11 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
                         req_info = dict_info[req_bn.mt]
                         if req_info.ttype is torch.Tensor:
                             data_parents.add(req_bn.mt)
-                    if bn.fct in global_vars.list_inplace_fct:
-                        is_inplace = True
-                    else:
-                        is_view = True
+                    if data_parents != set():
+                        if bn.fct in global_vars.list_inplace_fct:
+                            is_inplace = True
+                        else:
+                            is_view = True
 
             # === register ===
             if is_inplace or is_view:
