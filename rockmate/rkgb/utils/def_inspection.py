@@ -16,53 +16,54 @@ def generate_our_global(sg,model,device):
     our_global.update(sg.dict_constants)
     our_global["self"] = model
     our_global["device"] = device
-    for inp in sg.inputs+sg.whole_model_inputs:
+    for inp in sg.whole_model_inputs.union(set(sg.inputs)):
         info = sg.dict_info[inp]
         x = def_info.generate_val(info,device)
         our_global[inp]=x
     return our_global
 
-def generate_tmp_local(sn,sg,our_global,device,tmp_local=None):
-    # TO REMOVE arg tmp_local
-    if tmp_local is None:
-        tmp_local = dict()
-        exec(
-            sg.init_node.get_code(force_special_kwargs=True),
-            our_global,tmp_local)
-    for req_sn in sn.deps.keys():
-        if (not (req_sn is sg.init_node)
-        and req_sn.main_target not in tmp_local):
+def generate_tmp_local(sn,sg,our_global,device):
+    tmp_local = dict()
+    exec(
+        sg.init_node.get_code(force_special_kwargs=True),
+        our_global,tmp_local)
+    req_sn_todo = list(sn.deps.keys())
+    set_req_sn_todo = set(req_sn_todo)
+    while req_sn_todo != []:
+        req_sn = req_sn_todo.pop(0)
+        if set(req_sn.deps).intersection(set_req_sn_todo) != set():
+            req_sn_todo.append(req_sn) # not his turn yet
+            continue
+        else:
+            set_req_sn_todo.remove(req_sn)
+        if not (req_sn is sg.init_node):
             # we create the main_target value, and we run the body_code
             # but the body_code may requires some artefacts
             req_sn_mt = req_sn.main_target
             main_info = sg.dict_info[req_sn_mt]
             req_sn_mt_value = def_info.generate_val(main_info,device)
-            if isinstance(req_sn_mt_value,torch.Tensor):
-                req_sn_mt_value = req_sn_mt_value.clone()
+            # NO NEED TO CLONE HERE
+            # On Dtools, you need to clone newly created values
+            # in case an inplace operation is applied directly to it
+            # << a leaf Variable that requires grad is being used in an in-place operation >>
+            # But here inplace operation aren't executed in body_code 
+            # -> We don't run inplace_code
+            # if isinstance(req_sn_mt_value,torch.Tensor):
+                # req_sn_mt_value = req_sn_mt_value.clone()
             tmp_local[req_sn_mt] = req_sn_mt_value
+            body_code = ast_add_on.make_str_list_assign(
+                req_sn.body_code,
+                force_special_kwargs=True)
             for req_req_sn in req_sn.deps.keys():
                 if not (req_req_sn is sg.init_node):
                     for req_req_tar in req_req_sn.all_targets:
-                        req_req_info = sg.dict_info[req_req_tar]
-                        tmp_local[req_req_tar] = (
-                            def_info.generate_val(req_req_info,device))
-            exec(ast_add_on.make_str_list_assign(
-                    req_sn.body_code,
-                    force_special_kwargs=True),
-                our_global,tmp_local)
+                        if req_req_tar in body_code and req_req_tar not in tmp_local:
+                            req_req_info = sg.dict_info[req_req_tar]
+                            tmp_local[req_req_tar] = (
+                                def_info.generate_val(req_req_info,device))
+            exec(body_code,our_global,tmp_local)
     return tmp_local
 
-""" TO REMOVE
-def generate_deep_tmp_local(sn,sg,our_global,device):
-    tmp_local = dict()
-    for req_sn in sn.deps.keys():
-        generate_tmp_local(
-            req_sn,sg,our_global,device,tmp_local=tmp_local)
-        exec(
-            req_sn.get_code(force_special_kwargs=True),
-            our_global, tmp_local)
-    return tmp_local
-"""
 
 # ======================
 

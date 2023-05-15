@@ -359,9 +359,11 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
         else:
             dg.output_nodes = [output_node]
     dg.outputs = [str_val] # maybe just a tuple constructor...
+    dg.whole_module_output = str_val
 
 
     # --- missing edges for inplace operations ---
+    # -> May change the output
     dict_dn = dict((dn.mt,dn) for dn in d_nodes)
     for index_dn,dn in enumerate(d_nodes):
         if len(dn.users)==0 and dn.mt != str_val:
@@ -369,6 +371,11 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
             assert(info.is_view or info.is_inplace)
             data_owner_name = info.data_owner_name
             data_owner_dn = dict_dn[data_owner_name]
+            if data_owner_name is dg.whole_module_output:
+                # discard
+                if data_owner_name in dg.outputs:
+                    dg.outputs.remove(data_owner_name)
+                dg.outputs.append(dn.mt)
             for user_dn in data_owner_dn.users:
                 index_user = d_nodes.index(user_dn)
                 if index_user > index_dn:

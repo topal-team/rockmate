@@ -437,7 +437,7 @@ class HRemat(torch.nn.Module):
                 # -> We access to out_mt_value directly in the storage
             exec(self.outputs_wrapping_code, self.gd, self.compiler.storage.ld)
             final_output = self.compiler.get_val(
-                self.rkgb_res.D_graph.outputs[0]
+                self.rkgb_res.D_graph.whole_module_output 
             )
             #  -> Clear the compiler
             self.compiler.storage = None
@@ -993,7 +993,7 @@ class CheckpointedModule(torch.nn.Module):
                 # -> We access to out_mt_value directly in the storage
             exec(self.outputs_wrapping_code, self.gd, self.compiler.storage.ld)
             final_output = self.compiler.get_val(
-                self.rkgb_res.D_graph.outputs[0]
+                self.rkgb_res.D_graph.whole_module_output 
             )
             #  -> Clear the compiler
             self.compiler.storage = None

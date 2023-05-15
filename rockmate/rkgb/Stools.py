@@ -310,10 +310,11 @@ class S_node(RK_node):
 
 class S_graph(RK_graph):
     artefact_edges : list[tuple[S_node,S_node,set[str]]] = None
-    whole_model_inputs = []
     def __init__(self,dg : D_graph = None):
         super().__init__("S")
-        if not (dg is None): self.inherit_base_attributes(dg)
+        if not (dg is None):
+            self.inherit_base_attributes(dg)
+            self.whole_model_inputs = set(dg.inputs)
         self.init_node = None # NOT in self.nodes
         self.special_output_node = None # NOT in self.nodes
         self.dict_output_viewing_code = dict()
@@ -333,7 +334,7 @@ class S_graph(RK_graph):
             inputs.update(used_targets)
             # -> labels over the edges
         self.inputs = list(inputs)
-        self.whole_model_inputs = self.inputs
+        self.whole_model_inputs.update(set(self.inputs))
 
     def unhook_init_node(self):
         dict_info = self.dict_info
@@ -380,10 +381,11 @@ class S_graph(RK_graph):
                 bc,force_special_kwargs=True
             )
             dict_view_code[out.mt] = viewing_code
-            out.body_code = []
-            out.tensor_targets = list(
-                set([out.mt]+out.inplace_targets)\
-                .intersection(set(out.tensor_targets)))
+            # TO REMOVE
+            # out.body_code = []
+            # out.tensor_targets = list(
+                # set([out.mt]+out.inplace_targets)\
+                # .intersection(set(out.tensor_targets)))
             outputs.append(out.mt)
             
 
@@ -440,14 +442,21 @@ class S_graph(RK_graph):
         # -- (re)-sorting nodes -- 
         # due to merging, the topo order may not be correct anymore
         # by the way, remove unplugged nodes
-        if len(self.output_nodes) != 1:
-            raise Exception(
-                f"This function should be called after "\
-                f"S_graph.unhook_special_output_node, therefore "\
-                f"S_graph should have exactly one output_node.\n"\
-                f"Here : {len(self.output_nodes)} output_nodes")
-        self.nodes = RK_sort_based_on_deps(self.output_nodes[0])
+        if len(self.output_nodes)==1:
+            root_sn = self.output_nodes[0]
+            real_root = True
+        else:
+            real_root = False
+            root_sn = S_node("Tmp_root")
+            root_sn.deps = dict((out_sn,set()) for out_sn in self.output_nodes)
+            for out_sn in self.output_nodes:
+                out_sn.users[root_sn] = set()
+        self.nodes = RK_sort_based_on_deps(root_sn)
         if self.init_node in self.nodes: self.nodes.remove(self.init_node)
+        if not real_root:
+            self.nodes.remove(root_sn)
+            for out_sn in root_sn.deps:
+                del out_sn.users[root_sn]
         self.check_artefact()
         self.check_relations()
         self.make_inputs()
@@ -557,9 +566,7 @@ def D_to_S_init(dg : D_graph) -> S_graph:
     # -> in D_graph these nodes have a dummy code `'code = 'INPUT'`,
     # -> the "insert" method will put these dummy codes in init_node.body_code
     # -> that's why we clear init_node.body_code at the end of initialization
-    assert(len(dg.outputs) == 1)
-    output_node = dict_s_nodes[dg.outputs[0]]
-    sg.output_nodes = [output_node]
+    sg.output_nodes = [dict_s_nodes[out] for out in dg.outputs]
     sg.clear()
     return sg
 
@@ -1030,14 +1037,7 @@ def aux_print_graph(dot,sg : S_graph,uniq_num):
         if sn.is_artefact:
             node(sn.main_target,sn.get_code(),style="dashed")
         else:
-            code = sn.get_code()
-            if sn in sg.output_nodes:
-                if sn.mt in sg.dict_output_viewing_code:
-                    view_code = ast_add_on.ast_to_str(
-                        sg.dict_output_viewing_code[sn.mt])
-                    if view_code != "":
-                        code += "\n# Viewing code :\n"+view_code
-            node(sn.main_target,code)
+            node(sn.main_target,sn.get_code())
     for sn in sg.nodes:
         for (req_sn,str_set) in sn.deps.items():
             edge(req_sn.main_target,sn.main_target,str_set)
