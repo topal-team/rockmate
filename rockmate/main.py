@@ -214,7 +214,8 @@ class HRemat(torch.nn.Module):
 
         self.fwd_fct_list = self.fct_list[:loss_idx]
         self.bwd_fct_list = self.fct_list[loss_idx:]
-        self.bwd_fct_list.append(self.compiler.get_del_data(self.output, 0))
+        l = [self.compiler.fct_del_var(v) for v in self.output.tensor_targets]
+        self.bwd_fct_list.append(l)
         self.define_autograd_Function()
         self.inherits_original_mod_attributes_and_methods()
 
