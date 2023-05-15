@@ -10,7 +10,7 @@ import warnings
 
 
 class RunOp:
-    def __init__(self, kcn, keep_kcn=False):
+    def __init__(self, kcn, keep_kcn=True):
         self.name = kcn.name
         self.time = kcn.time
         self.overhead = kcn.overhead
@@ -50,6 +50,7 @@ class RunOp:
 
 class DelOp:
     def __init__(self, kdn, proxy=True):
+        self.kdn = kdn
         self.name = kdn.name
         self.kdn_type = kdn.kdn_type
         self.time = 0
@@ -183,7 +184,7 @@ class OpSchedule:
 
     def valid_sched(self):
         for i, op in enumerate(self.op_list[1:]):
-            if hasattr(op, "deps_global"):
+            if hasattr(op, "deps_global") and "loss" not in op.name:
                 for kdn_name in op.deps_global:
                     if (
                         not self.alive_list[i][self.kdn_names.index(kdn_name)]

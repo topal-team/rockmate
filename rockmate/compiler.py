@@ -73,6 +73,8 @@ class Compiler:
             return True
 
     def _get_names(self, name_list):
+        return [kdn.name for kdn in name_list]
+
         if not self.op_sched:
             return [kdn.name for kdn in name_list]
         else:
@@ -105,7 +107,10 @@ class Compiler:
                 l.append(self.fct_restore_rng_state(op.name))
 
         if not op.proxy:
-            l = [self.fct_run_forward_with_grad(op.get_code())]
+            if hasattr(op, "ff_code"):
+                l = [self.fct_run_forward_with_grad(op.ff_code)]
+            else:
+                l = [self.fct_run_forward_with_grad(op.get_code())]
         else:
             # compile inplace code
             inplace_code = make_str_list_assign(
@@ -279,101 +284,16 @@ class Compiler:
         fct_list = []
         for i, op in enumerate(op_sched.op_list):
             if "fwd" in op.name:
-                fct_list.append(self.get_fwd(op, i))
+                setattr(op.kcn, "proxy", op.proxy)
+                fct_list.append(self.get_fwd(op.kcn, i))
             elif "bwd" in op.name:
-                fct_list.append(self.get_bwd(op, i))
+                fct_list.append(self.get_bwd(op.kcn, i))
             elif "data" in op.name:
-                fct_list.append(self.get_del_data(op, i))
+                fct_list.append(self.get_del_data(op.kdn, i))
             elif "grad" in op.name:
-                fct_list.append(self.get_del_grad(op, i))
+                fct_list.append(self.get_del_grad(op.kdn, i))
             else:
                 fct_list.append([])
-        return fct_list
-
-    def compile_from_KN_list(self, kn_list):
-        for i, kn in enumerate(kn_list):
-            if hasattr(kn, "is_fwd") and "loss" in kn.name:
-                kn_list[i] = "Loss"
-
-        self.op_sched = False
-        self.op_name_list = []
-        for kn in kn_list:
-            if not isinstance(kn, str):
-                self.op_name_list.append(kn.name)
-            else:
-                self.op_name_list.append(kn)
-
-        kdn_names = set(
-            kn.name for kn in kn_list if hasattr(kn, "kdn_type")
-        ).union(
-            set(
-                kdn.name
-                for kn in kn_list
-                if hasattr(kn, "is_fwd")
-                for kdn in kn.users
-            )
-        )
-
-        def refine(kn_list):
-            for i, kn in enumerate(kn_list):
-                if hasattr(kn, "is_fwd") and "loss" in kn.name:
-                    kn_list[i] = "Loss"
-
-                if hasattr(kn, "kdn_type"):
-                    # try to delete KDN
-                    src_i = []  # indices of source KCN's after i
-                    for kcn in kn.deps:
-                        if kcn in kn_list[i:]:
-                            src_i.append(kn_list[i:].index(kcn) + i)
-                        else:
-                            src_i.append(len(kn_list))
-
-                    next_used_i = len(kn_list)  # the next index to use KDN
-                    for kcn in kn.users_real:
-                        if kcn in kn_list[i:]:
-                            next_used_i = min(
-                                kn_list[i:].index(kcn) + i, next_used_i
-                            )
-
-                    if max(src_i) > next_used_i:  # try to use before regenerate
-                        kn_list[i] = (
-                            "Disabled_" + kn_list[i].name
-                        )  # skip this deletion
-
-        refine(kn_list)
-
-        self.alive_list = []
-        alive_status = {kdn_name: 0 for kdn_name in kdn_names}
-
-        for kn in kn_list:
-            if hasattr(kn, "is_fwd"):
-                for kdn in kn.users:
-                    alive_status[kdn.name] = 1
-            elif hasattr(kn, "kdn_type"):
-                alive_status[kn.name] = 0
-
-            self.alive_list.append(alive_status.copy())
-
-        fct_list = []
-        for i, kn in enumerate(kn_list):
-            if isinstance(kn, str):
-                fct_list.append([])
-                continue
-            if "fwd" in kn.name:
-                for kdn in kn.users:
-                    if kdn.kdn_type != "data":
-                        continue
-                    setattr(kn, "proxy", kdn.info.requires_grad)
-                fct_list.append(self.get_fwd(kn, i))
-            elif "bwd" in kn.name:
-                fct_list.append(self.get_bwd(kn, i))
-            elif "data" in kn.name:
-                fct_list.append(self.get_del_data(kn, i))
-            elif "grad" in kn.name:
-                fct_list.append(self.get_del_grad(kn, i))
-            else:
-                fct_list.append([])
-
         return fct_list
 
     def compile_from_schedule(self, op_sched):
