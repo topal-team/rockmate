@@ -1117,7 +1117,7 @@ class Partitioner_OLD_bottom_to_top(Partitioner):
             for flow_pn in current_flows:
                 flow = dict_flow[flow_pn]
                 flow.remove(pn)
-                # equivalent to "seen.remove(n)" in cut_based_on_deps
+                # equivalent to "seen.remove(n)" in Rk_get_1_separators
                 if flow == set():
                     dict_end_of_flow[flow_pn] = pn
                 else:
