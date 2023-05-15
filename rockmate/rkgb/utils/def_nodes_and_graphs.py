@@ -261,6 +261,7 @@ class RK_graph():
         self.graph_type = graph_type # string: B, D, S, P, K, H
         # - base attribute -
         self.inputs = [] ; self.outputs = [] # str list -> interfaces
+        self.whole_module_output = None
         self.sources_req_grad = None
         self.dict_constants = dict()
         self.dict_info = dict()
@@ -301,6 +302,7 @@ class RK_graph():
         for attr in [
             "inputs",
             "outputs",
+            "whole_module_output",
             "sources_req_grad",
             "dict_constants",
             "dict_info",
