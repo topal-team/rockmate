@@ -172,6 +172,13 @@ class Compiler:
                     ),
                 )
             )
+            for inplace_target in op.inplace_targets:
+                if inplace_target != op.main_target:
+                    l.append(
+                        self.fct_del_var(
+                            f"_{inplace_target}",
+                        )
+                    )
 
             if detach:
                 l.append(self.fct_run_detach(op.main_target))
