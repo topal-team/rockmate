@@ -135,6 +135,9 @@ class HRemat(torch.nn.Module):
         # will choose the one with minimum time
         budget = budget or self.budget
         list_solvers = list_solvers or self.list_solvers
+        for solver in list_solvers:
+            if isinstance(solver, HILP):
+                solver.config.protected_names.append(self.output.name)
         if (
             True
             in [
