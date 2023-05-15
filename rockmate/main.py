@@ -114,7 +114,7 @@ class HRemat(torch.nn.Module):
         for cluster in self.rkgb_res.H_cluster.all_clusters:
             if not cluster.is_bottom:
                 preprocess(
-                    cluster, protect_names=["sources data", "sources grad"]
+                    cluster, protect_names=["sources data", "sources grad", self.output.name]
                 )
 
     def solver_recursive(self, list_solvers=None, only_preprocess=False):
