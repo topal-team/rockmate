@@ -14,7 +14,11 @@ from os import environ
 from . import rkgb
 from .rkgb.main import make_inputs, make_all_graphs
 from .rkgb.utils import print_debug, np, irotor
-from .rkgb.utils.global_vars import ref_verbose, solver_name, ExceptionModuleDoesNotReqGrad
+from .rkgb.utils.global_vars import (
+    ref_verbose,
+    solver_name,
+    ExceptionModuleDoesNotReqGrad,
+)
 from .rkgb.utils.small_fcts import get_device
 from .rkgb.utils.ast_add_on import ast_to_str
 from .rkgb import Ptools
@@ -55,7 +59,7 @@ class HRemat(torch.nn.Module):
     op_sched = None
     module_does_not_req_grad = False
 
-    def __init__( 
+    def __init__(
         self,
         original_mod,
         model_inputs,
@@ -66,11 +70,11 @@ class HRemat(torch.nn.Module):
         ilp_solver="gurobi",
         model_kwargs=None,
         partitioners=None,
-        #[
+        # [
         #    Ptools.Partitioner(),
         #    Ptools.Partitioner_bottom_to_top(),
         #    Ptools.Partitioner_seq(),
-        #],
+        # ],
     ):
         super().__init__()
         ref_verbose[0] = verbose
@@ -97,7 +101,6 @@ class HRemat(torch.nn.Module):
                 partitioners.append(Ptools.Partitioner_seq())
             if can_use_checkmate:
                 partitioners.append(Ptools.Partitioner())
-                    
 
         #  We don't want to use the default setattr
         # because torch.nn.Module will register it as a submodule
@@ -125,7 +128,9 @@ class HRemat(torch.nn.Module):
             )
             self.output = self.rkgb_res.K_graph.list_outputs_kdn_data[0]
             self.budget = budget
-            self.gd = make_gd(self.device, self.original_mod, self.dict_constants)
+            self.gd = make_gd(
+                self.device, self.original_mod, self.dict_constants
+            )
             self.list_solutions = []
             if solve_sched:
                 self.solve_sched()
@@ -136,7 +141,12 @@ class HRemat(torch.nn.Module):
         for cluster in self.rkgb_res.H_cluster.all_clusters:
             if not cluster.is_bottom:
                 preprocess(
-                    cluster, protect_names=["sources data", "sources grad", self.output.name]
+                    cluster,
+                    protect_names=[
+                        "sources data",
+                        "sources grad",
+                        self.output.name,
+                    ],
                 )
 
     def solver_recursive(self, list_solvers=None, only_preprocess=False):
@@ -204,6 +214,7 @@ class HRemat(torch.nn.Module):
 
         self.fwd_fct_list = self.fct_list[:loss_idx]
         self.bwd_fct_list = self.fct_list[loss_idx:]
+        self.bwd_fct_list.append(self.compiler.get_del_data(self.output, 0))
         self.define_autograd_Function()
         self.inherits_original_mod_attributes_and_methods()
 
@@ -418,7 +429,7 @@ class HRemat(torch.nn.Module):
     #  === nn.module's forward method wrapping self.autograd_Function.forward ===
     def forward(self, *args, record_mem=False, **kwargs):
         if self.module_does_not_req_grad:
-            return self.original_mod(*args,**kwargs)
+            return self.original_mod(*args, **kwargs)
         self.exec_with_record_mem = record_mem
         self.max_mem = []
         self.allo_mem = []
@@ -464,7 +475,7 @@ class HRemat(torch.nn.Module):
                 # -> We access to out_mt_value directly in the storage
             exec(self.outputs_wrapping_code, self.gd, self.compiler.storage.ld)
             final_output = self.compiler.get_val(
-                self.rkgb_res.D_graph.whole_module_output 
+                self.rkgb_res.D_graph.whole_module_output
             )
             #  -> Clear the compiler
             self.compiler.storage = None
@@ -1020,7 +1031,7 @@ class CheckpointedModule(torch.nn.Module):
                 # -> We access to out_mt_value directly in the storage
             exec(self.outputs_wrapping_code, self.gd, self.compiler.storage.ld)
             final_output = self.compiler.get_val(
-                self.rkgb_res.D_graph.whole_module_output 
+                self.rkgb_res.D_graph.whole_module_output
             )
             #  -> Clear the compiler
             self.compiler.storage = None
