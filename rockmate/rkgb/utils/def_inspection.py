@@ -48,8 +48,8 @@ def generate_tmp_local(sn,sg,our_global,device):
             # << a leaf Variable that requires grad is being used in an in-place operation >>
             # But here inplace operation aren't executed in body_code 
             # -> We don't run inplace_code
-            # if isinstance(req_sn_mt_value,torch.Tensor):
-                # req_sn_mt_value = req_sn_mt_value.clone()
+            if isinstance(req_sn_mt_value,torch.Tensor):
+                req_sn_mt_value = req_sn_mt_value.clone()
             tmp_local[req_sn_mt] = req_sn_mt_value
             body_code = ast_add_on.make_str_list_assign(
                 req_sn.body_code,
