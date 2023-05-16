@@ -164,6 +164,8 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
         bn for bn in bg.nodes
         if (bn not in b_nodes
         and len(bn.deps)!=0)]
+    to_insert_back.sort(key=RK_node.get_num)
+    to_insert_back = to_insert_back[::-1]
     while to_insert_back != []:
         retry_list = []
         for bn in to_insert_back:
@@ -197,6 +199,8 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
     our_global["self"] = model
     our_global["device"] = device
     our_global.update(bg.dict_constants)
+    
+    dict_inplace_ops = dict() # dict : main target -> set targets of inplace stuff
 
     sources_req_grad = False
     for bn in b_nodes:
@@ -316,9 +320,19 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
                 if is_inplace:
                     data_owner = dict_nodes[data_owner_name]
                     data_owner.protected = True
+                # -> If several inplace operations 
+                # -> We must ensure we compute them in the original order
+                if is_inplace:
+                    for other_inplace_op in dict_inplace_ops[data_owner_name]:
+                        other_dn = dict_nodes[other_inplace_op]
+                        other_dn.users.add(dn)
+                        dn.deps.add(other_dn)
+                    dict_inplace_ops[data_owner_name].add(dn.mt)
+                    
             else:
                 data_owner_name = bn.target
                 data_direct_parent_name = bn.target
+                dict_inplace_ops[bn.mt] = set()
             dict_info[bn.target] = info = def_info.Var_info(
                 bn_value,
                 is_view    = is_view,
