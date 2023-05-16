@@ -29,6 +29,7 @@ class HILP(Solver):
             nb_total_nodes=20,
             nb_bdg_save=6,
             nb_bdg_peak=4,
+            time_limit=60 * 60,
         ):
             self.mem_unit = mem_unit
             self.gurobi_params = gurobi_params
@@ -37,6 +38,7 @@ class HILP(Solver):
             self.nb_total_nodes = nb_total_nodes
             self.nb_bdg_save = nb_bdg_save
             self.nb_bdg_peak = nb_bdg_peak
+            self.time_limit = time_limit
 
     def __init__(
         self,
@@ -165,11 +167,13 @@ class HILP(Solver):
         if not hasattr(save_budget, "__iter__"):
             save_budget = [save_budget]
         # start = time.time()
+        gurobi_params = self.config.gurobi_params
+        gurobi_params["TimeLimit"] = self.config.time_limit
         self.md = ModelGurobi(
             hg,
             peak_budget=peak_budget,
             save_budget=max(save_budget),
-            gurobi_params=self.config.gurobi_params,
+            gurobi_params=gurobi_params,
             accurate_mem=accurate_mem,
             protected_names=self.config.protected_names,
         )
@@ -201,7 +205,14 @@ class HILP(Solver):
 
                     sols.add(time_mem)
                     self.op_sched = self.md.schedule()
-                    self.op_sched.solver = "HILP"
+                    if self.md.md.status==2:
+                        status = "opt"
+                    elif self.md.md.status==9:
+                        status = "early_stp"
+                    else:
+                        status = self.md.md.status
+
+                    self.op_sched.solver = f"HILP_{status}"
                     list_op_sched.append(self.op_sched)
                     # print(f"scheduling: {time.time()-start}")
             else:  # if infeasible, no need to try smaller budget
