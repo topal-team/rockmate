@@ -216,7 +216,7 @@ class RK_rotor(Solver):
                         fwd_op_list
                         + [Op(hcn.sub_cluster.loss_kcn)]
                         + bwd_op_list,
-                        len(fwd_op_list),
+                        len(fwd_op_list) - 1,
                         # cluster=hcn.sub_cluster,
                         refine=False,
                         correct_overhead=False,
@@ -304,6 +304,8 @@ class RK_rotor(Solver):
         chain.cw[chain.ln] = list(hg.outputs_hdn_data)[
             0
         ].mem  #  the final output
+
+        chain.cbw[-2] = [(c - chain.cw[chain.ln]) for c in chain.cbw[-2]]
 
         # for the Loss block :
         chain.nb_sol.append(1)
