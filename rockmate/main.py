@@ -163,9 +163,24 @@ class HRemat(torch.nn.Module):
         # will choose the one with minimum time
         budget = budget or self.budget
         list_solvers = list_solvers or self.list_solvers
+        rotor_solver = False
+        hilp_solver = False
+        checkmate_solver = False
+        for solver in list_solvers:
+            if isinstance(solver, HILP):
+                hilp_solver = True
+            if isinstance(solver, RK_rotor):
+                rotor_solver = True
+            if isinstance(solver, RK_checkmate):
+                checkmate_solver = True
+
         for solver in list_solvers:
             if isinstance(solver, HILP):
                 solver.config.protected_names.append(self.output.name)
+                if rotor_solver:
+                    solver.config.nb_bdg_save = 10
+                    solver.config.nb_bdg_peak = 10
+
         if (
             True
             in [
