@@ -1347,7 +1347,7 @@ class Partitioner_bottom_to_top(Partitioner):
                 value = 0
             else: 
                 value = (tot_mem_internal
-                * len(not_last_nodes)**-self.value_power_not_last)
+                * len(not_last_nodes)**-self.old_value_fct_value_power_not_last)
             # effort for determinism -> we break ties
             num_determinism = min(pn.unique_id for pn in option.group)
             return (value,num_determinism)
