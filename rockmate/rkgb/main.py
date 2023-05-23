@@ -25,6 +25,43 @@ class rkGB_res():
         self.K_graph_list = list_kg
         self.equivalent_classes = cc
         self.list_ano_S = list_ano_S
+    
+    @property
+    def B(self):
+        return self.B_graph
+    @property
+    def D(self):
+        return self.D_graph
+    @property
+    def S(self):
+        return self.S_graph
+    @property
+    def K(self):
+        return self.K_graph
+    @property
+    def Sl(self):
+        return self.S_graph_list
+    @property
+    def Kl(self):
+        return self.K_graph_list
+    @property
+    def Ps(self):
+        return self.P_structure
+    @property
+    def Pc(self):
+        if hasattr("main_cluster",self.P_structure):
+            return self.P_structure.main_cluster
+        else:
+            return None
+    @property
+    def Hc(self):
+        return self.H_cluster
+    @property
+    def cc(self):
+        return self.equivalent_classes
+    @property
+    def ano_Sl(self):
+        return self.list_ano_S
 
 # ==========================
 
