@@ -117,7 +117,9 @@ class HRemat(torch.nn.Module):
             if len(self.rkgb_res.S_graph.nodes) <= max_size_S_graph_for_no_partitioning:
                 # -> No partitioning !
                 make_late_partitioning(self.rkgb_res,original_mod,partitioners=[Ptools.Partitioner()])
-                list_solvers = [HILP(HILP.Config(nb_total_nodes_top_level=max_size_S_graph_for_no_partitioning+1))]   
+                list_solvers = [HILP(HILP.Config(nb_total_nodes_top_level=max_size_S_graph_for_no_partitioning+1))]
+            else:
+                make_late_partitioning(self.rkgb_res,original_mod,partitioners=partitioners)
                 
             self.list_solvers = list_solvers
             self.dict_constants = self.rkgb_res.K_graph.dict_constants
