@@ -142,7 +142,6 @@ def make_inputs(model,model_inputs,model_kwargs):
     return dict_inputs
 
 
-
 # to check is the device is cuda
 def print_cuda_warning_msg(things_not_on_cuda):
     l = things_not_on_cuda
@@ -281,6 +280,14 @@ def make_all_graphs(model,
         m.running_var  = r_var
 
     return rkGB_res(bg,dg,sg,kg,ps,hc,list_sg,list_kg,cc,list_ano_S)
+
+
+
+def make_late_partitioning(res : rkGB_res, model, partitioners):
+    assert(res.S is not None)
+    assert(res.K is not None)
+    res.P_structure = ps = Ptools.S_to_P(res.S,model,partitioners)
+    res.H_cluster = Htools.P_and_K_to_H(ps,res.K)
 
 # ==========================
 

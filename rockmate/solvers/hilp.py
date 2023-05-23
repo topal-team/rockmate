@@ -26,6 +26,7 @@ class HILP(Solver):
             },
             protected_names=["sources data", "sources grad"],
             nb_total_sched=100,
+            nb_total_nodes_top_level=30,
             nb_total_nodes=20,
             nb_bdg_save=6,
             nb_bdg_peak=4,
@@ -35,10 +36,12 @@ class HILP(Solver):
             self.gurobi_params = gurobi_params
             self.protected_names = protected_names
             self.nb_total_sched = nb_total_sched
+            self.nb_total_nodes_top_level = nb_total_nodes_top_level
             self.nb_total_nodes = nb_total_nodes
             self.nb_bdg_save = nb_bdg_save
             self.nb_bdg_peak = nb_bdg_peak
             self.time_limit = time_limit
+            self.solve_top_level = False
 
     def __init__(
         self,
@@ -50,7 +53,11 @@ class HILP(Solver):
     #     return f"HILP solver"
 
     def can_solve(self, hg: H_graph):
-        return len(hg.list_hcn) // 2 <= self.config.nb_total_nodes
+        if self.config.solve_top_level:
+            limit = self.config.nb_total_nodes_top_level
+        else:
+            limit = self.config.nb_total_nodes
+        return len(hg.list_hcn) // 2 <= limit
 
     def get_budget_list(self, hgraph: H_graph):
         min_bdg = get_hgraph_budget_lb(hgraph)

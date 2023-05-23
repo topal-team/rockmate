@@ -12,7 +12,7 @@ import warnings
 from os import environ
 
 from . import rkgb
-from .rkgb.main import make_inputs, make_all_graphs
+from .rkgb.main import make_inputs, make_all_graphs, make_late_partitioning
 from .rkgb.utils import print_debug, np, irotor
 from .rkgb.utils.global_vars import (
     ref_verbose,
@@ -70,6 +70,7 @@ class HRemat(torch.nn.Module):
         ilp_solver="gurobi",
         model_kwargs=None,
         partitioners=None,
+        max_size_S_graph_for_no_partitioning = 60,
         # [
         #    Ptools.Partitioner(),
         #    Ptools.Partitioner_bottom_to_top(),
@@ -110,9 +111,14 @@ class HRemat(torch.nn.Module):
                 original_mod,
                 dict_inputs,
                 verbose=verbose,
-                wanted_graphs={"H"},
+                wanted_graphs={"K"},
                 partitioners=partitioners,
-            )  # we don't need K_graph_list
+            )
+            if len(self.rkgb_res.S_graph.nodes) <= max_size_S_graph_for_no_partitioning:
+                # -> No partitioning !
+                make_late_partitioning(self.rkgb_res,original_mod,partitioners=[Ptools.Partitioner()])
+                list_solvers = [HILP(HILP.Config(nb_total_nodes_top_level=max_size_S_graph_for_no_partitioning+1))]   
+                
             self.list_solvers = list_solvers
             self.dict_constants = self.rkgb_res.K_graph.dict_constants
             self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)
@@ -200,12 +206,12 @@ class HRemat(torch.nn.Module):
         list_solutions = []
         for solver in list_solvers:
             if isinstance(solver, HILP):
-                solver.config.nb_total_nodes = 30
+                solver.config.solve_top_level = True
                 # print("temporarily changing total_nodes for top level hilp")
                 list_solutions.extend(
                     solver(self.rkgb_res.H_cluster, [budget], accurate_mem=True)
                 )
-                solver.config.nb_total_nodes = 20  # in case further usage
+                solver.config.solve_top_level = False  # in case further usage
 
             else:
                 list_solutions.extend(solver(self.rkgb_res.H_cluster, [budget]))
