@@ -492,12 +492,16 @@ def P_and_K_to_H(ps : P_structure, kg : K_graph):
 def nb_clusters(main_cluster : H_cluster):
     nb = 0
     nb_unique = 0
+    biggest = -1
     for c in main_cluster.all_clusters:
         if "bottom" in c.name: continue
         nb += 1
         if c.representee_cluster is c:
             nb_unique += 1
-    return nb,nb_unique
+            if c is not main_cluster:
+                for hg in c.p_cluster.possible_partitioning:
+                    biggest = max(len(hg.nodes),biggest)
+    return nb,nb_unique,biggest
 
 
 # ==========================
