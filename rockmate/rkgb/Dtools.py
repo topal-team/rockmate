@@ -77,16 +77,6 @@ class D_graph(RK_graph):
         # in case, after simplifications, we will cut / sequentialize
         # we need to protect the separators from "cheap" simplifications
         seps = RK_get_1_separators(self)
-        """ # TO REMOVE
-        important_sep = []
-        for i in range(len(all_seps)-1):
-            sep = all_seps[i]
-            if sep.users != set([all_seps[i+1]]):
-                important_sep.append(sep)
-        important_sep.append(all_seps[-1])
-        print_debug([sep.target for sep in important_sep])
-        for sep in important_sep: sep.protected = True
-        """
         for sep in seps: sep.protected = True
 
 # ==========================

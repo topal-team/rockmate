@@ -1,3 +1,9 @@
+"""
+This file comes from :
+https://amaarora.github.io/posts/2020-02-18-annotatedGPT2.html
+
+We do not use HuggingFace GPT because torch.jit fails to trace it
+"""
 import torch
 import math
 import copy

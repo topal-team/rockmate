@@ -35,12 +35,15 @@ def make_ast_module(l):
 
 # -- make_assign --
 # optional parameter **force_special_kwargs** : 
-#   by default its False, it means you don't do anything
-#   otherwise it relies on a dict of type :
+#   False (default): nothing is special
+#   Otherwise, it force some specif kwargs for some specific 
+#   functions, for instance torch.batch_norm shouldn't 
+#   retain stats when a code is recomputed. 
+#   It relies on a dict of type :
 #   -> <fct_name -> (arg_name,arg_value) list to inforce>
 #   if force_special_kwargs=True then you use :
 #   -> global_vars.default_forced_kwargs
-#   otherwise you can do force_special_kwargs=<your dict>
+#   you can also do force_special_kwargs=<your dict>
 
 def make_ast_assign(
     c,prefix="",suffix="",force_special_kwargs=False

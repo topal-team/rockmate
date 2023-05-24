@@ -2,8 +2,6 @@
 # ====== P structure =======
 # ==========================
 
-# TODO TODO ensure that a sub_graph always requires_grad
-
 # ** Graph partitioning **
 
 from .utils import *
@@ -617,7 +615,7 @@ class P_cluster():
                         req_sn.all_targets.index(used_target)
                     )
                 charac_edges.append((
-                    dict_mt_to_ano_info[req_sn.mt].ano_id,
+                    dict_mt_to_ano_info[req_sn.mt].ano_id, # TO CHANGE : take index in self.s_nodes instead
                     charac_used_targets
                 ))
             charac_inputs = []
@@ -753,6 +751,9 @@ class P_structure():
             for nb,pg in enumerate(cluster.possible_partitioning):
                 pg.name = f"Possible_pg_{nb}_of_{cluster.name}"
                 
+
+
+
 
 class P_Dynamic_manipulation(): # only contains staticmethod
 
@@ -965,7 +966,9 @@ class P_Dynamic_manipulation(): # only contains staticmethod
                     )
                 all_snodes.add(pn.sn)
         return all_snodes
-            
+
+
+
 
 class Partitioner_OLD_bottom_to_top(Partitioner): 
     # /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\
@@ -1253,6 +1256,8 @@ class Partitioner_OLD_bottom_to_top(Partitioner):
                 f"Nb of nodes at the end : {len(all_snodes)}"
             )
         return pg
+
+
 
 
 

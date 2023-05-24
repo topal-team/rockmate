@@ -840,6 +840,7 @@ def copy_K_graph(kg : K_graph):
 # ==========================
 
 # ====================
+"""
 # /!\ NOT WORKING /!\ 
 # TODO :
 # -> Need better edges for input_kdn_data/grad
@@ -921,7 +922,7 @@ def K_list_to_K(kl : K_graph_list,sg : S_graph) -> K_graph:
     whole_kg.sort_list_kcn()
 
     return whole_kg
-
+"""
 
 # ==========================
 

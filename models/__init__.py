@@ -24,7 +24,7 @@ import torch
 
 # =========================================================
 
-def get_GPT(device,nlayers=12,dropout=0.1,batchsize=5000):
+def get_GPT(device,nlayers=12,dropout=0.1,batchsize=12000):
     from .GPT import GPT2
     model = GPT2(nlayers=nlayers,dropout=dropout)
     model.to(device)
@@ -46,7 +46,7 @@ def get_fst_param_UNet(model):
     
 # =========================================================
 
-def get_MLP(device,batchsize=1,image_size=256):
+def get_MLP(device,batchsize=100,image_size=256):
     from mlp_mixer_pytorch import MLPMixer
     model = MLPMixer(
         image_size = image_size,
@@ -64,7 +64,7 @@ def get_fst_param_MLP(model):
     
 # =========================================================
 
-def get_RegNet32(device,batchsize=1,image_size=256):
+def get_RegNet32(device,batchsize=23,image_size=256):
     from torchvision.models import regnet_x_32gf
     model = regnet_x_32gf()
     model.to(device)
@@ -75,7 +75,7 @@ def get_fst_param_RegNet32(model):
     
 # =========================================================
 
-def get_ResNet101(device,batchsize=1,image_size=256):
+def get_ResNet101(device,batchsize=64,image_size=256):
     from torchvision.models import resnet101
     model = resnet101()
     model.to(device)
@@ -104,7 +104,7 @@ def get_fst_param_nn_Transformer(model):
     
 # =========================================================
 
-def get_FNO1d(device,batchsize=2056,block_number=4,image_size=256):
+def get_FNO1d(device,batchsize=4400,block_number=4,image_size=256):
     from models.FNO1d import FNO1d
     model = FNO1d(16, 64 ,block_number=block_number)
     model.to(device)
@@ -115,7 +115,7 @@ def get_fst_param_FNO1d(model):
     
 # =========================================================
 
-def get_FNO3d(device,batchsize=1,block_number=4,size_x=64,size_y=64,size_z=40):
+def get_FNO3d(device,batchsize=5,block_number=4,size_x=64,size_y=64,size_z=40):
     from models.FNO3d import FNO3d
     model = FNO3d(16, 16, 16, 64 ,block_number=block_number)
     model.to(device)
@@ -126,7 +126,7 @@ def get_fst_param_FNO3d(model):
 
 # =========================================================
 
-def get_UFNO(device,batchsize=1,size_x=96,size_y=200,size_z=24):
+def get_UFNO(device,batchsize=3,size_x=96,size_y=200,size_z=24):
     from models.UFNO import Net3d
     mode1 = 10
     mode2 = 10

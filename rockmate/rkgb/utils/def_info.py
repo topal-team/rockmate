@@ -15,7 +15,7 @@ from . import global_vars
 # is_view ; is_inplace ; 
 # data_owner_name ; data_direct_parent_name
 
-class Var_info(): # everything needed to randomly regenerate a var
+class Var_info():
     def __init__(self,
         value=None,
         is_view=False,
@@ -43,6 +43,7 @@ class Var_info(): # everything needed to randomly regenerate a var
                     value if isinstance(value,int) else value.clone())
                 self.requires_grad = False
             elif isinstance(value,torch.Tensor):
+                self.ttype = torch.Tensor
                 self.tsize = value.shape
                 self.dtype = value.dtype
                 self.requires_grad = value.requires_grad

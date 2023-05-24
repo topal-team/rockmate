@@ -381,11 +381,6 @@ class S_graph(RK_graph):
                 bc,force_special_kwargs=True
             )
             dict_view_code[out.mt] = viewing_code
-            # TO REMOVE
-            # out.body_code = []
-            # out.tensor_targets = list(
-                # set([out.mt]+out.inplace_targets)\
-                # .intersection(set(out.tensor_targets)))
             outputs.append(out.mt)
             
 

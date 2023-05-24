@@ -183,14 +183,12 @@ def make_all_graphs(model,
     ***** this function returns an objet with attributes *****
      -> .B_graph, .D_graph, .S_graph and .K_graph of the whole module
      -> .S_graph_list and .K_graph_list of the sequentialized module
-     -> .P_graph, .H_graph
-    on which you can use :
-    rkgb.print_graph and rkgb.print_graph_list or rkgb.print_all_graphs
+     -> .P_structure, .H_cluster
+    on which you can use : rkgb.print
 
     ***** args *****
      -> model must be a torch.nn.Module
-    /!\ Most of the time errors occur because of jit.trace /!\
-    /!\ so 'model' must be compatible with jit.trace       /!\
+    /!\ Some errors occur because of jit.trace /!\
     -> model_inputs :
         args of 'model', it can either be a simple
         variable or an iterable of variables.

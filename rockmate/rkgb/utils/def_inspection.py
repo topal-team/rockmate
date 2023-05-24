@@ -7,9 +7,9 @@ from . import def_info,ast_add_on,small_fcts,global_vars
 from .global_vars import print_debug
 import gc
 
-# ======================
-# = CREATE A FRESH ENV =
-# ======================
+# ========================================
+# = CREATE A FRESH ENVIRONNEMENT TO EXEC =
+# ========================================
 
 def generate_our_global(sg,model,device):
     our_global = globals().copy()
@@ -21,6 +21,7 @@ def generate_our_global(sg,model,device):
         x = def_info.generate_val(info,device)
         our_global[inp]=x
     return our_global
+
 
 def generate_tmp_local(sn,sg,our_global,device):
     tmp_local = dict()
@@ -39,15 +40,10 @@ def generate_tmp_local(sn,sg,our_global,device):
         if not (req_sn is sg.init_node):
             # we create the main_target value, and we run the body_code
             # but the body_code may requires some artefacts
+            # thus we need req of req
             req_sn_mt = req_sn.main_target
             main_info = sg.dict_info[req_sn_mt]
             req_sn_mt_value = def_info.generate_val(main_info,device)
-            # NO NEED TO CLONE HERE
-            # On Dtools, you need to clone newly created values
-            # in case an inplace operation is applied directly to it
-            # << a leaf Variable that requires grad is being used in an in-place operation >>
-            # But here inplace operation aren't executed in body_code 
-            # -> We don't run inplace_code
             if isinstance(req_sn_mt_value,torch.Tensor):
                 req_sn_mt_value = req_sn_mt_value.clone()
             tmp_local[req_sn_mt] = req_sn_mt_value
@@ -64,7 +60,6 @@ def generate_tmp_local(sn,sg,our_global,device):
             exec(body_code,our_global,tmp_local)
     return tmp_local
 
-
 # ======================
 
 
@@ -76,7 +71,7 @@ def generate_tmp_local(sn,sg,our_global,device):
 # -> PHANTOMS
 # ======================
 
-# -> aux function for "get_useful_vars" below
+# -> auxiliary function for "get_useful_vars" below
 def trace_grad_fn(grad_fn,main_target="var",params=None,our_global=None):
     if params is None: params = dict()
     if our_global is None: our_global = dict()
@@ -105,6 +100,8 @@ def trace_grad_fn(grad_fn,main_target="var",params=None,our_global=None):
                 aux(t[0],path+[k])
     aux(grad_fn,[])
     return explicit_vars,phs_found
+
+
 
 def get_useful_vars(sn,sg,our_global,device):
     params = dict(our_global['self'].named_parameters())
@@ -213,7 +210,7 @@ class Inspection_result():
             raise_exception=raise_exception)
 
 class inspector():
-    # -> We define a inspector class to save every intermediate 
+    # -> We define an inspector class to save every intermediate 
     # -> information used during inspection, very helpful to debug.
     def __init__(self,sn,sg,our_global,device):
         self.sn = sn
@@ -268,7 +265,7 @@ class inspector():
             exec(self.code_del_fwd, self.our_global, self.tmp_local)
 
         gc.disable()
-        # -> We don't want the gc to disterb the memory measurement
+        # -> We don't want the gc to disturb the memory measurement
         _ , mem_run_fwd , peak_fwd = self.memUsage.measure(fct_run_fwd)
         overhead_fwd = peak_fwd - mem_run_fwd
         self.ret.overhead_fwd = overhead_fwd
