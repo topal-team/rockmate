@@ -173,7 +173,7 @@ def make_all_graphs(model,
     wanted_graphs = {"B","D","S","K","P","H","Sl","Kl"},
     partitioners = [
         Ptools.Partitioner_bottom_to_top(),
-        Ptools.Partitioner_seq()
+        #Ptools.Partitioner_seq()
     ],
     verbose=False,
     impose_device=True,

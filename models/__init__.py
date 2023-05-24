@@ -86,7 +86,7 @@ def get_fst_param_ResNet101(model):
     
 # =========================================================
 
-def get_nn_Transformer(device,batchsize=32,num_encoder_layers=4,num_decoder_layers=4):
+def get_nn_Transformer(device,batchsize=32,num_encoder_layers=6,num_decoder_layers=6):
     model = torch.nn.Transformer(
         nhead=16, 
         num_encoder_layers=num_encoder_layers,

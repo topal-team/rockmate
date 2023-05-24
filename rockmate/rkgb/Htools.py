@@ -486,6 +486,20 @@ def P_and_K_to_H(ps : P_structure, kg : K_graph):
     return P_cluster_to_H_cluster(ps.main_cluster,kg)
 
 
+
+# =================
+# = Utils to test =
+def nb_clusters(main_cluster : H_cluster):
+    nb = 0
+    nb_unique = 0
+    for c in main_cluster.all_clusters:
+        if "bottom" in c.name: continue
+        nb += 1
+        if c.representee_cluster is c:
+            nb_unique += 1
+    return nb,nb_unique
+
+
 # ==========================
 # === printing functions ===
 # ==========================
