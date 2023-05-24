@@ -1,4 +1,0 @@
-To install the C implementation of the Revolve algorithm (around 10
-times faster than the Python version), use the following commands:
-
-python3 -m setup install
