@@ -501,7 +501,19 @@ def nb_clusters(main_cluster : H_cluster):
             if c is not main_cluster:
                 for hg in c.p_cluster.possible_partitioning:
                     biggest = max(len(hg.nodes),biggest)
-    return nb,nb_unique,biggest
+
+    max_depths = 0
+    def explore(c,depth):
+        nonlocal max_depths
+        max_depths = max(max_depths,depth)
+        if c.representee_cluster is c:
+            for pg in c.possible_partitioning:
+                for pn in pg.nodes:
+                    pn : P_node
+                    if pn.sub_cluster is not None:
+                        explore(pn.sub_cluster,depth+1)
+    explore(main_cluster.p_cluster,0)
+    return nb,nb_unique,biggest,max_depths
 
 
 # ==========================
