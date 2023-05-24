@@ -70,7 +70,7 @@ class HRemat(torch.nn.Module):
         ilp_solver="gurobi",
         model_kwargs=None,
         partitioners=None,
-        max_size_S_graph_for_no_partitioning = 60,
+        max_size_S_graph_for_no_partitioning = 40,
         # [
         #    Ptools.Partitioner(),
         #    Ptools.Partitioner_bottom_to_top(),
@@ -102,6 +102,16 @@ class HRemat(torch.nn.Module):
                 partitioners.append(Ptools.Partitioner_seq())
             if can_use_checkmate:
                 partitioners.append(Ptools.Partitioner())
+                
+        # ensure HILP config match partitioner config
+        for partitioner in partitioners:
+            if isinstance(partitioner,Ptools.Partitioner_bottom_to_top):
+                for solver in list_solvers:
+                    if isinstance(solver,HILP):
+                        solver.config.nb_total_nodes \
+                            = max(solver.config.nb_total_nodes,partitioner.config.max_estimate_per_sub_graph)
+                        solver.config.nb_total_nodes_top_level \
+                            = max(solver.config.nb_total_nodes_top_level,partitioner.config.max_estimate_for_main_graph)
 
         #  We don't want to use the default setattr
         # because torch.nn.Module will register it as a submodule
