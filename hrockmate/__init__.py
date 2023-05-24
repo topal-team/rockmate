@@ -1,5 +1,5 @@
-__all__ = ["rkgb", "solvers", "CheckpointedModule", "HRemat"]
+__all__ = ["rkgb", "solvers", "Rockmate", "HRockmate"]
 
-from .main import CheckpointedModule, HRemat
+from .main import Rockmate, HRockmate
 from . import rkgb
 from . import solvers

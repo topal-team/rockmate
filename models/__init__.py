@@ -244,7 +244,7 @@ def sanity_check_forward_and_backward_all_examples(device,remat_fct,skip_error=T
         examples=[
             "GPT","UNet","MLP","RegNet32","ResNet101",
             "nn_Transformer","FNO1d","FNO3d","UFNO","UNO"]):
-    # remat_fct = rockmate.main.HRemat
+    # remat_fct = rockmate.main.HRockmate
     print(examples)
     iterator_over_all_examples = get_iterator_over_all_examples(device,skip_error,examples)
     while True:

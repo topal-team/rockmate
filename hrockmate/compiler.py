@@ -1,6 +1,6 @@
-from rockmate.rkgb.utils.ast_add_on import make_str_assign, make_str_list_assign
-from rockmate.rkgb.utils import np, torch
-from rockmate.rkgb.Ktools import K_C_node, K_D_node
+from hrockmate.rkgb.utils.ast_add_on import make_str_assign, make_str_list_assign
+from hrockmate.rkgb.utils import np, torch
+from hrockmate.rkgb.Ktools import K_C_node, K_D_node
 from .solvers.def_op import DelOp
 
 

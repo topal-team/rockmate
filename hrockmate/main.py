@@ -52,7 +52,7 @@ def print_memsizes(list_kg):
     print_debug("\n")
 
 
-class HRemat(torch.nn.Module):
+class HRockmate(torch.nn.Module):
     compiler = None
     autograd_Function = None
     backward_stop = False
@@ -327,7 +327,7 @@ class HRemat(torch.nn.Module):
         # function, otherwise last_kcn.backward will call the following lines.
         # SO we need to return a detached copy of the outputs.
         #  Thus, the last node's output backward isn't affected, and
-        # we properly redefine CheckpointedModule's output backward.
+        # we properly redefine HRockmate's output backward.
 
         RkMod = self
 
@@ -599,7 +599,7 @@ class HRemat(torch.nn.Module):
                 self.list_solutions = self.rkgb_res.H_cluster.list_sched
 
 
-class CheckpointedModule(torch.nn.Module):
+class Rockmate(torch.nn.Module):
     compiler = None
     autograd_Function = None
     backward_stop = False
@@ -885,7 +885,7 @@ class CheckpointedModule(torch.nn.Module):
         # function, otherwise last_kcn.backward will call the following lines.
         # SO we need to return a detached copy of the outputs.
         #  Thus, the last node's output backward isn't affected, and
-        # we properly redefine CheckpointedModule's output backward.
+        # we properly redefine Rockmate's output backward.
 
         RkMod = self
 

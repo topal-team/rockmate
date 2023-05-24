@@ -1,7 +1,7 @@
-from rockmate.rkgb.utils import *
-from rockmate.rkgb.Ptools import P_graph, P_node
-from rockmate.rkgb.Ktools import K_graph, K_C_node, K_D_node
-from rockmate.rkgb.Htools import *
+from hrockmate.rkgb.utils import *
+from hrockmate.rkgb.Ptools import P_graph, P_node
+from hrockmate.rkgb.Ktools import K_graph, K_C_node, K_D_node
+from hrockmate.rkgb.Htools import *
 from collections import namedtuple
 from copy import deepcopy
 

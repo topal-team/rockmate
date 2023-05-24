@@ -2,7 +2,7 @@ from copy import deepcopy
 import numpy as np
 import torch
 
-from rockmate import rkgb
+from hrockmate import rkgb
 from .def_op import RunOp, DelOp, OpSchedule
 
 from subprocess import Popen

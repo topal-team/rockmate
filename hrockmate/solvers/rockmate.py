@@ -1,5 +1,5 @@
 import time
-from rockmate.rkgb.utils import np
+from hrockmate.rkgb.utils import np
 
 from .def_chain import RK_Chain
 from .rotor_solver import seq_builder, solve_dp_functional

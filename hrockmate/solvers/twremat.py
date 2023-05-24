@@ -1,8 +1,8 @@
-from rockmate.rkgb.Htools import H_cluster
-from rockmate.solvers.twremat_utils import *
-from rockmate.solvers.op_schedule import OpSchedule as New_OpSchedule
-from rockmate.solvers.op_schedule import Op
-from rockmate.solvers.main import Solver, get_cluster_budget
+from hrockmate.rkgb.Htools import H_cluster
+from hrockmate.solvers.twremat_utils import *
+from hrockmate.solvers.op_schedule import OpSchedule as New_OpSchedule
+from hrockmate.solvers.op_schedule import Op
+from hrockmate.solvers.main import Solver, get_cluster_budget
 
 
 class TwRemat(Solver):

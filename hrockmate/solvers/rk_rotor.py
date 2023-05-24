@@ -1,9 +1,9 @@
 import time
 import warnings
-from rockmate import rkgb
-from rockmate.rkgb.utils import np
-from rockmate.rkgb.Ktools import K_C_node
-from rockmate.rkgb.Htools import H_graph, H_cluster
+from hrockmate import rkgb
+from hrockmate.rkgb.utils import np
+from hrockmate.rkgb.Ktools import K_C_node
+from hrockmate.rkgb.Htools import H_graph, H_cluster
 import math
 from .main import Solver, get_cluster_budget
 from .def_chain import RK_Chain

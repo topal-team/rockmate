@@ -1,8 +1,8 @@
-from rockmate import rkgb
+from hrockmate import rkgb
 import numpy as np
 from copy import deepcopy
-from rockmate.rkgb.Htools import H_C_node, H_D_node, H_graph, H_cluster
-from rockmate.rkgb.Ktools import K_C_node, K_D_node
+from hrockmate.rkgb.Htools import H_C_node, H_D_node, H_graph, H_cluster
+from hrockmate.rkgb.Ktools import K_C_node, K_D_node
 from .op_schedule import Op, OpSchedule
 
 

@@ -5,9 +5,9 @@ import numpy as np
 from copy import deepcopy
 from gurobipy import GRB, Model, quicksum
 
-# from rockmate.def_op import RunOp, DelOp, OpSchedule
+# from hrockmate.def_op import RunOp, DelOp, OpSchedule
 from .op_schedule import Op, OpSchedule
-from rockmate.rkgb.Htools import *
+from hrockmate.rkgb.Htools import *
 
 
 class ModelGurobi:
