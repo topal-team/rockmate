@@ -15,6 +15,8 @@ from .rotor_solver import seq_builder, solve_dp_functional
 from .op_schedule import OpSchedule
 
 
+default_time_limit = [60 * 60]
+
 class HILP(Solver):
     class Config:
         def __init__(
@@ -30,7 +32,7 @@ class HILP(Solver):
             nb_total_nodes=20,
             nb_bdg_save=6,
             nb_bdg_peak=4,
-            time_limit=60 * 60,
+            time_limit=None,
         ):
             self.mem_unit = mem_unit
             self.gurobi_params = gurobi_params
@@ -40,8 +42,16 @@ class HILP(Solver):
             self.nb_total_nodes = nb_total_nodes
             self.nb_bdg_save = nb_bdg_save
             self.nb_bdg_peak = nb_bdg_peak
-            self.time_limit = time_limit
             self.solve_top_level = False
+            self.time_limit_ = time_limit
+    
+        @property
+        def time_limit(self):
+            if self.time_limit_ is None:
+                return default_time_limit[0]
+            else:
+                return self.time_limit_
+            
 
     def __init__(
         self,

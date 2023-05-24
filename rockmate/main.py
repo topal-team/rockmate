@@ -31,6 +31,7 @@ from .solvers.def_sequence import (
 from .solvers.main import preprocess, solve_recursive
 from .solvers.op_schedule import *
 from .solvers import RK_rotor, HILP, TwRemat, RK_checkmate
+from .solvers.hilp import default_time_limit
 from .solvers.HILP_gurobi import *
 from .solvers.rotor_solver import seq_builder, solve_dp_functional
 from .compiler import Compiler, RK_Storage, make_gd
@@ -68,6 +69,7 @@ class HRemat(torch.nn.Module):
         solve_sched=True,
         verbose=False,
         ilp_solver="gurobi",
+        ilp_time_limit=60 * 60,
         model_kwargs=None,
         partitioners=None,
         max_size_S_graph_for_no_partitioning = 40,
@@ -80,6 +82,7 @@ class HRemat(torch.nn.Module):
         super().__init__()
         ref_verbose[0] = verbose
         solver_name[0] = ilp_solver
+        default_time_limit[0] = ilp_time_limit
         self.device = get_device()
         object.__setattr__(self, "original_mod", original_mod)
         dict_inputs = make_inputs(original_mod, model_inputs, model_kwargs)
