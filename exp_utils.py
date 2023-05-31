@@ -1,14 +1,13 @@
 import torch
 import rkgb
 import rockmate as rk
-from rotor_exp.rotor import Checkpointable
+from rotor import Checkpointable
 from copy import deepcopy
 from rotor import timing
 import numpy as np
 import pickle
 import time
 import sys
-import dill
 from models.GPT import *
 from rotor.inspection import tensorMsize
 
@@ -114,8 +113,6 @@ def copy_run_rk(model, x, mbudget, repeat=10, nbar=10, nall=10):
             res["Error"] = f"caught {type(e)}: {e}"
             if type(e) != torch.cuda.OutOfMemoryError:
                 res["src_code"] = newmod.full_code
-                with open("rk_mod.pkl", "wb") as f:
-                    torch.save(newmod, f, pickle_module=dill)
         res["times"] = times
         results.append(res)
     _model.to("cpu")
@@ -128,8 +125,6 @@ def copy_run_rt(model, x, mbudget, repeat=10):
     model_rotor = deepcopy(model).to(device)
     results = []
     budgets = mbudget if hasattr(mbudget, "__iter__") else [mbudget]
-    # _model = deepcopy(model).to(device)
-    # _x = deepcopy(x).to(device)
 
     start = time.time()
     chk = Checkpointable(model_rotor, verbosity=0)
