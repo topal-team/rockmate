@@ -16,7 +16,6 @@ from rockmate.def_sequence import (
     SeqBlockFn,
     SeqBlockFe,
 )
-from rockmate.HILP_gurobi import *
 from rockmate.rotor_solver import seq_builder, solve_dp_functionnal
 from rockmate.translator import Translator, RngState
 from rockmate.compiler import Compiler, RK_Storage
@@ -43,7 +42,7 @@ def print_memsizes(list_kg):
     print_debug("\n")
 
 
-class CheckpointedModule(torch.nn.Module):
+class Rockmate(torch.nn.Module):
     def __init__(
         self,
         original_mod,
@@ -224,35 +223,6 @@ class CheckpointedModule(torch.nn.Module):
         self.fwd_fct_list = self.fct_list[:loss_idx]
         self.bwd_fct_list = self.fct_list[loss_idx:]
 
-    def get_compiled_fct_HILP(self, mem_limit=False, recursive=True):
-        # based only on rkgb
-        mem_limit = mem_limit or self.mem_limit
-        kg = self.rkgb_res.K_graph
-        sg = self.rkgb_res.S_graph
-        if recursive:
-            pg = rkgb.Ptools.S_to_P(sg)
-            self.hg = rkgb.Htools.P_and_K_to_H(pg, kg)
-            _ = rkgb.Htools.get_save_all_option(self.hg)
-            solve_hg_recursive(self.hg, solve_self=False)
-        md = ModelGurobi(self.hg, mem_limit, mem_limit)
-        md.solve()
-        if not md.feasible:
-            return "Not feasible solution"
-        self.h_sched = md.schedule()
-        self.bottom_op_list = rkgb.Htools.get_bottom_op_list(
-            self.h_sched.op_list
-        )
-        self.kn_list = rkgb.Htools.get_kn_list(self.bottom_op_list, kg)
-        loss_idx = [op.name for op in self.bottom_op_list].index(
-            "Loss_hcn_of_Hg_0"
-        )
-        self.storage = RK_Storage(
-            "cuda", self.original_mod, self.dict_constants
-        )
-        self.compiler = Compiler(self.storage)
-        fct_list = self.compiler.compile_from_KN_list(self.kn_list)
-        self.fwd_fct_list = fct_list[:loss_idx]
-        self.bwd_fct_list = fct_list[loss_idx + 1 :]
 
     def _exec(self, fct_list, record_mem=False, compiled=False):
         if not compiled:

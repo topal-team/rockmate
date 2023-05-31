@@ -1,4 +1,4 @@
-__all__ = ["rkgb","CheckpointedModule"]
+__all__ = ["rkgb","Rockmate"]
 
-from .main import CheckpointedModule
+from .main import Rockmate
 import rkgb
