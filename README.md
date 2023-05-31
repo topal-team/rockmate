@@ -4,11 +4,11 @@
 
 Currently, Rockmate relies on Gurobi to solve the Integer Linear Programming model. 
 
-The main class of Rockmate is `CheckpointedModule`. It can be built on a model as `torch.nn.Module`, an example input and the memory limit. The model and input should be on the GPU device.
+The main class of Rockmate is `Rockmate`. It can be built on a model as `torch.nn.Module`, an example input and the memory limit. The model and input should be on the GPU device.
 
 To build a Rockmate module:
 ```python
-rkMod = CheckpointedModule(model, x, m_budget)
+rkMod = Rockmate(model, x, m_budget)
 ```
 
 To run a Rockmate module:
@@ -24,7 +24,7 @@ The parameters of `model` will be updated after backward.
 
 ```python
 import torch
-from rockmate import CheckpointedModule
+from rockmate import Rockmate
 from torchvision.models import resnet101
 
 device = torch.device("cuda")
@@ -32,7 +32,7 @@ model = resnet101().to(device)
 x = torch.randn([100, 3, 128, 128]).to(device)
 m_budget = 2 * 1024**3
 
-rkMod = CheckpointedModule(model, x, m_budget)
+rkMod = Rockmate(model, x, m_budget)
 
 loss = rkMod(x).mean()
 loss.backward()

@@ -43,7 +43,7 @@ def print_memsizes(list_kg):
     print_debug("\n")
 
 
-class CheckpointedModule(torch.nn.Module):
+class Rockmate(torch.nn.Module):
     def __init__(
         self,
         original_mod,

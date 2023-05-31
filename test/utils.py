@@ -76,7 +76,7 @@ def copy_run_rk(
     budgets = mbudget if hasattr(mbudget, "__iter__") else [mbudget]
     _model = deepcopy(model).to(device)
     start = time.time()
-    rkmod = rk.CheckpointedModule(
+    rkmod = rk.Rockmate(
         _model,
         _dict_inputs,
         mem_limit=max(budgets),
