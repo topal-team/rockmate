@@ -4,9 +4,14 @@ from typing import Dict, Any
 import numpy as np
 from copy import deepcopy
 from gurobipy import GRB, Model, quicksum
-from gurobipy.GRB import GREATER_EQUAL as GEQ
-from gurobipy.GRB import LESS_EQUAL as LEQ
-from gurobipy.GRB import EQUAL as EQ
+# import gurobipy.GRB.GREATER_EQUAL as GEQ
+# import gurobipy.GRB.LESS_EQUAL as LEQ
+# import gurobipy.GRB.EQUAL as EQ
+
+
+GEQ = GRB.GREATER_EQUAL
+LEQ = GRB.LESS_EQUAL
+EQ = GRB.EQUAL
 
 
 # from hrockmate.def_op import RunOp, DelOp, OpSchedule
@@ -96,18 +101,18 @@ class ModelGurobi:
                 setattr(self.md.Params, k, v)
 
         self.create_list = [(k, i) for k in range(T) for i in _users_c[k]]
-        self.delete_list = [
-            (k, i) for i in range(L) for k in _deps_d[i] + _users_d[i]
-        ]
 
         E = len(self.create_list)
 
         self.contributions = [[] for _ in range(L)]
-        for (k,i) in self.create_list:
-            self.contributions[i].append(k)
+        for j,(k,i) in enumerate(self.create_list):
+            self.contributions[i].append(j)
         self.sizes = [hdn.mem / self.gcd for hdn in self.hgraph.list_hdn]
         self.overhead = [hcn.ff_overhead / self.gcd for hcn in self.hgraph.list_hcn]#placeholder
         self.comp_time = [hcn.ff_time for hcn in self.hgraph.list_hcn]#placeholder
+        for i, hcn in enumerate(self.hgraph.list_hcn):
+            if "Loss" in hcn.name:
+                self.loss_idx = i
 
         self.Comp = self.md.addVars(T, T, name="Comp", vtype=GRB.BINARY)
         self.Alive = self.md.addVars(T, T, E, name="Alive", vtype=GRB.BINARY)
@@ -122,7 +127,7 @@ class ModelGurobi:
         # define objective function
         self.md.setObjective(
             quicksum(
-                self.Time[i, t]
+                self.Time[t, i]
                 for i in range(T)
                 for t in range(T)
             ),
@@ -132,87 +137,107 @@ class ModelGurobi:
         # ======Boundary constraints======
         self.md.addLConstr(
             quicksum(
-                self.Comp[i, t] for t in range(T) for i in range(t + 1, T)
+                self.Comp[t, i] for t in range(T) for i in range(t + 1, T)
             ),
             EQ,
             0,
         )
         self.md.addLConstr(
             quicksum(
-                self.Alive[t, i, j]
+                self.Alive[0, 0, j]
                 for j in range(E)
-                for t in range(self.create_list[j][0] + 1)
-                for i in range(self.create_list[j][0] + 1)
             ),
             EQ,
             0,
         )
 
+        self.md.addLConstr(
+            quicksum(self.Comp[t, t] for t in range(T)),
+            GRB.EQUAL,
+            T,
+        )
+
         # ======Step Constraints======
-        for i in range(T):
-            for j in range(T):
-                self.md.addLConstr(self.Time[i,j], GEQ, self.Comp[i,j] * self.comp_time[j])
-                self.md.addLConstr(self.Time[i,j], GEQ, quicksum(
-                    quicksum(self.Ofl[i,j,k]*self.sizes[l] for k in self.contributions[l])/
-                    quicksum(self.Alive[i,j,k] for k in self.contributions[l])
+        for t in range(T):
+            for i in range(T):
+                self.md.addLConstr(self.Time[t,i], GEQ, self.Comp[t,i] * self.comp_time[i])
+                self.md.addLConstr(self.Time[t,i], GEQ, quicksum(
+                    quicksum(self.Ofl[t,i,j]*self.sizes[l] for j in self.contributions[l])/
+                    10*1024**2#quicksum(self.Alive[t,i,j] for j in self.contributions[l])
                     for l in range(L)
                 ))
-                self.md.addLConstr(self.Time[i,j], GEQ, quicksum(
-                    quicksum(self.Prf[i,j,k]*self.sizes[l] for k in self.contributions[l])/
-                    quicksum(self.Ofl[i,j,k] for k in self.contributions[l])
+                self.md.addLConstr(self.Time[t,i], GEQ, quicksum(
+                    quicksum(self.Prf[t,i,j]*self.sizes[l] for j in self.contributions[l])/
+                    10*1024**2#quicksum(self.Ofl[t,i,j] for j in self.contributions[l])
                     for l in range(L)
                 ))
-                self.md.addLConstr(self.Prf[i,j], GEQ, self.Comp[i,j])
-                self.md.addLConstr(self.Ofl[i,j], GEQ, self.Comp[i,j])
-
-                if j<T-1:
-                    self.md.addLConstr(self.Alive[i,j+1], GEQ,
-                                    self.Alive[i,j] - self.Comp[i,j])
-                    self.md.addLConstr(self.Alive[i,j+1], LEQ,
-                                    self.Alive[i,j] + self.Comp[i,j])
-                    for k in range(E):
-                        self.md.addLConstr(self.Alive[i,j+1,k], LEQ, 
-                                        self.Alive[i,j,k] + 
-                                        self.PrfEnd(i,j,k) +
-                                        self.Comp(i,j) * self.create_list[k][0]==j)
-
-                for k in range(E):
-                    self.md.addLConstr(self.Ofl[i,j,k], LEQ, self.Alive[i,j,k])
-                    self.md.addLConstr(self.Prf[i,j,k], LEQ, 
-                                       quicksum(self.Ofl[ii,jj,k] for ii in range(i) for jj in range(ii))+
-                                       quicksum(self.Ofl[i,jj,k] for jj in range(j)))
-                    self.md.addLConstr(self.PrfEnd[i,j,k], LEQ, 
-                                       self.PrfProg[i,k] + 
-                                       quicksum(self.Prf[i,jj,k]-self.PrfEnd[i,jj,k] for jj in range(j)))
-                    self.md.addLConstr(self.PrfEnd[i,j,k], GEQ, 
-                                       self.PrfProg[i,k] + 
-                                       quicksum(self.Prf[i,jj,k]-self.PrfEnd[i,jj,k] for jj in range(j)) - 
+                
+                if i<T-1:
+                    for j in range(E):
+                        self.md.addLConstr(self.Alive[t,i+1,j], GEQ,
+                                    self.Alive[t,i,j] - self.Comp[t,i])
+                        self.md.addLConstr(self.Alive[t,i+1,j], LEQ,
+                                    self.Alive[t,i,j] + self.Comp[t,i])
+                        if self.create_list[j][0]==i:
+                            self.md.addLConstr(self.Alive[t,i+1,j], LEQ, 
+                                            self.Alive[t,i,j] + 
+                                            self.PrfEnd[t,i,j] +
+                                            self.Comp[t,i])
+                        else:
+                            self.md.addLConstr(self.Alive[t,i+1,j], LEQ, self.Alive[t,i,j])
+                for j in range(E):
+                    self.md.addLConstr(self.Ofl[t,i,j], LEQ, self.Alive[t,i,j])
+                    self.md.addLConstr(self.Prf[t,i,j], LEQ, 
+                                       quicksum(self.Ofl[tt,ii,j] for tt in range(i) for ii in range(tt))+
+                                       quicksum(self.Ofl[t,ii,j] for ii in range(i)))
+                    self.md.addLConstr(self.PrfEnd[t,i,j], LEQ, 
+                                       self.PrfProg[t,i] + 
+                                       quicksum(self.Prf[t,ii,j]-self.PrfEnd[t,ii,j] for ii in range(i)))
+                    self.md.addLConstr(self.PrfEnd[t,i,j], GEQ, 
+                                       self.PrfProg[t,j] + 
+                                       quicksum(self.Prf[t,ii,j]-self.PrfEnd[t,ii,j] for ii in range(i)) - 
                                        0.9999)
+                    self.md.addLConstr(self.Prf[t,i,j], LEQ, self.Comp[t,i])
+                    self.md.addLConstr(self.Ofl[t,i,j], LEQ, self.Comp[t,i])
                 for l in range(L):
-                    for k in self.contributions[l]:
-                        self.md.addLConstr(self.Prf[i,j,k], LEQ, 
-                                           self.Ocp(i,j,l))
-                        self.md.addLConstr(self.Alive[i,j,k], LEQ, self.Ocp[i,j,l])
-                    self.md.addLConstr(quicksum(self.Ocp[i,j,l]*self.sizes[l] for l in range(L))+
-                                       self.Comp[i,j] * self.overhead[j],
-                                       LEQ,
-                                       self.save_budget)
-
-        for i in range(T-1):
-            for k in range(E):
-                self.md.addLConstr(self.PrfProg[i+1,k], EQ, 
-                                    self.PrfProg[i,k] + quicksum(self.Prf[i,jj,k]-self.PrfEnd[i,jj,k] for jj in range(i)))
+                    for j in self.contributions[l]:
+                        self.md.addLConstr(self.Prf[t,i,j], LEQ, 
+                                           self.Ocp[t,i,l])
+                        self.md.addLConstr(self.Alive[t,i,j], LEQ, self.Ocp[t,i,l])
+                self.md.addLConstr(quicksum(self.Ocp[t,i,l]*self.sizes[l] for l in range(L))+
+                                    self.Comp[t,i] * self.overhead[i]*0,
+                                    LEQ,
+                                    self.peak_budget)
+                    
+            for j, (k, i) in enumerate(self.create_list):
+                for k_ in _users_d[i]:
+                    self.md.addLConstr(
+                        self.Comp[t, k_],
+                        LEQ,
+                        self.Alive[t, k_, j]
+                    )
+                    
+        self.md.addLConstr(
+            quicksum(self.Comp[t, self.loss_idx] for t in range(T)),
+            LEQ,
+            1,
+        )
+        for t in range(T-1):
+            for j in range(E):
+                self.md.addLConstr(self.Alive[t+1,0,j], LEQ, self.Alive[t,T-1,j])
+                self.md.addLConstr(self.PrfProg[t+1,j], EQ, 
+                                    self.PrfProg[t,j] + quicksum(self.Prf[t,ii,j]-self.PrfEnd[t,ii,j] for ii in range(i)))
         
 
     def add_abar_constraint(self, save_budget):
         T = len(self.hgraph.list_hcn)
         L = len(self.hgraph.list_hdn)
         self.save_budget = save_budget / self.gcd
-        for k in range(T):
-            self.md.addLConstr(
-                quicksum(self.Ocp[self.loss_idx, self.loss_idx, l] for l in range(L)), 
-                         LEQ, self.save_budget
-            )
+        # for k in range(T):
+        self.md.addLConstr(
+            quicksum(self.Ocp[self.loss_idx, self.loss_idx, l] for l in range(L)), 
+                        LEQ, self.save_budget
+        )
 
     def solve(self):
         # self.md.message("\n\nRestarting solve\n\n")
