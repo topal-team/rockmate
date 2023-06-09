@@ -58,14 +58,14 @@ $$
 Ofl(i,j,k) \leq Alive(i,j,k)\\
 Prf(i,j,k) \leq \sum_{i'<i,j} Ofl(i',j,k)?\\
 PrfProg(i+1,k) = PrfProg(i,k) + \sum_j (Prf(i,j,k) - PrfEnd(i,j,k))\\
-PrfEnd(i,j,k) \leq PrfProg(i,k) + \sum_{j'<j} (Prf(i,j',k) - PrfEnd(i,j',k))\\
-PrfEnd(i,j,k) \geq PrfProg(i,k) + \sum_{j'<j} (Prf(i,j',k) - PrfEnd(i,j',k)) -0.9999\\
+0 \leq PrfProg(i,k) + \sum_{j'<j} (Prf(i,j',k) - PrfEnd(i,j',k))\\
+1 \geq PrfProg(i,k) + \sum_{j'<j} (Prf(i,j',k) - PrfEnd(i,j',k))\\
 $$
 
 Memory related constraints
 
 $$
-Prf(i,j,k) \leq Ocp(i,j,l)\\
+PrfProg(i,k) + \sum_{j'<j} (Prf(i,j',k) - PrfEnd(i,j',k)) \leq Ocp(i,j,l)\\
 Alive(i,j,k) \leq Ocp(i,j,l), \forall k \in l\\
 \sum_l Ocp(i,j,l) + overhead(j) * Comp(i,j) \leq Budget
 $$
