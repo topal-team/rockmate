@@ -33,7 +33,7 @@ class ModelGurobi:
         gurobi_params: Dict[str, Any] = {
             "LogToConsole": 0,
             "IntegralityFocus": 1,
-            "TimeLimit": 4 * 60,
+            "TimeLimit": 20 * 60,
         },
         gcd=None,
         accurate_mem=False,
@@ -110,6 +110,8 @@ class ModelGurobi:
         self.sizes = [hdn.mem / self.gcd for hdn in self.hgraph.list_hdn]
         self.overhead = [hcn.ff_overhead / self.gcd for hcn in self.hgraph.list_hcn]#placeholder
         self.comp_time = [hcn.ff_time for hcn in self.hgraph.list_hcn]#placeholder
+        self.bandwidthOfl = 10*1024**2
+        self.bandwidthPrf = 10*1024**2
         for i, hcn in enumerate(self.hgraph.list_hcn):
             if "Loss" in hcn.name:
                 self.loss_idx = i
@@ -163,12 +165,12 @@ class ModelGurobi:
                 self.md.addLConstr(self.Time[t,i], GEQ, self.Comp[t,i] * self.comp_time[i])
                 self.md.addLConstr(self.Time[t,i], GEQ, quicksum(
                     quicksum(self.Ofl[t,i,j]*self.sizes[l] for j in self.contributions[l])/
-                    10*1024**2#quicksum(self.Alive[t,i,j] for j in self.contributions[l])
+                    self.bandwidthOfl#quicksum(self.Alive[t,i,j] for j in self.contributions[l])
                     for l in range(L)
                 ))
                 self.md.addLConstr(self.Time[t,i], GEQ, quicksum(
                     quicksum(self.Prf[t,i,j]*self.sizes[l] for j in self.contributions[l])/
-                    10*1024**2#quicksum(self.Ofl[t,i,j] for j in self.contributions[l])
+                    self.bandwidthPrf#quicksum(self.Ofl[t,i,j] for j in self.contributions[l])
                     for l in range(L)
                 ))
                 
@@ -184,28 +186,30 @@ class ModelGurobi:
                                             self.PrfEnd[t,i,j] +
                                             self.Comp[t,i])
                         else:
-                            self.md.addLConstr(self.Alive[t,i+1,j], LEQ, self.Alive[t,i,j])
+                            self.md.addLConstr(self.Alive[t,i+1,j], LEQ, self.Alive[t,i,j] + 
+                                            self.PrfEnd[t,i,j])
                 for j in range(E):
                     self.md.addLConstr(self.Ofl[t,i,j], LEQ, self.Alive[t,i,j])
                     self.md.addLConstr(self.Prf[t,i,j], LEQ, 
                                        quicksum(self.Ofl[tt,ii,j] for tt in range(i) for ii in range(tt))+
                                        quicksum(self.Ofl[t,ii,j] for ii in range(i)))
-                    self.md.addLConstr(self.PrfEnd[t,i,j], LEQ, 
-                                       self.PrfProg[t,i] + 
-                                       quicksum(self.Prf[t,ii,j]-self.PrfEnd[t,ii,j] for ii in range(i)))
-                    self.md.addLConstr(self.PrfEnd[t,i,j], GEQ, 
+                    self.md.addLConstr(0, LEQ, 
                                        self.PrfProg[t,j] + 
-                                       quicksum(self.Prf[t,ii,j]-self.PrfEnd[t,ii,j] for ii in range(i)) - 
-                                       0.9999)
+                                       quicksum(self.Prf[t,ii,j]-self.PrfEnd[t,ii,j] for ii in range(i+1)))
+                    self.md.addLConstr(1, GEQ, 
+                                       self.PrfProg[t,j] + 
+                                       quicksum(self.Prf[t,ii,j]-self.PrfEnd[t,ii,j] for ii in range(i)))
                     self.md.addLConstr(self.Prf[t,i,j], LEQ, self.Comp[t,i])
                     self.md.addLConstr(self.Ofl[t,i,j], LEQ, self.Comp[t,i])
                 for l in range(L):
                     for j in self.contributions[l]:
-                        self.md.addLConstr(self.Prf[t,i,j], LEQ, 
+                        self.md.addLConstr(self.PrfProg[t,j] + 
+                                           quicksum(self.Prf[t,ii,j]-self.PrfEnd[t,ii,j] for ii in range(i+1)),
+                                           LEQ, 
                                            self.Ocp[t,i,l])
                         self.md.addLConstr(self.Alive[t,i,j], LEQ, self.Ocp[t,i,l])
                 self.md.addLConstr(quicksum(self.Ocp[t,i,l]*self.sizes[l] for l in range(L))+
-                                    self.Comp[t,i] * self.overhead[i]*0,
+                                    self.Comp[t,i] * self.overhead[i],
                                     LEQ,
                                     self.peak_budget)
                     
@@ -226,7 +230,7 @@ class ModelGurobi:
             for j in range(E):
                 self.md.addLConstr(self.Alive[t+1,0,j], LEQ, self.Alive[t,T-1,j])
                 self.md.addLConstr(self.PrfProg[t+1,j], EQ, 
-                                    self.PrfProg[t,j] + quicksum(self.Prf[t,ii,j]-self.PrfEnd[t,ii,j] for ii in range(i)))
+                                    self.PrfProg[t,j] + quicksum(self.Prf[t,ii,j]-self.PrfEnd[t,ii,j] for ii in range(T)))
         
 
     def add_abar_constraint(self, save_budget):
