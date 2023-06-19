@@ -2,7 +2,7 @@ import torch
 import rkgb
 import rockmate as rk
 from copy import deepcopy
-from rotor import timing
+from rkgb.utils.imports_from_rotor import make_timer
 import pickle
 import time
 import sys
@@ -31,7 +31,7 @@ def copy_run(model, inputs, dict_kwargs=None, repeat=10, return_mod=False):
         # _x = deepcopy(x).to(device)
         torch.cuda.reset_peak_memory_stats()
         max_before = torch.cuda.max_memory_allocated()
-        timer = timing.make_timer(device)
+        timer = make_timer(device)
         times = []
         for _ in range(repeat):
             timer.start()
@@ -76,7 +76,7 @@ def copy_run_rk(
     budgets = mbudget if hasattr(mbudget, "__iter__") else [mbudget]
     _model = deepcopy(model).to(device)
     start = time.time()
-    rkmod = rk.CheckpointedModule(
+    rkmod = rk.Rockmate(
         _model,
         _dict_inputs,
         mem_limit=max(budgets),
@@ -112,7 +112,7 @@ def copy_run_rk(
         _x = _dict_inputs.copy()
         torch.cuda.reset_peak_memory_stats()
         max_before = torch.cuda.max_memory_allocated()
-        timer = timing.make_timer(device)
+        timer = make_timer(device)
         times = []
         rkmod.reinit()
 
