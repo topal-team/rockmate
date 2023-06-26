@@ -663,7 +663,7 @@ static PyMethodDef RkTable_methods[] = {
 
 static PyTypeObject RkTableType = {
   PyVarObject_HEAD_INIT(NULL, 0)
-  .tp_name = "rockmate_csolver.RkTable",
+  .tp_name = "rockmate.csolver.RkTable",
   .tp_doc = PyDoc_STR("Rockmate Table"),
   .tp_basicsize = sizeof(RkTable),
   .tp_itemsize = 0,
@@ -678,14 +678,14 @@ static PyTypeObject RkTableType = {
     
 static struct PyModuleDef rotor_solver_module = {
     PyModuleDef_HEAD_INIT,
-    "rockmate_csolver",   /* name of module */
+    "rockmate.csolver",   /* name of module */
     NULL, /* module documentation, may be NULL */
     -1,       /* size of per-interpreter state of the module,
                  or -1 if the module keeps state in global variables. */
 };
 
 PyMODINIT_FUNC
-PyInit_rockmate_csolver(void)
+PyInit_csolver(void)
 {
   PyObject *m;
   if (PyType_Ready(&RkTableType) < 0)
