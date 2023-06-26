@@ -4,7 +4,7 @@
 # based on rotor/algorithms/persistent.py
 # ==========================
 
-from hrockmate.rkgb.utils import print_debug
+from rkgb.utils import print_debug
 from .def_chain import RK_Chain
 from .def_sequence import (
     SeqBlockFn,

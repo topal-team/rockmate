@@ -3,7 +3,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rockmate"
+name = "rkgb"
 version = "2.0.0"
 requires-python = ">=3.8"
 license = {file = "COPYING"}
@@ -11,10 +11,9 @@ readme = "README.md"
 description = "Efficient and Automatic Rematerialization for Pytorch training"
 dependencies = [
     "torch >= 1.8",
-    "gurobipy",
     "astunparse >= 1.6.3",
 ]
-keywords = ["rematerialization", "training", "pytorch", "memory"]
+keywords = ["vizualisation", "pytorch"]
 authors = [
   {name = "Théotime Le Hellard"},
   {name = "Xunyi Zhao"},
@@ -32,9 +31,4 @@ draw = ["pygraphviz"]
 
 [project.urls]
 Repository = "https://github.com/topal-team/rockmate.git"
-
-[tool.setuptools.packages.find]
-where = ["."]
-exclude = ["models", "test_csolver"]  # alternatively: `exclude = ["additional*"]`
-namespaces = false
 
