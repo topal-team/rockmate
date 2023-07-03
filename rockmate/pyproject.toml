@@ -10,7 +10,7 @@ license = {file = "COPYING"}
 readme = "README.md"
 description = "Efficient and Automatic Rematerialization for Pytorch training"
 dependencies = [
-    "torch >= 1.8",
+    "torch >= 1.7",
     "gurobipy",
     "rkgb >= 2.0.0",
 ]
