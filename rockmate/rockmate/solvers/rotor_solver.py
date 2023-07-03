@@ -236,7 +236,7 @@ def pseq_builder(chain, memory_limit, opt_table):
 from . import csequence as cs
 
 try:
-    import rockmate.csolver as rs
+    import rockmate.solvers.csolver as rs
 
     csolver_present = True
 except:
