@@ -305,12 +305,14 @@ class OpSchedule:
             return keep_correction
 
         if refine:
-            self.fwd_overhead_correction = refine_correction(
-                self.fwd_overhead_correction
-            )
-            self.bwd_overhead_correction = refine_correction(
-                self.bwd_overhead_correction
-            )
+            if self.fwd_overhead_correction:
+                self.fwd_overhead_correction = refine_correction(
+                    self.fwd_overhead_correction
+                )
+            if self.bwd_overhead_correction:
+                self.bwd_overhead_correction = refine_correction(
+                    self.bwd_overhead_correction
+                )
 
     def refine(self):
         for i, op in enumerate(self.op_list):
