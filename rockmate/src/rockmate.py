@@ -21,6 +21,7 @@ from .solvers.def_sequence import (
 from .solvers.rotor_solver import seq_builder, solve_dp_functional
 from .compiler import Compiler, RK_Storage, make_gd
 
+
 class Rockmate(torch.nn.Module):
     compiler = None
     autograd_Function = None
@@ -137,19 +138,23 @@ class Rockmate(torch.nn.Module):
         self.opt_table = solve_dp_functional(
             self.rk_chain, mmax, self.opt_table
         )
-        self.seq = seq_builder(
+        seq = seq_builder(
             self.rk_chain, self.mem_limit // self.mem_unit, self.opt_table
         )
         end = time.time()
         self.DP_solve_time = end - start
 
         enable = np.zeros(len(self.list_kg))
-        for s in self.seq.seq:
+        for s in seq.seq:
             if isinstance(s, SeqBlockFe):
                 enable[s.index] = 1
             if isinstance(s, SeqBlockBwd):
                 if not enable[s.index - 1]:
                     s.op_sched.del_input()
+        self.set_sequence(seq)
+
+    def set_sequence(self, sequence):
+        self.seq = sequence
         self.fwd_seq, self.bwd_seq = self.seq.cut_fwd_bwd()
         self.fwd_op_sched_list = [seq.op_sched for seq in self.fwd_seq.seq]
         self.bwd_op_sched_list = [seq.op_sched for seq in self.bwd_seq.seq]
@@ -562,9 +567,9 @@ class Rockmate(torch.nn.Module):
         self, path, id=datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
     ):
         with open(f"{path}/{id}_sched.pkl", "wb") as f:
-            pickle.dump(self.op_sched, f)
+            pickle.dump(self.seq, f)
 
     def load_scehd_from_local(self, path, id, load_sched=True):
         with open(f"{path}/{id}_sched.pkl", "rb") as f:
-            self.op_sched = pickle.load(f)
+            self.set_sequence(pickle.load(f))
         self.get_compiled_fct()

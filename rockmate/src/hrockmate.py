@@ -573,4 +573,11 @@ class HRockmate(torch.nn.Module):
             self.rkgb_res = pickle.load(f)
             if load_sched:
                 self.list_solutions = self.rkgb_res.H_cluster.list_sched
-
+                try:
+                    with open(f"{path}/{id}_sched.pkl", "rb") as f_sched:
+                        self.op_sched = pickle.load(f_sched)
+                except Exception:
+                    self.op_sched = self.list_solutions[
+                        np.argmin([sum(op_sched.time) for op_sched in self.list_solutions])
+                    ]
+                self.get_compiled_fct()
