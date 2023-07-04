@@ -158,6 +158,12 @@ class ModelGurobi:
             GRB.EQUAL,
             T,
         )
+        
+        self.md.addLConstr(
+            quicksum(self.PrfEnd[0,0,j] for j in range(E)),
+            GRB.EQUAL,
+            0,
+        )
 
         # ======Step Constraints======
         for t in range(T):
@@ -190,21 +196,22 @@ class ModelGurobi:
                                             self.PrfEnd[t,i,j])
                 for j in range(E):
                     self.md.addLConstr(self.Ofl[t,i,j], LEQ, self.Alive[t,i,j])
-                    self.md.addLConstr(self.Prf[t,i,j], LEQ, 
-                                       quicksum(self.Ofl[tt,ii,j] for tt in range(i) for ii in range(tt))+
+                    prog = (self.PrfProg[t,j] + quicksum(self.Prf[t,ii,j] for ii in range(i+1))  - (quicksum(self.PrfEnd[t,ii,j] for ii in range(i))))
+                    
+                    self.md.addLConstr(prog, 
+                                       LEQ, 
+                                       quicksum(self.Ofl[tt,ii,j] for tt in range(t) for ii in range(tt+1))+
                                        quicksum(self.Ofl[t,ii,j] for ii in range(i)))
                     self.md.addLConstr(0, LEQ, 
-                                       self.PrfProg[t,j] + 
-                                       quicksum(self.Prf[t,ii,j]-self.PrfEnd[t,ii,j] for ii in range(i+1)))
+                                       prog)
                     self.md.addLConstr(1, GEQ, 
-                                       self.PrfProg[t,j] + 
-                                       quicksum(self.Prf[t,ii,j]-self.PrfEnd[t,ii,j] for ii in range(i)))
+                                       prog)
                     self.md.addLConstr(self.Prf[t,i,j], LEQ, self.Comp[t,i])
+                    self.md.addLConstr(self.PrfEnd[t,i,j], LEQ, self.Comp[t,i])
                     self.md.addLConstr(self.Ofl[t,i,j], LEQ, self.Comp[t,i])
                 for l in range(L):
                     for j in self.contributions[l]:
-                        self.md.addLConstr(self.PrfProg[t,j] + 
-                                           quicksum(self.Prf[t,ii,j]-self.PrfEnd[t,ii,j] for ii in range(i+1)),
+                        self.md.addLConstr(prog, 
                                            LEQ, 
                                            self.Ocp[t,i,l])
                         self.md.addLConstr(self.Alive[t,i,j], LEQ, self.Ocp[t,i,l])
@@ -232,6 +239,13 @@ class ModelGurobi:
                 self.md.addLConstr(self.PrfProg[t+1,j], EQ, 
                                     self.PrfProg[t,j] + quicksum(self.Prf[t,ii,j]-self.PrfEnd[t,ii,j] for ii in range(T)))
         
+        for j in range(E):
+            self.md.addLConstr(quicksum(self.Ofl[t,i,j] for t in range(T) for i in range(T)),
+                               LEQ,
+                               quicksum(self.Prf[t,i,j] for t in range(T) for i in range(T)))
+            self.md.addLConstr(quicksum(self.Ofl[t,i,j] for t in range(T) for i in range(T)),
+                               LEQ,
+                               1)
 
     def add_abar_constraint(self, save_budget):
         T = len(self.hgraph.list_hcn)
@@ -256,3 +270,17 @@ class ModelGurobi:
         else:
             self.solve_time = self.md.Runtime
             self.feasible = True
+
+    def schedule(self, hgraph=None):
+        """
+        Given the solution from HILP, we want to translate the result
+        to a OpSchedule that can be used in a higher level.
+        """
+        hgraph = hgraph if hgraph else self.hgraph
+        assert self.feasible, "Cannot schedule an infeasible model!"
+        T = len(hgraph.list_hcn)
+        I = len(hgraph.list_hdn)
+        J = len(self.list_list_sched)
+
+        op_list = []
+        
