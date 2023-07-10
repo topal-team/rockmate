@@ -109,10 +109,27 @@ class B_var:
 
 # /!\ Most of B_graph attributes are empty and .nodes shouldn't be trusted 
 # -> not toposorted + contains a lot of useless nodes
-class B_graph(base.Graph):
+class RawGraph(base.Graph):
     def __init__(self):
-        super().__init__("B")
+        super().__init__("R")
         self.output_var = None 
+
+    def __str__(self):
+        return (
+            f"RawGraph with {len(self.nodes)} nodes "\
+            f"(remember this list may contain garbage)")
+    def render(self,
+            name=None,
+            view=True,
+            directory=base.Graph.default_render_directory,
+            render_format=base.Graph.default_render_format,
+            dot=None):
+        name = base.Graph._get_render_name(name)
+        dot = base.Graph._get_graphviz_dot(name,dot)
+        base.Graph._call_graphviz_to_render(
+            dot,view,
+        )
+
 
 # ==========================
 

@@ -76,7 +76,7 @@ class Node():
     # Methods that must be overridden by subclasses:
     def _raise_NotImplementedError(self,method_name):
         raise NotImplementedError(
-            f"{self}'s class ({self.__class__}) should "\
+            f"{self}'s class ({type(self).__name__}) should "\
             f"overwrite \"{method_name}\" method.")
     def get_deps(self):
         """To get all the deps of the same:
@@ -377,18 +377,25 @@ class Graph():
     # RENDER :
     default_render_directory = "graphviz_dir"
     default_render_format = "svg"
+    def _get_render_name(self,name):
+        if name is not None: 
+            return name
+        else:
+            return type(self).__name__
     @staticmethod
-    def _get_graphviz_dot(name):
-        if not has_graphviz:
+    def _get_graphviz_dot(name,dot=None):
+        if dot is not None:
+            return dot
+        elif not has_graphviz:
             raise Exception(
                 "To render rkGB graphs you need graphviz.\n"\
                 "Please install the [draw] variant of rkgb:"\
                 "\n pip install rkgb[draw]")
-        return graphviz.Digraph(name,comment=name)
+        else:
+            return graphviz.Digraph(name,comment=name)
     @staticmethod
     def _call_graphviz_to_render(dot,
             view,
-            graph_type,
             directory,
             render_format):
         try:
@@ -398,10 +405,12 @@ class Graph():
                 format=render_format,
                 quiet=True)
         except: print(
-            f"Warning : issue with graphviz to print {graph_type}_graph, "\
-            f"probably because Graphviz isn't installed on the computer "\
-            f"(the software, not the python module). Normally the .gv "\
-            f"has been generated, but not the .{render_format}",
+            f"Warning : issue with graphviz to render.\n"\
+            f"Python graphviz package is installed, but maybe "\
+            f"the Graphviz software isn't installed. \nThe python "\
+            f"package is just an interface which generates the .gv file,"\
+            f"but you need to install the software (maybe via apt) "\
+            f"to generate the .{render_format}",
             file = sys.stderr)
     def render(self):
         raise NotImplementedError(
