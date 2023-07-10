@@ -6,6 +6,12 @@
 """
 
 import copy
+import sys
+try:
+    import graphviz
+    has_graphviz = True
+except ModuleNotFoundError:
+    has_graphviz = False
 from lowlevel import ast_add_on
 
 # ==============================================
@@ -368,4 +374,37 @@ class Graph():
         separators.reverse()
         return separators
 
+    # RENDER :
+    default_render_directory = "graphviz_dir"
+    default_render_format = "svg"
+    @staticmethod
+    def _get_graphviz_dot(name):
+        if not has_graphviz:
+            raise Exception(
+                "To render rkGB graphs you need graphviz.\n"\
+                "Please install the [draw] variant of rkgb:"\
+                "\n pip install rkgb[draw]")
+        return graphviz.Digraph(name,comment=name)
+    @staticmethod
+    def _call_graphviz_to_render(dot,
+            view,
+            graph_type,
+            directory,
+            render_format):
+        try:
+            dot.render(
+                view=view,
+                directory=directory,
+                format=render_format,
+                quiet=True)
+        except: print(
+            f"Warning : issue with graphviz to print {graph_type}_graph, "\
+            f"probably because Graphviz isn't installed on the computer "\
+            f"(the software, not the python module). Normally the .gv "\
+            f"has been generated, but not the .{render_format}",
+            file = sys.stderr)
+    def render(self):
+        raise NotImplementedError(
+            "rkGB graph classes should overwrite 'render' method"
+        )
 

@@ -142,25 +142,3 @@ def get_data_ptr(value):
     else: return None
 
 # ==========================
-
-
-
-# ==========================
-# == SAFELY USE GRAPHVIZ ===
-# ==========================
-
-def graph_render(dot,open,graph_type,render_format):
-    try:
-        dot.render(directory="graphviz_dir",
-            format=render_format,
-            quiet=True,
-            view=open)
-    except: print(
-        f"Warning : issue with graphviz to print {graph_type}_graph, "\
-        f"probably because Graphviz isn't installed on the computer "\
-        f"(the software, not the python module). Normally the .gv "\
-        f"has been generated, but not the .pdf",
-        file = sys.stderr)
-
-# ==========================
-
