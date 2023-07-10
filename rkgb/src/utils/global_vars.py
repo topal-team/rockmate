@@ -218,7 +218,6 @@ default_forced_kwargs = dict(
     ]
 )
 
-solver_name = [None]
 # This dict is used by default when force_special_kwargs=True
 # -> dict of : fct_name -> (arg_name,arg_value) list to inforce
 # We change some kwargs in the code to avoid changing values
