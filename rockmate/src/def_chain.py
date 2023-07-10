@@ -3,10 +3,7 @@
 # also contains RK_Chain builder -> depends on use_chk.py
 #  based on rotor/algorithms/parameters.py
 # ==========================
-from rkgb.utils.global_vars import solver_name
 from rkgb.utils import imports_from_rotor as irotor
-if solver_name[0] != "gurobi":
-    from rockmate.ILP_MIP import ModelMIP
 from rockmate.ILP_gurobi_solver import ModelGurobi
 import numpy as np
 from rockmate.def_op import RunOp, DelOp, OpSchedule
@@ -19,7 +16,7 @@ import math
 
 def get_rk_solution(list_kg, l_bd_abar, budget_all):
 
-    if solver_name[0] == "gurobi":
+    if True: ##only support for Gurobi solver for now
         param_dict = {
             "LogToConsole": 0,
             "IntegralityFocus": 1,

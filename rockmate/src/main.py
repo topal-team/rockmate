@@ -5,7 +5,7 @@
 import rkgb
 from rkgb.main import make_inputs
 from rkgb.utils import print_debug, np, irotor
-from rkgb.utils.global_vars import ref_verbose, solver_name
+from rkgb.utils.global_vars import ref_verbose
 from rkgb.utils.small_fcts import get_device
 from rkgb.utils.ast_add_on import ast_to_str
 from rockmate.def_op import DelOp, OpSchedule
@@ -59,7 +59,6 @@ class Rockmate(torch.nn.Module):
     ):
         super().__init__()
         ref_verbose[0] = verbose
-        solver_name[0] = ilp_solver
         self.device = get_device()
         self.original_mod = original_mod
         self.mem_unit = mem_unit if mem_unit else 1024 ** 2

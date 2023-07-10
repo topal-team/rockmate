@@ -6,10 +6,13 @@ import ast
 import astunparse
 import torch
 import numpy as np
-import matplotlib.pyplot as plt
 import math
 from torch import tensor
-import graphviz
+try:
+    import graphviz
+    has_graphviz = True
+except ModuleNotFoundError:
+    has_graphviz = False
 
 # == rotor == for utils/def_inspection
 import rkgb.utils.imports_from_rotor as irotor
