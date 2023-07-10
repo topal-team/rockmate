@@ -2,14 +2,15 @@
 # ====== D structure =======
 # ==========================
 
-from .utils import *
-from .Btools import B_node,B_graph
+from lowlevel import ast_add_on
+from core import base
+from core.raw import RawNode,RawGraph
 
 # **********
 # * D_node *
 # **********
 
-class D_node(RK_node): # Also subclass of B_node
+class D_node(base.Node): # Also subclass of B_node
     def __init__(self,
             target="",code=None,fct="",
             is_rand=False,deps_rand=None,
@@ -36,26 +37,18 @@ class D_node(RK_node): # Also subclass of B_node
         self.users = set()
         self.deps_rand = deps_rand if deps_rand else set()
         self.protected = False
-    def __eq__(self,dn2,force_order=False,raise_exception=False):
-        dn1 = self
-        b = small_fcts.check_attr(dn1,dn2,
-            ["protected","target","fct","is_rand","deps_rand"],
-            raise_exception=raise_exception)
-        mkstr = lambda nl : [rn.target for rn in nl]
-        s = RK_node.sort_nodes if force_order else (lambda s : s)
-        b = (b
-            and (mkstr(s(dn1.deps)) == mkstr(s(dn2.deps)))
-            and (mkstr(s(dn1.users)) == mkstr(s(dn2.users)))
-            and (dn1.get_code() == dn2.get_code()))
-        return b
-    __hash__ = RK_node.__hash__
+
+    def get_deps(self):
+        return self.deps
+    def get_users(self):
+        return self.users
 
 
 # ***********
 # * D_graph *
 # ***********
 
-class D_graph(RK_graph):
+class D_graph(base.Graph):
     def __init__(self):
         super().__init__("D")
     def __eq__(self,g2,force_order=False,raise_exception=False):
@@ -71,7 +64,7 @@ class D_graph(RK_graph):
             for dn1,dn2 in zip(g1.nodes,g2.nodes):
                 b *= dn1.__eq__(dn2,force_order,raise_exception)
         return b
-    __hash__ = RK_node.__hash__
+    __hash__ = base.Node.__hash__
 
     def prepare_cut(self):
         # in case, after simplifications, we will cut / sequentialize
@@ -154,7 +147,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
         bn for bn in bg.nodes
         if (bn not in b_nodes
         and len(bn.deps)!=0)]
-    to_insert_back.sort(key=RK_node.get_num)
+    to_insert_back.sort(key=base.Node.get_num)
     to_insert_back = to_insert_back[::-1]
     while to_insert_back != []:
         retry_list = []

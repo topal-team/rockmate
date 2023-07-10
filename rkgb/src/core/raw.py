@@ -21,13 +21,13 @@
 #  one target obtained with a primitive operation
 #  .code attributes are AST objects
 
-from .utils import *
+from core import base
 
 # **********
 # * B_node *
 # **********
 
-class B_node(RK_node):
+class RawNode(base.Node):
     def __init__(self, target="", code=None, fct="", deps=None, is_input=False):
         """ attributes :
         .target   : str  : the name of the only var defined in the node
@@ -49,6 +49,11 @@ class B_node(RK_node):
         self.deps_rand = set()
         global all_nodes
         all_nodes.append(self)
+    
+    def get_deps(self):
+        return self.deps
+    def get_users(self):
+        raise Exception("Raw nodes don't have `users` relations")
 
 
 # *********
@@ -104,7 +109,7 @@ class B_var:
 
 # /!\ Most of B_graph attributes are empty and .nodes shouldn't be trusted 
 # -> not toposorted + contains a lot of useless nodes
-class B_graph(RK_graph):
+class B_graph(base.Graph):
     def __init__(self):
         super().__init__("B")
         self.output_var = None 

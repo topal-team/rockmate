@@ -9,7 +9,7 @@ from .Stools import S_node,S_graph
 # * K_C_node *
 # ************
 
-class K_C_node(RK_node):
+class K_C_node(base.Node):
     def __init__(self,
             main_target="/!\\ No target /!\\",
             all_targets       = None,
@@ -23,7 +23,7 @@ class K_C_node(RK_node):
             body_code    = None,
             deps_real = None,
             deps_fake = None,
-            deps_through_size_artefacts=None,
+            deps_through_artifacts=None,
             other_obj=None):
         # ** informative **
         super().__init__("KC",other_obj,main_target=main_target)
@@ -50,8 +50,8 @@ class K_C_node(RK_node):
         self.users_global = set() # KDN set
         self.users        = set() # KDN set
         self.deps_impossible_to_restore = set() # (KDN * str) set
-        da = deps_through_size_artefacts
-        self.deps_through_size_artefacts = da if da else set() # KCN set
+        da = deps_through_artifacts
+        self.deps_through_artifacts = da if da else set() # KCN set
         # -> just for the toposort, we don't need the reciprocal users_..
 
         # ** inspection **
@@ -60,6 +60,14 @@ class K_C_node(RK_node):
         self.phantom_names = []
         self.alias_in_users_phantoms = []
 
+    def get_deps(self):
+        return set().union(
+            *[bdn.deps for bdn in self.deps_real],
+            self.deps_through_artifacts)
+    def get_users(self):
+        return set().union(
+            *[bdn.users_real for bdn in self.users])
+
     @property
     def deps_only_global(self):
         return self.deps_global - self.deps_real.union(self.deps_fake)
@@ -67,58 +75,12 @@ class K_C_node(RK_node):
     def users_only_global(self):
         return self.users_global - self.users
 
-    """ # NOT MAINTAINED 
-    def __eq__(self,kcn2,force_order=False,raise_exception=False):
-        kcn1 = self
-        try:
-            b = (
-            small_fcts.check_attr(kcn1,kcn2,
-                ["name","main_target","is_fwd",
-                "all_targets","container_targets",
-                "tensor_targets","inplace_targets",
-                "is_rand","overhead",],#"phantom_names",
-                #"alias_in_users_phantoms"],
-                raise_exception=raise_exception)
-            and kcn1.full_code() == kcn2.full_code())
-            if not b and raise_exception: raise Exception(
-                f"{kcn1.main_target} and {kcn2.main_target} KCN differ on "\
-                f"code : {kcn1.full_code()}\n===\n{kcn2.full_code()}")
-
-            # ** deps/users **
-            mmt = lambda nl : [rn.main_target for rn in nl]
-            s = RK_node.sort_nodes if force_order else (lambda s : s)
-            for attr in ["deps_real","deps_fake","deps_global",
-                "users","users_global","deps_through_size_artefacts"]:
-                c = mmt(s(getattr(kcn1,attr))) == mmt(s(getattr(kcn2,attr)))
-                b *= c
-                if not c and raise_exception:
-                    raise Exception(f"kcns differ on attr {attr}")
-            mmt2 = lambda nl : [(r[0].main_target,r[1]) for r in nl]
-            b *= small_fcts.clean__eq__(
-                mmt2(kcn1.deps_impossible_to_restore),
-                mmt2(kcn2.deps_impossible_to_restore),
-                raise_exception=raise_exception)
-
-            # ** time **
-            t1 = kcn1.time
-            t2 = kcn2.time
-            r = global_vars.ref_reasonable_rate[0]
-            if not (((t1 == t2)
-                or (isinstance(t1,float) and isinstance(t2,float)
-                and (abs(t1 - t2) < (r * max(t1,t2)))))):return False
-            if not b and raise_exception:
-                raise Exception("kcns differ on attr .time")
-            return bool(b)
-        except AttributeError as a: return kcn1.__hash__() == kcn2.__hash__()
-    __hash__ = RK_node.__hash__
-    """
-
 
 # ************
 # * K_D_node *
 # ************
 
-class K_D_node(RK_node):
+class K_D_node(base.Node):
     def __init__(self,
             kdn_type = "/!\\ No kdn_type/!\\",
             main_target = "/!\\ No target /!\\",
@@ -162,43 +124,20 @@ class K_D_node(RK_node):
     def users_only_global(self):
         return self.users_global - self.users_real.union(self.users_fake)
 
-    """ # NOT MAINTAINED 
-    def __eq__(self,kdn2,force_order=False,raise_exception=False):
-        kdn1 = self
-        try:
-            b = small_fcts.check_attr(kdn1,kdn2,
-                ["name","mem","kdn_type","main_target",
-                "all_targets","container_targets",
-                "tensor_targets","inplace_targets",
-                "includes_phantoms",
-                "includes_base"],
-                #"alias_in_users_phantoms"],
-                raise_exception=raise_exception)
-            # ** deps/users **
-            mt = lambda nl : [rn.main_target for rn in nl]
-            s = RK_node.sort_nodes if force_order else (lambda s : s)
-            for attr in ["users_real","users_fake",
-                "deps","users_global","deps_global"]:
-                c = mt(s(getattr(kdn1,attr))) == mt(s(getattr(kdn2,attr)))
-                b *= c
-                if not c and raise_exception:
-                    raise Exception(f"kdns differ on attr {attr}")
-            mmt2 = lambda nl : [(r[0].main_target,r[1]) for r in nl]
-            b *= small_fcts.clean__eq__(
-                mmt2(kdn1.users_impossible_to_restore),
-                mmt2(kdn2.users_impossible_to_restore),
-                raise_exception=raise_exception)
-            return bool(b)
-        except AttributeError as a: return kdn1.__hash__() == kdn2.__hash__()
-    __hash__ = RK_node.__hash__
-    """
+    def get_deps(self):
+        return set().union(
+            *[bcn.deps_real for bcn in self.deps])
+    def get_users(self):
+        return set().union(
+            *[bcn.users for bcn in self.users_real])
+
 
 
 # ***********
 # * K_graph *
 # ***********
 
-class K_graph(RK_graph):
+class K_graph(base.Graph):
     has_fake_input_kdn_grad = False
     def __init__(self,sg : S_graph):
         super().__init__("K")
@@ -340,8 +279,8 @@ class K_graph(RK_graph):
         keys1 = list(g1.dict_kn)
         keys2 = list(g2.dict_kn)
         if force_order:
-            keys1 = RK_node.sort_names(keys1)
-            keys2 = RK_node.sort_names(keys2)
+            keys1 = base.Node.sort_names(keys1)
+            keys2 = base.Node.sort_names(keys2)
         b *= (keys1 == keys2)
         if not b and raise_exception:
             raise Exception("K_graphs differ on dict_kn's keys (order?)")
@@ -395,7 +334,7 @@ def aux_build_S_to_K(sg : S_graph,
         #   -> between KCN2 and KCN1. We decided to do NOT have KDN(size)
         #   -> in fact we just need KCN1 to be ordered before KCN2 in
         #   -> the toposort. To do so we create a tmp special dep:
-        #   -> "deps_through_size_artefacts" when we find artefact in sn.deps
+        #   -> "deps_through_artifacts" when we find artefact in sn.deps
         if sn.is_artefact: return ()
 
         # *** build the fwd part ***
@@ -430,7 +369,7 @@ def aux_build_S_to_K(sg : S_graph,
             inplace_code = sn.inplace_code,
             body_code    = sn.body_code,
             deps_real    = kcn_fwd_deps,
-            deps_through_size_artefacts = kcn_deps_art_kcn,
+            deps_through_artifacts = kcn_deps_art_kcn,
             other_obj = kg)
         dict_KCN_fwd[mt] = kcn_fwd
 
@@ -727,7 +666,7 @@ def copy_K_C_node(kcn : K_C_node):
     new_kcn.phantom_names = list(kcn.phantom_names)
     new_kcn.unique_id    = kcn.unique_id
     for attr in ["deps_real","deps_fake","deps_global",
-        "users","users_global","deps_through_size_artefacts"]:
+        "users","users_global","deps_through_artifacts"]:
         setattr(new_kcn,attr,set()) # /!\
     return new_kcn
 
@@ -790,7 +729,7 @@ def copy_K_graph(kg : K_graph):
     # -- edges --
     for new_kcn,old_kcn in zip(new_list_kcn,kg.list_kcn):
         for attr in ["deps_real","deps_fake","users",
-            "deps_through_size_artefacts"]:
+            "deps_through_artifacts"]:
             old_edges = getattr(old_kcn,attr)
             for old_aux_kn in old_edges:
                 getattr(new_kcn,attr).add(new_dict_kn[old_aux_kn.name])

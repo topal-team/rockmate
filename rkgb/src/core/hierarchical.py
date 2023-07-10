@@ -10,7 +10,7 @@ from .Ktools import K_graph, K_C_node, K_D_node
 # ************
 # * H_C_node *
 # ************
-class H_C_node(RK_node):
+class H_C_node(base.Node):
     def __init__(self,
             name,
             main_target = None, 
@@ -24,22 +24,30 @@ class H_C_node(RK_node):
         self.is_leaf = bool(main_target is None)
         self.deps = set()  # HDN set
         self.users = set()  # HDN set
-        self.deps_through_size_artefacts = set()  # HCN set
+        self.deps_through_artifacts = set()  # HCN set
         self.number = number
         # About self.number :
         # When toposorting list_hcn we want to respect as much as possible
         # the original order, so list_hcn toposort consists of:
         # -> inverse Breath First Search (as any toposort)
         # -> if equal, then choose the one which comes first in list_kcn.
-        # And that's what self.number is used for: Rk_node.get_num
+        # And that's what self.number is used for: base.Node.get_num
         # (for D, S and K nodes we can get the number from main_target,
         # but some H_nodes don't have a main_target).
+
+    def get_deps(self):
+        return set().union(
+            *[hdn.deps for hdn in self.deps],
+            self.deps_through_artifacts)
+    def get_users(self):
+        return set().union(
+            *[hdn.users for hdn in self.users])
 
 
 # ************
 # * H_D_node *
 # ************
-class H_D_node(RK_node):
+class H_D_node(base.Node):
     kdn : K_D_node = None
     main_target : str = None
     name : str = None
@@ -63,6 +71,13 @@ class H_D_node(RK_node):
             else:
                 assert(kdn.kdn_type == "phantoms")
                 raise Exception("An HDN cannot represent a KDN of type 'phantoms'")
+
+    def get_deps(self):
+        return set().union(
+            *[hcn.deps for hcn in self.deps])
+    def get_users(self):
+        return set().union(
+            *[hcn.users for hcn in self.users])
         
     @staticmethod
     def make_name_from_kdn(kdn):
@@ -72,7 +87,7 @@ class H_D_node(RK_node):
 # ***********
 # * H_graph *
 # ***********
-class H_graph(RK_graph):
+class H_graph(base.Graph):
     def __init__(self, name, h_cluster = None, other_obj = None):
         super().__init__("H",other_obj)
         # /!\ All the HCN's and HDN's should be in the same level. /!\ 
@@ -469,11 +484,11 @@ def P_graph_to_H_graph(
 
     # -> artefacts edges
     for kcn,hcn in dict_kcn_to_hcn.items():
-        for req_via_art_kcn in kcn.deps_through_size_artefacts:
+        for req_via_art_kcn in kcn.deps_through_artifacts:
             if req_via_art_kcn in dict_kcn_to_hcn:
                 req_via_art_hcn = dict_kcn_to_hcn[req_via_art_kcn]
                 if req_via_art_hcn is not hcn:
-                    hcn.deps_through_size_artefacts.add(
+                    hcn.deps_through_artifacts.add(
                         req_via_art_hcn
                     )
 

@@ -69,7 +69,7 @@ class Ano_S_node_Info():
         self.dict_ano_cst_to_basic_info = dict_acst_info = dict()
         self.dict_ano_param_to_basic_info = dict_aparam_info = dict()
         # Build ano targets + info
-        all_real_vars = sorted(all_real_vars,key = RK_node.get_num_tar)
+        all_real_vars = sorted(all_real_vars,key = base.Node.get_num_tar)
         nb_var = 0
         for real_name in all_real_vars:
             nb_var += 1
@@ -80,7 +80,7 @@ class Ano_S_node_Info():
             # -> We will keep only basic attributes of Var_info
 
         # Build ano constants + info
-        all_real_cst = sorted(all_real_cst,key = RK_node.get_num_cst)
+        all_real_cst = sorted(all_real_cst,key = base.Node.get_num_cst)
         nb_cst = 0
         for cst_real_name in all_real_cst:
             value = sg.dict_constants[cst_real_name]
@@ -170,7 +170,7 @@ class Partitioner():
             # "must be overwritten by all subclasses")
 
 
-class P_node(RK_node):
+class P_node(base.Node):
     is_protected_from_unwrap = None
     mem_out = None
     def __init__(self,
@@ -212,6 +212,11 @@ class P_node(RK_node):
         self.users_global = set() # FOR DYNAMIC PARTITIONING
         # Global edges contain ALL the deps/users, of any depth
 
+    def get_deps(self):
+        return self.deps
+    def get_users(self):
+        return self.users
+
     @property
     def size(self):
         if self.is_leaf or self.is_protected_from_unwrap: return 1
@@ -224,7 +229,7 @@ class P_node(RK_node):
         else: return self.sub_graph.total_size
 
 
-class P_graph(RK_graph):
+class P_graph(base.Graph):
     name : str = None
     pn_wrapping_it : P_node = None # -> pn representing self in an upper graph
     _first_nodes : list[P_node] = None
@@ -546,13 +551,13 @@ class P_cluster():
                     else:
                         dict_outputs_sent[out_node.mt].update(out_targets)
 
-        self.inputs = list(inputs) ; self.inputs.sort(key=RK_node.get_num_tar)
-        self.outputs = list(outputs) ; self.outputs.sort(key=RK_node.get_num_tar)
-        self.firsts_mt = firsts_mt ; firsts_mt.sort(key=RK_node.get_num_tar)
-        self.inputs_mt = inputs_mt ; inputs_mt.sort(key=RK_node.get_num_tar)
-        self.outputs_mt = outputs_mt ; outputs_mt.sort(key=RK_node.get_num_tar)
-        self.first_nodes = first_nodes ; first_nodes.sort(key=RK_node.get_num)
-        self.output_nodes = output_nodes ; output_nodes.sort(key=RK_node.get_num)
+        self.inputs = list(inputs) ; self.inputs.sort(key=base.Node.get_num_tar)
+        self.outputs = list(outputs) ; self.outputs.sort(key=base.Node.get_num_tar)
+        self.firsts_mt = firsts_mt ; firsts_mt.sort(key=base.Node.get_num_tar)
+        self.inputs_mt = inputs_mt ; inputs_mt.sort(key=base.Node.get_num_tar)
+        self.outputs_mt = outputs_mt ; outputs_mt.sort(key=base.Node.get_num_tar)
+        self.first_nodes = first_nodes ; first_nodes.sort(key=base.Node.get_num)
+        self.output_nodes = output_nodes ; output_nodes.sort(key=base.Node.get_num)
     # =========================
     
     # =========================
@@ -581,7 +586,7 @@ class P_cluster():
 
         # Experimental
         inputs_mt = list(self.inputs_mt) 
-        inputs_mt.sort(key = RK_node.get_num_tar)
+        inputs_mt.sort(key = base.Node.get_num_tar)
         for inp_nb,inp_mt in enumerate(inputs_mt):
             assert(inp_mt not in translator.dict_mt_to_ano_pair)
             inputs_sent = self.dict_input_mt_to_inputs_sent[inp_mt]

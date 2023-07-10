@@ -53,8 +53,8 @@ class S_edges():
         if not raise_exception:
             return ds1 == ds2
         else:
-            keys1 = RK_node.sort_targets(ds1.keys())
-            keys2 = RK_node.sort_targets(ds2.keys())
+            keys1 = base.Node.sort_targets(ds1.keys())
+            keys2 = base.Node.sort_targets(ds2.keys())
             if len(keys1) != len(keys2): raise Exception(
                 "Difference of dict_edges: "\
                 "number of edges (keys) diff")
@@ -110,7 +110,7 @@ class S_edges():
 # * S_node *
 # **********
 
-class S_node(RK_node):
+class S_node(base.Node):
     def __init__(self,
             main_target="No target",code=None,fct="",
             protected=False,
@@ -158,28 +158,11 @@ class S_node(RK_node):
         self.protected = protected
         self.is_rand   = is_rand
         self.deps_rand = deps_rand if deps_rand else set()
-    def __eq__(self,sn2,force_order=False,raise_exception=False):
-        sn1 = self
-        try:
-            b = small_fcts.check_attr(sn1,sn2,[
-                "is_artefact","main_fct",
-                "is_rand","deps_rand",
-                "main_target","all_targets",
-                "inplace_targets","container_targets",
-                "tensor_targets","protected"],
-                raise_exception=raise_exception)
-            b = (b
-                and S_edges.eq(sn1.deps,sn2.deps,
-                    raise_exception=raise_exception)
-                and S_edges.eq(sn1.users,sn2.users,
-                    raise_exception=raise_exception)
-                and (sn1.full_code() == sn2.full_code()))
-            if not b and raise_exception: raise Exception(
-                f"Node diff : code diff : \n {sn1.full_code()}\n"\
-                f"==== DIFFERENT ==== \n {sn2.full_code()}")
-            return b
-        except AttributeError as a: return sn1.__hash__() == sn2.__hash__()
-    __hash__ = RK_node.__hash__
+
+    def get_deps(self):
+        return set(self.deps.keys())
+    def get_users(self):
+        return set(self.users.keys())
 
     # -----
     def insert_code(self,aux_sn,sg):
@@ -308,7 +291,7 @@ class S_node(RK_node):
 # * S_graph *
 # ***********
 
-class S_graph(RK_graph):
+class S_graph(base.Graph):
     artefact_edges : list[tuple[S_node,S_node,set[str]]] = None
     def __init__(self,dg : D_graph = None):
         super().__init__("S")
@@ -326,7 +309,7 @@ class S_graph(RK_graph):
             "inputs","outputs",
             "nodes","dict_info","dict_constants"],
             raise_exception=raise_exception)
-    __hash__ = RK_node.__hash__
+    __hash__ = base.Node.__hash__
 
     def make_inputs(self):
         inputs = set()

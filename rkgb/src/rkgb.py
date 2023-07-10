@@ -389,7 +389,7 @@ def RK_print(*args,
             to_render.append((name,arg,Ktools.print_K_graph_list))
         elif ((isinstance(arg,list) or isinstance(arg,tuple))
                 and len(arg) != 1
-                and all(isinstance(a,RK_graph) for a in arg)):
+                and all(isinstance(a,base.Graph) for a in arg)):
             msg += f"List of {len(arg)} RK graphs:\n"
             sub_msgs = []
             list_sub = []
@@ -399,7 +399,7 @@ def RK_print(*args,
                         indent=2,pre_msg="",post_msg="",name="Empty")
                 )
             name = get_name(name)
-            name = name if name is not None else f"List_of_{len(arg)}_RK_graphs"
+            name = name if name is not None else f"List_of_{len(arg)}_base.Graphs"
             to_render.append((name,[c[1] for c in list_sub],[c[2] for c in list_sub]))
             msg += "\n".join(sub_msgs)
         elif isinstance(arg,Ptools.P_cluster):
