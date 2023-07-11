@@ -39,6 +39,25 @@ class Op:
 
         return result
 
+class PrfOp(Op):
+    def __init__(self, kn, fraction, before=None, after=None, disabled=False):
+        super().__init__(kn, fast_forward=False, disabled=disabled, detach=True)
+        self.kn = kn
+        self.disabled = disabled
+        self.is_del = False
+        self.fraction = fraction
+        self.before = before
+        self.after = after
+
+class OflOp(Op):
+    def __init__(self, kn, fraction, before=None, after=None, disabled=False):
+        super().__init__(kn, fast_forward=False, disabled=disabled, detach=True)
+        self.kn = kn
+        self.disabled = disabled
+        self.is_del = False
+        self.fraction = fraction
+        self.before = before
+        self.after = after
 
 class OpSchedule:
     solver = None
@@ -46,6 +65,8 @@ class OpSchedule:
     def __init__(
         self,
         op_list,
+        prf_list = [],
+        ofl_list = [],
         loss_idx=None,
         cluster=None,
         interfaces=None,
@@ -53,8 +74,11 @@ class OpSchedule:
         correct_overhead=True,
     ):
         # Key role of OpSchedule: taking op_list, analyzing memory stats,
-        # keeping info for further solving.
+        # keeping info for further solving. 
+        # New role: greedy algorithm to rearrange the prefetch/offload ops
         self.op_list = op_list
+        self.prf_list = prf_list
+        self.ofl_list = ofl_list
         if loss_idx is None:
             # Find the last loss op before the first bwd
             for i, op in enumerate(self.op_list):
