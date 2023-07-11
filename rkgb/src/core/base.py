@@ -158,7 +158,9 @@ class Node():
             return ast_add_on.make_ast_list_assign(code,
                 force_special_kwargs=force_special_kwargs)
     def get_code(self,force_special_kwargs=False):
-        return ast_add_on.ast_to_str(self.get_code_ast(force_special_kwargs))
+        return ast_add_on.ast_to_str(
+            self.get_code_ast(force_special_kwargs)
+        )
     
     # -> For S, BC
     # This function is a way to see what the final
@@ -416,4 +418,23 @@ class Graph():
         raise NotImplementedError(
             "rkGB graph classes should overwrite 'render' method"
         )
+    """ SKELETON FOR RENDER :
+    def __str__(self):
+        return (
+            f"RawGraph with {len(self.nodes)} nodes "\
+            f"(remember this list may contain garbage)")
+    def render(self,
+            name=None,
+            view=True,
+            directory=base.Graph.default_render_directory,
+            render_format=base.Graph.default_render_format,
+            render=True,
+            dot=None):
+        name = base.Graph._get_render_name(name)
+        dot = base.Graph._get_graphviz_dot(name,dot)
+        if render:
+            base.Graph._call_graphviz_to_render(
+                dot,view,directory,render_format
+            )
+    """
 

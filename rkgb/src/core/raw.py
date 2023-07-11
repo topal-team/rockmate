@@ -123,12 +123,19 @@ class RawGraph(base.Graph):
             view=True,
             directory=base.Graph.default_render_directory,
             render_format=base.Graph.default_render_format,
+            render=True,
             dot=None):
         name = base.Graph._get_render_name(name)
         dot = base.Graph._get_graphviz_dot(name,dot)
-        base.Graph._call_graphviz_to_render(
-            dot,view,
-        )
+        for rn in self.nodes:
+            dot.node(rn.target,rn.get_code())
+        for rn in self.nodes:
+            for req_rn in rn.deps:
+                dot.edge(req_rn.target,rn.target)
+        if render:
+            base.Graph._call_graphviz_to_render(
+                dot,view,directory,render_format
+            )
 
 
 # ==========================
