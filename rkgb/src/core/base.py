@@ -294,13 +294,21 @@ class Graph():
             setattr(self,attr,copy.copy(getattr(other_graph,attr)))
     # ===============================
 
-    # =====================
-    # === small methods ===
     def does_node_requires_grad(self,n : Node):
         return n.does_requires_grad(self.dict_info)
 
     def __hash__(self):
         return id(self)
+    
+
+    def _check_all_constructor_arguments_are_not_None(self,*args):
+        if None in args:
+            raise Exception(
+                f"To use a rkgb core graph constructor, be sure to "\
+                f"pass all arguments.\nTo build a graph you should "\
+                f"rather use the main class of rkgb: \nIn your case: "\
+                f"`rkgb.Build(model,samples,\"{type(self).__name__}\")`"
+            )
     
 
     @staticmethod

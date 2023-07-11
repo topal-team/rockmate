@@ -21,6 +21,7 @@
 #  one target obtained with a primitive operation
 #  .code attributes are AST objects
 
+from lowlevel import ast_add_on
 from core import base
 
 # **********
@@ -110,9 +111,16 @@ class B_var:
 # /!\ Most of B_graph attributes are empty and .nodes shouldn't be trusted 
 # -> not toposorted + contains a lot of useless nodes
 class RawGraph(base.Graph):
-    def __init__(self):
+    def __init__(self,model=None,dict_inputs=None,device=None):
         super().__init__("R")
-        self.output_var = None 
+        self.output_var = None
+
+        # == real constructor ==
+        if model is not None:
+            self._check_all_constructor_arguments_are_not_None(
+                [model,dict_inputs,device]
+            )
+            samples_for_jit = 
 
     def __str__(self):
         return (
@@ -138,16 +146,25 @@ class RawGraph(base.Graph):
             )
 
 
-# ==========================
+class RawParser():
+    def __init__(self,impose_device,device):
+        self.impose_device = impose_device
+        self.device = device
+        self.all_RawNodes = []
+        self.dict_rand = dict()
+        self.node_unique_id_generator = base.Node_unique_id_generator()
+        self.counter_unique_number = 0
 
+    def get_unique_number(self):
+        self.counter_unique_number += 1
+        return self.counter_unique_number
+    def make_unique(self,s):
+        return f"__{self.get_unique_number()}_{s}"
+    def get_fresh_name(self):
+        return f"__{self.get_unique_number()}_fresh"
+    def get_constant_name(self,s):
+        return f"_cst_{self.get_unique_number()}_{s}"
 
-# ==========================
-# ====== Make B graph ======
-# ==========================
-
-dict_rand = dict()
-node_unique_id_generator = Node_unique_id_generator()
-all_nodes = []
 
 def make_B(model, dict_inputs, verbose=None, impose_device=True, device=None):
     # -- global vars --
@@ -223,26 +240,6 @@ def make_B(model, dict_inputs, verbose=None, impose_device=True, device=None):
                 # Link local inputs' names with global vars
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~
-        # -> variables' names must be unique through all the program
-        def make_unique(s):
-            nonlocal fresh_var
-            fresh_var += 1
-            return f"__{fresh_var}_{s}"
-        
-        # -> In case we add new lines :
-        def get_fresh_var():
-            nonlocal fresh_var
-            fresh_var += 1
-            return f"__{fresh_var}_fv"
-        
-        # -> In case its an external constant
-        def get_constant(s):
-            nonlocal fresh_var
-            fresh_var += 1
-            return f"_cst_{fresh_var}_{s}"
-
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # ===== AUXILIARY FUNCTIONS =====
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -268,7 +265,7 @@ def make_B(model, dict_inputs, verbose=None, impose_device=True, device=None):
                 new_var.inherits(parent_var, l_attr)
             else:
                 if target is None:
-                    new_id = get_fresh_var()
+                    new_id = get_fresh_name()
                 else:
                     new_id = make_unique(target)
                 new_node = B_node(target=new_id, fct="getattr")
@@ -300,7 +297,7 @@ def make_B(model, dict_inputs, verbose=None, impose_device=True, device=None):
             if len(list_tg) == 1:
                 return make_unique(list_tg[0])
             else:
-                return get_fresh_var()
+                return get_fresh_name()
 
         def handle_targets(list_tg, main_var):  # str list of len > 1
             for i, tg in enumerate(list_tg):
@@ -379,7 +376,7 @@ def make_B(model, dict_inputs, verbose=None, impose_device=True, device=None):
                 # == builtin functions ==
                 else:
                     if target is None:
-                        target = get_fresh_var()
+                        target = get_fresh_name()
 
                     # == torch.nn.functional / torch.Tensor == quick.fix
                     if l_name[0] == "torch" and len(l_name) == 2:
@@ -451,7 +448,7 @@ def make_B(model, dict_inputs, verbose=None, impose_device=True, device=None):
         # -> because I need to precise the calling_node...
         def aux_handle_tuple_or_list(expr, target, constr):
             if target is None:
-                target = get_fresh_var()
+                target = get_fresh_name()
             new_node = B_node(target=target, fct=f"{constr} constructor")
             args_vars = [handle_expr(v) for v in expr.elts]
             args_ast = [v.get_value(calling_node=new_node) for v in args_vars]
@@ -483,7 +480,7 @@ def make_B(model, dict_inputs, verbose=None, impose_device=True, device=None):
                 and isinstance(expr.value, ast.Name)
                 and expr.value.id == "CONSTANTS"
             ):
-                s = get_constant(expr.attr)
+                s = get_constant_name(expr.attr)
                 dict_constants[s] = memory[expr.attr]
                 return B_var(ast.Name(s))
                 #return B_var(ast_add_on.make_ast_constant(memory[expr.attr]))
