@@ -14,7 +14,7 @@ from .HILP_gurobi import ModelGurobi
 from .HILP_pulp import ModelPULP
 from .rotor_solver import seq_builder, solve_dp_functional
 from .op_schedule import OpSchedule
-from hrockmate.rkgb.utils.global_vars import solver_name
+from rkgb.utils.global_vars import solver_name
 
 
 default_time_limit = [60 * 60]

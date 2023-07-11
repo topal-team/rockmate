@@ -6,8 +6,8 @@ from copy import deepcopy
 from pulp import *
 
 from .op_schedule import Op, OpSchedule
-from hrockmate.rkgb.Htools import *
-from hrockmate.rkgb.utils.global_vars import solver_name
+from rkgb.Htools import *
+from rkgb.utils.global_vars import solver_name
 
 
 class ModelPULP:
