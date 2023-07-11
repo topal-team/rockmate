@@ -41,14 +41,14 @@ class HRockmate(torch.nn.Module):
         original_mod,
         model_inputs,
         budget=None,
-        list_solvers=[HILP()],
+        list_solvers=[],
         solve_sched=True,
         verbose=False,
         ilp_solver="gurobi",
         ilp_time_limit=60 * 60,
         model_kwargs=None,
         partitioners=None,
-        max_size_S_graph_for_no_partitioning = 40,
+        max_size_S_graph_for_no_partitioning=40,
         # [
         #    Ptools.Partitioner(),
         #    Ptools.Partitioner_bottom_to_top(),
@@ -59,6 +59,8 @@ class HRockmate(torch.nn.Module):
         ref_verbose[0] = verbose
         solver_name[0] = ilp_solver
         default_time_limit[0] = ilp_time_limit
+        list_solvers = list_solvers or [HILP(ilp_solver=ilp_solver)]
+
         self.device = get_device()
         object.__setattr__(self, "original_mod", original_mod)
         dict_inputs = make_inputs(original_mod, model_inputs, model_kwargs)
@@ -81,16 +83,20 @@ class HRockmate(torch.nn.Module):
                 partitioners.append(Ptools.Partitioner_seq())
             if can_use_checkmate:
                 partitioners.append(Ptools.Partitioner())
-                
+
         # ensure HILP config match partitioner config
         for partitioner in partitioners:
-            if isinstance(partitioner,Ptools.Partitioner_bottom_to_top):
+            if isinstance(partitioner, Ptools.Partitioner_bottom_to_top):
                 for solver in list_solvers:
-                    if isinstance(solver,HILP):
-                        solver.config.nb_total_nodes \
-                            = max(solver.config.nb_total_nodes,partitioner.config.max_estimate_per_sub_graph)
-                        solver.config.nb_total_nodes_top_level \
-                            = max(solver.config.nb_total_nodes_top_level,partitioner.config.max_estimate_for_main_graph)
+                    if isinstance(solver, HILP):
+                        solver.config.nb_total_nodes = max(
+                            solver.config.nb_total_nodes,
+                            partitioner.config.max_estimate_per_sub_graph,
+                        )
+                        solver.config.nb_total_nodes_top_level = max(
+                            solver.config.nb_total_nodes_top_level,
+                            partitioner.config.max_estimate_for_main_graph,
+                        )
 
         #  We don't want to use the default setattr
         # because torch.nn.Module will register it as a submodule
@@ -105,11 +111,22 @@ class HRockmate(torch.nn.Module):
             )
             if len(self.rkgb_res.S_graph.nodes) <= max_size_S_graph_for_no_partitioning:
                 # -> No partitioning !
-                make_late_partitioning(self.rkgb_res,original_mod,partitioners=[Ptools.Partitioner()])
-                list_solvers = [HILP(HILP.Config(nb_total_nodes_top_level=max_size_S_graph_for_no_partitioning+1))]
+                make_late_partitioning(
+                    self.rkgb_res, original_mod, partitioners=[Ptools.Partitioner()]
+                )
+                list_solvers = [
+                    HILP(
+                        HILP.Config(
+                            nb_total_nodes_top_level=max_size_S_graph_for_no_partitioning
+                            + 1
+                        )
+                    )
+                ]
             else:
-                make_late_partitioning(self.rkgb_res,original_mod,partitioners=partitioners)
-                
+                make_late_partitioning(
+                    self.rkgb_res, original_mod, partitioners=partitioners
+                )
+
             self.list_solvers = list_solvers
             self.dict_constants = self.rkgb_res.K_graph.dict_constants
             self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)
@@ -188,8 +205,7 @@ class HRockmate(torch.nn.Module):
         ):
             self.solver_recursive()
         elif (
-            True
-            in [isinstance(solver, RK_checkmate) for solver in list_solvers]
+            True in [isinstance(solver, RK_checkmate) for solver in list_solvers]
             and rec
         ):
             self.preprocess()
@@ -326,9 +342,7 @@ class HRockmate(torch.nn.Module):
                 )
                 RkMod.name_of_inputs_which_req_grad_buffer = None
                 #  -> Detach input tensors (Rem 3) and store all the inputs
-                dict_input_tensors_detach = (
-                    dict()
-                )  #  dict : input -> detached input
+                dict_input_tensors_detach = dict()  #  dict : input -> detached input
                 for k, v in dict_inputs.items():
                     if isinstance(v, torch.Tensor):
                         v_d = v.detach().requires_grad_(v.requires_grad)
@@ -349,9 +363,7 @@ class HRockmate(torch.nn.Module):
                 # -> Autograd turns off itself before giving use the control.
                 # -> But we need it to forward/backward each node.
                 with torch.enable_grad():
-                    exec(
-                        RkMod.init_code, RkMod.gd, storage.ld  # is compiler.gd
-                    )
+                    exec(RkMod.init_code, RkMod.gd, storage.ld)  # is compiler.gd
                     for l in RkMod.fwd_fct_list:
                         RkMod._exec(l)
                 # -> Get the output
@@ -394,9 +406,7 @@ class HRockmate(torch.nn.Module):
                 storage = ctx.RK_Storage
                 RkMod.compiler.storage = storage
                 # -> Put grad_out in out.grad (Rem 4)
-                for out_mt, out_grad in zip(
-                    RkMod.rkgb_res.S_graph.outputs, grad_outs
-                ):
+                for out_mt, out_grad in zip(RkMod.rkgb_res.S_graph.outputs, grad_outs):
                     out = RkMod.compiler.get_val(out_mt)
                     out.grad = out_grad.view(out_grad.shape)
                     out_grad.data = torch.empty(0)
@@ -420,10 +430,7 @@ class HRockmate(torch.nn.Module):
                     for l in RkMod.bwd_fct_list:
                         with torch.enable_grad():
                             RkMod._exec(l)
-                    if (
-                        RkMod.exec_with_record_mem
-                        and RkMod.backward_add_output_grad
-                    ):
+                    if RkMod.exec_with_record_mem and RkMod.backward_add_output_grad:
                         RkMod.allo_mem[loss_idx] += RkMod.output_size
                     #  -> return grad of dummy input + inputs' which req grad (Rem 1)
                     grad_inputs = tuple(
@@ -473,9 +480,7 @@ class HRockmate(torch.nn.Module):
                 if isinstance(v, torch.Tensor) and v.requires_grad:
                     inputs_which_req_grad.append(v)
                     name_of_inputs_which_req_grad.append(k)
-            self.name_of_inputs_which_req_grad_buffer = (
-                name_of_inputs_which_req_grad
-            )
+            self.name_of_inputs_which_req_grad_buffer = name_of_inputs_which_req_grad
             dummy_input = torch.ones(1).requires_grad_()
             output_mt_values = self.autograd_Function.apply(
                 dummy_input, *inputs_which_req_grad
@@ -549,16 +554,10 @@ class HRockmate(torch.nn.Module):
 
     def inherits_original_mod_attributes_and_methods(self):
         for k, v in self.original_mod.__dict__.items():
-            if (
-                not "forward" in k
-                and not "backward" in k
-                and k not in ["training"]
-            ):
+            if not "forward" in k and not "backward" in k and k not in ["training"]:
                 self.__dict__[k] = v
 
-    def save_to_local(
-        self, path, id=datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
-    ):
+    def save_to_local(self, path, id=datetime.now().strftime("%d_%m_%Y_%H_%M_%S")):
         with open(f"{path}/{id}_rkgb_res.pkl", "wb") as f:
             pickle.dump(self.rkgb_res, f)
 
@@ -578,6 +577,8 @@ class HRockmate(torch.nn.Module):
                         self.op_sched = pickle.load(f_sched)
                 except Exception:
                     self.op_sched = self.list_solutions[
-                        np.argmin([sum(op_sched.time) for op_sched in self.list_solutions])
+                        np.argmin(
+                            [sum(op_sched.time) for op_sched in self.list_solutions]
+                        )
                     ]
                 self.get_compiled_fct()
