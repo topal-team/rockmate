@@ -38,14 +38,15 @@ class RawNode(base.Node):
             fct="", 
             deps=None, 
             is_input=False,
-            raw_parser=None):
+            raw_parser=None
+        ):
         """ attributes :
         .target   : str  : the name of the only var defined in the node
         .ast_code : AST  : right part of the assigning code
         .fct      : str  : the function used in .ast_code
         .is_input : bool : input vars are represented by nodes with dummy code
         .is_rand  : bool : whether .fct involves randomness
-        .deps      : B_node set : required nodes to run .ast_code
+        .deps      : RawNode set : required nodes to run .ast_code
         .deps_rand : str set : required random targets
         """
         super().__init__("B",target,other_object=raw_parser)
@@ -72,12 +73,13 @@ class RawNode(base.Node):
 
 class RawVar:
     def __init__(
-        self,
-        val,
-        node: RawNode = None,
-        is_attr_of_self=False,
-        real_value_as_an_attr_of_self=None,
-    ):
+            self,
+            val,
+            raw_parser,
+            node: RawNode = None,
+            is_attr_of_self=False,
+            real_value_as_an_attr_of_self=None,
+        ):
         # "val" must be an AST
         self.is_attr_of_self = is_attr_of_self
         self.real_value_as_an_attr_of_self = real_value_as_an_attr_of_self
@@ -87,7 +89,7 @@ class RawVar:
         if node:
             if node.deps == set() and not node.is_input:
                 if node.is_rand:
-                    dict_rand[node.target] = node.ast_code
+                    raw_parser.dict_rand[node.target] = node.ast_code
                     self.is_rand = True
                 else:  # src neither input or rand
                     self.val = node.ast_code
@@ -125,7 +127,8 @@ class RawGraph(base.Graph):
     def __init__(self,
             model,
             dict_inputs : preprocess_samples.DictInputs,
-            impose_device=True):
+            impose_device=True
+        ):
         super().__init__("R")
         # - use jit -
         samples_for_jit = dict_inputs.to_list_args()
@@ -153,7 +156,8 @@ class RawGraph(base.Graph):
             directory=base.Graph.default_render_directory,
             render_format=base.Graph.default_render_format,
             render=True,
-            dot=None):
+            dot=None
+        ):
         name = base.Graph._get_render_name(name)
         dot = base.Graph._get_graphviz_dot(name,dot)
         for rn in self.nodes:
@@ -193,7 +197,7 @@ class RawParser():
         # ex : sub_mod     = jit_tr_GPT2.wpe
         #      sub_mod_str = "self.wpe"
         #      sub_fct     = "forward"
-        # inputs_vars : B_vars on which the sub_fct is applied
+        # inputs_vars : RawVars on which the sub_fct is applied
         if sub_fct == "forward":  # quick fix
             code, memory = sub_mod.code_with_constants
         else:
@@ -203,7 +207,7 @@ class RawParser():
         a = (ast.parse(code)).body[0]
 
         dict_vars = {}
-        dict_vars["self"] = B_var(
+        dict_vars["self"] = RawVar(
             val=ast.Name(sub_mod_str), 
             is_attr_of_self=True, 
             real_value_as_an_attr_of_self=sub_mod
@@ -217,14 +221,14 @@ class RawParser():
         nb_i = len(inputs)
         if is_main:  # /!\
             for i in range(1, nb_i):
-                i_node = B_node(
+                i_node = RawNode(
                     target=inputs[i],
                     code=ast_add_on.make_ast_constant("INPUT"),
                     fct="INPUT",
                     deps=set(),
                     is_input=True,
                 )
-                dict_vars[inputs[i]] = B_var(ast.Name(inputs[i]), node=i_node)
+                dict_vars[inputs[i]] = RawVar(ast.Name(inputs[i]), node=i_node)
         else:
             assert nb_i == len(inputs_vars) + 1
             for i in range(1, nb_i):  # inputs[0]="self"
@@ -253,18 +257,18 @@ class RawParser():
             if parent_var.is_attr_of_self:
                 p_val = parent_var.val
                 new_val = aux_make_ast(p_val, format_fct, l_attr)
-                new_var = B_var(new_val, is_attr_of_self=True)
+                new_var = RawVar(new_val, is_attr_of_self=True)
                 new_var.inherits(parent_var, l_attr)
             else:
                 if target is None:
                     new_id = get_fresh_name()
                 else:
                     new_id = make_unique(target)
-                new_node = B_node(target=new_id, fct="getattr")
+                new_node = RawNode(target=new_id, fct="getattr")
                 p_val = parent_var.get_value(calling_node=new_node)
                 new_val = aux_make_ast(p_val, format_fct, l_attr)
                 new_node.ast_code = new_val
-                new_var = B_var(new_val, node=new_node)
+                new_var = RawVar(new_val, node=new_node)
             return new_var
 
         def handle_attr(expr: ast.Attribute, target: str):
@@ -294,21 +298,21 @@ class RawParser():
         def handle_targets(list_tg, main_var):  # str list of len > 1
             for i, tg in enumerate(list_tg):
                 new_tg_id = make_unique(tg)
-                new_node = B_node(target=new_tg_id, fct="getattr")
+                new_node = RawNode(target=new_tg_id, fct="getattr")
                 main_val = main_var.get_value(calling_node=new_node)
                 assert isinstance(main_val, ast.Name)
                 # else : to much simplifications :/
                 new_node.ast_code = ast.Subscript(
                     main_val, ast_add_on.make_ast_constant(i)
                 )
-                new_var = B_var(ast.Name(new_tg_id), node=new_node)
+                new_var = RawVar(ast.Name(new_tg_id), node=new_node)
                 dict_vars[tg] = new_var
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
         # -- handle a function call -- (cross recursive with handle_expr)
-        def handle_call(expr: ast.Call, target) -> B_var:
+        def handle_call(expr: ast.Call, target) -> RawVar:
             l_name = ast_add_on.open_attr_until_name(expr.func)  # full name
             args = list(expr.args)
 
@@ -344,7 +348,7 @@ class RawParser():
                 assert len(args) == 2
                 return handle_expr(args[1], target)
             elif var_impose_device and l_name[0] == "torch" and l_name[1] == "device":
-                return B_var(val = ast.Name("device"))
+                return RawVar(val = ast.Name("device"))
 
             else:  # -> real function
                 args_Bvar = [handle_expr(ar, target=None) for ar in args]
@@ -394,7 +398,7 @@ class RawParser():
                         fct_name = ".".join(l_name)
 
                     # == else ==
-                    new_node = B_node(target=target, fct=fct_name)
+                    new_node = RawNode(target=target, fct=fct_name)
                     args_ast = [
                         v.get_value(calling_node=new_node) for v in args_Bvar
                     ]
@@ -429,7 +433,7 @@ class RawParser():
                     new_node.ast_code = ast.Call(
                         func=ast.Name(fct_name), args=args_ast, keywords=kwds_ast
                     )
-                    return B_var(ast.Name(target), node=new_node)
+                    return RawVar(ast.Name(target), node=new_node)
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -441,7 +445,7 @@ class RawParser():
         def aux_handle_tuple_or_list(expr, target, constr):
             if target is None:
                 target = get_fresh_name()
-            new_node = B_node(target=target, fct=f"{constr} constructor")
+            new_node = RawNode(target=target, fct=f"{constr} constructor")
             args_vars = [handle_expr(v) for v in expr.elts]
             args_ast = [v.get_value(calling_node=new_node) for v in args_vars]
             if constr == "list":
@@ -449,21 +453,21 @@ class RawParser():
             else:
                 c = ast.Tuple(args_ast)
             new_node.ast_code = c
-            return B_var(ast.Name(target), node=new_node)
+            return RawVar(ast.Name(target), node=new_node)
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
-        # -- handle any expr -- return type -> B_var
+        # -- handle any expr -- return type -> RawVar
         # -> the main recursive fct to handle ast
         # if the expr is simple (e.g. constant or self's attr)
-        # -> B_var.has_node == False
+        # -> RawVar.has_node == False
         # otherwise, a node (= a piece of code) is created.
         # The optional parameter  "target" imposes the name of the var created
         # /!\ TorchScript's global constant vars must have been removed
-        def handle_expr(expr, target: str = None) -> B_var:
+        def handle_expr(expr, target: str = None) -> RawVar:
             if ast_add_on.is_constant(expr):
-                return B_var(expr)
+                return RawVar(expr)
             elif isinstance(expr, ast.Name):
                 assert expr.id in dict_vars
                 return dict_vars[expr.id]
@@ -474,8 +478,8 @@ class RawParser():
             ):
                 s = get_constant_name(expr.attr)
                 dict_constants[s] = memory[expr.attr]
-                return B_var(ast.Name(s))
-                #return B_var(ast_add_on.make_ast_constant(memory[expr.attr]))
+                return RawVar(ast.Name(s))
+                #return RawVar(ast_add_on.make_ast_constant(memory[expr.attr]))
             elif isinstance(expr, ast.Attribute):
                 return handle_attr(expr, target)  # may creates one node
             elif isinstance(expr, ast.Call):
@@ -488,7 +492,7 @@ class RawParser():
             elif isinstance(expr, ast.UnaryOp):
                 assert isinstance(expr.op, ast.USub)  # quick fix
                 assert ast_add_on.is_constant(expr.operand)
-                return B_var(expr)
+                return RawVar(expr)
             else:
                 raise Exception(f"{type(expr)} unknown")
 
@@ -530,17 +534,3 @@ class RawParser():
                 return ret_graph
 
         raise Exception("No ast.Return found at the end of jit.code ??!")
-    # === END OF MAIN RECURSIVE FUNCTION ===
-    # ======================================
-    
-    main_str = "self"
-    main_fct = "forward"
-    main_g = open_sub_module(jit_result, main_str, main_fct, [], is_main=True)
-    main_g.nodes = all_nodes
-    main_g.dict_rand = dict_rand
-    main_g.dict_constants = dict_constants
-    main_g.node_unique_id_generator = node_unique_id_generator
-    # -> reset global vars
-    dict_rand = dict()
-    node_unique_id_generator = Node_unique_id_generator()
-    return main_g
