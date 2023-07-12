@@ -67,31 +67,6 @@ class rkGB_res():
 
 
 # ==========================
-# ===== AUX FUNCTIONS ======
-# ==========================
-
-# to check is the device is cuda
-def print_cuda_warning_msg(things_not_on_cuda):
-    l = things_not_on_cuda
-    if l == []: pass
-    else:
-      if len(l) == 1:
-        main_line = f"{l[0]}'s device is not cuda !"
-      else:
-        s = " and ".join(l)
-        main_line = f"{s}'s devices are not cuda !"
-      print(
-        f"/!\\/!\\=======================================/!\\/!\\\n"\
-        f"/!\\/!\\= WARNING : {main_line}\n"\
-        f"/!\\/!\\=======================================/!\\/!\\\n\n"\
-        f"/!\\You ask rk-GB to measure the time and memory used by all\n"\
-        f"/!\\the computation nodes. But measuring memory can only\n"\
-        f"/!\\be done with cuda, therefore model and inputs' devices\n"\
-        f"/!\\should be cuda to get relevant results. You can use the \n"\
-        f"/!\\parameter \"check_device_is_cuda\" to avoid this warning.\n")
-
-
-# ==========================
 # ===== Main function ======
 # ==========================
 

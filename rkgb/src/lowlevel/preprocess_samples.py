@@ -47,10 +47,10 @@ class DictInputs():
         dict_inputs.update(model_kwargs)
         self.dict = dict_inputs
 
-    def to_list(self,model):
+    def to_list_args(self,model):
         """
         So that we can give all arguments without keywords 
-        Only *args no **kwargs.
+        Only *args no **kwargs. Useful in particular to call jit.
         """
         sign = inspect.signature(model.forward)
         params = list(sign.parameters.keys())

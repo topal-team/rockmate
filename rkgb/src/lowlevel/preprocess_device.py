@@ -41,25 +41,34 @@ def get_device_and_check_all_same_device(
         model,dict_inputs : preprocess_samples.DictInputs
         ):
     device = None
-    k = None
-    if not isinstance(dict_inputs,dict):
-        dict_inputs = dict(enumerate(dict_inputs))
-
-    for (key,inp) in dict_inputs.items():
-        if isinstance(inp,Tensor):
-            if device is None: device = inp.device ; k = f"input {key}"
-            else:
-                if device != inp.device:
-                    raise_different_devices(f"input {key}",inp.device,k,device)
-    i = -1
-    for p in model.parameters():
-        i += 1
-        if d is None: d = p.device ; k = f"{i}-th parameter"
-        else:
-            if d != p.device:
-                raise_different_devices(f"{i}-th parameter",p.device,k,device)
-    if device is not None: return device
-    else: raise Exception(
-        "Sorry, at least one input or one parameter should be a tensor.")
+    key_on_device = None # name of tensor/param on 'device'
+    # - inputs -
+    for key,val in dict_inputs.dict.items():
+        if isinstance(val,Tensor):
+            if device is None:
+                device = val.device
+                key_on_device = f"input {key}"
+            elif device != val.device:
+                raise_different_devices(
+                    f"input {key}",val.device,
+                    key_on_device,device
+                )
+    # - parameters -
+    for key,val in model.named_parameters():
+        if isinstance(val,Tensor):
+            if device is None:
+                device = val.device
+                key_on_device = f"parameter {key}"
+            elif device != val.device:
+                raise_different_devices(
+                    f"parameter {key}",val.device,
+                    key_on_device,device
+                )
+    if device is not None: 
+        return device
+    else: 
+        raise Exception(
+            "Sorry, at least one input or parameter should be a tensor."
+        )
 
 # ==========================

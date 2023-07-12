@@ -21,15 +21,24 @@
 #  one target obtained with a primitive operation
 #  .code attributes are AST objects
 
+import ast
+import torch
+from torch import Tensor
 from lowlevel import ast_add_on
+from lowlevel import constants
+from lowlevel import preprocess_samples
+from lowlevel import jit_patch
 from core import base
 
-# **********
-# * B_node *
-# **********
 
 class RawNode(base.Node):
-    def __init__(self, target="", code=None, fct="", deps=None, is_input=False):
+    def __init__(self, 
+            target="",
+            ast_code=None, 
+            fct="", 
+            deps=None, 
+            is_input=False,
+            raw_parser=None):
         """ attributes :
         .target   : str  : the name of the only var defined in the node
         .ast_code : AST  : right part of the assigning code
@@ -39,17 +48,17 @@ class RawNode(base.Node):
         .deps      : B_node set : required nodes to run .ast_code
         .deps_rand : str set : required random targets
         """
-        super().__init__("B",target=target,unique_id_generator=node_unique_id_generator)
-        if not code:
-            code = ast_add_on.make_ast_constant("/!\\ not defined /!\\")
-        self.ast_code = code
+        super().__init__("B",target,other_object=raw_parser)
+        if ast_code is None:
+            ast_code = ast_add_on.make_ast_constant("/!\\ NO CODE /!\\")
+        self.ast_code = ast_code
         self.fct = fct
         self.deps = deps if not (deps is None) else set()
         self.is_input = is_input
-        self.is_rand = bool(fct in global_vars.list_rand_fct)
+        self.is_rand = bool(fct in constants.list_rand_fct)
         self.deps_rand = set()
-        global all_nodes
-        all_nodes.append(self)
+        if raw_parser is not None:
+            raw_parser.all_RawNodes.append(self)
     
     def get_deps(self):
         return self.deps
@@ -61,11 +70,11 @@ class RawNode(base.Node):
 # * B_Var *
 # *********
 
-class B_var:
+class RawVar:
     def __init__(
         self,
         val,
-        node: B_node = None,
+        node: RawNode = None,
         is_attr_of_self=False,
         real_value_as_an_attr_of_self=None,
     ):
@@ -104,23 +113,35 @@ class B_var:
         self.real_value_as_an_attr_of_self = obj
 
 
-# **********
-# * B_graph *
-# **********
 
-# /!\ Most of B_graph attributes are empty and .nodes shouldn't be trusted 
-# -> not toposorted + contains a lot of useless nodes
 class RawGraph(base.Graph):
-    def __init__(self,model=None,dict_inputs=None,device=None):
+    """RawGraph
+    -> Attention: most attributes common to all graphs
+       such as "inputs" or "outputs" are empty, even 
+       "nodes" aren't toposorted and some are useless
+    -> The only attribute important is "output_RawVar"
+       which gives the source of the "deps" relation
+    """
+    def __init__(self,
+            model,
+            dict_inputs : preprocess_samples.DictInputs,
+            impose_device=True):
         super().__init__("R")
-        self.output_var = None
-
-        # == real constructor ==
-        if model is not None:
-            self._check_all_constructor_arguments_are_not_None(
-                [model,dict_inputs,device]
+        # - use jit -
+        samples_for_jit = dict_inputs.to_list_args()
+        with torch.no_grad():
+            jit_result = torch.jit.trace_module(
+                model, {"forward": samples_for_jit}, check_trace=False
             )
-            samples_for_jit = 
+        # - parse -
+        parser = RawParser(impose_device)
+        self.output_RawVar = parser.open_sub_module(
+            jit_result, "self", "forward", [], is_main=True
+        )
+        self.nodes = parser.all_RawNodes
+        self.dict_rand = parser.dict_rand
+        self.dict_constants = parser.dict_constants
+
 
     def __str__(self):
         return (
@@ -146,12 +167,13 @@ class RawGraph(base.Graph):
             )
 
 
+
 class RawParser():
-    def __init__(self,impose_device,device):
+    def __init__(self,impose_device):
         self.impose_device = impose_device
-        self.device = device
         self.all_RawNodes = []
         self.dict_rand = dict()
+        self.dict_constants = dict()
         self.node_unique_id_generator = base.Node_unique_id_generator()
         self.counter_unique_number = 0
 
@@ -166,37 +188,7 @@ class RawParser():
         return f"_cst_{self.get_unique_number()}_{s}"
 
 
-def make_B(model, dict_inputs, verbose=None, impose_device=True, device=None):
-    # -- global vars --
-    global var_impose_device
-    var_impose_device = impose_device
-    if not (verbose is None):
-        global_vars.ref_verbose[0] = verbose
-    if not device:
-        device = small_fcts.get_device_and_check_all_same_device(
-            model, dict_inputs
-        )
-    # -- Receptacle variables --
-    # -> Everything is done using cross recursive functions, 
-    #    but we save some results in these general variables 
-    #    rather than passing them as function arguments.
-    global dict_rand ; dict_rand = dict()  # all random targets
-    dict_constants = dict()
-    global all_nodes ; all_nodes = [] # list of all the nodes generated
-    fresh_var = 0 # counter to give a unique number to each target
-    global node_unique_id_generator
-    node_unique_id_generator = Node_unique_id_generator()
-
-    sample_for_jit = small_fcts.order_dict_inputs(dict_inputs,model)
-
-    with torch.no_grad():
-        jit_result = torch.jit.trace_module(
-            model, {"forward": sample_for_jit}, check_trace=False
-        )
-
-    # ===============================
-    # === MAIN RECURSIVE FUNCTION ===
-    def open_sub_module(sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
+    def open_sub_module(self,sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
         # -> B_graph
         # ex : sub_mod     = jit_tr_GPT2.wpe
         #      sub_mod_str = "self.wpe"
@@ -381,7 +373,7 @@ def make_B(model, dict_inputs, verbose=None, impose_device=True, device=None):
                     # == torch.nn.functional / torch.Tensor == quick.fix
                     if l_name[0] == "torch" and len(l_name) == 2:
                         bool_found = False
-                        for module_name in global_vars.list_python_modules:
+                        for module_name in constants.list_python_modules:
                             try:
                                 exec(f"{module_name}.{l_name[1]}")
                                 fct_name = f"{module_name}.{l_name[1]}"
@@ -396,7 +388,7 @@ def make_B(model, dict_inputs, verbose=None, impose_device=True, device=None):
                                 f"torch.<function name>, for instance here:\n"\
                                 f"torch.{l_name[1]}.\nSo we need to find the "\
                                 f"submodule where the function belongs to, "\
-                                f"we will tryed : {global_vars.list_python_modules}"
+                                f"we will tryed : {constants.list_python_modules}"
                             )
                     else:
                         fct_name = ".".join(l_name)
@@ -417,7 +409,7 @@ def make_B(model, dict_inputs, verbose=None, impose_device=True, device=None):
                                 ast.keyword(
                                     "dtype",
                                     ast_add_on.make_ast_constant(
-                                        global_vars.get_torchscript_dtype(kw.value.value)
+                                        jit_patch.get_torchscript_dtype(kw.value.value)
                                     ))
                             )
                         elif not (
