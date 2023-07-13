@@ -336,41 +336,41 @@ class Compiler:
         ]
         self.op_list = op_sched.op_list
         self.alive_list = op_sched.alive_list
-        # self.prf_list = op_sched.prf_list
-        # self.ofl_list = op_sched.ofl_list
+        self.prf_list = op_sched.prf_list
+        self.ofl_list = op_sched.ofl_list
         self.op_sched = False
-        # page_fct = {i: [] for i in range(len(op_sched.op_list))}
-        # page_fct[None] = []
-        # wait_op = []
-        # for op in op_sched.prf_list:
-        #     if op.disabled:
-        #         continue
-        #     after_idx = None
-        #     if op.after in self.op_list:
-        #         after_idx = self.op_list.index(op.after)
-        #     page_fct[after_idx].extend(self.get_prefetch(op.kn, after_idx=after_idx))
-        #     wait_op.append(op.before)
-        # for op in op_sched.ofl_list:
-        #     if op.disabled:
-        #         continue
-        #     after_idx = None
-        #     if op.after in self.op_list:
-        #         after_idx = self.op_list.index(op.after)
-        #     page_fct[after_idx].extend(self.get_offload(op.kn, after_idx=after_idx))
-        # wait_op.append(op.before)
+        page_fct = {i: [] for i in range(len(op_sched.op_list))}
+        page_fct[None] = []
+        wait_op = []
+        for op in op_sched.prf_list:
+            if op.disabled:
+                continue
+            after_idx = None
+            if op.after in self.op_list:
+                after_idx = self.op_list.index(op.after)
+            page_fct[after_idx].extend(self.get_prefetch(op.kn, after_idx=after_idx))
+            wait_op.append(op.before)
+        for op in op_sched.ofl_list:
+            if op.disabled:
+                continue
+            after_idx = None
+            if op.after in self.op_list:
+                after_idx = self.op_list.index(op.after)
+            page_fct[after_idx].extend(self.get_offload(op.kn, after_idx=after_idx))
+        wait_op.append(op.before)
 
-        # fct_list = [page_fct[None]]
+        fct_list = [page_fct[None]]
 
         for i, op in enumerate(op_sched.op_list):
             kn = op.kn
-            # if op in wait_op:
-            #     fct_list.append(
-            #         [
-            #             self.fct_wait_stream(
-            #                 self.gd["main_stream"], self.gd["prefetch_stream"]
-            #             )
-            #         ]
-            #     )
+            if op in wait_op:
+                fct_list.append(
+                    [
+                        self.fct_wait_stream(
+                            self.gd["main_stream"], self.gd["prefetch_stream"]
+                        )
+                    ]
+                )
             if op.disabled:
                 fct_list.append([])
                 continue
