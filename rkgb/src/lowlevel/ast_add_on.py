@@ -1,17 +1,23 @@
 # ====================================
 # = Useful functions for ast objects =
 # ====================================
+
+import sys
 import inspect
-from .imports import *
-from .global_vars import default_forced_kwargs 
-from .small_fcts import remove_prefix,remove_suffix
+import ast
+import astunparse
+from lowlevel import constants
+from utils import utils
+
+sys_info = sys.version_info
+python_version = sys_info.major + sys_info.minor/10
 
 # -- general --
 
 def ast_to_str(ast_code):
     #return ast.unparse(ast.fix_missing_locations(ast_code))
     code = astunparse.unparse(ast_code)
-    return remove_prefix(remove_suffix(code,"\n"),"\n")
+    return utils.remove_prefix(utils.remove_suffix(code,"\n"),"\n")
 
 def open_attr_until_name(v):
     l_name = []
@@ -42,7 +48,7 @@ def make_ast_module(l):
 #   It relies on a dict of type :
 #   -> <fct_name -> (arg_name,arg_value) list to inforce>
 #   if force_special_kwargs=True then you use :
-#   -> global_vars.default_forced_kwargs
+#   -> constants.default_forced_kwargs
 #   you can also do force_special_kwargs=<your dict>
 
 def make_ast_assign(
@@ -53,7 +59,7 @@ def make_ast_assign(
     if force_special_kwargs and isinstance(right_part,ast.Call):
         # nothing done inplace, so we don't impact the code
         dict_forced_kwargs = (
-            default_forced_kwargs 
+            constants.default_forced_kwargs 
             if force_special_kwargs is True
             else force_special_kwargs)
         a = right_part
@@ -117,7 +123,7 @@ def make_str_list_assign(
 # -> older version compatibility
 
 def is_constant(v):
-    if py_version >= 3.8:
+    if python_version >= 3.8:
         return isinstance(v,ast.Constant)
     else:
         rep = type(v) in [

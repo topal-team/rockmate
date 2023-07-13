@@ -59,7 +59,7 @@ class RawNode(base.Node):
         self.is_rand = bool(fct in constants.list_rand_fct)
         self.deps_rand = set()
         if raw_parser is not None:
-            raw_parser.all_RawNodes.append(self)
+            raw_parser.all_raw_nodes.append(self)
     
     def get_deps(self):
         return self.deps
@@ -67,14 +67,11 @@ class RawNode(base.Node):
         raise Exception("Raw nodes don't have `users` relations")
 
 
-# *********
-# * B_Var *
-# *********
 
 class RawVar:
     def __init__(
             self,
-            val,
+            value_ast,
             raw_parser,
             node: RawNode = None,
             is_attr_of_self=False,
@@ -83,34 +80,37 @@ class RawVar:
         # "val" must be an AST
         self.is_attr_of_self = is_attr_of_self
         self.real_value_as_an_attr_of_self = real_value_as_an_attr_of_self
-        self.val = val
+        self.ast = value_ast
         self.has_node = False  # by default
         self.is_rand = False  # by default
-        if node:
+        if node: # to improve via "multiple_outputs" branch
             if node.deps == set() and not node.is_input:
                 if node.is_rand:
                     raw_parser.dict_rand[node.target] = node.ast_code
                     self.is_rand = True
-                else:  # src neither input or rand
-                    self.val = node.ast_code
+                else:  # node without deps but neither input or rand
+                    self.ast = node.ast_code
             else:
                 self.has_node = True
                 self.node = node
 
-    def get_value(self, calling_node):
+    def get_ast(self, calling_node):
+        """ Instead of self.ast, you must use this
+        Take care of the "deps" relation
+        """
         if self.has_node:
             calling_node.deps.add(self.node)
         elif self.is_rand:
-            calling_node.deps_rand.add(self.val.id)
-        return self.val
+            calling_node.deps_rand.add(self.ast.id)
+        return self.ast
 
-    def inherits(self, parent, l_attr):  
+    def inherits(self, parent, list_attributes):  
         # for a getattr AND is_attr_of_self
         if parent.has_node:
             self.has_node = True
             self.node = parent.node
         obj = parent.real_value_as_an_attr_of_self
-        for at in l_attr:
+        for at in list_attributes:
             obj = getattr(obj,at)
         self.real_value_as_an_attr_of_self = obj
 
@@ -121,7 +121,7 @@ class RawGraph(base.Graph):
     -> Attention: most attributes common to all graphs
        such as "inputs" or "outputs" are empty, even 
        "nodes" aren't toposorted and some are useless
-    -> The only attribute important is "output_RawVar"
+    -> The only attribute important is "output_raw_var"
        which gives the source of the "deps" relation
     """
     def __init__(self,
@@ -138,10 +138,10 @@ class RawGraph(base.Graph):
             )
         # - parse -
         parser = RawParser(impose_device)
-        self.output_RawVar = parser.open_sub_module(
+        self.output_raw_var = parser.open_sub_module(
             jit_result, "self", "forward", [], is_main=True
         )
-        self.nodes = parser.all_RawNodes
+        self.nodes = parser.all_raw_nodes
         self.dict_rand = parser.dict_rand
         self.dict_constants = parser.dict_constants
 
@@ -175,22 +175,66 @@ class RawGraph(base.Graph):
 class RawParser():
     def __init__(self,impose_device):
         self.impose_device = impose_device
-        self.all_RawNodes = []
+        self.all_raw_nodes = []
         self.dict_rand = dict()
         self.dict_constants = dict()
+        self.current_dict_raw_vars = dict()
         self.node_unique_id_generator = base.Node_unique_id_generator()
         self.counter_unique_number = 0
 
     def get_unique_number(self):
         self.counter_unique_number += 1
         return self.counter_unique_number
-    def make_unique(self,s):
+    def make_name_unique(self,s):
         return f"__{self.get_unique_number()}_{s}"
     def get_fresh_name(self):
         return f"__{self.get_unique_number()}_fresh"
     def get_constant_name(self,s):
         return f"_cst_{self.get_unique_number()}_{s}"
 
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~
+    # -- handle attribute --
+    def rebuild_ast_attribute(self,parent_ast,list_attributes):
+        new_ast = parent_ast
+        for attr in list_attributes:
+            new_ast = ast.Attribute(new_ast,attr)
+        return new_ast
+
+    def aux_for_attributes(self, target, parent_raw_var, list_attributes):
+        """ Used for:
+         - Via an ast.Call `getattr(a,"b")`
+         - Via an ast.Attribute `a.b`
+        """
+        if parent_raw_var.is_attr_of_self:
+            parent_ast = parent_raw_var.ast
+            new_ast = self.rebuild_ast_attribute(parent_ast,list_attributes)
+            new_raw_var = RawVar(new_ast, is_attr_of_self=True)
+            new_raw_var.inherits(parent_raw_var, list_attributes)
+        else:
+            if target is None:
+                new_id = self.get_fresh_name()
+            else:
+                new_id = self.make_name_unique(target)
+            new_node = RawNode(target=new_id, fct="getattr")
+            parent_ast = parent_raw_var.get_ast(calling_node=new_node)
+            new_ast = self.rebuild_ast_attribute(parent_ast,list_attributes)
+            new_node.ast_code = new_ast
+            new_raw_var = RawVar(new_ast, node=new_node)
+        return new_raw_var
+
+    def handle_ast_attribute(expr: ast.Attribute, target: str):
+        l_name = ast_add_on.open_attr_until_name(expr)
+        if l_name[0] not in dict_vars:
+            raise Exception(
+                f"Unknown global variable mentioned in the code "
+                f"extracted by jit {l_name[0]}."
+            )
+        parent_raw_var = dict_vars[l_name[0]]
+        attr = ".".join(l_name[1:])
+        format_fct = lambda pv: ast.Name(pv.id + "." + attr)
+        return aux_handle_attr(target, parent_raw_var, format_fct, l_name[1:])
+
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
     def open_sub_module(self,sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
         # -> B_graph
@@ -238,52 +282,6 @@ class RawParser():
 
 
         # ===== AUXILIARY FUNCTIONS =====
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~
-        # -- handle attribute --
-        # -> explicit "getattr" or using "." (e.g. self.wpe)
-        def aux_make_ast(p_val, format_fct, l_attr):  # -> AST
-            if isinstance(p_val, ast.Name):
-                new_val = format_fct(p_val)
-            else:
-                attr = ".".join(l_attr)
-                new_val = ast.Call(
-                    func=ast.Name("getattr"),
-                    args=[p_val, ast_add_on.make_ast_constant(attr)],
-                    keywords=[],
-                )
-            return new_val
-
-        def aux_handle_attr(target, parent_var, format_fct, l_attr):
-            if parent_var.is_attr_of_self:
-                p_val = parent_var.val
-                new_val = aux_make_ast(p_val, format_fct, l_attr)
-                new_var = RawVar(new_val, is_attr_of_self=True)
-                new_var.inherits(parent_var, l_attr)
-            else:
-                if target is None:
-                    new_id = get_fresh_name()
-                else:
-                    new_id = make_unique(target)
-                new_node = RawNode(target=new_id, fct="getattr")
-                p_val = parent_var.get_value(calling_node=new_node)
-                new_val = aux_make_ast(p_val, format_fct, l_attr)
-                new_node.ast_code = new_val
-                new_var = RawVar(new_val, node=new_node)
-            return new_var
-
-        def handle_attr(expr: ast.Attribute, target: str):
-            l_name = ast_add_on.open_attr_until_name(expr)
-            if l_name[0] not in dict_vars:
-                raise Exception(
-                    f"Unknown global variable mentioned in the code "
-                    f"extracted by jit {l_name[0]}."
-                )
-            parent_var = dict_vars[l_name[0]]
-            attr = ".".join(l_name[1:])
-            format_fct = lambda pv: ast.Name(pv.id + "." + attr)
-            return aux_handle_attr(target, parent_var, format_fct, l_name[1:])
-
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
         # -- open list of targets e.g. tuple --
@@ -305,8 +303,8 @@ class RawParser():
                 new_node.ast_code = ast.Subscript(
                     main_val, ast_add_on.make_ast_constant(i)
                 )
-                new_var = RawVar(ast.Name(new_tg_id), node=new_node)
-                dict_vars[tg] = new_var
+                new_raw_var = RawVar(ast.Name(new_tg_id), node=new_node)
+                dict_vars[tg] = new_raw_var
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -322,7 +320,7 @@ class RawParser():
                 assert ast_add_on.is_constant(args[1])
                 # If fail: Why is there an expression to
                 # refer to the attr we want to take ?!
-                parent_var = handle_expr(args[0])
+                parent_raw_var = handle_expr(args[0])
                 attr = args[1].value
                 if attr.isdigit():
                     format_fct = lambda pv: ast.Subscript(
@@ -334,7 +332,7 @@ class RawParser():
                         args=[pv, ast_add_on.make_ast_constant(attr)],
                         keywords=[],
                     )
-                return aux_handle_attr(target, parent_var, format_fct, [attr])
+                return aux_handle_attr(target, parent_raw_var, format_fct, [attr])
                 # might create one node
 
             # == TorchScript's functions ==
