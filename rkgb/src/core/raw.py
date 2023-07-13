@@ -222,17 +222,10 @@ class RawParser():
             new_raw_var = RawVar(new_ast, node=new_node)
         return new_raw_var
 
-    def handle_ast_attribute(expr: ast.Attribute, target: str):
-        l_name = ast_add_on.open_attr_until_name(expr)
-        if l_name[0] not in dict_vars:
-            raise Exception(
-                f"Unknown global variable mentioned in the code "
-                f"extracted by jit {l_name[0]}."
-            )
-        parent_raw_var = dict_vars[l_name[0]]
-        attr = ".".join(l_name[1:])
-        format_fct = lambda pv: ast.Name(pv.id + "." + attr)
-        return aux_handle_attr(target, parent_raw_var, format_fct, l_name[1:])
+    def handle_ast_attribute(self,expr: ast.Attribute, target: str) -> RawVar:
+        parent_expr,list_attributes = ast_add_on.open_all_nested_attributes(expr)
+        parent_raw_var = self.handle_expr(parent_expr, target)
+        return self.aux_for_attributes(target, parent_raw_var, list_attributes)
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -311,7 +304,7 @@ class RawParser():
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
         # -- handle a function call -- (cross recursive with handle_expr)
         def handle_call(expr: ast.Call, target) -> RawVar:
-            l_name = ast_add_on.open_attr_until_name(expr.func)  # full name
+            l_name = ast_add_on.open_all_nested_attributes(expr.func)  # full name
             args = list(expr.args)
 
             # == explicit getattr ==

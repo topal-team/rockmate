@@ -19,14 +19,13 @@ def ast_to_str(ast_code):
     code = astunparse.unparse(ast_code)
     return utils.remove_prefix(utils.remove_suffix(code,"\n"),"\n")
 
-def open_attr_until_name(v):
-    l_name = []
-    while isinstance(v,ast.Attribute):
-        l_name.append(v.attr)
-        v = v.value
-    l_name.append(v.id)
-    l_name.reverse()
-    return l_name
+def open_all_nested_attributes(value):
+    list_attributes = []
+    while isinstance(value,ast.Attribute):
+        list_attributes.append(value.attr)
+        value = value.value
+    list_attributes.reverse()
+    return value,list_attributes
 
 def make_ast_constant(v):
     x = ast.Constant(v)
