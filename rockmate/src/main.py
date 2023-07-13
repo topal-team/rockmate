@@ -23,6 +23,8 @@ import torch
 from torch import tensor
 import ast
 import time
+import pickle
+from datetime import datetime
 import warnings
 from os import environ
 
@@ -46,47 +48,47 @@ class Rockmate(torch.nn.Module):
     def __init__(
         self,
         original_mod,
-        dict_inputs,
-        mem_limit=None,
+        model_inputs,
+        budget=None,
         mem_unit=None,
         verbose=False,
-        get_chain=True,
+        solve=True,
         get_sequence=True,
         get_compiled_fct=True,
-        nb_budget_abar=10,
-        nb_budget_all=2,
+        nb_budget_save=10,
+        nb_budget_peak=5,
         ilp_solver="gurobi",
     ):
         super().__init__()
         ref_verbose[0] = verbose
         self.device = get_device()
         self.original_mod = original_mod
-        self.mem_unit = mem_unit if mem_unit else 1024 ** 2
+        self.mem_unit = mem_unit if mem_unit else 1024**2
         # -- use pytorch graph builder to get the list of K_graphs --
         self.rkgb_res = rkgb.make_all_graphs(
-            original_mod, dict_inputs, verbose=verbose, bool_kg=True
+            original_mod, model_inputs, verbose=verbose, bool_kg=True
         )  # we don't need the whole K_graph
         self.list_kg = self.rkgb_res.K_graph_list
         self.dict_constants = self.rkgb_res.K_graph_list[0].dict_constants
         self.eq_classes = self.rkgb_res.equivalent_classes
         self.init_code = ast_to_str(self.list_kg[0].init_code)
         self.output = self.list_kg[-1].output_kdn_data
-        self.mem_limit = mem_limit
-        if get_chain:
-            self.get_chain(nb_budget_abar, nb_budget_all)
+        self.budget = budget
+        if solve:
+            self.get_chain(nb_budget_save, nb_budget_peak)
             if get_sequence:
-                self.get_sequence(mem_limit)
+                self.get_sequence(budget)
                 if get_compiled_fct:
                     self.get_compiled_fct()
 
-    def get_chain(self, nb_budget_abar=10, nb_budget_all=5):
+    def get_chain(self, nb_budget_save=10, nb_budget_peak=5):
         start = time.time()
         #  -- use checkmate to solve all the blocks --
         self.rk_chain = RK_Chain(
             self.list_kg,
             self.eq_classes,
-            nb_budget_abar,
-            nb_budget_all,
+            nb_budget_save,
+            nb_budget_peak,
             mem_unit=self.mem_unit,
         )
         end = time.time()
@@ -94,7 +96,7 @@ class Rockmate(torch.nn.Module):
 
         self.opt_table = None
 
-    def get_sequence(self, mem_limit):
+    def get_sequence(self, budget):
         for n, p in self.original_mod.named_parameters():
             if p.grad is None:
                 p.grad = torch.zeros_like(p)
@@ -113,24 +115,22 @@ class Rockmate(torch.nn.Module):
             ]
         )
 
-        if mem_limit:
-            self.mem_limit = mem_limit
+        if budget:
+            self.budget = budget
         else:
-            self.mem_limit = (
+            self.budget = (
                 # If not given a budget, we use the current available memory
                 torch.cuda.get_device_properties(0).total_memory * 0.9
                 - torch.cuda.memory_allocated()
                 - self.peak_overhead
             )
-        print_debug("mem_limit", self.mem_limit)
+        print_debug("budget", self.budget)
         # -- solve the chain like rotor --
         start = time.time()
-        mmax = self.mem_limit // self.mem_unit - self.rk_chain.cw[0]
-        self.opt_table = solve_dp_functionnal(
-            self.rk_chain, mmax, self.opt_table
-        )
+        mmax = self.budget // self.mem_unit - self.rk_chain.cw[0]
+        self.opt_table = solve_dp_functionnal(self.rk_chain, mmax, self.opt_table)
         self.seq = seq_builder(
-            self.rk_chain, self.mem_limit // self.mem_unit, self.opt_table
+            self.rk_chain, self.budget // self.mem_unit, self.opt_table
         )
         end = time.time()
         self.DP_solve_time = end - start
@@ -211,9 +211,7 @@ class Rockmate(torch.nn.Module):
         self.simulation_overhead = self.simulation_time / sum(
             [kcn.time for kg in self.list_kg for kcn in kg.list_kcn]
         )
-        self.storage = RK_Storage(
-            self.device, self.original_mod, self.dict_constants
-        )
+        self.storage = RK_Storage(self.device, self.original_mod, self.dict_constants)
 
     def get_compiled_fct(self):
         self.compiler = Compiler(self.storage)
@@ -221,7 +219,6 @@ class Rockmate(torch.nn.Module):
         loss_idx = len(self.fwd_op_list)
         self.fwd_fct_list = self.fct_list[:loss_idx]
         self.bwd_fct_list = self.fct_list[loss_idx:]
-
 
     def _exec(self, fct_list, record_mem=False, compiled=False):
         if not compiled:
@@ -244,8 +241,8 @@ class Rockmate(torch.nn.Module):
         if not self.training:
             self.original_mod.eval()
             return self.original_mod(*args, **kwargs)
-        dict_inputs = make_inputs(self.original_mod, args, kwargs)
-        for k, v in dict_inputs.items():
+        model_inputs = make_inputs(self.original_mod, args, kwargs)
+        for k, v in model_inputs.items():
             self.storage.add_val(k, v)
         exec(self.init_code, self.storage.gd, self.storage.ld)
         for kg in self.list_kg:
@@ -317,3 +314,21 @@ class Rockmate(torch.nn.Module):
     def reinit(self):
         self.original_mod.zero_grad()
         self.storage.ld = {}
+
+    def save_to_file(self, path, id=datetime.now().strftime("%d_%m_%Y_%H_%M_%S")):
+        sol = {}
+        sol["op_sched"] = self.op_sched
+        sol["loss_idx"] = len(self.fwd_op_list)
+        with open(f"{path}/{id}_solution.pkl", "wb") as f:
+            pickle.dump(sol, f)
+
+    def load_from_file(self, path, id=datetime.now().strftime("%d_%m_%Y_%H_%M_%S")):
+        with open(f"{path}/{id}_solution.pkl", "rb") as f:
+            sol = pickle.load(f)
+        op_sched = sol["op_sched"]
+        loss_idx = sol["loss_idx"]
+        self.storage = RK_Storage(self.device, self.original_mod, self.dict_constants)
+        self.compiler = Compiler(self.storage)
+        self.fct_list = self.compiler.compile(op_sched)
+        self.fwd_fct_list = self.fct_list[:loss_idx]
+        self.bwd_fct_list = self.fct_list[loss_idx:]
