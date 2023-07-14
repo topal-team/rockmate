@@ -197,7 +197,11 @@ class RawParser():
     def rebuild_ast_attribute(self,parent_ast,list_attributes):
         new_ast = parent_ast
         for attr in list_attributes:
-            new_ast = ast.Attribute(new_ast,attr)
+            if attr.isdigit():
+                new_ast = ast.Subscript(new_ast,
+                    slice=ast_add_on.make_ast_constant(int(attr)))
+            else:
+                new_ast = ast.Attribute(new_ast,attr)
         return new_ast
 
     def aux_for_attributes(self, target, parent_raw_var, list_attributes):
@@ -209,7 +213,7 @@ class RawParser():
             parent_ast = parent_raw_var.ast
             new_ast = self.rebuild_ast_attribute(parent_ast,list_attributes)
             new_raw_var = RawVar(new_ast, is_attr_of_self=True)
-            new_raw_var.inherits(parent_raw_var, list_attributes)
+            new_raw_var.inherits(parent_raw_var,list_attributes)
         else:
             if target is None:
                 new_id = self.get_fresh_name()
@@ -219,14 +223,146 @@ class RawParser():
             parent_ast = parent_raw_var.get_ast(calling_node=new_node)
             new_ast = self.rebuild_ast_attribute(parent_ast,list_attributes)
             new_node.ast_code = new_ast
-            new_raw_var = RawVar(new_ast, node=new_node)
+            new_raw_var = RawVar(new_ast,node=new_node)
         return new_raw_var
 
-    def handle_ast_attribute(self,expr: ast.Attribute, target: str) -> RawVar:
-        parent_expr,list_attributes = ast_add_on.open_all_nested_attributes(expr)
-        parent_raw_var = self.handle_expr(parent_expr, target)
-        return self.aux_for_attributes(target, parent_raw_var, list_attributes)
 
+    def handle_ast_attribute(self, target : str, expr : ast.Attribute) -> RawVar:
+        parent_expr,list_attributes = ast_add_on.open_all_nested_attributes(expr)
+        parent_raw_var = self.handle_expr(parent_expr,target)
+        return self.aux_for_attributes(target,parent_raw_var,list_attributes)
+
+
+    def aux_handle_ast_call_getattr(self,target,call_args):
+        assert len(call_args) == 2 # getattr(arg1,arg2)
+        assert ast_add_on.is_constant(call_args[1])
+        # If fail: something like `getattr(a,"foo"+"bar")`
+        # It's a nested operation, so I assume jit inlined it
+        # If new tracer, then use handle_expr over call_args[1]
+        parent_raw_var = self.handle_expr(call_args[0])
+        attribute = call_args[1].value
+        return self.aux_for_attributes(target,parent_raw_var,[attribute])
+
+
+    def handle_call(self,target : str, expr : ast.Call) -> RawVar:
+        call_args = list(expr.args)
+        ast_first_term,rest_of_func_name \
+            = ast_add_on.open_all_nested_attributes(expr.func)
+        # e.g. `torch.nn.functional(a,b)` :
+        # -> call_args = [ast.Name("a"),ast.Name("b")]
+        # -> ast_first_term = ast.Name("torch")
+        # -> rest_of_func_name = ["nn","functional"]
+        assert(isinstance(ast_first_term,ast.Name))
+        # If fail:
+        # It means it's an ast.Call (more precisely a method call),
+        # over an expr, something like `([1]+[2]).reverse()`
+        # Which is clearly a nested operation, so I assume jit inline this.
+        # In case one day we move to a need tracer, which doesn't
+        # inline, use 'self.handle_expr' on ast_first_part
+        first_term_of_func_name = ast_first_term.id
+
+        # getattr:
+        if (first_term_of_func_name == "getattr" and not rest_of_func_name):
+            return self.aux_handle_ast_call_getattr(target,call_args)
+        # TorchScript's functions:
+        # -> must be removed because some refer to TorchScript global var
+        # -> their purpose is to make the type explicit, e.g. int_to_tensor
+        elif first_term_of_func_name == "ops":
+        elif l_name[0] == "ops":
+            assert len(args) == 1
+            return handle_expr(args[0], target)
+        elif l_name[0] == "int":
+            return handle_expr(args[0], target)
+        elif l_name[0] == "annotate":
+            assert len(args) == 2
+            return handle_expr(args[1], target)
+        elif var_impose_device and l_name[0] == "torch" and l_name[1] == "device":
+            return RawVar(val = ast.Name("device"))
+
+        else:  # -> real function
+            args_Bvar = [handle_expr(ar, target=None) for ar in args]
+            # == sub module ==
+            if l_name[0] in dict_vars:
+                sub_var = dict_vars[l_name[0]]
+                print_debug(
+                    f"In {sub_mod_str}.{sub_fct} try to sub open "
+                    f"{ast_add_on.ast_to_str(sub_var.val)}.{l_name[1:]}"
+                )
+                assert sub_var.is_attr_of_self
+                sub_sub_mod = sub_var.real_value_as_an_attr_of_self
+                for at in l_name[1:-1]:
+                    sub_sub_mod = getattr(sub_sub_mod, at)
+                sub_sub_str = ast_add_on.ast_to_str(sub_var.val)
+                sub_graph = open_sub_module(
+                    sub_sub_mod, sub_sub_str, l_name[-1], args_Bvar
+                )
+                return sub_graph.output_var
+
+            # == builtin functions ==
+            else:
+                if target is None:
+                    target = get_fresh_name()
+
+                # == torch.nn.functional / torch.Tensor == quick.fix
+                if l_name[0] == "torch" and len(l_name) == 2:
+                    bool_found = False
+                    for module_name in constants.list_python_modules:
+                        try:
+                            exec(f"{module_name}.{l_name[1]}")
+                            fct_name = f"{module_name}.{l_name[1]}"
+                            bool_found = True
+                        except:
+                            pass
+                        if bool_found: break
+
+                    if not bool_found:
+                        raise Exception(
+                            f"jit translate any torch function has: "\
+                            f"torch.<function name>, for instance here:\n"\
+                            f"torch.{l_name[1]}.\nSo we need to find the "\
+                            f"submodule where the function belongs to, "\
+                            f"we will tryed : {constants.list_python_modules}"
+                        )
+                else:
+                    fct_name = ".".join(l_name)
+
+                # == else ==
+                new_node = RawNode(target=target, fct=fct_name)
+                args_ast = [
+                    v.get_value(calling_node=new_node) for v in args_Bvar
+                ]
+                kwds_ast = []
+                for kw in expr.keywords:
+                    if var_impose_device and kw.arg == "device":
+                        kwds_ast.append(
+                            ast.keyword("device", ast.Name("device"))
+                        )
+                    elif kw.arg == "dtype" and ast_add_on.is_constant(kw.value):
+                        kwds_ast.append(
+                            ast.keyword(
+                                "dtype",
+                                ast_add_on.make_ast_constant(
+                                    jit_patch.get_torchscript_dtype(kw.value.value)
+                                ))
+                        )
+                    elif not (
+                        (
+                            (kw.arg == "dtype" or kw.arg == "layout")
+                            and ast_add_on.is_constant(kw.value)
+                            and isinstance(kw.value.value, int)  # WTF
+                        )
+                        or (kw.arg == "layout" and kw.value.value is None)
+                    ):
+                        kwds_ast.append(
+                            ast.keyword(
+                                kw.arg,
+                                (handle_expr(kw.value)).get_value(new_node),
+                            )
+                        )
+                new_node.ast_code = ast.Call(
+                    func=ast.Name(fct_name), args=args_ast, keywords=kwds_ast
+                )
+                return RawVar(ast.Name(target), node=new_node)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
     def open_sub_module(self,sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
@@ -302,129 +438,6 @@ class RawParser():
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
-        # -- handle a function call -- (cross recursive with handle_expr)
-        def handle_call(expr: ast.Call, target) -> RawVar:
-            l_name = ast_add_on.open_all_nested_attributes(expr.func)  # full name
-            args = list(expr.args)
-
-            # == explicit getattr ==
-            if len(l_name) == 1 and l_name[0] == "getattr":
-                assert len(args) == 2
-                assert ast_add_on.is_constant(args[1])
-                # If fail: Why is there an expression to
-                # refer to the attr we want to take ?!
-                parent_raw_var = handle_expr(args[0])
-                attr = args[1].value
-                if attr.isdigit():
-                    format_fct = lambda pv: ast.Subscript(
-                        value=pv, slice=ast_add_on.make_ast_constant(int(attr))
-                    )
-                else:
-                    format_fct = lambda pv: ast.Call(
-                        func=ast.Name("getattr"),
-                        args=[pv, ast_add_on.make_ast_constant(attr)],
-                        keywords=[],
-                    )
-                return aux_handle_attr(target, parent_raw_var, format_fct, [attr])
-                # might create one node
-
-            # == TorchScript's functions ==
-            # -> must be removed because some refer to TorchScript global var
-            elif l_name[0] == "ops":
-                assert len(args) == 1
-                return handle_expr(args[0], target)
-            elif l_name[0] == "int":
-                return handle_expr(args[0], target)
-            elif l_name[0] == "annotate":
-                assert len(args) == 2
-                return handle_expr(args[1], target)
-            elif var_impose_device and l_name[0] == "torch" and l_name[1] == "device":
-                return RawVar(val = ast.Name("device"))
-
-            else:  # -> real function
-                args_Bvar = [handle_expr(ar, target=None) for ar in args]
-                # == sub module ==
-                if l_name[0] in dict_vars:
-                    sub_var = dict_vars[l_name[0]]
-                    print_debug(
-                        f"In {sub_mod_str}.{sub_fct} try to sub open "
-                        f"{ast_add_on.ast_to_str(sub_var.val)}.{l_name[1:]}"
-                    )
-                    assert sub_var.is_attr_of_self
-                    sub_sub_mod = sub_var.real_value_as_an_attr_of_self
-                    for at in l_name[1:-1]:
-                        sub_sub_mod = getattr(sub_sub_mod, at)
-                    sub_sub_str = ast_add_on.ast_to_str(sub_var.val)
-                    sub_graph = open_sub_module(
-                        sub_sub_mod, sub_sub_str, l_name[-1], args_Bvar
-                    )
-                    return sub_graph.output_var
-
-                # == builtin functions ==
-                else:
-                    if target is None:
-                        target = get_fresh_name()
-
-                    # == torch.nn.functional / torch.Tensor == quick.fix
-                    if l_name[0] == "torch" and len(l_name) == 2:
-                        bool_found = False
-                        for module_name in constants.list_python_modules:
-                            try:
-                                exec(f"{module_name}.{l_name[1]}")
-                                fct_name = f"{module_name}.{l_name[1]}"
-                                bool_found = True
-                            except:
-                                pass
-                            if bool_found: break
-
-                        if not bool_found:
-                            raise Exception(
-                                f"jit translate any torch function has: "\
-                                f"torch.<function name>, for instance here:\n"\
-                                f"torch.{l_name[1]}.\nSo we need to find the "\
-                                f"submodule where the function belongs to, "\
-                                f"we will tryed : {constants.list_python_modules}"
-                            )
-                    else:
-                        fct_name = ".".join(l_name)
-
-                    # == else ==
-                    new_node = RawNode(target=target, fct=fct_name)
-                    args_ast = [
-                        v.get_value(calling_node=new_node) for v in args_Bvar
-                    ]
-                    kwds_ast = []
-                    for kw in expr.keywords:
-                        if var_impose_device and kw.arg == "device":
-                            kwds_ast.append(
-                                ast.keyword("device", ast.Name("device"))
-                            )
-                        elif kw.arg == "dtype" and ast_add_on.is_constant(kw.value):
-                            kwds_ast.append(
-                                ast.keyword(
-                                    "dtype",
-                                    ast_add_on.make_ast_constant(
-                                        jit_patch.get_torchscript_dtype(kw.value.value)
-                                    ))
-                            )
-                        elif not (
-                            (
-                                (kw.arg == "dtype" or kw.arg == "layout")
-                                and ast_add_on.is_constant(kw.value)
-                                and isinstance(kw.value.value, int)  # WTF
-                            )
-                            or (kw.arg == "layout" and kw.value.value is None)
-                        ):
-                            kwds_ast.append(
-                                ast.keyword(
-                                    kw.arg,
-                                    (handle_expr(kw.value)).get_value(new_node),
-                                )
-                            )
-                    new_node.ast_code = ast.Call(
-                        func=ast.Name(fct_name), args=args_ast, keywords=kwds_ast
-                    )
-                    return RawVar(ast.Name(target), node=new_node)
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
