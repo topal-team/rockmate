@@ -138,7 +138,7 @@ class RawGraph(base.Graph):
             )
         # - parse -
         parser = RawParser(impose_device)
-        self.output_raw_var = parser.open_sub_module(
+        self.output_raw_var = parser.parse(
             jit_result, "self", "forward", [], is_main=True
         )
         self.nodes = parser.all_raw_nodes
@@ -192,8 +192,7 @@ class RawParser():
     def get_constant_name(self,s):
         return f"_cst_{self.get_unique_number()}_{s}"
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~
-    # -- handle attribute --
+
     def rebuild_ast_attribute(self,parent_ast,list_attributes):
         new_ast = parent_ast
         for attr in list_attributes:
@@ -242,6 +241,22 @@ class RawParser():
         parent_raw_var = self.handle_expr(call_args[0])
         attribute = call_args[1].value
         return self.aux_for_attributes(target,parent_raw_var,[attribute])
+    
+    def aux_handle_ast_call_sub_module(
+            self,called_raw_var,rest_of_func_name ,call_arg_raw_vars):
+        sub_module = called_raw_var.real_value_as_an_attr_of_self
+        for attribute in rest_of_func_name[:-1]:
+            sub_module = getattr(sub_module, attribute)
+        sub_module_name = ast_add_on.ast_to_str(called_raw_var.ast)
+        method_name = rest_of_func_name[-1]
+        sub_module_output_raw_var = self.parse(
+            sub_module, sub_module_name, method_name, call_arg_raw_vars
+        )
+        # Note: to parse sub_module, we give raw_vars of its inputs,
+        # and it returns the raw_var which define its output
+        # -> ie it creates the raw_var of the sub_module call result!
+        # Which is exactly the objective of `RawParser.handle_ast` functions
+        return sub_module_output_raw_var
 
 
     def handle_call(self,target : str, expr : ast.Call) -> RawVar:
@@ -252,23 +267,24 @@ class RawParser():
         # -> call_args = [ast.Name("a"),ast.Name("b")]
         # -> ast_first_term = ast.Name("torch")
         # -> rest_of_func_name = ["nn","functional"]
-        assert(isinstance(ast_first_term,ast.Name))
+        assert isinstance(ast_first_term,ast.Name)
         # If fail:
         # It means it's an ast.Call (more precisely a method call),
         # over an expr, something like `([1]+[2]).reverse()`
         # Which is clearly a nested operation, so I assume jit inline this.
-        # In case one day we move to a need tracer, which doesn't
+        # In case one day we move to a need tracer which doesn't
         # inline, use 'self.handle_expr' on ast_first_part
         first_term_of_func_name = ast_first_term.id
 
         # getattr:
         if (first_term_of_func_name == "getattr" and not rest_of_func_name):
             return self.aux_handle_ast_call_getattr(target,call_args)
+
         # TorchScript's functions:
         # -> must be removed because some refer to TorchScript global var
         # -> their purpose is to make the type explicit, e.g. int_to_tensor
         elif first_term_of_func_name == "ops":
-            assert(len(call_args)==1)
+            assert len(call_args)==1
             # If fail:
             # All TorchScript's ops functions I found had 1 arg, and none
             # were useful; if you found one which has 2 args maybe it's
@@ -276,38 +292,37 @@ class RawParser():
             # in the if condition, which will avoid your new case and
             # letting the final else handle it.
             return self.handle_expr(target,call_args[0])
-        elif l_name[0] == "ops":
-            assert len(args) == 1
-            return handle_expr(args[0], target)
-        elif l_name[0] == "int":
-            return handle_expr(args[0], target)
-        elif l_name[0] == "annotate":
-            assert len(args) == 2
-            return handle_expr(args[1], target)
-        elif var_impose_device and l_name[0] == "torch" and l_name[1] == "device":
-            return RawVar(val = ast.Name("device"))
+        elif first_term_of_func_name == "int":
+            return self.handle_expr(target,call_args[0])
+        elif first_term_of_func_name == "annotate":
+            assert len(call_args) == 2
+            # If fail: then I miss understood "annotate" functions
+            # check comment 6 lines above.
+            return self.handle_expr(target,call_args[1])
+        elif (self.impose_device 
+        and first_term_of_func_name == "torch"
+        and rest_of_func_name[0] == "device"):
+            return RawVar(value_ast = ast.Name("device"))
 
-        else:  # -> real function
-            args_Bvar = [handle_expr(ar, target=None) for ar in args]
-            # == sub module ==
-            if l_name[0] in dict_vars:
-                sub_var = dict_vars[l_name[0]]
-                print_debug(
-                    f"In {sub_mod_str}.{sub_fct} try to sub open "
-                    f"{ast_add_on.ast_to_str(sub_var.val)}.{l_name[1:]}"
+        else:
+            call_arg_raw_vars = [self.handle_expr(None,arg) for arg in call_args]
+            # Method => sub module:
+            if first_term_of_func_name in self.dict_vars: # => a method
+                called_raw_var = self.dict_vars[first_term_of_func_name]
+                assert called_raw_var.is_attr_of_self
+                # If fail:
+                # I assumed all method call are call to sub modules of `self`:
+                # e.g. self.w.wpe(...)
+                # Since jit seems to always avoid other method calls.
+                # You can always use the method directly via the class:
+                # e.g. instead of "x.size()" use "torch.Tensor.size(x)"
+                # So even though we change the tracer, you can use such trick.
+                return self.aux_handle_ast_call_sub_module(
+                    called_raw_var,rest_of_func_name,call_arg_raw_vars
                 )
-                assert sub_var.is_attr_of_self
-                sub_sub_mod = sub_var.real_value_as_an_attr_of_self
-                for at in l_name[1:-1]:
-                    sub_sub_mod = getattr(sub_sub_mod, at)
-                sub_sub_str = ast_add_on.ast_to_str(sub_var.val)
-                sub_graph = open_sub_module(
-                    sub_sub_mod, sub_sub_str, l_name[-1], args_Bvar
-                )
-                return sub_graph.output_var
-
-            # == builtin functions ==
-            else:
+            
+            else: # Else = Call to a primitive function
+                self.aux_for_call_find_
                 if target is None:
                     target = get_fresh_name()
 
@@ -373,7 +388,7 @@ class RawParser():
                 return RawVar(ast.Name(target), node=new_node)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    def open_sub_module(self,sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
+    def parse(self,sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
         # -> B_graph
         # ex : sub_mod     = jit_tr_GPT2.wpe
         #      sub_mod_str = "self.wpe"
