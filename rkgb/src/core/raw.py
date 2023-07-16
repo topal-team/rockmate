@@ -229,7 +229,7 @@ class RawParser():
 
     def handle_ast_attribute(self, target : str, expr : ast.Attribute) -> RawVar:
         parent_expr,list_attributes = ast_add_on.open_all_nested_attributes(expr)
-        parent_raw_var = self.handle_expr(parent_expr,target)
+        parent_raw_var = self.handle_expr(self.get_fresh_name(),parent_expr)
         return self.aux_for_attributes(target,parent_raw_var,list_attributes)
 
 
@@ -268,6 +268,14 @@ class RawParser():
         # -> must be removed because some refer to TorchScript global var
         # -> their purpose is to make the type explicit, e.g. int_to_tensor
         elif first_term_of_func_name == "ops":
+            assert(len(call_args)==1)
+            # If fail:
+            # All TorchScript's ops functions I found had 1 arg, and none
+            # were useful; if you found one which has 2 args maybe it's
+            # useful, to fix you just need to add "and len(call_args)==1"
+            # in the if condition, which will avoid your new case and
+            # letting the final else handle it.
+            return self.handle_expr(target,call_args[0])
         elif l_name[0] == "ops":
             assert len(args) == 1
             return handle_expr(args[0], target)
