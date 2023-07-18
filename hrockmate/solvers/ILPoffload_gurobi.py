@@ -242,6 +242,11 @@ class ModelGurobi:
                     self.md.addLConstr(self.Ofl[t, i, j], LEQ, self.Comp[t, i])
                 for l in range(L):
                     for j in self.contributions[l]:
+                        prog = (
+                            self.PrfProg[t, j]
+                            + quicksum(self.Prf[t, ii, j] for ii in range(i + 1))
+                            - (quicksum(self.PrfEnd[t, ii, j] for ii in range(i)))
+                        )
                         self.md.addLConstr(prog, LEQ, self.Ocp[t, i, l])
                         self.md.addLConstr(self.Alive[t, i, j], LEQ, self.Ocp[t, i, l])
 
@@ -252,7 +257,7 @@ class ModelGurobi:
                         if l not in _users_c[i]
                     )
                     + self.Comp[t, i] * self.overhead[i]
-                    + quicksum(self.Ocp[t, i, l] * self.sizes[l] for l in _users_c[i]),
+                    + quicksum(self.sizes[l] for l in _users_c[i]),
                     LEQ,
                     self.peak_budget,
                 )
@@ -352,7 +357,7 @@ class ModelGurobi:
                             ofl_list.append(
                                 OflOp(
                                     hdn.kdn,
-                                    1,
+                                    self.Ofl[t, i, e].X,
                                     after=op_list[-1],
                                 )
                             )
@@ -362,7 +367,7 @@ class ModelGurobi:
                             prf_list.append(
                                 PrfOp(
                                     hdn.kdn,
-                                    1,
+                                    self.Prf[t, i, e].X,
                                     after=op_list[-1],
                                 )
                             )
