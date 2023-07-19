@@ -105,8 +105,12 @@ class ModelGurobi:
         for j, (k, i) in enumerate(self.create_list):
             self.contributions[i].append(j)
         self.sizes = [hdn.mem / self.gcd for hdn in self.hgraph.list_hdn]
+        # self.overhead = [
+        #     hcn.ff_overhead / self.gcd for hcn in self.hgraph.list_hcn
+        # ]  # placeholder
         self.overhead = [
-            hcn.ff_overhead / self.gcd for hcn in self.hgraph.list_hcn
+            (kcn.overhead / self.gcd if kcn.overhead else 0)
+            for kcn in self.hgraph.cluster.list_kcn
         ]  # placeholder
         self.comp_time = [hcn.ff_time for hcn in self.hgraph.list_hcn]  # placeholder
         self.bandwidthOfl = 1 * 1024**2  # byte/ms
@@ -344,7 +348,12 @@ class ModelGurobi:
                     #     op_list.append(Op())
                     # kcn_pair = hcn.sub_cluster.list_kcn
                     # op_list.append(Op(kcn_pair[0] if hcn.is_fwd else kcn_pair[1]))
-                    op_list.append(Op(hgraph.cluster.list_kcn[i]))
+                    op_list.append(
+                        Op(
+                            hgraph.cluster.list_kcn[i],
+                            disabled=("loss" in hgraph.cluster.list_kcn[i].name),
+                        )
+                    )
                     if print_sched:
                         print(f"Compute {hgraph.list_hcn[i]} at stage {t}")
 
@@ -361,6 +370,16 @@ class ModelGurobi:
                                     after=op_list[-1],
                                 )
                             )
+
+                        src = self.create_list[e][0]
+                        if i < T - 1:
+                            if self.Alive[t, i + 1, e].X < self.PrfEnd[t, i, e].X + (
+                                src == i
+                            ) + (self.Alive[t, i, e].X):
+                                if print_sched:
+                                    print(f"\tDelete {hdn}")
+                                op_list.append(Op(hdn.kdn))
+
                         if self.Prf[t, i, e].X > 0:
                             if print_sched:
                                 print(f"\tPrefetch {self.Prf[t,i,e].X*100}% of {hdn}")
@@ -371,15 +390,6 @@ class ModelGurobi:
                                     after=op_list[-1],
                                 )
                             )
-                        src = self.create_list[e][0]
-                        if i < T - 1:
-                            if self.Alive[t, i + 1, e].X < self.PrfEnd[t, i, e].X + (
-                                src == i
-                            ) + (self.Alive[t, i, e].X):
-                                if print_sched:
-                                    print(f"\tDelete {hdn}")
-                                op_list.append(Op(hdn.kdn))
-
                         # if PrfEnd[t,j,e].X>0:
                         #     print(f"\tPrefetch done of edge {e}")
         op_sched = OpSchedule(op_list, prf_list, ofl_list, refine=False)
