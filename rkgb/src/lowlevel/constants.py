@@ -36,7 +36,7 @@ class ExceptionModuleDoesNotReqGrad(Exception):
 # === LISTS OF FUNCTIONS ===
 # ==========================
 
-list_python_modules = [
+list_pytorch_packages = [
     "torch",
     "torch.nn.functional",
     "torch.Tensor",

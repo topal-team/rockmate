@@ -257,7 +257,52 @@ class RawParser():
         # -> ie it creates the raw_var of the sub_module call result!
         # Which is exactly the objective of `RawParser.handle_ast` functions
         return sub_module_output_raw_var
+    
+    def aux_for_call_find_function_name(
+        first_term_of_func_name,rest_of_func_name):
+        # Explanation:
+        # When there is a torch function call, jit registers only
+        # the name of the function and nothing about which PyTorch package
+        # or class it comes from. Thus we have to test one by one: 
+        # torch.<> ; torch.Tensor.<> ; torch.nn.functional.<> etc
+        # to find where the function comes from.
+        # Note: it's error prone, in case two files define functions
+        # with the same name but different behaviors; but we have no choice.
+        # We made a short list of possible packages
+        #   torch.<.>
+        #   torch.nn.functional.<.>
+        #   torch.Tensor.<.>
+        #   torch._C._nn.<.>
+        #   torch._C._fft.<.>
+        #   torch.ops.aten.<.>
+        # Don't hesitate to append this list: 
+        # -> rkgb.lowlevel.constants.list_pytorch_packages
+        if (first_term_of_func_name == "torch" 
+        and len(rest_of_func_name) == 1):
+            last_term_of_func_name = rest_of_func_name[1]
+            for package_name in constants.list_pytorch_packages:
+                try:
+                    exec(f"{package_name}.{last_term_of_func_name}")
+                    fct_name = f"{package_name}.{last_term_of_func_name}"
+                    return fct_name
+                except:
+                    pass
 
+            # None of the packages match
+            raise Exception(
+                f"When there is a torch function call, jit "\
+                f"registers only the name of the function and "\
+                f"not where it comes from.\nFor instance only `gelu` "\
+                f"instead of `torch.nn.functional.gelu`.\n Here we "\
+                f"didn't manage to find where `{last_term_of_func_name}`"\
+                f"comes from. If you know from which package it comes "\
+                f"you can add it in "\
+                f"`rkgb.lowlevel.constants.list_pytorch_packages`"
+            )
+        else:
+            fct_name = ".".join([first_term_of_func_name]+rest_of_func_name)
+            return fct_name
+        
 
     def handle_call(self,target : str, expr : ast.Call) -> RawVar:
         call_args = list(expr.args)
@@ -322,32 +367,11 @@ class RawParser():
                 )
             
             else: # Else = Call to a primitive function
-                self.aux_for_call_find_
+                self.aux_for_call_find_function_name(
+                    first_term_of_func_name,rest_of_func_name)
                 if target is None:
                     target = get_fresh_name()
 
-                # == torch.nn.functional / torch.Tensor == quick.fix
-                if l_name[0] == "torch" and len(l_name) == 2:
-                    bool_found = False
-                    for module_name in constants.list_python_modules:
-                        try:
-                            exec(f"{module_name}.{l_name[1]}")
-                            fct_name = f"{module_name}.{l_name[1]}"
-                            bool_found = True
-                        except:
-                            pass
-                        if bool_found: break
-
-                    if not bool_found:
-                        raise Exception(
-                            f"jit translate any torch function has: "\
-                            f"torch.<function name>, for instance here:\n"\
-                            f"torch.{l_name[1]}.\nSo we need to find the "\
-                            f"submodule where the function belongs to, "\
-                            f"we will tryed : {constants.list_python_modules}"
-                        )
-                else:
-                    fct_name = ".".join(l_name)
 
                 # == else ==
                 new_node = RawNode(target=target, fct=fct_name)
@@ -388,7 +412,7 @@ class RawParser():
                 return RawVar(ast.Name(target), node=new_node)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    def parse(self,sub_mod, sub_mod_str, sub_fct, inputs_vars, is_main=False):
+    def parse(self,sub_module, sub_module_name, method_name, inputs_raw_vars, is_main=False):
         # -> B_graph
         # ex : sub_mod     = jit_tr_GPT2.wpe
         #      sub_mod_str = "self.wpe"
