@@ -218,7 +218,7 @@ class RawParser():
                 new_id = self.get_fresh_name()
             else:
                 new_id = self.make_name_unique(target)
-            new_node = RawNode(target=new_id, fct="getattr")
+            new_node = RawNode(target=new_id, fct="getattr",raw_parser=self)
             parent_ast = parent_raw_var.get_ast(calling_node=new_node)
             new_ast = self.rebuild_ast_attribute(parent_ast,list_attributes)
             new_node.ast_code = new_ast
@@ -367,14 +367,11 @@ class RawParser():
                 )
             
             else: # Else = Call to a primitive function
-                self.aux_for_call_find_function_name(
+                fct_name = self.aux_for_call_find_function_name(
                     first_term_of_func_name,rest_of_func_name)
                 if target is None:
-                    target = get_fresh_name()
-
-
-                # == else ==
-                new_node = RawNode(target=target, fct=fct_name)
+                    target = self.get_fresh_name()
+                new_node = RawNode(target=target,fct=fct_name,raw_parser=self)
                 args_ast = [
                     v.get_value(calling_node=new_node) for v in args_Bvar
                 ]
