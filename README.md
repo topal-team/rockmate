@@ -74,4 +74,4 @@ rkgb_result = rkgb.test_rkgb(model,sample)
 
 # Next release soon
 
-Cleaner implementation and detail documentation to be released soon.
+Rockmate is in heavy development, with documentation and more features. Stay tuned for future updates coming soon.
