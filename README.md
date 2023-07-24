@@ -14,7 +14,7 @@ You can simply use pip:
 pip install rockmate
 ```
 
-Or clone the repository and install locally (we recommand using editable mode)
+Or clone the repository and install locally (we recommend using editable mode)
 ```
 git clone https://github.com/topal-team/rockmate.git
 cd rockmate
