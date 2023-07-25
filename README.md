@@ -1,6 +1,6 @@
 # Rockmate
 
-This repository contains the code for the [ICML 2023 paper (oral) "Rockmate: an Efficient, Fast, Automatic and Generic Tool for Re-materialization in PyTorch"]((https://openreview.net/pdf?id=wLAMOoL0KD)). It demonstrates how a PyTorch neural network can be trained under the given GPU budget constraint using the proposed automatic re-materialization (activation checkpointing) technique.
+This repository contains the code for the [ICML 2023 paper (oral) "Rockmate: an Efficient, Fast, Automatic and Generic Tool for Re-materialization in PyTorch"](https://openreview.net/pdf?id=wLAMOoL0KD). It demonstrates how a PyTorch neural network can be trained under the given GPU budget constraint using the proposed automatic re-materialization (activation checkpointing) technique.
 
 Given a PyTorch model, a sample input, and a GPU memory budget, 
 `Rockmate` builds a new `torch.nn.Module`, which performs forward and backward pass keeping activations under the given budget. 
