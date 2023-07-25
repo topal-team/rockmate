@@ -1,11 +1,21 @@
 # Rockmate
 
-Given a module, a sample input and a memory budget, `Rockmate` builds a new `torch.nn.Module` with equal forward and backward results while keeping the memory usage of activations under the given budget.
+This repository contains the code for the [ICML 2023 paper (oral) "Rockmate: an Efficient, Fast, Automatic and Generic Tool for Re-materialization in PyTorch"](https://openreview.net/pdf?id=wLAMOoL0KD). It demonstrates how a PyTorch neural network can be trained under the given GPU budget constraint using the proposed automatic re-materialization (activation checkpointing) technique.
 
-For more details of our algorithm, see our paper at: https://openreview.net/pdf?id=wLAMOoL0KD
+Given a PyTorch model, a sample input, and a GPU memory budget, 
+`Rockmate` builds a new `torch.nn.Module`, which performs forward and backward pass keeping activations under the given budget. 
 
+- The new model produces the same outputs and gradients as the original one.
+- Model training with a budget constraint, which is lower than the one required by PyTorch Autodiff, is achieved by re-computing some of the activations instead of storing them for gradient calculation.
+- Depending on the budget, `Rockmate` defines automatically which activations should be recomputed. 
+
+<!-- Given a module, sample input, and a memory budget, `Rockmate` builds a new `torch.nn.Module` with equal forward and backward results while keeping the memory usage of activations under the given budget. -->
+
+<!-- For more details of our algorithm, see our paper at: https://openreview.net/pdf?id=wLAMOoL0KD -->
+
+Note:
 - The model and sample should be on the same GPU device.
-- **Warning**: Currently, Rockmate relies on Gurobi to solve the Integer Linear Programming model. 
+- **Warning**: Currently, Rockmate relies on [Gurobi](https://www.gurobi.com/documentation/quickstart.html) optimization library to solve the Integer Linear Programming model that defines a recomputation schedule for a given neural network architecture. This requires a license to Gurobi, which is free for academic use. 
 
 # Installation
 
@@ -72,6 +82,20 @@ rkgb.print_all_graphs(rkgb_result,name="resnet101",render_format="pdf")
 rkgb_result = rkgb.test_rkgb(model,sample)
 ```
 
-# Next release soon
+# Citing
+If you used our research, we kindly ask you to cite the corresponding [paper](https://openreview.net/pdf?id=wLAMOoL0KD).
+
+```
+@inproceedings{zhao2023rockmate,
+  title={Rockmate: an Efficient, Fast, Automatic and Generic Tool for Re-materialization in PyTorch},
+  author={Zhao, Xunyi and Le Hellard, Th{\'e}otime and Eyraud-Dubois, Lionel and Gusak, Julia and Beaumont, Olivier},
+  booktitle={International Conference on Machine Learning},
+  year={2023}
+}
+```
+
+# Further research and release
 
 Rockmate is in heavy development, with documentation and more features. Stay tuned for future updates coming soon.
+
+
