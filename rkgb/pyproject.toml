@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rkgb"
+version = "1.0.1"
+requires-python = ">=3.8"
+license = {file = "LICENSE.txt"}
+readme = "README.md"
+description = "Graph Builder tool of the Rockmate package"
+dependencies = [
+    "numpy",
+    "torch >= 1.8",
+    "astunparse >= 1.6.3",
+]
+keywords = ["vizualisation", "pytorch"]
+authors = [
+  {name = "Théotime Le Hellard"},
+  {name = "Xunyi Zhao"},
+  {name = "Julia Gusak"},
+  {name = "Olivier Beaumont"},
+  {name = "Lionel Eyraud-Dubois"},
+]
+maintainers = [
+  {name = "Lionel Eyraud-Dubois", email = "lionel.eyraud-dubois@inria.fr"}
+]
+
+[project.optional-dependencies]
+draw = ["pygraphviz"]
+
+[project.urls]
+Repository = "https://github.com/topal-team/rockmate.git"
+
+

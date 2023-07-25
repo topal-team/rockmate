@@ -9,9 +9,9 @@ __all__ = [
     "print_debug",
     # FROM IMPORTS
     "ast",
-    "np","plt","math",
+    "np","math",
     "torch","tensor",
-    "graphviz",
+    "has_graphviz",
     "irotor"]
 
 
@@ -24,3 +24,5 @@ from rkgb.utils import def_info
 from rkgb.utils import def_inspection
 from rkgb.utils import complement_for_Stools
 from rkgb.utils.global_vars import print_debug
+if has_graphviz:
+    __all__.append("graphviz")

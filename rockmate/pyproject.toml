@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rockmate"
+version = "1.0.1"
+requires-python = ">=3.8"
+license = {file = "LICENSE.txt"}
+readme = "README.md"
+description = "Efficient and Automatic Rematerialization for Pytorch training"
+dependencies = [
+    "numpy",
+    "torch >= 1.8",
+    "gurobipy",
+    "rkgb >= 1.0.0"
+]
+keywords = ["rematerialization", "training", "pytorch", "memory"]
+authors = [
+  {name = "Théotime Le Hellard"},
+  {name = "Xunyi Zhao"},
+  {name = "Julia Gusak"},
+  {name = "Olivier Beaumont"},
+  {name = "Lionel Eyraud-Dubois"},
+]
+maintainers = [
+  {name = "Lionel Eyraud-Dubois", email = "lionel.eyraud-dubois@inria.fr"}
+]
+
+[project.optional-dependencies]
+
+[project.urls]
+Repository = "https://github.com/topal-team/rockmate.git"
+
+
