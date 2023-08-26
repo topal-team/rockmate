@@ -26,7 +26,7 @@ class RngState:
         torch.cuda.set_rng_state(self.gpu_states[op_name])
 
 
-def make_global_dictionary(device, nn_mod, dict_constants):
+def make_gd(device, nn_mod, dict_constants):
     return {
         **globals(),
         **dict_constants,
