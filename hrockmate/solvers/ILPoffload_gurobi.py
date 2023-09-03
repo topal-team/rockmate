@@ -113,15 +113,21 @@ class ModelGurobi:
             for kcn in self.hgraph.cluster.list_kcn
         ]  # placeholder
         self.comp_time = [hcn.ff_time for hcn in self.hgraph.list_hcn]  # placeholder
-        self.bandwidthOfl = 1 * 1024**2  # byte/ms
-        self.bandwidthPrf = 1 * 1024**2  # byte/ms
+        self.bandwidthOfl = 4 * 1024**2  # byte/ms
+        self.bandwidthPrf = 4 * 1024**2  # byte/ms
         for i, hcn in enumerate(self.hgraph.list_hcn):
             if "Loss" in hcn.name:
                 self.loss_idx = i
 
         self.Comp = self.md.addVars(T, T, name="Comp", vtype=GRB.BINARY)
         self.Alive = self.md.addVars(T, T, E, name="Alive", vtype=GRB.BINARY)
+        # self.Alive = self.md.addVars(
+        #     T, T, E, lb=0, ub=1, name="Alive", vtype=GRB.CONTINUOUS
+        # )
         self.Ocp = self.md.addVars(T, T, L, name="Ocp", vtype=GRB.BINARY)
+        # self.Ocp = self.md.addVars(
+        #     T, T, L, lb=0, ub=1, name="Ocp", vtype=GRB.CONTINUOUS
+        # )
         self.Time = self.md.addVars(T, T, name="Time", vtype=GRB.CONTINUOUS)
         self.Ofl = self.md.addVars(
             T, T, E, lb=0, ub=1, name="Ofl", vtype=GRB.CONTINUOUS
@@ -230,7 +236,7 @@ class ModelGurobi:
                     )
 
                     self.md.addLConstr(
-                        prog,
+                        prog + (quicksum(self.PrfEnd[t, ii, j] for ii in range(i))),
                         LEQ,
                         quicksum(
                             self.Ofl[tt, ii, j]
