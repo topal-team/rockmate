@@ -51,6 +51,7 @@ class ModelGurobi:
         self.gurobi_params = gurobi_params
         self.feasible = None
         self.solve_time = None
+        self.acc_mem = accurate_mem
 
         #############################
         self.hgraph = hgraph
@@ -120,11 +121,14 @@ class ModelGurobi:
                 self.loss_idx = i
 
         self.Comp = self.md.addVars(T, T, name="Comp", vtype=GRB.BINARY)
-        self.Alive = self.md.addVars(T, T, E, name="Alive", vtype=GRB.BINARY)
-        # self.Alive = self.md.addVars(
-        #     T, T, E, lb=0, ub=1, name="Alive", vtype=GRB.CONTINUOUS
-        # )
-        self.Ocp = self.md.addVars(T, T, L, name="Ocp", vtype=GRB.BINARY)
+        # self.Alive = self.md.addVars(T, T, E, name="Alive", vtype=GRB.BINARY)
+        self.Alive = self.md.addVars(
+            T, T, E, lb=0, ub=1, name="Alive", vtype=GRB.CONTINUOUS
+        )
+        if self.acc_mem:
+            self.Ocp = self.md.addVars(T, T, L, name="Ocp", vtype=GRB.BINARY)
+        else:
+            self.Ocp = self.md.addVars(T, L, name="Ocp", vtype=GRB.BINARY)
         # self.Ocp = self.md.addVars(
         #     T, T, L, lb=0, ub=1, name="Ocp", vtype=GRB.CONTINUOUS
         # )
@@ -257,15 +261,29 @@ class ModelGurobi:
                             + quicksum(self.Prf[t, ii, j] for ii in range(i + 1))
                             - (quicksum(self.PrfEnd[t, ii, j] for ii in range(i)))
                         )
-                        self.md.addLConstr(prog, LEQ, self.Ocp[t, i, l])
-                        self.md.addLConstr(self.Alive[t, i, j], LEQ, self.Ocp[t, i, l])
+                        if self.acc_mem:
+                            self.md.addLConstr(prog, LEQ, self.Ocp[t, i, l])
+                            self.md.addLConstr(
+                                self.Alive[t, i, j], LEQ, self.Ocp[t, i, l]
+                            )
+                        else:
+                            self.md.addLConstr(prog, LEQ, self.Ocp[t, l])
+                            self.md.addLConstr(self.Alive[t, i, j], LEQ, self.Ocp[t, l])
 
-                self.md.addLConstr(
-                    quicksum(
+                if self.acc_mem:
+                    save_mem = quicksum(
                         self.Ocp[t, i, l] * self.sizes[l]
                         for l in range(L)
                         if l not in _users_c[i]
                     )
+                else:
+                    save_mem = quicksum(
+                        self.Ocp[t, l] * self.sizes[l]
+                        for l in range(L)
+                        if l not in _users_c[i]
+                    )
+                self.md.addLConstr(
+                    save_mem
                     + self.Comp[t, i] * self.overhead[i]
                     + quicksum(self.sizes[l] for l in _users_c[i]),
                     LEQ,
@@ -310,11 +328,18 @@ class ModelGurobi:
         L = len(self.hgraph.list_hdn)
         self.save_budget = save_budget / self.gcd
         # for k in range(T):
-        self.md.addLConstr(
-            quicksum(self.Ocp[self.loss_idx, self.loss_idx, l] for l in range(L)),
-            LEQ,
-            self.save_budget,
-        )
+        if self.acc_mem:
+            save_mem = quicksum(
+                self.Ocp[self.loss_idx, self.loss_idx, l] for l in range(L)
+            )
+        else:
+            save_mem = quicksum(self.Ocp[self.loss_idx, l] for l in range(L))
+
+            self.md.addLConstr(
+                save_mem,
+                LEQ,
+                self.save_budget,
+            )
 
     def solve(self):
         # self.md.message("\n\nRestarting solve\n\n")
