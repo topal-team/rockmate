@@ -140,6 +140,7 @@ class ModelGurobi:
             T, T, E, lb=0, ub=1, name="Prf", vtype=GRB.CONTINUOUS
         )
         self.PrfEnd = self.md.addVars(T, T, E, name="PrfEnd", vtype=GRB.BINARY)
+        # self.PrfEnd = self.md.addVars(T, T, E, lb=0, ub=1, name="PrfEnd", vtype=GRB.CONTINUOUS)
         self.PrfProg = self.md.addVars(
             T, E, lb=0, ub=1, name="PrfProg", vtype=GRB.CONTINUOUS
         )
@@ -298,7 +299,13 @@ class ModelGurobi:
             quicksum(self.Comp[t, self.loss_idx] for t in range(T)),
             LEQ,
             1,
-        )
+        )  # compute loss op once
+        self.md.addLConstr(
+            quicksum(self.Comp[self.loss_idx, i] for i in range(T)),
+            LEQ,
+            1,
+        )  # compute only loss op in its stage
+
         for t in range(T - 1):
             for j in range(E):
                 self.md.addLConstr(
@@ -340,6 +347,13 @@ class ModelGurobi:
                 LEQ,
                 self.save_budget,
             )
+
+    def add_remat_limit(self, id, limit=1):
+        self.md.addLConstr(
+            quicksum(self.Comp[t, id] for t in range(len(self.hgraph.list_hcn))),
+            LEQ,
+            limit,
+        )
 
     def solve(self):
         # self.md.message("\n\nRestarting solve\n\n")
