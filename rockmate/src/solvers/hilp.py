@@ -1,9 +1,9 @@
 import time
 import torch
-import hrockmate.rkgb as rkgb
+import rkgb
 import numpy as np
-from hrockmate.rkgb.Htools import H_cluster, H_graph, H_C_node
-import gc
+from rkgb.Htools import H_cluster, H_graph, H_C_node
+
 from .main import (
     Solver,
     get_cluster_budget,

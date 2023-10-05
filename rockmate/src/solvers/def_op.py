@@ -3,7 +3,7 @@
 # we exec it and how we store things
 # -> to replace rotor/Checkpointable.functions
 # ==========================
-from hrockmate.rkgb.utils.small_fcts import check_attr
+from rkgb.utils.small_fcts import check_attr
 import numpy as np
 import torch
 import warnings

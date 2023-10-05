@@ -325,6 +325,9 @@ def RK_print(*args,
     """
 
     # === Names ===
+    if not has_graphviz:
+        raise Exception("RK_print requires graphviz installed. Please install the [draw] variant of rockmate:\n pip install rockmate[draw]")
+
     except_msg = (
         "Unsupported type for kwarg `name`.\n"\
         "Can be None, a string, a list or tuple of strings")

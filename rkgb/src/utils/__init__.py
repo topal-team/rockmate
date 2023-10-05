@@ -11,12 +11,11 @@ __all__ = [
     "print_debug",
     # FROM IMPORTS
     "ast",
-    "np","plt","math",
+    "np","math",
     "torch","tensor",
-    "graphviz",
     "warnings","sys",
     "irotor",
-    "copy"]
+    "copy", "has_graphviz"]
 
 from .imports import *
 from . import global_vars
@@ -31,3 +30,5 @@ from .def_nodes_and_graphs import (
     RK_sort_based_on_deps,
     RK_get_1_separators)
 from .global_vars import print_debug
+if has_graphviz:
+    __all__.append("graphviz")

@@ -1,13 +1,13 @@
 import time
 import torch
-from hrockmate import rkgb
+import rkgb
 import os
-from hrockmate.rkgb.utils import print_debug, np, irotor
-from hrockmate.rkgb.utils.global_vars import ref_verbose, solver_name
-from hrockmate.rkgb.utils.small_fcts import get_device
-from hrockmate.rkgb.utils.ast_add_on import ast_to_str
-from hrockmate.rkgb.Htools import H_cluster, H_graph, H_C_node
-from hrockmate.rkgb.Ktools import K_graph
+from rkgb.utils import print_debug, np, irotor
+from rkgb.utils.global_vars import ref_verbose, solver_name
+from rkgb.utils.small_fcts import get_device
+from rkgb.utils.ast_add_on import ast_to_str
+from rkgb.Htools import H_cluster, H_graph, H_C_node
+from rkgb.Ktools import K_graph
 
 from .main import Solver, get_cluster_budget
 from .HILP_gurobi import ModelGurobi

@@ -7,7 +7,7 @@ from gurobipy import GRB, Model, quicksum
 
 # from hrockmate.def_op import RunOp, DelOp, OpSchedule
 from .op_schedule import Op, OpSchedule
-from hrockmate.rkgb.Htools import *
+from rkgb.Htools import *
 
 
 class ModelGurobi:

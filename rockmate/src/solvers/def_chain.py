@@ -3,8 +3,8 @@
 # also contains RK_Chain builder -> depends on use_chk.py
 #  based on rotor/algorithms/parameters.py
 # ==========================
-from hrockmate.rkgb.utils.global_vars import solver_name
-from hrockmate.rkgb.utils import imports_from_rotor as irotor
+from rkgb.utils.global_vars import solver_name
+from rkgb.utils import imports_from_rotor as irotor
 
 # if solver_name[0] != "gurobi":
 #     from hrockmate.ILP_MIP import ModelMIP
