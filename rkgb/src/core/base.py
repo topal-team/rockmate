@@ -50,7 +50,7 @@ class Node():
             node_type : str,
             main_target : str = None,
             target = None, mt = None, # aliases
-            other_object = None, # to get unique_id from it
+            parent_structure = None, # to get unique_id from it
             unique_id_generator : Node_unique_id_generator = None):
         self.node_type = node_type # str: R, F, S, P, BC, BD, HC, HD
         # == init main_target ==
@@ -63,28 +63,28 @@ class Node():
         else:
             self.main_target = "/!\\ No target /!\\"
         # == init unique_id ==
-        if other_object is not None:
-            if hasattr(other_object,"node_unique_id_generator"):
-                self.unique_id = other_object.node_unique_id_generator.use()
-            elif isinstance(other_object,Node_unique_id_generator):
-                self.unique_id = other_object.use()
+        if parent_structure is not None:
+            if hasattr(parent_structure,"node_unique_id_generator"):
+                self.unique_id = parent_structure.node_unique_id_generator.use()
+            elif isinstance(parent_structure,Node_unique_id_generator):
+                self.unique_id = parent_structure.use()
         elif unique_id_generator is not None:
             self.unique_id = unique_id_generator.use()
         else:
             self.unique_id = id(self)
 
     # Methods that must be overridden by subclasses:
-    def _raise_NotImplementedError(self,method_name):
-        raise NotImplementedError(
-            f"{self}'s class ({type(self).__name__}) should "\
-            f"overwrite \"{method_name}\" method.")
-    def get_deps(self):
-        """To get all the deps of the same:
-        - Include soft ones (via artifacts)
-        - Jump over data nodes (for B and H graphs)"""
-        self._raise_NotImplementedError("get_deps")
-    def get_users(self):
-        self._raise_NotImplementedError("get_users")
+    # def _raise_NotImplementedError(self,method_name):
+        # raise NotImplementedError(
+            # f"{self}'s class ({type(self).__name__}) should "\
+            # f"overwrite \"{method_name}\" method.")
+    # def get_deps(self):
+        # """To get all the deps of the same:
+        # - Include soft ones (via artifacts)
+        # - Jump over data nodes (for B and H graphs)"""
+        # self._raise_NotImplementedError("get_deps")
+    # def get_users(self):
+        # self._raise_NotImplementedError("get_users")
 
     # =================================
     # === main_target / mt / target ===
@@ -238,7 +238,7 @@ class Graph():
     def __init__(
             self,
             graph_type : str,
-            other_object = None,
+            parent_structure = None,
             node_unique_id_generator : Node_unique_id_generator = None):
         self.graph_type = graph_type # string: R, F, S, P, B, H
         # == base attribute ==
@@ -252,11 +252,11 @@ class Graph():
         self.nodes = []
         self.output_nodes = []
         # == init node_unique_id_generator ==
-        if other_object is not None:
-            if hasattr(other_object,"node_unique_id_generator"):
-                self.node_unique_id_generator = other_object.node_unique_id_generator
-            elif isinstance(other_object,Node_unique_id_generator):
-                self.node_unique_id_generator = other_object
+        if parent_structure is not None:
+            if hasattr(parent_structure,"node_unique_id_generator"):
+                self.node_unique_id_generator = parent_structure.node_unique_id_generator
+            elif isinstance(parent_structure,Node_unique_id_generator):
+                self.node_unique_id_generator = parent_structure
         elif node_unique_id_generator is None:
             self.node_unique_id_generator = Node_unique_id_generator()
         else:

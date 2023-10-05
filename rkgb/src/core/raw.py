@@ -33,12 +33,12 @@ from core import base
 
 class RawNode(base.Node):
     def __init__(self, 
-            target="",
+            target,
+            raw_parser,
             ast_code=None, 
             fct="", 
             deps=None, 
-            is_input=False,
-            raw_parser=None
+            is_input=False
         ):
         """ attributes :
         .target   : str  : the name of the only var defined in the node
@@ -49,23 +49,22 @@ class RawNode(base.Node):
         .deps      : RawNode set : required nodes to run .ast_code
         .deps_rand : str set : required random targets
         """
-        super().__init__("B",target,other_object=raw_parser)
+        super().__init__("R",target,parent_structure=raw_parser)
         if ast_code is None:
-            ast_code = ast_add_on.make_ast_constant("/!\\ NO CODE /!\\")
-        self.ast_code = ast_code
+            self.ast_code = ast_add_on.make_ast_constant("/!\\ NO CODE /!\\")
+        else:
+            self.ast_code = ast_code
         self.fct = fct
-        self.deps = deps if not (deps is None) else set()
+        raw_parser.all_raw_nodes.append(self)
+        raw_parser.deps[self] = deps if deps is not None else set()
         self.is_input = is_input
         self.is_rand = bool(fct in constants.list_rand_fct)
         self.deps_rand = set()
-        if raw_parser is not None:
-            raw_parser.all_raw_nodes.append(self)
-    
-    def get_deps(self):
-        return self.deps
-    def get_users(self):
-        raise Exception("Raw nodes don't have `users` relations")
 
+    def deps(self,parent_structure): # Either a RawParser or a RawGraph
+        return parent_structure.deps[self]
+    def indirect_deps(self,parent_structure):
+        return parent_structure.deps[self]
 
 
 class RawVar:
