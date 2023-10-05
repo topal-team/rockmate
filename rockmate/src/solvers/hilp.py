@@ -3,7 +3,7 @@ import torch
 import rkgb
 import numpy as np
 from rkgb.Htools import H_cluster, H_graph, H_C_node
-
+import gc
 from .main import (
     Solver,
     get_cluster_budget,
