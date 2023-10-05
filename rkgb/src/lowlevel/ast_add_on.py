@@ -14,9 +14,9 @@ python_version = sys_info.major + sys_info.minor/10
 
 # -- general --
 
-def ast_to_str(ast_code):
-    #return ast.unparse(ast.fix_missing_locations(ast_code))
-    code = astunparse.unparse(ast_code)
+def ast_to_str(code_ast):
+    #return ast.unparse(ast.fix_missing_locations(code_ast))
+    code = astunparse.unparse(code_ast)
     return utils.remove_prefix(utils.remove_suffix(code,"\n"),"\n")
 
 def open_all_nested_attributes(value):

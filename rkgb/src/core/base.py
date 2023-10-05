@@ -147,7 +147,7 @@ class Node():
     def get_code_ast(self,force_special_kwargs=False):
         if self.node_type == "R" or self.node_type == "F":
             return ast_add_on.make_ast_assign(
-                (self.main_target,self.ast_code),
+                (self.main_target,self.code_ast),
                 force_special_kwargs=force_special_kwargs
             )
         else:

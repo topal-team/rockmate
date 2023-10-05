@@ -17,11 +17,11 @@ class D_node(base.Node): # Also subclass of B_node
             other_obj = None):
         """ attributes :
         .target    : str  : the name of the only var defined in the node
-        .ast_code  : AST  : right part of the assigning code
-        .fct       : str  : the function used in .ast_code
+        .code_ast  : AST  : right part of the assigning code
+        .fct       : str  : the function used in .code_ast
         .is_input  : bool : inputs are represented by nodes wth dummy code
         .is_rand   : bool : whether .fct involves randomness
-        .deps      : D_node set : required nodes to run .ast_code
+        .deps      : D_node set : required nodes to run .code_ast
         .deps_rand : str set : required random targets
         .users     : D_node set : reciprocal of .deps
         .protected : bool : whether self is a 1-separator of the graph
@@ -29,7 +29,7 @@ class D_node(base.Node): # Also subclass of B_node
         super().__init__("D",other_obj,target=target)
         if not code:
             code = ast_add_on.make_ast_constant("/!\\ not defined /!\\")
-        self.ast_code = code
+        self.code_ast = code
         self.fct = fct
         self.is_input = False
         self.is_rand = is_rand
@@ -188,7 +188,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
     sources_req_grad = False
     for bn in b_nodes:
         # -- translate B node to D --
-        dn = D_node(bn.target,bn.ast_code,bn.fct,
+        dn = D_node(bn.target,bn.code_ast,bn.fct,
                 is_rand = bn.is_rand,
                 deps_rand = set(bn.deps_rand),
                 other_obj=dg)
@@ -239,7 +239,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
                                 except:
                                     sub_code.args[i] = save_value
                             else: try_to_fix(arg)
-                code = bn.ast_code
+                code = bn.code_ast
                 try_to_fix(code)
                 if not fixed[0]: raise Exception(
                     f"Sorry there are some errors in the code generated :"\
@@ -419,7 +419,7 @@ def print_all_fw_nodes(g,print_ast=True):
     for n in g:
         if print_ast:
             print(ast.dump(ast_add_on.make_ast_assign(
-                (n.target,n.ast_code)),indent=4))
+                (n.target,n.code_ast)),indent=4))
         else:
             print(f"({n.target}) : [{n.fct}] : {n.get_code()}")
     if isinstance(g,D_graph):
@@ -476,8 +476,8 @@ def test_fw_code(dg : D_graph,model,dict_inputs : dict):
     loc_dict["self"] = model
     for inp in dg.inputs:
         loc_dict[inp] = dict_inputs[inp]
-    for rd_tar,ast_code in dg.dict_rand.items():
-        code = ast_add_on.make_str_assign(rd_tar,ast_code)
+    for rd_tar,code_ast in dg.dict_rand.items():
+        code = ast_add_on.make_str_assign(rd_tar,code_ast)
         exec(code, globals(), loc_dict)
     for dn in dg.nodes:
         for req_rd in dn.deps_rand:

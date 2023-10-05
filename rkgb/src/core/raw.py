@@ -35,25 +35,25 @@ class RawNode(base.Node):
     def __init__(self, 
             target,
             raw_parser,
-            ast_code=None, 
+            code_ast=None, 
             fct="", 
             deps=None, 
             is_input=False
         ):
         """ attributes :
         .target   : str  : the name of the only var defined in the node
-        .ast_code : AST  : right part of the assigning code
-        .fct      : str  : the function used in .ast_code
+        .code_ast : AST  : right part of the assigning code
+        .fct      : str  : the function used in .code_ast
         .is_input : bool : input vars are represented by nodes with dummy code
         .is_rand  : bool : whether .fct involves randomness
-        .deps      : RawNode set : required nodes to run .ast_code
+        .deps      : RawNode set : required nodes to run .code_ast
         .deps_rand : str set : required random targets
         """
         super().__init__("R",target,parent_structure=raw_parser)
-        if ast_code is None:
-            self.ast_code = ast_add_on.make_ast_constant("/!\\ NO CODE /!\\")
+        if code_ast is None:
+            self.code_ast = ast_add_on.make_ast_constant("/!\\ NO CODE /!\\")
         else:
-            self.ast_code = ast_code
+            self.code_ast = code_ast
         self.fct = fct
         raw_parser.all_raw_nodes.append(self)
         raw_parser.deps[self] = deps if deps is not None else set()
@@ -76,32 +76,31 @@ class RawVar:
             is_attr_of_self=False,
             real_value_as_an_attr_of_self=None,
         ):
-        # "val" must be an AST
         self.is_attr_of_self = is_attr_of_self
         self.real_value_as_an_attr_of_self = real_value_as_an_attr_of_self
-        self.ast = value_ast
+        self.value_ast = value_ast
         self.has_node = False  # by default
         self.is_rand = False  # by default
         if node: # to improve via "multiple_outputs" branch
             if node.deps == set() and not node.is_input:
                 if node.is_rand:
-                    raw_parser.dict_rand[node.target] = node.ast_code
+                    raw_parser.dict_rand[node.target] = node.code_ast
                     self.is_rand = True
                 else:  # node without deps but neither input or rand
-                    self.ast = node.ast_code
+                    self.value_ast = node.code_ast
             else:
                 self.has_node = True
                 self.node = node
 
     def get_ast(self, calling_node):
-        """ Instead of self.ast, you must use this
+        """ Instead of self.value_ast, you must use this
         Take care of the "deps" relation
         """
         if self.has_node:
             calling_node.deps.add(self.node)
         elif self.is_rand:
-            calling_node.deps_rand.add(self.ast.id)
-        return self.ast
+            calling_node.deps_rand.add(self.value_ast.id)
+        return self.value_ast
 
     def inherits(self, parent, list_attributes):  
         # for a getattr AND is_attr_of_self
@@ -208,7 +207,7 @@ class RawParser():
          - Via an ast.Attribute `a.b`
         """
         if parent_raw_var.is_attr_of_self:
-            parent_ast = parent_raw_var.ast
+            parent_ast = parent_raw_var.value_ast
             new_ast = self.rebuild_ast_attribute(parent_ast,list_attributes)
             new_raw_var = RawVar(new_ast, is_attr_of_self=True)
             new_raw_var.inherits(parent_raw_var,list_attributes)
@@ -220,7 +219,7 @@ class RawParser():
             new_node = RawNode(target=new_id, fct="getattr",raw_parser=self)
             parent_ast = parent_raw_var.get_ast(calling_node=new_node)
             new_ast = self.rebuild_ast_attribute(parent_ast,list_attributes)
-            new_node.ast_code = new_ast
+            new_node.code_ast = new_ast
             new_raw_var = RawVar(new_ast,node=new_node)
         return new_raw_var
 
@@ -246,7 +245,7 @@ class RawParser():
         sub_module = called_raw_var.real_value_as_an_attr_of_self
         for attribute in rest_of_func_name[:-1]:
             sub_module = getattr(sub_module, attribute)
-        sub_module_name = ast_add_on.ast_to_str(called_raw_var.ast)
+        sub_module_name = ast_add_on.ast_to_str(called_raw_var.value_ast)
         method_name = rest_of_func_name[-1]
         sub_module_output_raw_var = self.parse(
             sub_module, sub_module_name, method_name, call_arg_raw_vars
@@ -402,7 +401,7 @@ class RawParser():
                                 (handle_expr(kw.value)).get_value(new_node),
                             )
                         )
-                new_node.ast_code = ast.Call(
+                new_node.code_ast = ast.Call(
                     func=ast.Name(fct_name), args=args_ast, keywords=kwds_ast
                 )
                 return RawVar(ast.Name(target), node=new_node)
@@ -472,7 +471,7 @@ class RawParser():
                 main_val = main_var.get_value(calling_node=new_node)
                 assert isinstance(main_val, ast.Name)
                 # else : to much simplifications :/
-                new_node.ast_code = ast.Subscript(
+                new_node.code_ast = ast.Subscript(
                     main_val, ast_add_on.make_ast_constant(i)
                 )
                 new_raw_var = RawVar(ast.Name(new_tg_id), node=new_node)
@@ -499,7 +498,7 @@ class RawParser():
                 c = ast.List(args_ast)
             else:
                 c = ast.Tuple(args_ast)
-            new_node.ast_code = c
+            new_node.code_ast = c
             return RawVar(ast.Name(target), node=new_node)
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~

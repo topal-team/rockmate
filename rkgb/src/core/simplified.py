@@ -523,7 +523,7 @@ def D_to_S_init(dg : D_graph) -> S_graph:
     for dn in dg.nodes:
         sn = S_node(
                 main_target=dn.target,
-                code=dn.ast_code,
+                code=dn.code_ast,
                 fct=dn.fct,
                 protected=dn.protected,
                 is_rand=dn.is_rand,
@@ -557,7 +557,7 @@ def D_to_S_init(dg : D_graph) -> S_graph:
 # === remove cheap nodes ===
 # ==========================
 
-def insert_ast_code(main_sn,sub_sn):
+def insert_code_ast(main_sn,sub_sn):
     mc = main_sn.main_code[1]
     st = sub_sn.main_target
     sc = sub_sn.main_code[1]
@@ -599,7 +599,7 @@ def insert_ast_code(main_sn,sub_sn):
             f"insert things: {type(mc.value)}")
 
 def simplify_node(sn):
-    # aux fct, insert n.ast_code in children's code, and then unplug it
+    # aux fct, insert n.code_ast in children's code, and then unplug it
     for user_sn in sn.users.keys():
         # -- plug user_sn directly to deps of sn --
         S_edges.merge_inplace(user_sn.deps,sn.deps)
@@ -608,7 +608,7 @@ def simplify_node(sn):
             S_edges.discard_inplace(req_sn.users,sn)
             S_edges.add_inplace(req_sn.users,user_sn,str_set)
         # -- insert the code --
-        insert_ast_code(user_sn,sn)
+        insert_code_ast(user_sn,sn)
         # -- handle randomness --
         user_sn.is_rand = user_sn.is_rand or sn.is_rand
         user_sn.deps_rand.update(sn.deps_rand)
@@ -780,10 +780,10 @@ def simplify_view(sg : S_graph):
 def create_random_snodes_from_dict_rand(sg,model,device):
     dict_random_sn = dict() # str -> S_node
     dict_info = sg.dict_info
-    for name,ast_code in sg.dict_rand.items():
+    for name,code_ast in sg.dict_rand.items():
         dict_random_sn[name] = S_node(
             main_target = name,
-            code       = ast_code,
+            code       = code_ast,
             fct        = "--Random function--",
             protected  = True,
             is_rand    = True,
@@ -795,7 +795,7 @@ def create_random_snodes_from_dict_rand(sg,model,device):
         if model: our_global["self"] = model
         if device: our_global["device"] = device
         dict_info[name] = def_info.Var_info(
-            eval(ast_add_on.ast_to_str(ast_code),our_global)
+            eval(ast_add_on.ast_to_str(code_ast),our_global)
         )
     for sn in sg.nodes:
         for req_rd in sn.deps_rand:
