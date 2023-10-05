@@ -270,14 +270,14 @@ def solve_ilp(
         # print("Not feasible solution")
         # return []
         if md.feasible:
-            if True:  # print_result:
-                # if True:
-                # print(
-                #     f"Solution with obj: {md.md.getObjective().getValue()}"
-                # )
-                print(
-                    f"Solve Hgraph {hg.name} with {len(hg.list_hcn)} nodes takes {md.solve_time:03f}s"
-                )
+            # if print_result:
+            #     # if True:
+            #     # print(
+            #     #     f"Solution with obj: {md.md.getObjective().getValue()}"
+            #     # )
+            #     print(
+            #         f"Solve Hgraph {hg.name} with {len(hg.list_hcn)} nodes takes {md.solve_time:03f}s"
+            #     )
             loss_idx = md.loss_idx
             time_mem = (
                 md.md.getObjective().getValue(),  # time

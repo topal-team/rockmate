@@ -197,13 +197,13 @@ def solve_recursive(h_cluster: H_cluster, list_solvers=[], skip_self=False):
             if h_cluster is h_cluster.representee_cluster:
                 last_time = time.time()
                 h_cluster.list_sched.extend(solver(h_cluster))
-                print(
-                    f"Time to solve {h_cluster.name} of size {len(h_cluster.list_kcn)}: {time.time() - last_time}"
-                )
-                print(
-                    f"The CPU usage when solving {h_cluster.name} is: ",
-                    psutil.cpu_percent(4),
-                )
+                # print(
+                #     f"Time to solve {h_cluster.name} of size {len(h_cluster.list_kcn)}: {time.time() - last_time}"
+                # )
+                # print(
+                #     f"The CPU usage when solving {h_cluster.name} is: ",
+                #     psutil.cpu_percent(4),
+                # )
 
 
 # Preprocessing Cluster: add fast_forward and autograd option
