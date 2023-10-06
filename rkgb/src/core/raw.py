@@ -253,7 +253,8 @@ class RawParser():
         # -> ie it creates the raw_var of the sub_module call result!
         # Which is exactly the objective of `RawParser.handle_ast` functions
         return sub_module_output_raw_var
-    
+
+    """ TO REMOVE => I find a much better solution : torch.ops.aten
     def aux_for_call_find_function_name(
         first_term_of_func_name,rest_of_func_name):
         # Explanation:
@@ -298,6 +299,7 @@ class RawParser():
         else:
             fct_name = ".".join([first_term_of_func_name]+rest_of_func_name)
             return fct_name
+    """
         
 
     def handle_call(self,target : str, expr : ast.Call) -> RawVar:
@@ -363,8 +365,12 @@ class RawParser():
                 )
             
             else: # Else = Call to a primitive function
-                fct_name = self.aux_for_call_find_function_name(
-                    first_term_of_func_name,rest_of_func_name)
+                # Function name :
+                if (first_term_of_func_name == "torch" 
+                    and len(rest_of_func_name) == 1):
+                    fct_name = "torch.ops.aten."+rest_of_func_name[0]
+                else:
+                    fct_name = ".".join([first_term_of_func_name]+rest_of_func_name)
                 if target is None:
                     target = self.get_fresh_name()
                 new_node = RawNode(target=target,fct=fct_name,raw_parser=self)
