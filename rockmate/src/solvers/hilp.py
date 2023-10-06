@@ -10,6 +10,7 @@ from .main import (
     get_hgraph_budget_lb,
     get_hgraph_budget_ub,
 )
+import pulp
 from .HILP_gurobi import ModelGurobi
 from .HILP_pulp import ModelPULP
 from .rotor_solver import seq_builder, solve_dp_functional
@@ -67,7 +68,13 @@ class HILP(Solver):
             print("Using GUROBI to solve ILP")
         else:
             self.model_ilp = ModelPULP
-            print(f"Using {solver_name[0]} to solve ILP")
+            # print(f"Using {solver_name[0]} to solve ILP")
+            try:
+                solver = pulp.get_solver(self.ilp_solver, msg=0)
+            except:
+                avail_solver = pulp.listSolvers(onlyAvailable=True)[0]
+                print(f"Cannot get {ilp_solver}, will use {avail_solver}")
+                self.ilp_solver = avail_solver
 
     # def __repr__(self):
     #     return f"HILP solver"

@@ -588,13 +588,14 @@ class ModelPULP:
 
     def solve(self, solver=None):
         # self.md.message("\n\nRestarting solve\n\n")
-        solver = solver or solver_name[0]
-        try:
-            solver = get_solver(solver, msg=0)
-        except:
-            avail_solver = listSolvers(onlyAvailable=True)[0]
-            print(f"Cannot get {solver}, will use {avail_solver}")
-            solver = get_solver(avail_solver, msg=0)
+        solver = get_solver(solver, msg=0)
+        # solver = solver or solver_name[0]
+        # try:
+        #     solver = get_solver(solver, msg=0)
+        # except:
+        #     avail_solver = listSolvers(onlyAvailable=True)[0]
+        #     print(f"Cannot get {solver}, will use {avail_solver}")
+        #     solver = get_solver(avail_solver, msg=0)
             
         status = self.md.solve(solver)
         self.status = LpStatus[status]#readable status
