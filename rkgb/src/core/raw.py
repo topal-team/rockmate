@@ -21,6 +21,7 @@
 #  one target obtained with a primitive operation
 #  .code attributes are AST objects
 
+from typing import Union
 import ast
 import torch
 from torch import Tensor
@@ -210,7 +211,7 @@ class RawParser():
         if parent_raw_var.is_attr_of_self:
             parent_ast = parent_raw_var.value_ast
             new_ast = self.rebuild_ast_attribute(parent_ast,list_attributes)
-            new_raw_var = RawVar(new_ast, is_attr_of_self=True)
+            new_raw_var = RawVar(new_ast,raw_parser=self,is_attr_of_self=True)
             new_raw_var.inherits_self_attr(parent_raw_var,list_attributes)
         else:
             new_id = self.get_unique_name(target)
@@ -218,7 +219,7 @@ class RawParser():
             parent_ast = parent_raw_var.use_value_ast(calling_node=new_node)
             new_ast = self.rebuild_ast_attribute(parent_ast,list_attributes)
             new_node.code_ast = new_ast
-            new_raw_var = RawVar(new_ast,node=new_node)
+            new_raw_var = RawVar(new_ast,raw_parser=self,node=new_node)
         return new_raw_var
 
 
@@ -302,7 +303,7 @@ class RawParser():
     """
         
 
-    def handle_call(self,target : str, expr : ast.Call) -> RawVar:
+    def handle_ast_call(self,target : str, expr : ast.Call) -> RawVar:
         call_args = list(expr.args)
         ast_first_term,rest_of_func_name \
             = ast_add_on.open_all_nested_attributes(expr.func)
@@ -345,7 +346,7 @@ class RawParser():
         elif (self.impose_device 
         and first_term_of_func_name == "torch"
         and rest_of_func_name[0] == "device"):
-            return RawVar(value_ast = ast.Name("device"))
+            return RawVar(value_ast=ast.Name("device"),raw_parser=self)
 
         else:
             call_arg_raw_vars = [self.handle_expr(None,arg) for arg in call_args]
@@ -409,7 +410,25 @@ class RawParser():
                 new_node.code_ast = ast.Call(
                     func=ast.Name(fct_name), args=args_ast, keywords=kwds_ast
                 )
-                return RawVar(ast.Name(target), node=new_node)
+                return RawVar(ast.Name(target),raw_parser=self,node=new_node)
+            
+
+    def handle_ast_tuple_or_list(self,
+            target : str, expr : Union[ast.List,ast.Tuple]) -> RawVar:
+        # Not simplified / inserted here, might change TO CHANGE ?
+        # -> because I need to precise the calling_node...
+        target = self.get_unique_name(target)
+        constr = "list" if isinstance(expr,ast.List) else "tuple"
+        new_node = RawNode(
+            target=target, fct=f"{constr} constructor",raw_parser=self)
+        args_raw_vars = [self.handle_expr(e) for e in expr.elts]
+        args_ast = [v.use_value_ast(calling_node=new_node) for v in args_raw_vars]
+        if isinstance(expr,ast.List):
+            new_node.code_ast = ast.List(args_ast)
+        else:
+            new_node.code_ast = ast.Tuple(args_ast)
+        return RawVar(ast.Name(target),raw_parser=self,node=new_node)
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
     def parse(self,sub_module, sub_module_name, method_name, inputs_raw_vars, is_main=False):
@@ -489,23 +508,6 @@ class RawParser():
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
-        # isinstance(expr, ast.List or ast.Tuple)
-        # constr = "list" or "tuple"
-        # in this version, I'm *not* inserting them here, I will do it later.
-        # -> because I need to precise the calling_node...
-        def aux_handle_tuple_or_list(expr, target, constr):
-            if target is None:
-                target = get_fresh_name()
-            new_node = RawNode(target=target, fct=f"{constr} constructor")
-            args_vars = [handle_expr(v) for v in expr.elts]
-            args_ast = [v.use_value_ast(calling_node=new_node) for v in args_vars]
-            if constr == "list":
-                c = ast.List(args_ast)
-            else:
-                c = ast.Tuple(args_ast)
-            new_node.code_ast = c
-            return RawVar(ast.Name(target), node=new_node)
-
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -534,12 +536,12 @@ class RawParser():
             elif isinstance(expr, ast.Attribute):
                 return handle_attr(expr, target)  # may creates one node
             elif isinstance(expr, ast.Call):
-                return handle_call(expr, target)
+                return handle_ast_call(expr, target)
                 # may creates nodes for arguments (+ for output=target)
             elif isinstance(expr, ast.List):
-                return aux_handle_tuple_or_list(expr, target, "list")
+                return handle_ast_tuple_or_list(expr, target, "list")
             elif isinstance(expr, ast.Tuple):
-                return aux_handle_tuple_or_list(expr, target, "tuple")
+                return handle_ast_tuple_or_list(expr, target, "tuple")
             elif isinstance(expr, ast.UnaryOp):
                 assert isinstance(expr.op, ast.USub)  # quick fix
                 assert ast_add_on.is_constant(expr.operand)
