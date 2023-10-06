@@ -166,14 +166,19 @@ class RawGraph(base.Graph):
                 dot,view,directory,render_format
             )
 
-
+# Draft of the general comment about how the parser works:
+# if the expr is simple (e.g. constant or self's attr)
+# -> RawVar.has_node == False
+# otherwise, a node (= a piece of code) is created.
+# The optional parameter  "target" imposes the name of the var created
 class RawParser():
     def __init__(self,impose_device):
         self.impose_device = impose_device
         self.all_raw_nodes = []
         self.dict_rand = dict()
+        self.dict_raw_vars = dict()
         self.dict_constants = dict()
-        self.current_dict_raw_vars = dict()
+        self.current_jit_memory = dict()
         self.node_unique_id_generator = base.Node_unique_id_generator()
         self.counter_unique_number = 0
 
@@ -429,18 +434,50 @@ class RawParser():
             new_node.code_ast = ast.Tuple(args_ast)
         return RawVar(ast.Name(target),raw_parser=self,node=new_node)
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    def parse(self,sub_module, sub_module_name, method_name, inputs_raw_vars, is_main=False):
+    def handle_expr(self, target : str, expr) -> RawVar:
+        if ast_add_on.is_constant(expr):
+            return RawVar(expr,raw_parser=self)
+        elif isinstance(expr, ast.Name):
+            if expr.id in self.dict_raw_vars:
+                return self.dict_raw_vars[expr.id]
+            else:
+                raise Exception(
+                    "Unknown variable encountered while parsing "\
+                    "jit result, external/global var ?")
+        elif (
+            isinstance(expr, ast.Attribute)  # -> special constants
+            and isinstance(expr.value, ast.Name)
+            and expr.value.id == "CONSTANTS"
+        ):
+            cst_name = self.get_constant_name(expr.attr)
+            self.dict_constants[cst_name] = self.current_jit_memory[expr.attr]
+            return RawVar(ast.Name(cst_name),raw_parser=self)
+        elif isinstance(expr, ast.Attribute):
+            return self.handle_ast_attribute(target,expr)
+        elif isinstance(expr, ast.Call):
+            return self.handle_ast_call(target,expr)
+        elif isinstance(expr, ast.List) or isinstance(expr,ast.Tuple):
+            return self.handle_ast_tuple_or_list(target,expr)
+        elif isinstance(expr, ast.UnaryOp):
+            assert isinstance(expr.op, ast.USub)  # quick fix
+            assert ast_add_on.is_constant(expr.operand)
+            return RawVar(expr,raw_parser=self)
+        else:
+            raise Exception(f"{type(expr)} unknown")
+
+
+    def parse(self,
+            sub_module, sub_module_name, method_name, inputs_raw_vars, is_main=False):
         # -> B_graph
         # ex : sub_mod     = jit_tr_GPT2.wpe
         #      sub_mod_str = "self.wpe"
         #      sub_fct     = "forward"
         # inputs_vars : RawVars on which the sub_fct is applied
         if sub_fct == "forward":  # quick fix
-            code, memory = sub_mod.code_with_constants
+            code, self.current_jit_memory = sub_mod.code_with_constants
         else:
-            code, memory = getattr(sub_mod, sub_fct).code_with_constants
+            code, self.current_jit_memory = getattr(sub_mod, sub_fct).code_with_constants
         if not isinstance(memory, dict):  # quick fix, due to a type error in jit
             memory = memory.const_mapping
         a = (ast.parse(code)).body[0]
@@ -511,43 +548,6 @@ class RawParser():
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
-        # -- handle any expr -- return type -> RawVar
-        # -> the main recursive fct to handle ast
-        # if the expr is simple (e.g. constant or self's attr)
-        # -> RawVar.has_node == False
-        # otherwise, a node (= a piece of code) is created.
-        # The optional parameter  "target" imposes the name of the var created
-        # /!\ TorchScript's global constant vars must have been removed
-        def handle_expr(expr, target: str = None) -> RawVar:
-            if ast_add_on.is_constant(expr):
-                return RawVar(expr)
-            elif isinstance(expr, ast.Name):
-                assert expr.id in dict_vars
-                return dict_vars[expr.id]
-            elif (
-                isinstance(expr, ast.Attribute)  # -> special constants
-                and isinstance(expr.value, ast.Name)
-                and expr.value.id == "CONSTANTS"
-            ):
-                s = get_constant_name(expr.attr)
-                dict_constants[s] = memory[expr.attr]
-                return RawVar(ast.Name(s))
-                #return RawVar(ast_add_on.make_ast_constant(memory[expr.attr]))
-            elif isinstance(expr, ast.Attribute):
-                return handle_attr(expr, target)  # may creates one node
-            elif isinstance(expr, ast.Call):
-                return handle_ast_call(expr, target)
-                # may creates nodes for arguments (+ for output=target)
-            elif isinstance(expr, ast.List):
-                return handle_ast_tuple_or_list(expr, target, "list")
-            elif isinstance(expr, ast.Tuple):
-                return handle_ast_tuple_or_list(expr, target, "tuple")
-            elif isinstance(expr, ast.UnaryOp):
-                assert isinstance(expr.op, ast.USub)  # quick fix
-                assert ast_add_on.is_constant(expr.operand)
-                return RawVar(expr)
-            else:
-                raise Exception(f"{type(expr)} unknown")
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~
         # =========================
