@@ -35,11 +35,11 @@ class H_C_node(base.Node):
         # (for D, S and K nodes we can get the number from main_target,
         # but some H_nodes don't have a main_target).
 
-    def get_deps(self):
+    def get_all_standard_deps(self):
         return set().union(
             *[hdn.deps for hdn in self.deps],
             self.deps_through_artifacts)
-    def get_users(self):
+    def get_all_standard_users(self):
         return set().union(
             *[hdn.users for hdn in self.users])
 
@@ -72,10 +72,10 @@ class H_D_node(base.Node):
                 assert(kdn.kdn_type == "phantoms")
                 raise Exception("An HDN cannot represent a KDN of type 'phantoms'")
 
-    def get_deps(self):
+    def get_all_standard_deps(self):
         return set().union(
             *[hcn.deps for hcn in self.deps])
-    def get_users(self):
+    def get_all_standard_users(self):
         return set().union(
             *[hcn.users for hcn in self.users])
         
@@ -122,7 +122,7 @@ class H_graph(base.Graph):
         leaves_hcn = set()
         for hcn in self.list_hcn:
             if not hcn.is_fwd:
-                if len(hcn.get_users())==0:
+                if len(hcn.get_all_standard_users())==0:
                     leaves_hcn.add(hcn)
         root_hdn = H_D_node()
         root_hdn.deps = leaves_hcn

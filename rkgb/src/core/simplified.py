@@ -159,9 +159,9 @@ class S_node(base.Node):
         self.is_rand   = is_rand
         self.deps_rand = deps_rand if deps_rand else set()
 
-    def get_deps(self):
+    def get_all_standard_deps(self):
         return set(self.deps.keys())
-    def get_users(self):
+    def get_all_standard_users(self):
         return set(self.users.keys())
 
     # -----

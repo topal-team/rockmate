@@ -212,9 +212,9 @@ class P_node(base.Node):
         self.users_global = set() # FOR DYNAMIC PARTITIONING
         # Global edges contain ALL the deps/users, of any depth
 
-    def get_deps(self):
+    def get_all_standard_deps(self):
         return self.deps
-    def get_users(self):
+    def get_all_standard_users(self):
         return self.users
 
     @property

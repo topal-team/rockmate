@@ -74,17 +74,17 @@ class Node():
             self.unique_id = id(self)
 
     # Methods that must be overridden by subclasses:
-    # def _raise_NotImplementedError(self,method_name):
-        # raise NotImplementedError(
-            # f"{self}'s class ({type(self).__name__}) should "\
-            # f"overwrite \"{method_name}\" method.")
-    # def get_deps(self):
-        # """To get all the deps of the same:
-        # - Include soft ones (via artifacts)
-        # - Jump over data nodes (for B and H graphs)"""
-        # self._raise_NotImplementedError("get_deps")
-    # def get_users(self):
-        # self._raise_NotImplementedError("get_users")
+    def _raise_NotImplementedError(self,method_name):
+        raise NotImplementedError(
+            f"{self}'s class ({type(self).__name__}) should "\
+            f"overwrite \"{method_name}\" method.")
+    def get_all_standard_deps(self):
+        """To get all the deps of the same:
+        - Include soft ones (via artifacts)
+        - Jump over data nodes (for B and H graphs)"""
+        self._raise_NotImplementedError("get_all_standard_deps")
+    def get_all_standard_users(self):
+        self._raise_NotImplementedError("get_all_standard_users")
 
     # =================================
     # === main_target / mt / target ===
@@ -321,7 +321,7 @@ class Graph():
         # Compute incoming degree
         degree = dict()
         def count_edges(n : Node):
-            for sub_n in n.get_deps():
+            for sub_n in n.get_all_standard_deps():
                 if sub_n not in degree:
                     d = 0
                     degree[sub_n] = 0
@@ -339,7 +339,7 @@ class Graph():
             n = max(to_explore,key=lambda n : n.get_num())
             to_explore.discard(n)
             sorted_list.append(n)
-            for req_n in n.get_deps():
+            for req_n in n.get_all_standard_deps():
                 if req_n in sorted_list: raise Exception(
                     f"Cycle in the graph ! (found while trying to toposort):\n"\
                     f"{req_n.mt} and {n.mt} are members of this cycle.")
@@ -366,7 +366,7 @@ class Graph():
 
         to_be_visited = list(g.output_nodes)
         seen = set(to_be_visited)
-        dict_nb_usages = dict([(m,len(m.get_users())) for m in g.nodes])
+        dict_nb_usages = dict([(m,len(m.get_all_standard_users())) for m in g.nodes])
 
         separators = []
         while to_be_visited!=[]:
@@ -376,7 +376,7 @@ class Graph():
             if seen==set():
                 if g.does_node_requires_grad(n):
                     separators.append(n)
-            for req_n in n.get_deps():
+            for req_n in n.get_all_standard_deps():
                 seen.add(req_n)
                 dict_nb_usages[req_n]-=1
                 if dict_nb_usages[req_n]==0:

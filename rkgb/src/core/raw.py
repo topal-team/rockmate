@@ -34,11 +34,11 @@ from core import base
 class RawNode(base.Node):
     def __init__(self, 
             target,
-            raw_parser,
             code_ast=None, 
             fct="", 
             deps=None, 
-            is_input=False
+            is_input=False,
+            raw_parser=None,
         ):
         """ attributes :
         .target   : str  : the name of the only var defined in the node
@@ -55,16 +55,15 @@ class RawNode(base.Node):
         else:
             self.code_ast = code_ast
         self.fct = fct
-        raw_parser.all_raw_nodes.append(self)
-        raw_parser.deps[self] = deps if deps is not None else set()
         self.is_input = is_input
         self.is_rand = bool(fct in constants.list_rand_fct)
-        self.deps_rand = set()
+        self.deps_rand : set[str] = set()
+        self.deps : set[RawNode] = deps if deps is not None else set()
+        if raw_parser is not None: raw_parser.all_raw_nodes.append(self)
 
-    def deps(self,parent_structure): # Either a RawParser or a RawGraph
-        return parent_structure.deps[self]
-    def indirect_deps(self,parent_structure):
-        return parent_structure.deps[self]
+    def get_all_standard_deps(self):
+        return self.deps
+
 
 
 class RawVar:
@@ -92,7 +91,7 @@ class RawVar:
                 self.has_node = True
                 self.node = node
 
-    def get_ast(self, calling_node):
+    def use_value_ast(self, calling_node):
         """ Instead of self.value_ast, you must use this
         Take care of the "deps" relation
         """
@@ -102,7 +101,7 @@ class RawVar:
             calling_node.deps_rand.add(self.value_ast.id)
         return self.value_ast
 
-    def inherits(self, parent, list_attributes):  
+    def inherits_self_attr(self, parent, list_attributes):  
         # for a getattr AND is_attr_of_self
         if parent.has_node:
             self.has_node = True
@@ -116,10 +115,8 @@ class RawVar:
 
 class RawGraph(base.Graph):
     """RawGraph
-    -> Attention: most attributes common to all graphs
-       such as "inputs" or "outputs" are empty, even 
-       "nodes" aren't toposorted and some are useless
-    -> The only attribute important is "output_raw_var"
+    -> tldr: raw graph => very few attributes
+    -> The only important attribute is "output_raw_var"
        which gives the source of the "deps" relation
     """
     def __init__(self,
@@ -169,7 +166,6 @@ class RawGraph(base.Graph):
             )
 
 
-
 class RawParser():
     def __init__(self,impose_device):
         self.impose_device = impose_device
@@ -183,10 +179,15 @@ class RawParser():
     def get_unique_number(self):
         self.counter_unique_number += 1
         return self.counter_unique_number
-    def make_name_unique(self,s):
-        return f"__{self.get_unique_number()}_{s}"
+    def make_name_unique(self,name):
+        return f"__{self.get_unique_number()}_{name}"
     def get_fresh_name(self):
         return f"__{self.get_unique_number()}_fresh"
+    def get_unique_name(self,name = None):
+        if name is None:
+            return self.get_fresh_name()
+        else:
+            return self.make_name_unique(name)
     def get_constant_name(self,s):
         return f"_cst_{self.get_unique_number()}_{s}"
 
@@ -201,23 +202,20 @@ class RawParser():
                 new_ast = ast.Attribute(new_ast,attr)
         return new_ast
 
-    def aux_for_attributes(self, target, parent_raw_var, list_attributes):
+    def aux_for_attribute(self, target, parent_raw_var, list_attributes):
         """ Used for:
-         - Via an ast.Call `getattr(a,"b")`
-         - Via an ast.Attribute `a.b`
+         - `getattr(a,"b")` via an ast.Call
+         - `a.b` via an ast.Attribute
         """
         if parent_raw_var.is_attr_of_self:
             parent_ast = parent_raw_var.value_ast
             new_ast = self.rebuild_ast_attribute(parent_ast,list_attributes)
             new_raw_var = RawVar(new_ast, is_attr_of_self=True)
-            new_raw_var.inherits(parent_raw_var,list_attributes)
+            new_raw_var.inherits_self_attr(parent_raw_var,list_attributes)
         else:
-            if target is None:
-                new_id = self.get_fresh_name()
-            else:
-                new_id = self.make_name_unique(target)
+            new_id = self.get_unique_name(target)
             new_node = RawNode(target=new_id, fct="getattr",raw_parser=self)
-            parent_ast = parent_raw_var.get_ast(calling_node=new_node)
+            parent_ast = parent_raw_var.use_value_ast(calling_node=new_node)
             new_ast = self.rebuild_ast_attribute(parent_ast,list_attributes)
             new_node.code_ast = new_ast
             new_raw_var = RawVar(new_ast,node=new_node)
@@ -227,7 +225,7 @@ class RawParser():
     def handle_ast_attribute(self, target : str, expr : ast.Attribute) -> RawVar:
         parent_expr,list_attributes = ast_add_on.open_all_nested_attributes(expr)
         parent_raw_var = self.handle_expr(self.get_fresh_name(),parent_expr)
-        return self.aux_for_attributes(target,parent_raw_var,list_attributes)
+        return self.aux_for_attribute(target,parent_raw_var,list_attributes)
 
 
     def aux_handle_ast_call_getattr(self,target,call_args):
@@ -238,7 +236,7 @@ class RawParser():
         # If new tracer, then use handle_expr over call_args[1]
         parent_raw_var = self.handle_expr(call_args[0])
         attribute = call_args[1].value
-        return self.aux_for_attributes(target,parent_raw_var,[attribute])
+        return self.aux_for_attribute(target,parent_raw_var,[attribute])
     
     def aux_handle_ast_call_sub_module(
             self,called_raw_var,rest_of_func_name ,call_arg_raw_vars):

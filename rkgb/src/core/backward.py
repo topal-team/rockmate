@@ -60,11 +60,11 @@ class K_C_node(base.Node):
         self.phantom_names = []
         self.alias_in_users_phantoms = []
 
-    def get_deps(self):
+    def get_all_standard_deps(self):
         return set().union(
             *[bdn.deps for bdn in self.deps_real],
             self.deps_through_artifacts)
-    def get_users(self):
+    def get_all_standard_users(self):
         return set().union(
             *[bdn.users_real for bdn in self.users])
 
@@ -124,10 +124,10 @@ class K_D_node(base.Node):
     def users_only_global(self):
         return self.users_global - self.users_real.union(self.users_fake)
 
-    def get_deps(self):
+    def get_all_standard_deps(self):
         return set().union(
             *[bcn.deps_real for bcn in self.deps])
-    def get_users(self):
+    def get_all_standard_users(self):
         return set().union(
             *[bcn.users for bcn in self.users_real])
 

@@ -38,9 +38,9 @@ class D_node(base.Node): # Also subclass of B_node
         self.deps_rand = deps_rand if deps_rand else set()
         self.protected = False
 
-    def get_deps(self):
+    def get_all_standard_deps(self):
         return self.deps
-    def get_users(self):
+    def get_all_standard_users(self):
         return self.users
 
 
