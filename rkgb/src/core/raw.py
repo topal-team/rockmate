@@ -365,21 +365,21 @@ class RawParser():
                 )
             
             else: # Else = Call to a primitive function
-                # Function name :
+                # Function name, fix jit error : `torch` -> `torch.ops.aten`
                 if (first_term_of_func_name == "torch" 
                     and len(rest_of_func_name) == 1):
                     fct_name = "torch.ops.aten."+rest_of_func_name[0]
                 else:
                     fct_name = ".".join([first_term_of_func_name]+rest_of_func_name)
-                if target is None:
-                    target = self.get_fresh_name()
+                target = self.get_unique_name(target)
                 new_node = RawNode(target=target,fct=fct_name,raw_parser=self)
                 args_ast = [
-                    v.get_value(calling_node=new_node) for v in args_Bvar
+                    arg_raw_var.use_value_ast(calling_node=new_node) 
+                    for arg_raw_var in call_arg_raw_vars
                 ]
                 kwds_ast = []
                 for kw in expr.keywords:
-                    if var_impose_device and kw.arg == "device":
+                    if self.impose_device and kw.arg == "device":
                         kwds_ast.append(
                             ast.keyword("device", ast.Name("device"))
                         )
@@ -402,9 +402,10 @@ class RawParser():
                         kwds_ast.append(
                             ast.keyword(
                                 kw.arg,
-                                (handle_expr(kw.value)).get_value(new_node),
+                                (self.handle_expr(kw.value)).use_value_ast(new_node),
                             )
                         )
+                    #else: we remove weird keywords jit adds sometimes
                 new_node.code_ast = ast.Call(
                     func=ast.Name(fct_name), args=args_ast, keywords=kwds_ast
                 )
@@ -472,7 +473,7 @@ class RawParser():
             for i, tg in enumerate(list_tg):
                 new_tg_id = make_unique(tg)
                 new_node = RawNode(target=new_tg_id, fct="getattr")
-                main_val = main_var.get_value(calling_node=new_node)
+                main_val = main_var.use_value_ast(calling_node=new_node)
                 assert isinstance(main_val, ast.Name)
                 # else : to much simplifications :/
                 new_node.code_ast = ast.Subscript(
@@ -497,7 +498,7 @@ class RawParser():
                 target = get_fresh_name()
             new_node = RawNode(target=target, fct=f"{constr} constructor")
             args_vars = [handle_expr(v) for v in expr.elts]
-            args_ast = [v.get_value(calling_node=new_node) for v in args_vars]
+            args_ast = [v.use_value_ast(calling_node=new_node) for v in args_vars]
             if constr == "list":
                 c = ast.List(args_ast)
             else:

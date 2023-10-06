@@ -51,7 +51,7 @@ def get_torchscript_dtype(t):
         return dt
     
 
-"""
+""" TO KEEP
 # torchscript_dtype_numbers tabular has been created
 # using the following code. jit.trace replaces dtype keywords
 # by integers, which make the code impossible to run (WTF)
