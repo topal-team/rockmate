@@ -610,8 +610,10 @@ class ModelPULP:
         # else:
         #     self.solve_time = self.md.Runtime
         #     self.feasible = True
+        if self.feasible:
+            self.solve_time = self.md.solutionTime
 
-    def schedule(self, hgraph=None):
+    def schedule(self, hgraph=None, check_valid=False):
         """
         Given the solution from HILP, we want to translate the result
         to a OpSchedule that can be used in a higher level.
@@ -622,6 +624,9 @@ class ModelPULP:
         I = len(hgraph.list_hdn)
         J = len(self.list_list_sched)
 
+        def sol(value):
+            return value>0.9999#inttol
+
         op_list = []
         for t in range(T):
             for k in range(T):
@@ -631,11 +636,12 @@ class ModelPULP:
 
                     op_list.append(Op(self.hgraph.cluster.loss_kcn))
                 j = self.hcn2sub_c[k]
-                if self.sumR[(k, t)].value() == 1:
+                # if self.sumR[(k, t)].value() == 1:
+                if sol(self.sumR[(k, t)].value()):
                     hcn = hgraph.list_hcn[k]
                     opt = -1
                     for o in range(self.nOpts[k]):
-                        if self.R[k][t, o].value() == 1:
+                        if sol(self.R[k][t, o].value()):
                             opt = o
                             break
                     if opt > -1:
@@ -654,7 +660,8 @@ class ModelPULP:
 
                         if (
                             not hcn.is_fwd
-                            and self.sumSp[(j, t + 1)].value() > 0
+                            # and self.sumSp[(j, t + 1)].value() > 0
+                            and sol(self.sumSp[(j, t + 1)].value())
                         ):  # phantoms should be kept
                             phantoms_to_keep = h_obj.phantoms
                             for op in sub_op_list[::-1]:
@@ -707,7 +714,8 @@ class ModelPULP:
 
                 for eidx, (k_, i) in enumerate(self.delete_list):
                     # print(k_, i)
-                    if k == k_ and self.delete[t, eidx].value() == 1:
+                    # if k == k_ and self.delete[t, eidx].value()==1:
+                    if k == k_ and sol(self.delete[t, eidx].value()):
                         hdn = hgraph.list_hdn[i]
                         op_list.append(Op(hdn.kdn))
 
@@ -732,4 +740,13 @@ class ModelPULP:
         #         no_bwd = False
         # if no_bwd:
         #     raise("wrong solution")
-        return OpSchedule(op_list, loss_idx=None, cluster=self.hgraph.cluster)
+        op_sched = OpSchedule(op_list, loss_idx=None, cluster=self.hgraph.cluster)
+        # check_valid = True
+        if check_valid:
+            for op, alive_status in zip(op_sched.op_list, op_sched.alive_list):
+                if op.is_del:continue
+                for kdn in op.kn.deps_real:
+                    if not alive_status[kdn.name]:
+                        print(f"Invalid sched found: try to run {op.kn} without {kdn}")
+                        raise ValueError
+        return op_sched

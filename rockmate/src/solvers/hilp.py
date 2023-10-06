@@ -58,6 +58,7 @@ class HILP(Solver):
     def __init__(
         self,
         config=None,
+        ilp_solver=None
     ):
         super().__init__(config)
         self.ilp_solver = ilp_solver or solver_name[0]
@@ -176,7 +177,7 @@ class HILP(Solver):
         peak_budget,
         save_budget=None,
         accurate_mem=False,
-        print_result=False,
+        print_result=True,
     ):
         gc.collect()
         if not self.can_solve(hg):
