@@ -176,7 +176,7 @@ class RawParser():
         self.impose_device = impose_device
         self.all_raw_nodes = []
         self.dict_rand = dict()
-        self.dict_raw_vars = dict()
+        self.current_dict_raw_vars = dict()
         self.dict_constants = dict()
         self.current_jit_memory = dict()
         self.node_unique_id_generator = base.Node_unique_id_generator()
@@ -246,14 +246,17 @@ class RawParser():
     
     def aux_handle_ast_call_sub_module(
             self,called_raw_var,rest_of_func_name ,call_arg_raw_vars):
-        sub_module = called_raw_var.real_value_as_an_attr_of_self
+        jit_result_sub_module = called_raw_var.real_value_as_an_attr_of_self
         for attribute in rest_of_func_name[:-1]:
-            sub_module = getattr(sub_module, attribute)
+            jit_result_sub_module = getattr(jit_result_sub_module, attribute)
         sub_module_name = ast_add_on.ast_to_str(called_raw_var.value_ast)
         method_name = rest_of_func_name[-1]
+        save_current_dict_raw_vars = self.current_dict_raw_vars
         sub_module_output_raw_var = self.parse(
-            sub_module, sub_module_name, method_name, call_arg_raw_vars
+            jit_result_sub_module, sub_module_name, 
+            method_name, call_arg_raw_vars
         )
+        self.current_dict_raw_vars = save_current_dict_raw_vars
         # Note: to parse sub_module, we give raw_vars of its inputs,
         # and it returns the raw_var which define its output
         # -> ie it creates the raw_var of the sub_module call result!
@@ -439,8 +442,8 @@ class RawParser():
         if ast_add_on.is_constant(expr):
             return RawVar(expr,raw_parser=self)
         elif isinstance(expr, ast.Name):
-            if expr.id in self.dict_raw_vars:
-                return self.dict_raw_vars[expr.id]
+            if expr.id in self.current_dict_raw_vars:
+                return self.current_dict_raw_vars[expr.id]
             else:
                 raise Exception(
                     "Unknown variable encountered while parsing "\
@@ -468,122 +471,109 @@ class RawParser():
 
 
     def parse(self,
-            sub_module, sub_module_name, method_name, inputs_raw_vars, is_main=False):
-        # -> B_graph
-        # ex : sub_mod     = jit_tr_GPT2.wpe
-        #      sub_mod_str = "self.wpe"
-        #      sub_fct     = "forward"
-        # inputs_vars : RawVars on which the sub_fct is applied
-        if sub_fct == "forward":  # quick fix
-            code, self.current_jit_memory = sub_mod.code_with_constants
+            jit_result_of_this_module, 
+            module_name, method_name, 
+            input_raw_vars, is_main=False) -> RawVar:
+        # jit_result : is the result for a specific module or sub module,
+        # ex : module      = jit_tr_GPT2.wpe
+        #      module_name = "self.wpe"
+        #      method_name = "forward"
+        # inputs_vars : RawVars on which module's function is applied
+
+        # 1) Get the code from jit
+        if method_name == "forward":  # quick fix
+            code, memory \
+                = jit_result_of_this_module.code_with_constants
         else:
-            code, self.current_jit_memory = getattr(sub_mod, sub_fct).code_with_constants
+            result = getattr(jit_result_of_this_module, method_name)
+            code, memory = result.code_with_constants
         if not isinstance(memory, dict):  # quick fix, due to a type error in jit
             memory = memory.const_mapping
-        a = (ast.parse(code)).body[0]
+        self.current_jit_memory = memory
+        method_code_ast = (ast.parse(code)).body[0]
 
-        dict_vars = {}
-        dict_vars["self"] = RawVar(
-            val=ast.Name(sub_mod_str), 
+        # 2) Initiate the local env of raw vars with 1 var for "self"
+        self.current_dict_raw_vars = dict()
+        self.current_dict_raw_vars["self"] = RawVar(
+            val=ast.Name(module_name), 
             is_attr_of_self=True, 
-            real_value_as_an_attr_of_self=sub_mod
+            real_value_as_an_attr_of_self=jit_result_of_this_module
         )
 
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~
-        # -- Inputs --
-        inputs = []
-        for arg in a.args.args:
-            inputs.append(arg.arg)
-        nb_i = len(inputs)
-        if is_main:  # /!\
-            for i in range(1, nb_i):
-                i_node = RawNode(
-                    target=inputs[i],
+        # 3) Add the inputs to the local env
+        input_names = [inp.arg for inp in method_code_ast.args.args]
+        # Note: input_names[0] = "self"
+        if is_main: # = top level
+            for input_name in input_names[1:]:
+                input_node = RawNode(
+                    target=input_name,
+                    raw_parser=self,
                     code=ast_add_on.make_ast_constant("INPUT"),
                     fct="INPUT",
-                    deps=set(),
                     is_input=True,
                 )
-                dict_vars[inputs[i]] = RawVar(ast.Name(inputs[i]), node=i_node)
-        else:
-            assert nb_i == len(inputs_vars) + 1
-            for i in range(1, nb_i):  # inputs[0]="self"
-                dict_vars[inputs[i]] = inputs_vars[i - 1]
-                # Link local inputs' names with global vars
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~
+                self.current_dict_raw_vars[input_name] \
+                    = RawVar(ast.Name(input_name),
+                             raw_parser=self,
+                             node=input_node)
+        else: # sub module => Called at higher level => inputs = the calling args
+            assert len(input_names) == len(input_raw_vars) + 1
+            for input_name,input_raw_var in \
+                    zip(input_names[1:],input_raw_vars):
+                self.current_dict_raw_vars[input_name] = input_raw_var
+                # Link local inputs' names with higher level RawVars
 
-
-        # ===== AUXILIARY FUNCTIONS =====
-
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~
-        # -- open list of targets e.g. tuple --
-        # -> so that each node has only one target
-        # (e.g. l = fct() ; a = l[0] ; b = l[1] instead of a,b=fct())
-        def init_targets(list_tg):
-            if len(list_tg) == 1:
-                return make_unique(list_tg[0])
-            else:
-                return get_fresh_name()
-
-        def handle_targets(list_tg, main_var):  # str list of len > 1
-            for i, tg in enumerate(list_tg):
-                new_tg_id = make_unique(tg)
-                new_node = RawNode(target=new_tg_id, fct="getattr")
-                main_val = main_var.use_value_ast(calling_node=new_node)
-                assert isinstance(main_val, ast.Name)
-                # else : to much simplifications :/
-                new_node.code_ast = ast.Subscript(
-                    main_val, ast_add_on.make_ast_constant(i)
-                )
-                new_raw_var = RawVar(ast.Name(new_tg_id), node=new_node)
-                dict_vars[tg] = new_raw_var
-
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~
-
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~
-
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~
-
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~
-
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~
-
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~
-        # =========================
-
-        # == MAIN ==
-        for ast_n in a.body:
-            if isinstance(ast_n, ast.Assign):
-                # -- targets --
-                list_tg = []
-                tg = ast_n.targets[0]
-                if isinstance(tg, ast.Name):
-                    list_tg = [tg.id]
-                    target_id = tg.id
-                elif isinstance(tg, ast.Tuple) or isinstance(tg, ast.List):
-                    for e in tg.elts:
-                        list_tg.append(e.id)
-                    target_id = None
+        # 4) Parse each line 1 by 1
+        for line_of_code_ast in method_code_ast.body:
+            if isinstance(line_of_code_ast, ast.Assign):
+                # 1) Flat targets
+                ast_targets = line_of_code_ast.targets[0]
+                if isinstance(ast_targets, ast.Name):
+                    list_targets = [ast_targets.id]
+                    main_target = ast_targets.id
+                elif (isinstance(ast_targets, ast.Tuple) 
+                or    isinstance(ast_targets, ast.List)):
+                    list_targets = [tar.id for tar in ast_targets.elts]
+                    main_target = None
                 else:
                     raise Exception(
-                        f"ast.Call's target neither name, tuple or list ?"
-                        f"{type(tg)} found"
+                        f"ast.Assign's target neither name, tuple or list ?"
+                        f"{type(ast_targets)} found"
                     )
 
-                # -- main --
-                main_id = init_targets(list_tg)
-                main_var = handle_expr(ast_n.value, main_id)
-                if len(list_tg) > 1:
-                    handle_targets(list_tg, main_var)
+                # 2) Parse the expression
+                main_raw_var = self.handle_expr(
+                    main_target,
+                    line_of_code_ast.value,
+                )
 
-                if target_id is not None:
-                    dict_vars[target_id] = main_var
+                # 3) Handle multiple targets
+                # (a,b) = code => fresh_var = code ; a = fresh_var[0], b = ...[1]
+                if main_target is not None:
+                    self.current_dict_raw_vars[main_target] = main_raw_var
+                else: # multiple 
+                    for target_index, target_name in enumerate(list_targets):
+                        target_unique_name = self.make_name_unique(target_name)
+                        target_assigning_node = RawNode(
+                            target=target_unique_name,
+                            fct="getattr",
+                            raw_parser=self)
+                        target_assigning_node.code_ast = ast.Subscript(
+                            main_raw_var.use_value_ast(
+                                calling_node=target_assigning_node),
+                            ast_add_on.make_ast_constant(target_index)
+                        )
+                        target_raw_var = RawVar(
+                            ast.Name(target_unique_name),
+                            raw_parser=self,
+                            node=target_assigning_node
+                        )
 
+        # 5) end of the loop
             else:
-                assert isinstance(ast_n, ast.Return)
-                ret_graph = B_graph()
-                ret_graph.output_var = handle_expr(ast_n.value, target=None)
-                return ret_graph
+                assert isinstance(line_of_code_ast, ast.Return)
+                return self.handle_expr(
+                    target=None,
+                    expr=line_of_code_ast.value)
 
         raise Exception("No ast.Return found at the end of jit.code ??!")
