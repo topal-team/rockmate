@@ -50,7 +50,7 @@ class Node():
             node_type : str,
             main_target : str = None,
             target = None, mt = None, # aliases
-            parent_structure = None, # to get unique_id from it
+            parent_structure_with_id_generator = None, # to get unique_id from it
             unique_id_generator : Node_unique_id_generator = None):
         self.node_type = node_type # str: R, F, S, P, BC, BD, HC, HD
         # == init main_target ==
@@ -63,11 +63,15 @@ class Node():
         else:
             self.main_target = "/!\\ No target /!\\"
         # == init unique_id ==
-        if parent_structure is not None:
-            if hasattr(parent_structure,"node_unique_id_generator"):
-                self.unique_id = parent_structure.node_unique_id_generator.use()
-            elif isinstance(parent_structure,Node_unique_id_generator):
-                self.unique_id = parent_structure.use()
+        if parent_structure_with_id_generator is not None:
+            if hasattr(
+            parent_structure_with_id_generator,"node_unique_id_generator"):
+                self.unique_id \
+                    = parent_structure_with_id_generator\
+                      .node_unique_id_generator.use()
+            elif isinstance(
+            parent_structure_with_id_generator,Node_unique_id_generator):
+                self.unique_id = parent_structure_with_id_generator.use()
         elif unique_id_generator is not None:
             self.unique_id = unique_id_generator.use()
         else:
@@ -189,10 +193,8 @@ class Node():
     # === requires_grad ===
     # -> For any type of node
     def does_requires_grad(self,dict_info):
-        tar = self.main_target
-        nt = self.node_type
-        if tar is None:
-            if nt == "P" or nt == 'HC':
+        if self.main_target is None:
+            if self.node_type == "P" or self.node_type == 'HC':
                 if self.is_leaf:
                     raise Exception(
                         "'main_target == None' should imply 'not self.is_leaf'"
@@ -202,12 +204,12 @@ class Node():
                 raise Exception(
                     f"Apart from P_nodes and H_C_nodes,\n"\
                     f"self.main_target shouldn't be None, "\
-                    f"error with a {nt}_node"
+                    f"error with a {self.node_type}_node"
                 )
         else:
-            return (tar in dict_info # -> otherwise : special nodes
-                and hasattr(dict_info[tar],"requires_grad")
-                and dict_info[tar].requires_grad)
+            return (self.main_target in dict_info # -> otherwise : special nodes
+                and hasattr(dict_info[self.main_target],"requires_grad")
+                and dict_info[self.main_target].requires_grad)
     # =====================
 
     # ================
@@ -238,7 +240,7 @@ class Graph():
     def __init__(
             self,
             graph_type : str,
-            parent_structure = None,
+            other_object_with_id_generator = None,
             node_unique_id_generator : Node_unique_id_generator = None):
         self.graph_type = graph_type # string: R, F, S, P, B, H
         # == base attribute ==
@@ -252,11 +254,14 @@ class Graph():
         self.nodes = []
         self.output_nodes = []
         # == init node_unique_id_generator ==
-        if parent_structure is not None:
-            if hasattr(parent_structure,"node_unique_id_generator"):
-                self.node_unique_id_generator = parent_structure.node_unique_id_generator
-            elif isinstance(parent_structure,Node_unique_id_generator):
-                self.node_unique_id_generator = parent_structure
+        if other_object_with_id_generator is not None:
+            if hasattr(
+            other_object_with_id_generator,"node_unique_id_generator"):
+                self.node_unique_id_generator = \
+                    other_object_with_id_generator.node_unique_id_generator
+            elif isinstance(
+            other_object_with_id_generator,Node_unique_id_generator):
+                self.node_unique_id_generator = other_object_with_id_generator
         elif node_unique_id_generator is None:
             self.node_unique_id_generator = Node_unique_id_generator()
         else:
@@ -314,27 +319,29 @@ class Graph():
     @staticmethod
     def get_sorted_nodes_by_following_deps_relation_from_origin(
             origin_node : Node):
-        """Toposort nodes"""
-        # /!\ origin_node is the root of .deps relation 
-        # /!\ => e.g. the output node of the graph
+        """Toposort nodes
+        /!\ origin_node is the source of .deps relation 
+        /!\ => e.g. the output node of the graph"""
 
-        # Compute incoming degree
+        # Compute incoming degree (= len(users) (not len(deps)))
         degree = dict()
-        def count_edges(n : Node):
-            for sub_n in n.get_all_standard_deps():
-                if sub_n not in degree:
+        degree[origin_node] = 0
+        to_visit = [origin_node]
+        while to_visit != []:
+            n = to_visit.pop()
+            for req_n in n.get_all_standard_deps():
+                if req_n not in degree:
                     d = 0
-                    degree[sub_n] = 0
-                    count_edges(sub_n)
+                    degree[req_n] = 0
+                    to_visit.append(req_n)
                 else:
-                    d = degree[sub_n]
-                degree[sub_n] = d+1
-        count_edges(origin_node)
+                    d = degree[req_n]
+                degree[req_n] = d+1
 
         # Explore nodes by increasing lexicographic-order of their n.main_target
         # BUT a node is explored iff all its users are explored => toposort
         sorted_list = []
-        to_explore = set([origin_node])
+        to_explore = set([origin_node]) # TO CHANGE: to a max heap structure
         while to_explore: # not empty
             n = max(to_explore,key=lambda n : n.get_num())
             to_explore.discard(n)
@@ -355,14 +362,16 @@ class Graph():
 
     @staticmethod
     def find_cutting_points(g):
-        # DONT FORGET TO ADD A SOURCE TO DEPS RELATION IF NECESSARY
-        # returns the list of all 1-separators of the 'deps' relation
-        # used on F (to protect), S (to cut), P (to partition)
+        """
+        DONT FORGET TO ADD A SOURCE TO DEPS RELATION IF NECESSARY
+        returns the list of all 1-separators of the 'deps' relation
+        used on F (to protect), S (to cut), P (to partition)
 
-        # Note : We don't want a block where nothing requires_grad.
-        # Because it implies that we don't have a output_bdn_grad 
-        # and that Fe/Be make no sense.
-        # Thus a cutting point must requires_grad.
+        Note : We don't want a block where nothing requires_grad.
+        Because it implies that we don't have a output_bdn_grad 
+        and that Fe/Be make no sense.
+        Thus a cutting point must requires_grad.
+        """
 
         to_be_visited = list(g.output_nodes)
         seen = set(to_be_visited)

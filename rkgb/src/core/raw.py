@@ -50,7 +50,7 @@ class RawNode(base.Node):
         .deps      : RawNode set : required nodes to run .code_ast
         .deps_rand : str set : required random targets
         """
-        super().__init__("R",target,parent_structure=raw_parser)
+        super().__init__("R",target,parent_structure_with_id_generator=raw_parser)
         if code_ast is None:
             self.code_ast = ast_add_on.make_ast_constant("/!\\ NO CODE /!\\")
         else:
