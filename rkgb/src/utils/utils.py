@@ -1,8 +1,8 @@
 # ==========================
 # ==== Useful functions ====
 # ==========================
-from .imports import *
 import inspect
+from torch import Tensor
 
 # -> to raise exceptions with lambda functions
 def raise_(s):
@@ -79,7 +79,7 @@ def check_attr(o1,o2,list_attr,raise_exception=False):
 
 def has_a_data_ptr(value):
     return (
-    isinstance(value,torch.Tensor)
+    isinstance(value,Tensor)
         or
         ( ( isinstance(value,list) or isinstance(value,tuple))
             and
@@ -87,7 +87,7 @@ def has_a_data_ptr(value):
     )
 
 def get_data_ptr(value):
-    if isinstance(value,torch.Tensor):
+    if isinstance(value,Tensor):
         return value.data_ptr()
     elif (isinstance(value,list) or isinstance(value,tuple)):
         for v in value:

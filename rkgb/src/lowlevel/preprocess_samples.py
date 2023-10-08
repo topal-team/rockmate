@@ -1,7 +1,7 @@
 import inspect
 
 class DictInputs():
-    def __init__(self,model,model_args,model_kwargs):
+    def __init__(self,model,model_args,model_kwargs=None):
         # -- load params list --
         sign = inspect.signature(model.forward)
         params = list(sign.parameters.items())

@@ -1,7 +1,8 @@
 # ====================
 # = global variables =
 # ====================
-from .imports import torch, sys
+import torch
+import sys
 
 time_min_duration = 0
 time_min_repeat = 5

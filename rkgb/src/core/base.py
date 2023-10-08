@@ -12,7 +12,9 @@ try:
     has_graphviz = True
 except ModuleNotFoundError:
     has_graphviz = False
-from lowlevel import ast_add_on
+from src.lowlevel import ast_add_on
+# import lowlevel.ast_add_on
+# from lowlevel import ast_add_on
 
 # ==============================================
 # = Auxiliary class : Node_unique_id_generator =

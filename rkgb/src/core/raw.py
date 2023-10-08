@@ -25,11 +25,11 @@ from typing import Union
 import ast
 import torch
 from torch import Tensor
-from lowlevel import ast_add_on
-from lowlevel import constants
-from lowlevel import preprocess_samples
-from lowlevel import jit_patch
-from core import base
+from src.lowlevel import ast_add_on
+from src.lowlevel import constants
+from src.lowlevel import preprocess_samples
+from src.lowlevel import jit_patch
+from src.core import base
 
 
 class RawNode(base.Node):
@@ -127,7 +127,7 @@ class RawGraph(base.Graph):
         ):
         super().__init__("R")
         # - use jit -
-        samples_for_jit = dict_inputs.to_list_args()
+        samples_for_jit = dict_inputs.to_list_args(model)
         with torch.no_grad():
             jit_result = torch.jit.trace_module(
                 model, {"forward": samples_for_jit}, check_trace=False
@@ -154,7 +154,7 @@ class RawGraph(base.Graph):
             render=True,
             dot=None
         ):
-        name = base.Graph._get_render_name(name)
+        name = self._get_render_name(name)
         dot = base.Graph._get_graphviz_dot(name,dot)
         for rn in self.nodes:
             dot.node(rn.target,rn.get_code())
@@ -230,7 +230,7 @@ class RawParser():
 
     def handle_ast_attribute(self, target : str, expr : ast.Attribute) -> RawVar:
         parent_expr,list_attributes = ast_add_on.open_all_nested_attributes(expr)
-        parent_raw_var = self.handle_expr(self.get_fresh_name(),parent_expr)
+        parent_raw_var = self.handle_expr(None,parent_expr)
         return self.aux_for_attribute(target,parent_raw_var,list_attributes)
 
 
@@ -240,7 +240,7 @@ class RawParser():
         # If fail: something like `getattr(a,"foo"+"bar")`
         # It's a nested operation, so I assume jit inlined it
         # If new tracer, then use handle_expr over call_args[1]
-        parent_raw_var = self.handle_expr(call_args[0])
+        parent_raw_var = self.handle_expr(None,call_args[0])
         attribute = call_args[1].value
         return self.aux_for_attribute(target,parent_raw_var,[attribute])
     
@@ -359,8 +359,8 @@ class RawParser():
         else:
             call_arg_raw_vars = [self.handle_expr(None,arg) for arg in call_args]
             # Method => sub module:
-            if first_term_of_func_name in self.dict_vars: # => a method
-                called_raw_var = self.dict_vars[first_term_of_func_name]
+            if first_term_of_func_name in self.current_dict_raw_vars: # => a method
+                called_raw_var = self.current_dict_raw_vars[first_term_of_func_name]
                 assert called_raw_var.is_attr_of_self
                 # If fail:
                 # I assumed all method call are call to sub modules of `self`:
@@ -411,7 +411,8 @@ class RawParser():
                         kwds_ast.append(
                             ast.keyword(
                                 kw.arg,
-                                (self.handle_expr(kw.value)).use_value_ast(new_node),
+                                (self.handle_expr(None,kw.value))\
+                                     .use_value_ast(new_node),
                             )
                         )
                     #else: we remove weird keywords jit adds sometimes
@@ -429,7 +430,7 @@ class RawParser():
         constr = "list" if isinstance(expr,ast.List) else "tuple"
         new_node = RawNode(
             target=target, fct=f"{constr} constructor",raw_parser=self)
-        args_raw_vars = [self.handle_expr(e) for e in expr.elts]
+        args_raw_vars = [self.handle_expr(None,e) for e in expr.elts]
         args_ast = [v.use_value_ast(calling_node=new_node) for v in args_raw_vars]
         if isinstance(expr,ast.List):
             new_node.code_ast = ast.List(args_ast)
@@ -495,7 +496,8 @@ class RawParser():
         # 2) Initiate the local env of raw vars with 1 var for "self"
         self.current_dict_raw_vars = dict()
         self.current_dict_raw_vars["self"] = RawVar(
-            val=ast.Name(module_name), 
+            value_ast=ast.Name(module_name), 
+            raw_parser=self,
             is_attr_of_self=True, 
             real_value_as_an_attr_of_self=jit_result_of_this_module
         )
@@ -508,7 +510,7 @@ class RawParser():
                 input_node = RawNode(
                     target=input_name,
                     raw_parser=self,
-                    code=ast_add_on.make_ast_constant("INPUT"),
+                    code_ast=ast_add_on.make_ast_constant("INPUT"),
                     fct="INPUT",
                     is_input=True,
                 )
