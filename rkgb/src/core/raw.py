@@ -252,11 +252,13 @@ class RawParser():
         sub_module_name = ast_add_on.ast_to_str(called_raw_var.value_ast)
         method_name = rest_of_func_name[-1]
         save_current_dict_raw_vars = self.current_dict_raw_vars
+        save_current_jit_memory = self.current_jit_memory
         sub_module_output_raw_var = self.parse(
             jit_result_sub_module, sub_module_name, 
             method_name, call_arg_raw_vars
         )
         self.current_dict_raw_vars = save_current_dict_raw_vars
+        self.current_jit_memory = save_current_jit_memory
         # Note: to parse sub_module, we give raw_vars of its inputs,
         # and it returns the raw_var which define its output
         # -> ie it creates the raw_var of the sub_module call result!
@@ -570,6 +572,7 @@ class RawParser():
                             raw_parser=self,
                             node=target_assigning_node
                         )
+                        self.current_dict_raw_vars[target_name] = target_raw_var
 
         # 5) end of the loop
             else:
