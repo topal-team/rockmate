@@ -9,7 +9,7 @@ def raise_(s):
     raise Exception(s)
 
 # -> to get all the attrs except special ones
-def vdir(c):
+def all_non_private_attributes(c):
     return [s for s in dir(c)
             if (not s.startswith("__")
             and not inspect.ismethod(getattr(c,s)))]
@@ -23,9 +23,6 @@ def remove_suffix(text, suffix):
     if text.endswith(suffix):
         return text[:-len(suffix)]
     return text
-
-
-
 
 
 # ==========================
@@ -68,33 +65,5 @@ def check_attr(o1,o2,list_attr,raise_exception=False):
             if v1 != v2: return False
         else: clean__eq__(v1,v2,raise_exception=True)
     return True
-
-# ==========================
-
-
-
-# ==========================
-# == Concerning data_ptr ===
-# ==========================
-
-def has_a_data_ptr(value):
-    return (
-    isinstance(value,Tensor)
-        or
-        ( ( isinstance(value,list) or isinstance(value,tuple))
-            and
-            any([has_a_data_ptr(v) for v in value]))
-    )
-
-def get_data_ptr(value):
-    if isinstance(value,Tensor):
-        return value.data_ptr()
-    elif (isinstance(value,list) or isinstance(value,tuple)):
-        for v in value:
-            v_ptr = get_data_ptr(v)
-            if not (v_ptr is None):
-                return v_ptr
-        return None
-    else: return None
 
 # ==========================

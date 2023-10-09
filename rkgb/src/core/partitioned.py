@@ -20,9 +20,9 @@ class Ano_S_node_Info():
     dict_tar_to_ano_tar : dict[str, str] = None
     dict_cst_to_ano_cst : dict[str, str] = None
     dict_param_to_ano_param : dict[str, str] = None
-    dict_ano_tar_to_basic_info : dict[str, def_info.Var_info] = None
-    dict_ano_cst_to_basic_info : dict[str, def_info.Var_info] = None
-    dict_ano_param_to_basic_info : dict[str, def_info.Var_info] = None
+    dict_ano_tar_to_basic_info : dict[str, def_info.VariableInfo] = None
+    dict_ano_cst_to_basic_info : dict[str, def_info.VariableInfo] = None
+    dict_ano_param_to_basic_info : dict[str, def_info.VariableInfo] = None
 
     # =====================================================================
     def __init__(self,sn : S_node, sg : S_graph, model : torch.nn.Module):
@@ -77,7 +77,7 @@ class Ano_S_node_Info():
             dict_tar_atar[real_name] = atar
             dict_tar_anb[real_name] = nb_var
             dict_atar_info[atar] = sg.dict_info[real_name]
-            # -> We will keep only basic attributes of Var_info
+            # -> We will keep only basic attributes of VariableInfo
 
         # Build ano constants + info
         all_real_cst = sorted(all_real_cst,key = base.Node.get_num_cst)
@@ -87,7 +87,7 @@ class Ano_S_node_Info():
             nb_cst += 1
             acst = f"_cst_{nb_cst}_ano"
             dict_cst_acst[cst_real_name] = acst
-            dict_acst_info[acst] = def_info.Var_info(value)
+            dict_acst_info[acst] = def_info.VariableInfo(value)
 
         # Build ano params + info
         nb_param = 0
@@ -97,7 +97,7 @@ class Ano_S_node_Info():
             nb_param += 1
             aparam = f"self.param_{nb_param}"
             dict_param_aparam[param_full_name] = aparam
-            dict_aparam_info[aparam] = def_info.Var_info(param_value)
+            dict_aparam_info[aparam] = def_info.VariableInfo(param_value)
                 
         # =============================
         # === THIRD: build ano code ===
@@ -114,17 +114,17 @@ class Ano_S_node_Info():
 
     # ============================
     @staticmethod
-    def make_charac_info(info : def_info.Var_info):
-        if info.ttype is tuple or info.ttype is list:
+    def make_charac_info(info : def_info.VariableInfo):
+        if info.variable_type is tuple or info.variable_type is list:
             return (
-                info.ttype,
+                info.variable_type,
                 [Ano_S_node_Info.make_charac_info(sub) for sub in info.sub_info]
             )
         else:
             return (
-                info.ttype,
+                info.variable_type,
                 info.dtype if hasattr(info,"dtype") else None,
-                info.tsize if hasattr(info,"tsize") else None,
+                info.tensor_size if hasattr(info,"tensor_size") else None,
                 info.requires_grad if hasattr(info,"requires_grad") else None,
                 info.memsize if hasattr(info,"memsize") else None,
             )

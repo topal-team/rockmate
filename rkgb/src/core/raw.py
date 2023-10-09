@@ -37,7 +37,6 @@ class RawNode(base.Node):
             target,
             code_ast=None, 
             fct="", 
-            deps=None, 
             is_input=False,
             raw_parser=None,
         ):
@@ -59,7 +58,8 @@ class RawNode(base.Node):
         self.is_input = is_input
         self.is_rand = bool(fct in constants.list_rand_fct)
         self.deps_rand : set[str] = set()
-        self.deps : set[RawNode] = deps if deps is not None else set()
+        # TO REMOVE
+        # self.deps : set[RawNode] = deps if deps is not None else set()
         if raw_parser is not None: raw_parser.all_raw_nodes.append(self)
 
     def get_all_standard_deps(self):
@@ -264,54 +264,6 @@ class RawParser():
         # -> ie it creates the raw_var of the sub_module call result!
         # Which is exactly the objective of `RawParser.handle_ast` functions
         return sub_module_output_raw_var
-
-    """ TO REMOVE => I find a much better solution : torch.ops.aten
-    def aux_for_call_find_function_name(
-        first_term_of_func_name,rest_of_func_name):
-        # Explanation:
-        # When there is a torch function call, jit registers only
-        # the name of the function and nothing about which PyTorch package
-        # or class it comes from. Thus we have to test one by one: 
-        # torch.<> ; torch.Tensor.<> ; torch.nn.functional.<> etc
-        # to find where the function comes from.
-        # Note: it's error prone, in case two files define functions
-        # with the same name but different behaviors; but we have no choice.
-        # We made a short list of possible packages
-        #   torch.<.>
-        #   torch.nn.functional.<.>
-        #   torch.Tensor.<.>
-        #   torch._C._nn.<.>
-        #   torch._C._fft.<.>
-        #   torch.ops.aten.<.>
-        # Don't hesitate to append this list: 
-        # -> rkgb.lowlevel.constants.list_pytorch_packages
-        if (first_term_of_func_name == "torch" 
-        and len(rest_of_func_name) == 1):
-            last_term_of_func_name = rest_of_func_name[1]
-            for package_name in constants.list_pytorch_packages:
-                try:
-                    exec(f"{package_name}.{last_term_of_func_name}")
-                    fct_name = f"{package_name}.{last_term_of_func_name}"
-                    return fct_name
-                except:
-                    pass
-
-            # None of the packages match
-            raise Exception(
-                f"When there is a torch function call, jit "\
-                f"registers only the name of the function and "\
-                f"not where it comes from.\nFor instance only `gelu` "\
-                f"instead of `torch.nn.functional.gelu`.\n Here we "\
-                f"didn't manage to find where `{last_term_of_func_name}`"\
-                f"comes from. If you know from which package it comes "\
-                f"you can add it in "\
-                f"`rkgb.lowlevel.constants.list_pytorch_packages`"
-            )
-        else:
-            fct_name = ".".join([first_term_of_func_name]+rest_of_func_name)
-            return fct_name
-    """
-        
 
     def handle_ast_call(self,target : str, expr : ast.Call) -> RawVar:
         call_args = list(expr.args)

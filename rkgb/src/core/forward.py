@@ -3,33 +3,37 @@
 # ==========================
 
 from src.lowlevel import ast_add_on
-from core import base
-from core.raw import RawNode,RawGraph
+from src.lowlevel import variable_info
+from src.core import base
+from src.core.raw import RawNode,RawGraph
 
 # **********
-# * D_node *
+# * ForwardNode *
 # **********
 
-class D_node(base.Node): # Also subclass of B_node
+class ForwardNode(base.Node):
     def __init__(self,
-            target="",code=None,fct="",
-            is_rand=False,deps_rand=None,
-            other_obj = None):
+            target,
+            code_ast=None,
+            fct="",
+            is_rand=False,
+            deps_rand=None,
+            forward_graph=None):
         """ attributes :
         .target    : str  : the name of the only var defined in the node
         .code_ast  : AST  : right part of the assigning code
         .fct       : str  : the function used in .code_ast
         .is_input  : bool : inputs are represented by nodes wth dummy code
         .is_rand   : bool : whether .fct involves randomness
-        .deps      : D_node set : required nodes to run .code_ast
+        .deps      : ForwardNode set : required nodes to run .code_ast
         .deps_rand : str set : required random targets
-        .users     : D_node set : reciprocal of .deps
+        .users     : ForwardNode set : reciprocal of .deps
         .protected : bool : whether self is a 1-separator of the graph
         """
         super().__init__("D",other_obj,target=target)
-        if not code:
-            code = ast_add_on.make_ast_constant("/!\\ not defined /!\\")
-        self.code_ast = code
+        if code_ast is None:
+            code_ast = ast_add_on.make_ast_constant("/!\\ not defined /!\\")
+        self.code_ast = code_ast
         self.fct = fct
         self.is_input = False
         self.is_rand = is_rand
@@ -45,26 +49,57 @@ class D_node(base.Node): # Also subclass of B_node
 
 
 # ***********
-# * D_graph *
+# * ForwardGraph *
 # ***********
 
-class D_graph(base.Graph):
+class ForwardGraph(base.Graph):
     def __init__(self):
-        super().__init__("D")
-    def __eq__(self,g2,force_order=False,raise_exception=False):
-        g1 = self
-        b = small_fcts.check_attr(g1,g2,
-            ["inputs","outputs","dict_info"],
-            raise_exception=raise_exception)
-        mt = lambda l : [dn.target for dn in l]
-        b *= (mt(g1.nodes) == mt(g2.nodes))
-        if raise_exception and not b:
-            raise Exception("D_graphs' differ on nodes order or length")
-        if b:
-            for dn1,dn2 in zip(g1.nodes,g2.nodes):
-                b *= dn1.__eq__(dn2,force_order,raise_exception)
-        return b
-    __hash__ = base.Node.__hash__
+        super().__init__("F")
+
+
+    def generate_deep_tmp_local(self,raw_node,our_global):
+        # To generate an environment where to run raw_node's code,
+        # we generate its dependencies, either using the info 
+        # (about shape, dtype etc) we previously collected, 
+        # or by running their code in case of view or inplace nodes, 
+        # in which case we first (i) generate their dependencies, 
+        # using dict_info; and also (ii) its random dependencies.
+        tmp_local = dict()
+        done = set()
+        ready = set()
+        todo = list(raw_node.deps)
+        while todo != []:
+            req_rn = todo[-1]
+            req_tar = req_rn.target
+            if req_tar in done:
+                todo.pop()
+            else:
+                req_info = self.dict_info[req_tar]
+                if (req_info.is_inplace 
+                or  req_info.is_view
+                or  req_rn.fct == "getattr"):
+                    if req_tar in ready:
+                        for req_rd in req_rn.deps_rand:
+                            if not req_rd in done:
+                                code = ast_add_on.make_str_assign(
+                                    (req_rd,self.dict_rand[req_rd]))
+                                exec(code,our_global,tmp_local)
+                                done.add(req_rd)
+                        exec(req_rn.get_code(),our_global,tmp_local)
+                        done.add(req_tar)
+                        todo.pop()
+                    else:
+                        todo.extend(list(req_rn.deps))
+                        ready.add(req_tar)
+                else:
+                    req_x = def_info.generate_val(req_info,our_global["device"])
+                    if isinstance(req_x,torch.Tensor):
+                        req_x = req_x.clone()
+                    tmp_local[req_tar] = req_x
+                    done.add(req_tar)
+                    todo.pop()
+        return tmp_local
+
 
     def prepare_cut(self):
         # in case, after simplifications, we will cut / sequentialize
@@ -87,42 +122,6 @@ def sort_nodes(g : B_graph): # -> B_node list
     else: return RK_sort_based_on_deps(o_var.node)
 
 
-def generate_deep_tmp_local(dg,bn,our_global):
-    tmp_local = dict()
-    done = set()
-    ready = set()
-    todo = list(bn.deps)
-    while todo != []:
-        req_bn = todo[-1]
-        req_tar = req_bn.target
-        if req_tar in done:
-            todo.pop()
-        else:
-            req_info = dg.dict_info[req_tar]
-            if (req_info.is_inplace 
-            or  req_info.is_view
-            or  req_bn.fct == "getattr"):
-                if req_tar in ready:
-                    for req_rd in req_bn.deps_rand:
-                        if not req_rd in done:
-                            code = ast_add_on.make_str_assign(
-                                (req_rd,dg.dict_rand[req_rd]))
-                            exec(code,our_global,tmp_local)
-                            done.add(req_rd)
-                    exec(req_bn.get_code(),our_global,tmp_local)
-                    done.add(req_tar)
-                    todo.pop()
-                else:
-                    todo.extend(list(req_bn.deps))
-                    ready.add(req_tar)
-            else:
-                req_x = def_info.generate_val(req_info,our_global["device"])
-                if isinstance(req_x,torch.Tensor):
-                    req_x = req_x.clone()
-                tmp_local[req_tar] = req_x
-                done.add(req_tar)
-                todo.pop()
-    return tmp_local
 
 # ==========================
 
@@ -134,7 +133,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
             model,dict_inputs)
 
     # --- init and sort ---
-    dg = D_graph()
+    dg = ForwardGraph()
     dg.inherit_base_attributes(bg)
     inputs       = dg.inputs
     d_nodes      = dg.nodes
@@ -188,14 +187,14 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
     sources_req_grad = False
     for bn in b_nodes:
         # -- translate B node to D --
-        dn = D_node(bn.target,bn.code_ast,bn.fct,
+        dn = ForwardNode(bn.target,bn.code_ast,bn.fct,
                 is_rand = bn.is_rand,
                 deps_rand = set(bn.deps_rand),
                 other_obj=dg)
         if bn.is_input:
             inputs.append(bn.target)
             dn.is_input = True
-            dict_info[bn.target] = input_info = def_info.Var_info(
+            dict_info[bn.target] = input_info = def_info.VariableInfo(
                 dict_inputs[bn.target],
                 data_owner_name = bn.target)
             if input_info.requires_grad:
@@ -209,7 +208,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
 
         # -- run local forward to get info --
         if dont_build_dict_info:
-            dict_info[bn.target] = def_info.Var_info()
+            dict_info[bn.target] = def_info.VariableInfo()
         elif not bn.is_input:
             tmp_local = generate_deep_tmp_local(dg,bn,our_global)
             try:
@@ -275,7 +274,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
                     data_parents = set()
                     for req_bn in bn.deps:
                         req_info = dict_info[req_bn.mt]
-                        if req_info.ttype is torch.Tensor:
+                        if req_info.variable_type is torch.Tensor:
                             data_parents.add(req_bn.mt)
                     if data_parents != set():
                         if bn.fct in global_vars.list_inplace_fct:
@@ -316,7 +315,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
                 data_owner_name = bn.target
                 data_direct_parent_name = bn.target
                 dict_inplace_ops[bn.mt] = set()
-            dict_info[bn.target] = info = def_info.Var_info(
+            dict_info[bn.target] = info = def_info.VariableInfo(
                 bn_value,
                 is_view    = is_view,
                 is_inplace = is_inplace,
@@ -364,7 +363,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
     dict_dn = dict((dn.mt,dn) for dn in d_nodes)
     for index_dn,dn in enumerate(d_nodes):
         if len(dn.users)==0 and dn.mt != str_val:
-            info : def_info.Var_info = dict_info[dn.mt]
+            info : def_info.VariableInfo = dict_info[dn.mt]
             assert(info.is_view or info.is_inplace)
             data_owner_name = info.data_owner_name
             data_owner_dn = dict_dn[data_owner_name]
@@ -422,12 +421,12 @@ def print_all_fw_nodes(g,print_ast=True):
                 (n.target,n.code_ast)),indent=4))
         else:
             print(f"({n.target}) : [{n.fct}] : {n.get_code()}")
-    if isinstance(g,D_graph):
+    if isinstance(g,ForwardGraph):
         print("dict_info : ")
         for (tar,info) in g.dict_info.items():
             print(f"{tar} info : {info}")
 
-def print_fw_code(dg : D_graph):
+def print_fw_code(dg : ForwardGraph):
     print(dg.dict_rand)
     str_input = ','.join(dg.inputs)
     print(f"def main({str_input}):")
@@ -435,16 +434,16 @@ def print_fw_code(dg : D_graph):
         if not dn.is_input: print(f"\t{dn.get_code()}")
     print(f"\treturn {dg.output}")
 
-def aux_print_D_graph_message(dg : D_graph):
-    return f"D_graph - Forward graph : of size {len(dg.nodes)}"
-def aux_print_D_graph_name(dg,name=None):
+def aux_print_ForwardGraph_message(dg : ForwardGraph):
+    return f"ForwardGraph - Forward graph : of size {len(dg.nodes)}"
+def aux_print_ForwardGraph_name(dg,name=None):
     if name is not None: return name
-    else: return "Forward_D_graph"
+    else: return "Forward_ForwardGraph"
 
-def print_D_graph(dg : D_graph,name=None,open=True,render_format="svg",dot=None,uniq_num=0):
+def print_ForwardGraph(dg : ForwardGraph,name=None,open=True,render_format="svg",dot=None,uniq_num=0):
     if dot is None:
         render = True
-        if name is None: name = aux_print_D_graph_name(dg)
+        if name is None: name = aux_print_ForwardGraph_name(dg)
         dot = graphviz.Digraph(name,comment=name)
     else:
         render = False
@@ -471,7 +470,7 @@ def print_D_graph(dg : D_graph,name=None,open=True,render_format="svg",dot=None,
 # === test forward code ====
 # ==========================
 
-def test_fw_code(dg : D_graph,model,dict_inputs : dict):
+def test_fw_code(dg : ForwardGraph,model,dict_inputs : dict):
     loc_dict = {}
     loc_dict["self"] = model
     for inp in dg.inputs:

@@ -343,7 +343,7 @@ class S_graph(base.Graph):
         output_node = self.output_nodes[0]
         output = output_node.main_target
         output_info = self.dict_info[output]
-        if output_info.ttype in [tuple,list]:
+        if output_info.variable_type in [tuple,list]:
             real_output_nodes = []
             real_outputs = set()
             for req_sn,req_targets in output_node.deps.items():
@@ -476,11 +476,11 @@ class S_graph(base.Graph):
                 containers = []
                 for tar in sn.all_targets:
                     info = dict_info[tar]
-                    ttype = info.ttype
-                    if ttype == torch.Tensor:
+                    variable_type = info.variable_type
+                    if variable_type == torch.Tensor:
                         if info.data_owner_name != "PARAM":
                             tensors.append(tar)
-                    elif ttype == tuple or ttype == list:
+                    elif variable_type == tuple or variable_type == list:
                         containers.append(tar)
                 sn.tensor_targets = tensors
                 sn.container_targets = containers
@@ -495,12 +495,12 @@ class S_graph(base.Graph):
                 raise Exception(
                   f"{sn.main_target} not in dict_info ??")
             info = self.dict_info[sn.main_target]
-            if not (info.ttype in [torch.Tensor,torch.Size]):
+            if not (info.variable_type in [torch.Tensor,torch.Size]):
                 raise Exception(
                   f"After simplifications there should "\
-                  f"only be tensors or sizes, but {info.ttype} "\
+                  f"only be tensors or sizes, but {info.variable_type} "\
                   f"found for {sn.main_target}.")
-            if info.ttype==torch.Size and not sn.is_artefact:
+            if info.variable_type==torch.Size and not sn.is_artefact:
                 raise Exception(
                   f"After simplifications, all remaining "\
                   f"\"size\" should be \"artefacts\", but "\
@@ -643,7 +643,7 @@ def size_children(sg,sn):
     # give the list of child nodes of sn which are size
     ret = []
     for user_sn in sn.users.keys():
-        if sg.dict_info[user_sn.main_target].ttype == torch.Size:
+        if sg.dict_info[user_sn.main_target].variable_type == torch.Size:
             ret.append(user_sn)
     return ret
 
@@ -661,7 +661,7 @@ def simplify_size(sg : S_graph):
                     size_sn.insert(other_sn,strong=True,sg=sg)
                 # -- insert their code --
                 if (sn is sg.init_node
-                or sg.dict_info[sn.main_target].ttype == torch.Size):
+                or sg.dict_info[sn.main_target].variable_type == torch.Size):
                     sn.insert(size_sn,strong=True,sg=sg)
                 else: sn.insert(size_sn,strong=False,sg=sg)
     sg.clear()
@@ -794,7 +794,7 @@ def create_random_snodes_from_dict_rand(sg,model,device):
         our_global.update(sg.dict_constants)
         if model: our_global["self"] = model
         if device: our_global["device"] = device
-        dict_info[name] = def_info.Var_info(
+        dict_info[name] = def_info.VariableInfo(
             eval(ast_add_on.ast_to_str(code_ast),our_global)
         )
     for sn in sg.nodes:
