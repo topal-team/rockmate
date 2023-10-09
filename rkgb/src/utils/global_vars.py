@@ -229,5 +229,5 @@ default_forced_kwargs = dict(
 # due to recomputation. For instance batchnorm statistics.
 # ==========================
 
-solver_name = [None]
+solver_name = ["gurobi"]
 

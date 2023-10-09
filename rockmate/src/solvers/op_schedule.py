@@ -1,7 +1,7 @@
-from hrockmate.rkgb.utils import *
-from hrockmate.rkgb.Ptools import P_graph, P_node
-from hrockmate.rkgb.Ktools import K_graph, K_C_node, K_D_node
-from hrockmate.rkgb.Htools import *
+from rkgb.utils import *
+from rkgb.Ptools import P_graph, P_node
+from rkgb.Ktools import K_graph, K_C_node, K_D_node
+from rkgb.Htools import *
 from collections import namedtuple
 from copy import deepcopy
 
@@ -329,12 +329,14 @@ class OpSchedule:
             return keep_correction
 
         if refine:
-            self.fwd_overhead_correction = refine_correction(
-                self.fwd_overhead_correction
-            )
-            self.bwd_overhead_correction = refine_correction(
-                self.bwd_overhead_correction
-            )
+            if self.fwd_overhead_correction:
+                self.fwd_overhead_correction = refine_correction(
+                    self.fwd_overhead_correction
+                )
+            if self.bwd_overhead_correction:
+                self.bwd_overhead_correction = refine_correction(
+                    self.bwd_overhead_correction
+                )
 
     def refine(self):
         for i, op in enumerate(self.op_list):

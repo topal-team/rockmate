@@ -1,9 +1,11 @@
-from hrockmate import rkgb
+import rkgb
 import numpy as np
 from copy import deepcopy
-from hrockmate.rkgb.Htools import H_C_node, H_D_node, H_graph, H_cluster
-from hrockmate.rkgb.Ktools import K_C_node, K_D_node
+from rkgb.Htools import H_C_node, H_D_node, H_graph, H_cluster
+from rkgb.Ktools import K_C_node, K_D_node
 from .op_schedule import Op, OpSchedule
+import time
+import psutil
 
 
 class Solver:
@@ -80,9 +82,7 @@ def get_hgraph_budget_lb(hgraph: H_graph):
     for hcn in hgraph.list_hcn:
         if hcn.sub_cluster is not None:
             list_sched = hcn.sub_cluster.get_sched()
-            hcn_memory_budget.append(
-                min(op_sched.peak_mem for op_sched in list_sched)
-            )
+            hcn_memory_budget.append(min(op_sched.peak_mem for op_sched in list_sched))
         else:
             hcn_memory_budget.append(hcn.ff_overhead)
     return max(hcn_memory_budget)
@@ -195,7 +195,15 @@ def solve_recursive(h_cluster: H_cluster, list_solvers=[], skip_self=False):
         for solver in list_solvers:
             # h_cluster.solve(solver)
             if h_cluster is h_cluster.representee_cluster:
+                last_time = time.time()
                 h_cluster.list_sched.extend(solver(h_cluster))
+                # print(
+                #     f"Time to solve {h_cluster.name} of size {len(h_cluster.list_kcn)}: {time.time() - last_time}"
+                # )
+                # print(
+                #     f"The CPU usage when solving {h_cluster.name} is: ",
+                #     psutil.cpu_percent(4),
+                # )
 
 
 # Preprocessing Cluster: add fast_forward and autograd option
@@ -273,9 +281,16 @@ def get_single_compute_op_list(
     def _can_del(i, kdn):
         if kdn.name in protect_names:
             return False
-        for kcn in list_kcn[i + 1 :]:
-            if kdn in kcn.deps_real:
+        # for kcn in list_kcn[i + 1 :]:
+        #     if kdn in kcn.deps_real:
+        #         return False
+        for kcn in kdn.users_real:
+            if kcn in list_kcn[i + 1 :]:
                 return False
+        if kdn in cluster.loss_kcn.deps_real:
+            return False
+        if kdn in cluster.interfaces["inputs_kdn_data"]:
+            return False
         return True
 
     op_list = []
@@ -291,6 +306,8 @@ def get_single_compute_op_list(
         # if i == cluster.loss_idx:
         #     loss_idx = len(op_list)
         for kdn in kcn.users:
+            if "phantom" in kdn.name and ff:
+                continue
             alive_status[kdn.name] = 1
         op_list.append(
             Op(
@@ -303,11 +320,12 @@ def get_single_compute_op_list(
         # alive_list.append(alive_status.copy())
 
         for kdn_name, alive in alive_status.items():
-            kdn = cluster.dict_kn[kdn_name]
-            if alive and _can_del(i, kdn):
-                op_list.append(Op(kdn))
-                alive_status[kdn_name] = 0
-                # alive_list.append(alive_status.copy())
+            if alive:
+                kdn = cluster.dict_kn[kdn_name]
+                if _can_del(i, kdn):
+                    op_list.append(Op(kdn))
+                    alive_status[kdn_name] = 0
+                    # alive_list.append(alive_status.copy())
 
     return op_list  # , loss_idx
 
