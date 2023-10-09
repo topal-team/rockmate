@@ -1,10 +1,16 @@
 from rkgb.utils.ast_add_on import make_str_assign, make_str_list_assign
 from rkgb.utils import np, torch
-from rkgb.Ktools import K_C_node, K_D_node
-from .solvers.def_op import DelOp
+
+# from .solvers.op_schedule import PrfOp, OflOp
 
 
 class RngState:
+    """
+    We take care of random operations,
+    in particular to be able to recompute a random function deterministically,
+    we store random states on the first computation and restore them when needed.
+    """
+
     def __init__(self):
         self.cpu_states = {}
         self.gpu_states = {}
@@ -20,7 +26,7 @@ class RngState:
         torch.cuda.set_rng_state(self.gpu_states[op_name])
 
 
-def make_gd(device, nn_mod, dict_constants):
+def make_global_dictionary(device, nn_mod, dict_constants):
     return {
         **globals(),
         **dict_constants,
@@ -29,12 +35,17 @@ def make_gd(device, nn_mod, dict_constants):
         "torch": torch,
         "meta": torch.ones(1).to(device),
         "cmeta": torch.view_as_complex(torch.ones(2)).to(device),
+        "main_stream": torch.cuda.current_stream(),
+        "prefetch_stream": torch.cuda.Stream(device),
+        "offload_stream": torch.cuda.Stream(device),
     }
 
 
 class RK_Storage:
+    """ """
+
     def __init__(self):
-        self.ld = {}
+        self.ld = {"events": {}}
         self.shapes = dict()
         self.dtypes = dict()
         self.rng_state = RngState()
@@ -72,74 +83,90 @@ class Compiler:
         else:
             return True
 
-    def _get_names(self, name_list):
-        return [kdn.name for kdn in name_list]
+    def _get_names(self, kdn_list):
+        """return the list of data node' names"""
+        return [kdn.name for kdn in kdn_list]
 
-        if not self.op_sched:
-            return [kdn.name for kdn in name_list]
-        else:
-            return name_list
+    def find_target_next_occurance(elements, target, start):
+        return start + elements[start:].index(target)
 
-    def find_next_idx(l, target, i):
-        return i + l[i:].index(target)
+    def get_fwd(self, kn, i, detach=True):
+        """get forward part functions
+        A K_C_node node consists of a main code that creates the .data, and a body code that contains secondary
+        statements about shapes, views, and in-place operations.
+        To prevent autograd from creating the whole computational graph in output's grad fn,
+        rk-Exec detach each tensor after computing it, so that grad fn only keeps track of the last operation.
+        We always name with an underscore the variable before detaching, we call it the proxy.
 
-    def get_fwd(self, op, i, detach=True):
-        if "loss" in op.main_target:
+
+        Parameters: kn: computation/data node in H Graph at operation i
+                    i : index of the operation in the op schedule
+                    detach : detach the tensor from computational graph
+        """
+
+        if "loss" in kn.main_target:
             return [self.fct_run_forward_no_grad("")]
-        rec = op.name in self.op_name_list[:i]
-        if not op.proxy or (
-            op.name.replace("fwd", "bwd") not in self.op_name_list[i:]
+
+        # if we find the same operation before current operation
+        recomputation = kn.name in self.op_name_list[:i]
+
+        if not kn.proxy or (
+            kn.name.replace("fwd", "bwd") not in self.op_name_list[i:]
         ):  # not prepared for BWD
-            last_before_bwd = False
+            last_before_bwd = False  # if the forward operation is the last one before backward operations
+
         else:
             next_bwd_idx = i + self.op_name_list[i:].index(
-                op.name.replace("fwd", "bwd")
+                kn.name.replace("fwd", "bwd")
             )
-            last_before_bwd = not (op.name in self.op_name_list[i + 1 : next_bwd_idx])
-        l = []
+            last_before_bwd = not (kn.name in self.op_name_list[i + 1 : next_bwd_idx])
+        function_list = []
 
-        if op.is_rand:
-            if not rec:
-                l.append(self.fct_get_rng_state(op.name))
+        if kn.is_rand:
+            if not recomputation:
+                function_list.append(self.fct_get_rng_state(kn.name))
             else:
-                l.append(self.fct_restore_rng_state(op.name))
+                function_list.append(self.fct_restore_rng_state(kn.name))
 
-        if not op.proxy:
-            if hasattr(op, "ff_code"):
-                l = [self.fct_run_forward_with_grad(op.ff_code)]
+        if not kn.proxy:
+            if hasattr(kn, "ff_code"):  # ff_code is in old version code
+                function_list = [self.fct_run_forward_with_grad(kn.ff_code)]
             else:
-                l = [self.fct_run_forward_with_grad(op.get_code())]
+                function_list = [self.fct_run_forward_with_grad(kn.get_code())]
         else:
             # compile inplace code
             inplace_code = make_str_list_assign(
-                op.inplace_code, force_special_kwargs=rec
+                kn.inplace_code, force_special_kwargs=recomputation
             )
             # compile body code
             body_code = ""
-            for bc in op.body_code:
+            for bc in kn.body_code:
                 suffix = ""
-                if rec and (bc[0] in op.tensor_targets):
+                if recomputation and (bc[0] in kn.tensor_targets):
                     suffix = ".data"
                 body_code += (
-                    make_str_assign(bc, suffix=suffix, force_special_kwargs=rec) + "\n"
+                    make_str_assign(
+                        bc, suffix=suffix, force_special_kwargs=recomputation
+                    )
+                    + "\n"
                 )
 
             # compile main code
             suffix = ""
             main_code = (
-                make_str_assign(op.main_code, suffix=suffix, force_special_kwargs=rec)
+                make_str_assign(
+                    kn.main_code, suffix=suffix, force_special_kwargs=recomputation
+                )
                 + "\n"
             )
-            main_code = main_code.replace(op.main_target, f"_{op.main_target}")
+            main_code = main_code.replace(kn.main_target, f"_{kn.main_target}")
 
+            # if the operation is not the last one before bwd process, we run the main code in no_grad mode
             if not last_before_bwd:
-                # inplace_code = inplace_code.replace(
-                #     op.main_target, f"_{op.main_target}"
-                # )
-
-                for target in op.tensor_targets:
+                for target in kn.tensor_targets:
                     inplace_code = inplace_code.replace(target, "_" + target)
-                l.append(
+
+                function_list.append(
                     self.fct_run_forward_no_grad(
                         main_code.replace("self.", "original_mod.").replace(
                             "self[", "original_mod["
@@ -147,17 +174,20 @@ class Compiler:
                     )
                 )
             else:
+                # control saved_tensors in autograd : manual check to avoid pytorch to save some tensors in with_grad mode
                 no_save_list = []
-                candidates = list(op.deps_global) + list(op.users_global)
+                candidates = list(kn.deps_global) + list(kn.users_global)
                 candidates = self._get_names(candidates)
                 for kdn_name in candidates:
                     if kdn_name in self.op_name_list[i:next_bwd_idx]:
                         no_save_list.append(kdn_name.split(" ")[0])
 
-                for target in op.tensor_targets:
+                for (
+                    target
+                ) in kn.tensor_targets:  # kn.tensor_targets is Tensor of pytorch
                     inplace_code = inplace_code.replace(target, "_" + target)
 
-                l.append(
+                function_list.append(
                     self.fct_run_forward_with_grad(
                         main_code.replace("self.", "original_mod.").replace(
                             "self[", "original_mod["
@@ -165,26 +195,33 @@ class Compiler:
                         no_save_list=no_save_list,
                     )
                 )
-            l.append(
+            # the detach operation must be performed after in-place operations because they impact data, even though
+            # these in-place operations can be applied to views and not directly to the original tensor
+            function_list.append(
                 self.fct_run_forward_with_grad(
                     inplace_code.replace("self.", "original_mod.").replace(
                         "self[", "original_mod["
                     ),
                 )
             )
-            for inplace_target in op.inplace_targets:
-                if inplace_target != op.main_target:
-                    l.append(
+
+            # inplace_targets: the in-place operation variable
+            for inplace_target in kn.inplace_targets:
+                if inplace_target != kn.main_target:
+                    function_list.append(
                         self.fct_del_var(
                             f"_{inplace_target}",
                         )
                     )
-
+            # This detach operation must take place before the creation of various independent views,
+            # otherwise we would have to detach each view independently, which is impossible in PyTorch
             if detach:
-                l.append(self.fct_run_detach(op.main_target))
+                function_list.append(self.fct_run_detach(kn.main_target))
             else:
-                l.append(self.fct_fake_detach(op.main_target))
-            l.append(
+                function_list.append(self.fct_fake_detach(kn.main_target))
+
+            # add body_code functions in the list
+            function_list.append(
                 self.fct_run_forward_with_grad(
                     body_code.replace("self.", "original_mod.").replace(
                         "self[", "original_mod["
@@ -193,115 +230,152 @@ class Compiler:
             )
 
         # get the shape of tensors
-        if not rec:
-            if op.proxy:
-                l.append(self.fct_get_shapes(f"_{op.main_target}"))
-            for target in op.tensor_targets:
-                l.append(self.fct_get_shapes(target))
-        return l
+        if not recomputation:
+            if kn.proxy:
+                function_list.append(self.fct_get_shapes(f"_{kn.main_target}"))
+            for target in kn.tensor_targets:
+                function_list.append(self.fct_get_shapes(target))
+        return function_list
 
-    def get_bwd(self, op, i, detach=True):
+    def get_bwd(self, kn, i, detach=True):
+        """get backward part functions
+
+        Parameters: kn: computation/data node in H Graph at operation i
+                    i : index of the operation in the op schedule
+                    detach : if detach is false, we use pytorch's backward
+        """
         if not detach:
             return []
-        rec = op.name in self.op_name_list[:i]
+
+        recomputation = kn.name in self.op_name_list[:i]
         last = True
-        if op.name in self.op_name_list[i + 1 :]:  # not the last bwd
-            next_bwd_idx = i + 1 + self.op_name_list[i + 1 :].index(op.name)
+        if kn.name in self.op_name_list[i + 1 :]:  # not the last bwd
+            next_bwd_idx = i + 1 + self.op_name_list[i + 1 :].index(kn.name)
             no_fwd_before_bwd = not (
-                op.name.replace("bwd", "fwd") in self.op_name_list[i + 1 : next_bwd_idx]
+                kn.name.replace("bwd", "fwd") in self.op_name_list[i + 1 : next_bwd_idx]
             )
             if no_fwd_before_bwd:
                 last = False
-        l = []
-        l2 = []
 
-        if op.is_rand:
-            if not rec:
-                l.append(self.fct_get_rng_state(op.name))
+        backward_function_list = []
+        delete_tensor_function_list = []
+
+        if kn.is_rand:
+            if not recomputation:
+                backward_function_list.append(self.fct_get_rng_state(kn.name))
             else:
-                l.append(self.fct_restore_rng_state(op.name))
+                backward_function_list.append(self.fct_restore_rng_state(kn.name))
 
         temporary_tensor_names = [
             kdn_name.split(" ")[0]
-            for kdn_name in self._get_names(op.deps_fake)
+            for kdn_name in self._get_names(kn.deps_fake)
             if not self._is_alive(kdn_name, i)
         ]
-        if op.main_target in temporary_tensor_names:
-            temporary_tensor_names.append(f"_{op.main_target}")
+        if kn.main_target in temporary_tensor_names:
+            temporary_tensor_names.append(f"_{kn.main_target}")
         for tensor_name in temporary_tensor_names:
-            l.append(self.fct_generate_fake_data(tensor_name))
-            l2.append(self.fct_del_tensor_data(tensor_name))
-        if rec:
-            prev_i = i - self.op_name_list[:i][::-1].index(op.name) - 1
+            backward_function_list.append(self.fct_generate_fake_data(tensor_name))
+            delete_tensor_function_list.append(self.fct_del_tensor_data(tensor_name))
+
+        if recomputation:
+            prev_i = i - self.op_name_list[:i][::-1].index(kn.name) - 1
             input_names = []
-            for kdn in op.users_global:
+            for kdn in kn.users_global:
                 if f"{kdn.name}" in self.op_name_list[prev_i:i]:
                     input_names.append(kdn.name.split(" ")[0])
             if input_names:
-                l.append(
+                backward_function_list.append(
                     self.fct_run_backward_with_inputs(
-                        op.main_target,
+                        kn.main_target,
                         retain_graph=(not last),
                         input_names=input_names,
                     )
                 )
         else:
-            l.append(self.fct_run_backward(op.main_target, retain_graph=(not last)))
+            backward_function_list.append(
+                self.fct_run_backward(kn.main_target, retain_graph=(not last))
+            )
 
-        return l + l2
+        return backward_function_list + delete_tensor_function_list
 
-    def get_del_data(self, op, i):
-        l = []
-        l.append(self.fct_del_tensor_data(op.main_target))
-        if op.info is not None and op.info.requires_grad:
-            l.append(self.fct_del_tensor_data(f"_{op.main_target}"))
-        if op.includes_base:
-            l.append(self.fct_del_tensor_base(op.main_target))
-        for v in op.tensor_targets:
-            l.append(self.fct_del_tensor_data(v))
-        for v in op.container_targets:
-            l.append(self.fct_del_var(v))
+    def get_del_data(self, kn, i):
+        function_list = []
+        function_list.append(self.fct_del_tensor_data(kn.main_target))
+        if kn.info is not None and kn.info.requires_grad:
+            function_list.append(self.fct_del_tensor_data(f"_{kn.main_target}"))
+        if kn.includes_base:
+            function_list.append(self.fct_del_tensor_base(kn.main_target))
+        for v in kn.tensor_targets:
+            function_list.append(self.fct_del_tensor_data(v))
+        for v in kn.container_targets:
+            function_list.append(self.fct_del_var(v))
         # l.append(self.fct_del_var(f"_{op.main_target}"))
 
-        return l
+        return function_list
 
-    def get_del_grad(self, op, i):
-        return [self.fct_del_tensor_grad(op.main_target)]
+    def get_del_grad(self, kn, i):
+        return [self.fct_del_tensor_grad(kn.main_target)]
 
-    def compile(self, op_sched):
-        self.op_sched = op_sched
-        self.op_name_list = op_sched.op_name_list
-        self.alive_list = op_sched.alive_list
+    def get_prefetch(self, kn, before_idx=None, after_idx=None):
+        function_list = []
+        # function_list.append(self.fct_mem_alloc(kn.main_target))
+        function_list.append(self.fct_prefetch(kn.main_target, after_idx=after_idx))
+        return function_list
 
-        fct_list = []
-        for i, op in enumerate(op_sched.op_list):
-            if "fwd" in op.name:
-                setattr(op.kcn, "proxy", op.proxy)
-                fct_list.append(self.get_fwd(op.kcn, i))
-            elif "bwd" in op.name:
-                fct_list.append(self.get_bwd(op.kcn, i))
-            elif "data" in op.name:
-                fct_list.append(self.get_del_data(op.kdn, i))
-            elif "grad" in op.name:
-                fct_list.append(self.get_del_grad(op.kdn, i))
-            else:
-                fct_list.append([])
-        return fct_list
+    def get_offload(self, kn, before_idx=None, after_idx=None):
+        function_list = []
+        function_list.append(self.fct_offload(kn.main_target, after_idx=after_idx))
+        return function_list
 
+    # H-rockmate
     def compile_from_schedule(self, op_sched):
         fct_list = []
         # self.op_name_list = op_sched.op_name_list
         self.op_name_list = [
             (op.name if not op.disabled else "") for op in op_sched.op_list
         ]
+        self.op_list = op_sched.op_list
         self.alive_list = op_sched.alive_list
+        self.prf_list = op_sched.prf_list
+        self.ofl_list = op_sched.ofl_list
         self.op_sched = False
+        page_fct = {i: [] for i in range(len(op_sched.op_list))}
+        page_fct[None] = []
+        wait_op = []
+        for op in op_sched.prf_list:
+            if op.disabled:
+                continue
+            after_idx = None
+            if op.after in self.op_list:
+                after_idx = self.op_list.index(op.after)
+            page_fct[after_idx].extend(self.get_prefetch(op.kn, after_idx=after_idx))
+            wait_op.append(op.before)
+        for op in op_sched.ofl_list:
+            if op.disabled:
+                continue
+            after_idx = None
+            if op.after in self.op_list:
+                after_idx = self.op_list.index(op.after)
+            page_fct[after_idx].extend(self.get_offload(op.kn, after_idx=after_idx))
+        wait_op.append(op.before)
+
+        fct_list = [page_fct[None]]
+
         for i, op in enumerate(op_sched.op_list):
             kn = op.kn
+            if op in wait_op:
+                fct_list.append(
+                    [
+                        self.fct_wait_stream(
+                            self.gd["main_stream"], self.gd["prefetch_stream"]
+                        )
+                    ]
+                )
             if op.disabled:
                 fct_list.append([])
                 continue
-            if "fwd" in op.kn.name:
+
+            elif "fwd" in op.kn.name:
                 for kdn in op.kn.users:
                     if kdn.kdn_type != "data":
                         continue
@@ -317,6 +391,82 @@ class Compiler:
                 fct_list.append([])
 
         return fct_list
+
+    def fct_snychronize(self):
+        def fct():
+            torch.cuda.synchronize()
+
+        return fct
+
+    def fct_record_cuda(self, i, stream=None):
+        stream = stream or self.gd["main_stream"]
+
+        def fct():
+            assert i not in self.storage.ld["events"]
+            self.storage.ld["events"][i] = stream.record_event()
+
+        return fct
+
+    def fct_wait_stream(self, stream, wait_stream):
+        def fct():
+            stream.wait_stream(wait_stream)
+
+        return fct
+
+    def fct_prefetch(self, var_name, after_idx=None, stream=None, range=[]):
+        device = self.gd["device"]
+        stream = stream or self.gd["prefetch_stream"]
+        range = range or [None, None]
+
+        def prefetch():
+            if after_idx:
+                stream.wait_event(self.storage.ld["events"][after_idx])
+            # stream.wait_stream(self.gd["main_stream"])
+            with torch.cuda.stream(stream):
+                self.storage.ld[var_name].data = self.storage.ld[f"cpu_{var_name}"].to(
+                    device
+                )
+                self.storage.ld[f"_{var_name}"].data = self.storage.ld[
+                    f"{var_name}"
+                ].data
+
+        return prefetch
+
+    def fct_offload(self, var_name, after_idx=None, stream=None, range=[]):
+        device = self.gd["device"]
+        stream = stream or self.gd["offload_stream"]
+        range = range or [None, None]
+
+        def offload():
+            # stream.wait_stream(self.gd["main_stream"])
+            if after_idx:
+                stream.wait_event(self.storage.ld["events"][after_idx])
+            with torch.cuda.stream(stream):
+                self.storage.ld[f"cpu_{var_name}"].copy_(
+                    self.storage.ld[var_name], non_blocking=True
+                )
+
+        return offload
+
+    def fct_mem_alloc(self, var_name, stream=None):
+        stream = stream or self.gd["main_stream"]
+
+        def mem_alloc():
+            with torch.cuda.stream(stream):
+                self.storage.ld[var_name].data = torch.empty(
+                    self.storage.shapes[var_name]
+                )
+
+        return mem_alloc
+
+    def fct_mem_dealloc(self, var_name, stream=None):
+        stream = stream or self.gd["main_stream"]
+
+        def mem_dealloc():
+            with torch.cuda.stream(stream):
+                self.storage.ld[var_name] = torch.empty(0)
+
+        return mem_dealloc
 
     #  ==================================
     #  = ELEMENTARY COMPILING FUNCTIONS =
@@ -362,6 +512,9 @@ class Compiler:
         def fct():
             self.storage.shapes[tensor_name] = self.storage.ld[tensor_name].shape
             self.storage.dtypes[tensor_name] = self.storage.ld[tensor_name].dtype
+            self.storage.ld[f"cpu_{tensor_name}"] = torch.empty(
+                self.storage.ld[tensor_name].shape
+            )
 
         return fct
 
@@ -396,9 +549,6 @@ class Compiler:
 
     def fct_run_inplace(self, tensor_name, inplace_code):
         def fct():
-            # ld = {tensor_name: self.storage.ld[f"_{tensor_name}"]}
-            # code = f"{tensor_name} = x\n{inplace_code}"
-            # print(tensor_name, inplace_code)
             exec(inplace_code, self.gd, self.storage.ld)
 
         return fct
@@ -429,6 +579,10 @@ class Compiler:
         return fct
 
     def fct_run_backward(self, tensor_name, retain_graph):
+        """
+        to return function of backward operations
+        """
+
         def fct():
             self.storage.ld[f"_{tensor_name}"].backward(
                 self.storage.ld[tensor_name].grad, retain_graph=retain_graph
@@ -489,116 +643,4 @@ class Compiler:
 
         return fct
 
-        # endregion
-
-
-def kn_list_peak_mem(kn_list, kg, refine_list=False):
-    kdn_names = set(kn.name for kn in kn_list if isinstance(kn, K_D_node)).union(
-        set(kdn.name for kn in kn_list if isinstance(kn, K_C_node) for kdn in kn.users)
-    )
-
-    def refine(kn_list):
-        for i, kn in enumerate(kn_list):
-            if hasattr(kn, "is_fwd") and "loss" in kn.name:
-                kn_list[i] = "Loss"
-            if isinstance(kn, K_D_node):
-                # try to delete KDN
-                src_i = []  # indices of source KCN's after i
-                for kcn in kn.deps:
-                    if kcn in kn_list[i:]:
-                        src_i.append(kn_list[i:].index(kcn) + i)
-                    else:
-                        src_i.append(len(kn_list))
-
-                next_used_i = len(kn_list)  # the next index to use KDN
-                for kcn in kn.users_real:
-                    if kcn in kn_list[i:]:
-                        next_used_i = min(kn_list[i:].index(kcn) + i, next_used_i)
-
-                if max(src_i) > next_used_i:  # try to use before regenerate
-                    kn_list[i] = "Disabled_" + kn_list[i].name  # skip this deletion
-
-    if refine_list:
-        refine(kn_list)
-
-    alive_list = []
-    alive_status = {kdn_name: 0 for kdn_name in kdn_names}
-    overhead_list = []
-
-    for kn in kn_list:
-        if isinstance(kn, K_C_node):
-            for kdn in kn.users:
-                alive_status[kdn.name] = 1
-        elif isinstance(kn, K_D_node):
-            alive_status[kn.name] = 0
-
-        alive_list.append(alive_status.copy())
-        if isinstance(kn, K_C_node):
-            overhead_list.append(kn.overhead)
-        else:
-            overhead_list.append(0)
-
-    def optimize(kn_list, alive_list):
-        for i, (kn, alive_status) in enumerate(zip(kn_list, alive_list)):
-            alive_kn_names = [k for k, v in alive_status.items() if v]
-            for kn_name in alive_kn_names:
-                kdn = kg.dict_kn[kn_name]
-                src_i = []  # indices of source KCN's after i
-                for kcn in kdn.deps:
-                    if kcn in kn_list[i + 1 :]:
-                        src_i.append(kn_list[i + 1 :].index(kcn) + i)
-                    else:
-                        src_i.append(len(kn_list))
-
-                next_used_i = len(kn_list)  # the next index to use KDN
-                for kcn in kdn.users_real:
-                    if kcn in kn_list[i:]:
-                        next_used_i = min(kn_list[i:].index(kcn) + i, next_used_i)
-
-                if max(src_i) < next_used_i:  # use only after regenerate
-                    print(f"{kn_name} is alive at {i}-th place")
-                    # kn_list[i] = (
-                    #     "Disabled_" + kn_list[i].name
-                    # )  # skip this deletion
-
-    # optimize(kn_list, alive_list)
-
-    def _sum_mem(alive_status):
-        return sum(kg.dict_kn[k].mem for k, v in alive_status.items() if v)
-
-    return max(
-        [
-            _sum_mem(alive_status) + overhead
-            for alive_status, overhead in zip(alive_list, overhead_list)
-        ]
-    )
-
-
-def save_all(kg):
-    def _can_del(i, kdn):
-        for kcn in kdn.users_real:
-            # if "bwd" in kcn.name:
-            #     continue
-            if kg.list_kcn.index(kcn) > i:
-                return False
-        return True
-
-    kn_list = []
-    alive_list = []
-    alive_status = np.zeros(len(kg.list_kdn), dtype=bool)
-    alive_status[-1] = True
-    for i, kcn in enumerate(kg.list_kcn):
-        kn_list.append(kcn)
-        for kdn in kcn.users:
-            # if "data" not in kdn.kdn_type:
-            #     continue
-            alive_status[kg.list_kdn.index(kdn)] = 1
-        alive_list.append(alive_status.copy())
-        for j, kdn in enumerate(kg.list_kdn):
-            # if kdn in [kg.output_kdn_data, kg.output_kdn_grad]:
-            #     continue
-            if alive_status[j] and _can_del(i, kdn):
-                kn_list.append(kdn)
-                alive_status[j] = 0
-                alive_list.append(alive_status.copy())
-    return kn_list, alive_list
+    # endregion
