@@ -18,7 +18,7 @@ def generate_our_global(sg,model,device):
     our_global["device"] = device
     for inp in sg.whole_model_inputs.union(set(sg.inputs)):
         info = sg.dict_info[inp]
-        x = def_info.generate_val(info,device)
+        x = def_info.generate_value(info,device)
         our_global[inp]=x
     return our_global
 
@@ -43,7 +43,7 @@ def generate_tmp_local(sn,sg,our_global,device):
             # thus we need req of req
             req_sn_mt = req_sn.main_target
             main_info = sg.dict_info[req_sn_mt]
-            req_sn_mt_value = def_info.generate_val(main_info,device)
+            req_sn_mt_value = def_info.generate_value(main_info,device)
             if isinstance(req_sn_mt_value,torch.Tensor):
                 req_sn_mt_value = req_sn_mt_value.clone()
             tmp_local[req_sn_mt] = req_sn_mt_value
@@ -56,7 +56,7 @@ def generate_tmp_local(sn,sg,our_global,device):
                         if req_req_tar in body_code and req_req_tar not in tmp_local:
                             req_req_info = sg.dict_info[req_req_tar]
                             tmp_local[req_req_tar] = (
-                                def_info.generate_val(req_req_info,device))
+                                def_info.generate_value(req_req_info,device))
             exec(body_code,our_global,tmp_local)
     return tmp_local
 
@@ -298,7 +298,7 @@ class inspector():
             self.sn,self.sg,self.our_global,self.device)
         exec(self.code_run_fwd, self.our_global, self.tmp_local)
         self.tmp_local[self.sn.main_target].grad = (
-            def_info.generate_val(self.info,self.device))
+            def_info.generate_value(self.info,self.device))
 
     # measure
     def measure_bwd(self):

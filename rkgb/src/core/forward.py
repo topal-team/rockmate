@@ -92,7 +92,7 @@ class ForwardGraph(base.Graph):
                         todo.extend(list(req_rn.deps))
                         ready.add(req_tar)
                 else:
-                    req_x = def_info.generate_val(req_info,our_global["device"])
+                    req_x = def_info.generate_value(req_info,our_global["device"])
                     if isinstance(req_x,torch.Tensor):
                         req_x = req_x.clone()
                     tmp_local[req_tar] = req_x

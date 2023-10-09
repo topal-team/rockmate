@@ -8,7 +8,7 @@ from src.lowlevel import constants
 from src.lowlevel import measure
 
 # -> all the info concerning a variable/tensor which might be useful
-# -> e.g. to regenerate it, using def_info.generate_val(info,device)
+# -> e.g. to regenerate it, using def_info.generate_value(info,device)
 
 # attributes : 
 # dtype ; variable_type ; tensor_size
@@ -35,13 +35,15 @@ class VariableInfo():
         if value is None:
             self.variable_type = None
         else:
+            # 1) Find the variable_type: either a size or type(value)
             if (isinstance(value,int) or
                 (isinstance(value,torch.Tensor)
                 and not value.requires_grad
                 and value.shape==torch.Size([]))):
-                self.variable_type = tt = torch.Size
-            else: self.variable_type = tt = type(value)
-            if tt==torch.Size:
+                self.variable_type = torch.Size
+            else: self.variable_type = type(value)
+            # 2) Fill attributes: size/dtype/requires_grad etc
+            if self.variable_type==torch.Size:
                 self.tensor_size = (
                     value if isinstance(value,int) else value.clone())
                 self.requires_grad = False
@@ -50,15 +52,43 @@ class VariableInfo():
                 self.tensor_size = value.shape
                 self.dtype = value.dtype
                 self.requires_grad = value.requires_grad
-                self.memsize = (
-                    int(measure.tensorMsize(value)))
-            elif tt==tuple or tt==list:
+                self.memsize = int(measure.tensorMsize(value))
+            elif self.variable_type==tuple or self.variable_type==list:
                 self.sub_info = [VariableInfo(y) for y in value]
-                self.requires_grad = any([sub.requires_grad for sub in self.sub_info])
+                self.requires_grad = any([
+                    sub_var.requires_grad 
+                    for sub_var in self.sub_info])
             else:
                 raise Exception(
-                    f"The type {tt} is not supported for VariableInfo")
+                    f"The type `{self.variable_type}` "\
+                    f"is not supported for VariableInfo")
             
+
+    def generate_value(self,device):
+        if self.variable_type==torch.Size:
+            return self.tensor_size
+        elif self.variable_type==torch.Tensor:
+            if self.dtype in constants.int_dtype:
+                return torch.randint(128,self.tensor_size,
+                    dtype=self.dtype,
+                    requires_grad=self.requires_grad,
+                    device=device)
+            elif self.dtype in constants.bool_dtype:
+                return torch.randint(2,self.tensor_size,
+                    dtype=self.dtype,
+                    requires_grad=self.requires_grad,
+                    device=device)
+            else: # float or complex
+                return torch.randn(self.tensor_size,
+                    dtype=self.dtype,
+                    requires_grad=self.requires_grad,
+                    device=device)
+        else:
+            assert(self.variable_type==tuple or self.variable_type==list)
+            value = [sub_var.generate_value(device) for sub_var in self.sub_info]
+            return self.variable_type(value)
+
+
     @staticmethod
     def has_a_data_ptr(value):
         return (
@@ -112,31 +142,6 @@ class VariableInfo():
         return clone
 
 
-
-def generate_val(info,device):
-    tt = info.variable_type
-    if tt==torch.Size:
-        return info.tensor_size
-    elif tt==torch.Tensor:
-        if info.dtype in constants.int_dtype:
-            return torch.randint(128,info.tensor_size,
-                dtype=info.dtype,
-                requires_grad=info.requires_grad,
-                device=device)
-        elif info.dtype in constants.bool_dtype:
-            return torch.randint(2,info.tensor_size,
-                dtype=info.dtype,
-                requires_grad=info.requires_grad,
-                device=device)
-        else: # float or complexe
-            return torch.randn(info.tensor_size,
-                dtype=info.dtype,
-                requires_grad=info.requires_grad,
-                device=device)
-    else:
-        assert(tt==list or tt==tuple)
-        x = [generate_val(sub_info,device) for sub_info in info.sub_info]
-        return tt(x)
 
 # ==========================
 
