@@ -287,6 +287,10 @@ def get_single_compute_op_list(
         for kcn in kdn.users_real:
             if kcn in list_kcn[i + 1 :]:
                 return False
+        if kdn in cluster.loss_kcn.deps_real:
+            return False
+        if kdn in cluster.interfaces["inputs_kdn_data"]:
+            return False
         return True
 
     op_list = []
@@ -302,6 +306,8 @@ def get_single_compute_op_list(
         # if i == cluster.loss_idx:
         #     loss_idx = len(op_list)
         for kdn in kcn.users:
+            if "phantom" in kdn.name and ff:
+                continue
             alive_status[kdn.name] = 1
         op_list.append(
             Op(
