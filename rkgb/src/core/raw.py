@@ -61,6 +61,7 @@ class RawNode(base.Node):
         self.deps_rand : set[str] = set()
         # TO REMOVE
         # self.deps : set[RawNode] = deps if deps is not None else set()
+        self.deps = set()
         if raw_parser is not None: raw_parser.all_raw_nodes.append(self)
 
     def get_all_standard_deps(self):

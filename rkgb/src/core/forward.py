@@ -55,122 +55,76 @@ class ForwardNode(base.Node):
 # * ForwardGraph *
 # ***********
 
+# To explain in the doc :
+# -> to make dict_info we need to run the forward !
+# -> we handle nodes one by one : 
+# 1) generate random input vectors
+# 2) exec the code to generate the node value
+# 3) extract the info for this node, and forget the tensors
 class ForwardGraph(base.Graph):
     def __init__(self,
         raw_graph : RawGraph,
         model,
         dict_inputs : preprocess_samples.DictInputs,
         device,
-        dont_build_dict_info=False,
+        build_dict_info=True,
     ):
         super().__init__("F")
-        # --- init and sort ---
-        dg.inherit_base_attributes(bg)
-        inputs       = dg.inputs
-        d_nodes      = dg.nodes
-        dict_info    = dg.dict_info
-        dict_nodes   = dict()
-        b_nodes      = sort_nodes(bg)
+        self.inherit_base_attributes(raw_graph) # => dict_rand / dict_constants
+        self.sources_req_grad = False # by default
 
+        raw_nodes = raw_graph.get_toposorted_list_of_non_useless_nodes()
+        dict_nodes = dict()
+        dict_inplace_ops = dict() 
+        # dict : main target -> set targets of related inplace operations
 
-    def generate_deep_tmp_local(self,raw_node,our_global):
-        # To generate an environment where to run raw_node's code,
-        # we generate its dependencies, either using the info 
-        # (about shape, dtype etc) we previously collected, 
-        # or by running their code in case of view or inplace nodes, 
-        # in which case we first (i) generate their dependencies, 
-        # using dict_info; and also (ii) its random dependencies.
-        tmp_local = dict()
-        done = set()
-        ready = set()
-        todo = list(raw_node.deps)
-        while todo != []:
-            req_rn = todo[-1]
-            req_tar = req_rn.target
-            if req_tar in done:
-                todo.pop()
-            else:
-                req_info = self.dict_info[req_tar]
-                if (req_info.is_inplace 
-                or  req_info.is_view
-                or  req_rn.fct == "getattr"):
-                    if req_tar in ready:
-                        for req_rd in req_rn.deps_rand:
-                            if not req_rd in done:
-                                code = ast_add_on.make_str_assign(
-                                    (req_rd,self.dict_rand[req_rd]))
-                                exec(code,our_global,tmp_local)
-                                done.add(req_rd)
-                        exec(req_rn.get_code(),our_global,tmp_local)
-                        done.add(req_tar)
-                        todo.pop()
-                    else:
-                        todo.extend(list(req_rn.deps))
-                        ready.add(req_tar)
-                else:
-                    req_x = req_info.generate_value(our_global["device"])
-                    if isinstance(req_x,Tensor):
-                        req_x = req_x.clone()
-                    tmp_local[req_tar] = req_x
-                    done.add(req_tar)
-                    todo.pop()
-        return tmp_local
+        our_global = globals().copy()
+        our_global["self"] = model
+        our_global["device"] = device
+        our_global.update(self.dict_constants)
 
+        # Translate each node one by one following the topo-order
+        rn : RawNode
+        for rn in raw_nodes:
+            fn = ForwardNode(rn.target,rn.code_ast,rn.fct,
+                    is_rand = rn.is_rand,
+                    deps_rand = set(rn.deps_rand),
+                    forward_graph=self)
+            # inputs:
+            if rn.is_input:
+                self.inputs.append(rn.target)
+                fn.is_input = True
+                self.dict_info[rn.target] \
+                    = input_info = variable_info.VariableInfo(
+                        dict_inputs[rn.target],
+                        data_owner_name = rn.target)
+                if input_info.requires_grad:
+                    self.sources_req_grad = True
+            # deps:
+            for req_rn in rn.deps:
+                req_fn = dict_nodes[req_rn.target]
+                fn.deps.add(req_fn)
+                req_fn.users.add(fn)
+            dict_nodes[rn.target] = fn
+            self.nodes.append(fn)
 
-    def prepare_cut(self):
-        # in case, after simplifications, we will cut / sequentialize
-        # we need to protect the separators from "cheap" simplifications
-        seps = RK_get_1_separators(self)
-        for sep in seps: sep.protected = True
+            # info :
+            if not build_dict_info:
+                self.dict_info[fn.target] = variable_info.VariableInfo()
+            elif not rn.is_input:
+                # 1) Run node's code to generate the value
+                tmp_local = self.generate_deep_tmp_local(rn,our_global)
+                try: exec(
+                    rn.get_code(force_special_kwargs=True),
+                    our_global,tmp_local
+                )
+                except:
 
-# ==========================
+        
+
 
 
             
-    # --- translate B node to D and make dict_info ---
-    # -> to make dict_info we need to run the forward !
-    # -> we handle nodes one by one : 
-    # 1) generate random input vectors
-    # 2) exec the code to generate the node value
-    # 3) extract the info for this node, and forget the tensors
-    our_global = globals().copy()
-    our_global["self"] = model
-    our_global["device"] = device
-    our_global.update(bg.dict_constants)
-    
-    dict_inplace_ops = dict() # dict : main target -> set targets of inplace stuff
-
-    sources_req_grad = False
-    for bn in b_nodes:
-        # -- translate B node to D --
-        dn = ForwardNode(bn.target,bn.code_ast,bn.fct,
-                is_rand = bn.is_rand,
-                deps_rand = set(bn.deps_rand),
-                other_obj=dg)
-        if bn.is_input:
-            inputs.append(bn.target)
-            dn.is_input = True
-            dict_info[bn.target] = input_info = def_info.VariableInfo(
-                dict_inputs[bn.target],
-                data_owner_name = bn.target)
-            if input_info.requires_grad:
-                sources_req_grad = True
-        for req_bn in bn.deps:
-            req_dn = dict_nodes[req_bn.target]
-            dn.deps.add(req_dn)
-            req_dn.users.add(dn)
-        dict_nodes[bn.target] = dn
-        d_nodes.append(dn)
-
-        # -- run local forward to get info --
-        if dont_build_dict_info:
-            dict_info[bn.target] = def_info.VariableInfo()
-        elif not bn.is_input:
-            tmp_local = generate_deep_tmp_local(dg,bn,our_global)
-            try:
-                exec(
-                    bn.get_code(force_special_kwargs=True), 
-                    our_global, tmp_local)
             except:
                 # Something bad happened on jit.trace's Python code
                 # -> for instance a dtype has been replaced by an integer 
@@ -283,7 +237,7 @@ class ForwardGraph(base.Graph):
 
             del tmp_local
 
-    dg.sources_req_grad = sources_req_grad 
+        dg.sources_req_grad = sources_req_grad 
 
 
     # --- translate output ---
@@ -356,9 +310,62 @@ class ForwardGraph(base.Graph):
 
 
 
-    # -- prepares the sequencing --
-    dg.prepare_cut()
-    return dg
+        # -- prepares the sequencing --
+        dg.prepare_cut()
+        return dg
+
+
+    def generate_deep_tmp_local(self,raw_node,our_global):
+        # To generate an environment where to run raw_node's code,
+        # we generate its dependencies, either using the info 
+        # (about shape, dtype etc) we previously collected, 
+        # or by running their code in case of view or inplace nodes, 
+        # in which case we first (i) generate their dependencies, 
+        # using dict_info; and also (ii) its random dependencies.
+        tmp_local = dict()
+        done = set()
+        ready = set()
+        todo = list(raw_node.deps)
+        while todo != []:
+            req_rn = todo[-1]
+            req_tar = req_rn.target
+            if req_tar in done:
+                todo.pop()
+            else:
+                req_info = self.dict_info[req_tar]
+                if (req_info.is_inplace 
+                or  req_info.is_view
+                or  req_rn.fct == "getattr"):
+                    if req_tar in ready:
+                        for req_rd in req_rn.deps_rand:
+                            if not req_rd in done:
+                                code = ast_add_on.make_str_assign(
+                                    (req_rd,self.dict_rand[req_rd]))
+                                exec(code,our_global,tmp_local)
+                                done.add(req_rd)
+                        exec(req_rn.get_code(),our_global,tmp_local)
+                        done.add(req_tar)
+                        todo.pop()
+                    else:
+                        todo.extend(list(req_rn.deps))
+                        ready.add(req_tar)
+                else:
+                    req_x = req_info.generate_value(our_global["device"])
+                    if isinstance(req_x,Tensor):
+                        req_x = req_x.clone()
+                    tmp_local[req_tar] = req_x
+                    done.add(req_tar)
+                    todo.pop()
+        return tmp_local
+
+
+    def prepare_cut(self):
+        # in case, after simplifications, we will cut / sequentialize
+        # we need to protect the separators from "cheap" simplifications
+        seps = RK_get_1_separators(self)
+        for sep in seps: sep.protected = True
+
+# ==========================
 
 # ==========================
 
