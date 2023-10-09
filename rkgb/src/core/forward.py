@@ -2,6 +2,7 @@
 # ====== D structure =======
 # ==========================
 
+from torch import Tensor
 from src.lowlevel import ast_add_on
 from src.lowlevel import variable_info
 from src.core import base
@@ -30,7 +31,8 @@ class ForwardNode(base.Node):
         .users     : ForwardNode set : reciprocal of .deps
         .protected : bool : whether self is a 1-separator of the graph
         """
-        super().__init__("D",other_obj,target=target)
+        super().__init__("F",target,
+            parent_structure_with_id_generator=forward_graph)
         if code_ast is None:
             code_ast = ast_add_on.make_ast_constant("/!\\ not defined /!\\")
         self.code_ast = code_ast
@@ -92,8 +94,8 @@ class ForwardGraph(base.Graph):
                         todo.extend(list(req_rn.deps))
                         ready.add(req_tar)
                 else:
-                    req_x = def_info.generate_value(req_info,our_global["device"])
-                    if isinstance(req_x,torch.Tensor):
+                    req_x = req_info.generate_value(our_global["device"])
+                    if isinstance(req_x,Tensor):
                         req_x = req_x.clone()
                     tmp_local[req_tar] = req_x
                     done.add(req_tar)
@@ -274,7 +276,7 @@ def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False
                     data_parents = set()
                     for req_bn in bn.deps:
                         req_info = dict_info[req_bn.mt]
-                        if req_info.variable_type is torch.Tensor:
+                        if req_info.variable_type is Tensor:
                             data_parents.add(req_bn.mt)
                     if data_parents != set():
                         if bn.fct in global_vars.list_inplace_fct:
