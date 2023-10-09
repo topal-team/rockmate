@@ -307,7 +307,8 @@ class Graph():
     def __hash__(self):
         return id(self)
     
-
+    """
+    # TO REMOVE
     def _check_all_constructor_arguments_are_not_None(self,*args):
         if None in args:
             raise Exception(
@@ -316,10 +317,11 @@ class Graph():
                 f"rather use the main class of rkgb: \nIn your case: "\
                 f"`rkgb.Build(model,samples,\"{type(self).__name__}\")`"
             )
+    """
     
 
     @staticmethod
-    def get_sorted_nodes_by_following_deps_relation_from_origin(
+    def get_sorted_nodes_by_following_relation_deps(
             origin_node : Node):
         """Toposort nodes
         /!\ origin_node is the source of .deps relation 

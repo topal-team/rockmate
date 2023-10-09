@@ -122,7 +122,7 @@ class RawGraph(base.Graph):
        which gives the source of the "deps" relation
     """
     def __init__(self,
-            model,
+            model : torch.nn.Module,
             dict_inputs : preprocess_samples.DictInputs,
             impose_device=True
         ):
@@ -141,6 +141,56 @@ class RawGraph(base.Graph):
         self.nodes = parser.all_raw_nodes
         self.dict_rand = parser.dict_rand
         self.dict_constants = parser.dict_constants
+
+
+    def get_toposorted_list_of_non_useless_nodes(self):
+        # While parsing we create a node for every piece
+        # of code, including e.g. "fv_10 = [1,1]", but 
+        # usually code pieces that don't have dependencies, 
+        # are inserted directly where they are used
+        # ie use "a = f([1,1])", instead of "a = f(fv_10)"
+        # with "fv_10 = [1,1]".
+        # TO CHANGE ? (see multiple_outputs branch ???)
+        # 1) Trace through the deps relation from the output
+        if not self.output_raw_var.has_node:
+            list_raw_nodes = []
+        else:
+            list_raw_nodes \
+                = base.Graph.get_sorted_nodes_by_following_relation_deps(
+                self.output_raw_var.node)
+            
+        # 2) Reinsert some nodes (which are missing because they don't
+        # have any users in the deps relation of the output_node,
+        # but might still be important: e.g. some inplace operations).
+        # TO IMPROVE / CHANGE ??? I think its kind greedy strategy...
+        to_insert_back = [
+            rn for rn in self.nodes
+            if (rn not in list_raw_nodes
+            and len(rn.deps)!=0)]
+        to_insert_back.sort(key=base.Node.get_num)
+        to_insert_back = to_insert_back[::-1]
+        while to_insert_back != []:
+            retry_list = []
+            for rn in to_insert_back:
+                index_deps = []
+                fail = False
+                for req_rn in rn.deps:
+                    if req_rn not in list_raw_nodes:
+                        fail = True
+                        break
+                    else:
+                        index_deps.append(list_raw_nodes.index(req_rn))
+                if fail:
+                    retry_list.append(rn)
+                    continue
+                else:
+                    max_index = max(index_deps)
+                    list_raw_nodes.insert(max_index+1,rn)
+            if retry_list == to_insert_back:
+                to_insert_back = [] # -> Give up
+            else:
+                to_insert_back = retry_list
+        return list_raw_nodes
 
 
     def __str__(self):

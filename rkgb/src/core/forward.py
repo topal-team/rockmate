@@ -5,6 +5,7 @@
 from torch import Tensor
 from src.lowlevel import ast_add_on
 from src.lowlevel import variable_info
+from src.lowlevel import preprocess_samples
 from src.core import base
 from src.core.raw import RawNode,RawGraph
 
@@ -55,8 +56,21 @@ class ForwardNode(base.Node):
 # ***********
 
 class ForwardGraph(base.Graph):
-    def __init__(self):
+    def __init__(self,
+        raw_graph : RawGraph,
+        model,
+        dict_inputs : preprocess_samples.DictInputs,
+        device,
+        dont_build_dict_info=False,
+    ):
         super().__init__("F")
+        # --- init and sort ---
+        dg.inherit_base_attributes(bg)
+        inputs       = dg.inputs
+        d_nodes      = dg.nodes
+        dict_info    = dg.dict_info
+        dict_nodes   = dict()
+        b_nodes      = sort_nodes(bg)
 
 
     def generate_deep_tmp_local(self,raw_node,our_global):
@@ -112,66 +126,6 @@ class ForwardGraph(base.Graph):
 # ==========================
 
 
-# ==========================
-# = Move from B to D graph =
-# ==========================
-
-def sort_nodes(g : B_graph): # -> B_node list 
-    # use output's node and trace everything
-    # /!\ never trust B_graph.nodes
-    o_var = g.output_var
-    if not o_var.has_node: return []
-    else: return RK_sort_based_on_deps(o_var.node)
-
-
-
-# ==========================
-
-# ===== Main function ======
-
-def B_to_D(bg : B_graph,model,dict_inputs,device=None,dont_build_dict_info=False):
-    if not device:
-        device = small_fcts.get_device_and_check_all_same_device(
-            model,dict_inputs)
-
-    # --- init and sort ---
-    dg = ForwardGraph()
-    dg.inherit_base_attributes(bg)
-    inputs       = dg.inputs
-    d_nodes      = dg.nodes
-    dict_info    = dg.dict_info
-    dict_nodes   = dict()
-    b_nodes      = sort_nodes(bg)
-
-    # -- Fix B_nodes without users --
-    to_insert_back = [
-        bn for bn in bg.nodes
-        if (bn not in b_nodes
-        and len(bn.deps)!=0)]
-    to_insert_back.sort(key=base.Node.get_num)
-    to_insert_back = to_insert_back[::-1]
-    while to_insert_back != []:
-        retry_list = []
-        for bn in to_insert_back:
-            index_deps = []
-            fail = False
-            for req_bn in bn.deps:
-                if req_bn not in b_nodes:
-                    fail = True
-                    break
-                else:
-                    index_deps.append(b_nodes.index(req_bn))
-            if fail:
-                retry_list.append(bn)
-                continue
-            else:
-                max_index = max(index_deps)
-                b_nodes.insert(max_index+1,bn)
-        if retry_list == to_insert_back:
-            to_insert_back = [] # -> Give up
-        else:
-            to_insert_back = retry_list
-    # ------
             
     # --- translate B node to D and make dict_info ---
     # -> to make dict_info we need to run the forward !
