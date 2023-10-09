@@ -68,13 +68,13 @@ class HILP(Solver):
             print("Using GUROBI to solve ILP")
         else:
             self.model_ilp = ModelPULP
-            # print(f"Using {solver_name[0]} to solve ILP")
             try:
                 solver = pulp.get_solver(self.ilp_solver, msg=0)
             except:
                 avail_solver = pulp.listSolvers(onlyAvailable=True)[0]
                 print(f"Cannot get {ilp_solver}, will use {avail_solver}")
                 self.ilp_solver = avail_solver
+            print(f"Using {self.ilp_solver} to solve ILP")
 
     # def __repr__(self):
     #     return f"HILP solver"
