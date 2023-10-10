@@ -125,7 +125,7 @@ class ForwardGraph(base.Graph):
                     )
 
             self.dict_info[rn.target] = self.detect_inplace_or_view(
-                rn,tmp_local,dict_nodes)
+                rn,tmp_local,dict_nodes,dict_inplace_ops)
             del tmp_local
         
 
@@ -251,7 +251,9 @@ class ForwardGraph(base.Graph):
     def detect_inplace_or_view(self,
             current_raw_node,
             current_forward_node,
-            tmp_local,dict_nodes):
+            tmp_local,
+            dict_nodes,
+            dict_inplace_ops):
         # - detect inplace operation -
         current_rn_value = tmp_local[current_raw_node.target]
         is_view    = False # by default
@@ -312,16 +314,16 @@ class ForwardGraph(base.Graph):
             # -> If several inplace operations 
             # -> We must ensure we compute them in the original order
             if is_inplace:
-                for other_inplace_op in self.dict_inplace_ops[data_owner_name]:
+                for other_inplace_op in dict_inplace_ops[data_owner_name]:
                     other_fn = dict_nodes[other_inplace_op]
                     other_fn.users.add(current_forward_node)
                     current_forward_node.deps.add(other_fn)
-                self.dict_inplace_ops[data_owner_name].add(current_forward_node.mt)
+                dict_inplace_ops[data_owner_name].add(current_forward_node.mt)
                 
         else:
             data_owner_name = current_raw_node.target
             data_direct_parent_name = current_raw_node.target
-            self.dict_inplace_ops[current_raw_node.mt] = set()
+            dict_inplace_ops[current_raw_node.mt] = set()
         info = variable_info.VariableInfo(
             current_rn_value,
             is_view    = is_view,
