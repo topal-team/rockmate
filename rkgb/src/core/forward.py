@@ -6,6 +6,7 @@ import ast
 from torch import Tensor
 from src.lowlevel import ast_add_on
 from src.lowlevel import jit_patch
+from src.lowlevel import constants
 from src.lowlevel import variable_info
 from src.lowlevel import preprocess_samples
 from src.core import base
@@ -123,94 +124,10 @@ class ForwardGraph(base.Graph):
                         rn_code_str,our_global,tmp_local
                     )
 
-        
-
-
-
-            
-            # - detect inplace operation -
-            bn_value = tmp_local[bn.target]
-            is_view    = False # by default
-            is_inplace = False # by default
-            data_parents = set()
-
-            # === FIRST WAY TO RECOGNIZE A VIEW ===
-            # -> data_ptr
-            if small_fcts.has_a_data_ptr(bn_value):
-                bn_data_ptr = small_fcts.get_data_ptr(bn_value)
-                for o_name,o_value in tmp_local.items():
-                    if (o_name != bn.target
-                    and o_name in dict_info
-                    and small_fcts.has_a_data_ptr(o_value)
-                    and small_fcts.get_data_ptr(o_value) == bn_data_ptr):
-                        data_parents.add(o_name)
-                        data_owner_name = o_name
-                        if o_value is bn_value: is_inplace = True
-                        else: is_view = True
-
-            # === SECOND WAY TO RECOGNIZE A VIEW ===
-            # -> main_fct is a view/inplace function
-            if not (is_inplace or is_view):
-                if (bn.fct in global_vars.list_view_fct
-                or bn.fct in global_vars.list_inplace_fct):
-                    data_parents = set()
-                    for req_bn in bn.deps:
-                        req_info = dict_info[req_bn.mt]
-                        if req_info.variable_type is Tensor:
-                            data_parents.add(req_bn.mt)
-                    if data_parents != set():
-                        if bn.fct in global_vars.list_inplace_fct:
-                            is_inplace = True
-                        else:
-                            is_view = True
-
-            # === register ===
-            if is_inplace or is_view:
-                bn_deps_names = set(req_bn.target for req_bn in bn.deps)
-                data_direct_parents = bn_deps_names & data_parents
-                if len(data_direct_parents) == 0:
-                    for req_bn in bn.deps:
-                        for req_req_bn in req_bn.deps:
-                            req_req_name = req_req_bn.target
-                            if req_req_name in data_parents:
-                                data_direct_parents.add(req_req_name)
-                if len(data_direct_parents) == 0: raise Exception(
-                    f"{bn.target} is an inplace or view op, it doesn't "\
-                    f"share its data with any of its deps ?! (even deps of deps)")
-                data_direct_parent_name = data_direct_parents.pop()
-                o_info = dict_info[data_direct_parent_name]
-                data_owner_name = o_info.data_owner_name
-                # -> we must protect the data_owner from cheap simplification
-                if is_inplace:
-                    data_owner = dict_nodes[data_owner_name]
-                    data_owner.protected = True
-                # -> If several inplace operations 
-                # -> We must ensure we compute them in the original order
-                if is_inplace:
-                    for other_inplace_op in dict_inplace_ops[data_owner_name]:
-                        other_dn = dict_nodes[other_inplace_op]
-                        other_dn.users.add(dn)
-                        dn.deps.add(other_dn)
-                    dict_inplace_ops[data_owner_name].add(dn.mt)
-                    
-            else:
-                data_owner_name = bn.target
-                data_direct_parent_name = bn.target
-                dict_inplace_ops[bn.mt] = set()
-            dict_info[bn.target] = info = def_info.VariableInfo(
-                bn_value,
-                is_view    = is_view,
-                is_inplace = is_inplace,
-                data_owner_name = data_owner_name,
-                data_direct_parent_name = data_direct_parent_name)
-            # ** Correct req_grad of data_parent **
-            if info.requires_grad:
-                dict_info[info.data_owner_name].requires_grad = True
-
+            self.dict_info[rn.target] = self.detect_inplace_or_view(
+                rn,tmp_local,dict_nodes)
             del tmp_local
-
-        dg.sources_req_grad = sources_req_grad 
-
+        
 
     # --- translate output ---
     o_var = bg.output_var
@@ -329,6 +246,92 @@ class ForwardGraph(base.Graph):
                     done.add(req_tar)
                     todo.pop()
         return tmp_local
+    
+
+    def detect_inplace_or_view(self,
+            current_raw_node,
+            current_forward_node,
+            tmp_local,dict_nodes):
+        # - detect inplace operation -
+        current_rn_value = tmp_local[current_raw_node.target]
+        is_view    = False # by default
+        is_inplace = False # by default
+        data_parents = set() # variables which have the same data_ptr
+
+        # === FIRST WAY TO RECOGNIZE A VIEW ===
+        # -> data_ptr
+        if variable_info.VariableInfo.has_a_data_ptr(current_rn_value):
+            current_rn_data_ptr = variable_info.VariableInfo.get_data_ptr(current_rn_value)
+            for o_name,o_value in tmp_local.items():
+                if (o_name != current_raw_node.target
+                and o_name in self.dict_info
+                and variable_info.VariableInfo.has_a_data_ptr(o_value)
+                and variable_info.VariableInfo.get_data_ptr(o_value) == current_rn_data_ptr):
+                    data_parents.add(o_name)
+                    data_owner_name = o_name
+                    if o_value is current_rn_value: is_inplace = True
+                    else: is_view = True
+
+        # === SECOND WAY TO RECOGNIZE A VIEW ===
+        # -> main_fct is a view/inplace function
+        if not (is_inplace or is_view):
+            if (current_raw_node.fct in constants.list_view_fct
+            or current_raw_node.fct in constants.list_inplace_fct):
+                data_parents = set()
+                for req_rn in current_raw_node.deps:
+                    req_info = self.dict_info[req_rn.mt]
+                    if req_info.variable_type is Tensor:
+                        data_parents.add(req_rn.mt)
+                if data_parents != set():
+                    if current_raw_node.fct in constants.list_inplace_fct:
+                        is_inplace = True
+                    else:
+                        is_view = True
+
+        # === register ===
+        if is_inplace or is_view:
+            current_rn_deps_names = set(
+                req_rn.target for req_rn in current_raw_node.deps)
+            data_direct_parents = current_rn_deps_names & data_parents
+            if len(data_direct_parents) == 0:
+                for req_rn in current_raw_node.deps:
+                    for req_req_rn in req_rn.deps:
+                        req_req_name = req_req_rn.target
+                        if req_req_name in data_parents:
+                            data_direct_parents.add(req_req_name)
+            if len(data_direct_parents) == 0: raise Exception(
+                f"{current_raw_node.target} is an inplace or view op, it doesn't "\
+                f"share its data with any of its deps ?! (even deps of deps)")
+            data_direct_parent_name = data_direct_parents.pop()
+            o_info = self.dict_info[data_direct_parent_name]
+            data_owner_name = o_info.data_owner_name
+            # -> we must protect the data_owner from cheap simplification
+            if is_inplace:
+                data_owner = dict_nodes[data_owner_name]
+                data_owner.protected = True
+            # -> If several inplace operations 
+            # -> We must ensure we compute them in the original order
+            if is_inplace:
+                for other_inplace_op in self.dict_inplace_ops[data_owner_name]:
+                    other_fn = dict_nodes[other_inplace_op]
+                    other_fn.users.add(current_forward_node)
+                    current_forward_node.deps.add(other_fn)
+                self.dict_inplace_ops[data_owner_name].add(current_forward_node.mt)
+                
+        else:
+            data_owner_name = current_raw_node.target
+            data_direct_parent_name = current_raw_node.target
+            self.dict_inplace_ops[current_raw_node.mt] = set()
+        info = variable_info.VariableInfo(
+            current_rn_value,
+            is_view    = is_view,
+            is_inplace = is_inplace,
+            data_owner_name = data_owner_name,
+            data_direct_parent_name = data_direct_parent_name)
+        # ** Correct req_grad of data_parent **
+        if info.requires_grad:
+            self.dict_info[info.data_owner_name].requires_grad = True
+        return info
 
 
     def prepare_cut(self):
