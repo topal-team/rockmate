@@ -2,8 +2,10 @@
 # ====== D structure =======
 # ==========================
 
+import ast
 from torch import Tensor
 from src.lowlevel import ast_add_on
+from src.lowlevel import jit_patch
 from src.lowlevel import variable_info
 from src.lowlevel import preprocess_samples
 from src.core import base
@@ -114,48 +116,18 @@ class ForwardGraph(base.Graph):
             elif not rn.is_input:
                 # 1) Run node's code to generate the value
                 tmp_local = self.generate_deep_tmp_local(rn,our_global)
-                try: exec(
-                    rn.get_code(force_special_kwargs=True),
-                    our_global,tmp_local
-                )
+                rn_code_str = rn.get_code(force_special_kwargs=True)
+                try: exec(rn_code_str,our_global,tmp_local)
                 except:
+                    jit_patch.try_to_fix_dtype_in_returned_ast_code(
+                        rn_code_str,our_global,tmp_local
+                    )
 
         
 
 
 
             
-            except:
-                # Something bad happened on jit.trace's Python code
-                # -> for instance a dtype has been replaced by an integer 
-                # we will try to fix this
-                fixed = [False]
-                def try_to_fix(sub_code): # fix inplace
-                    if isinstance(sub_code,ast.Call):
-                        args_ast = list(sub_code.args)
-                        for i,arg in enumerate(args_ast):
-                            if (ast_add_on.is_constant(arg)
-                            and isinstance(arg.value,int)):
-                                save_value = arg.value
-                                sub_code.args[i] = (
-                                    ast_add_on.make_ast_constant(
-                                    global_vars.get_torchscript_dtype(arg.value)
-                                ) )
-                                try:
-                                    exec(bn.get_code(), our_global, tmp_local)
-                                    fixed[0] = True
-                                    break
-                                except:
-                                    sub_code.args[i] = save_value
-                            else: try_to_fix(arg)
-                code = bn.code_ast
-                try_to_fix(code)
-                if not fixed[0]: raise Exception(
-                    f"Sorry there are some errors in the code generated :"\
-                    f"using jit which make it impossible to exec, the code "\
-                    f"is : {ast_add_on.ast_to_str(code)}"
-                )
-                
             # - detect inplace operation -
             bn_value = tmp_local[bn.target]
             is_view    = False # by default

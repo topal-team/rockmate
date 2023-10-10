@@ -1,5 +1,7 @@
 import sys
 import torch
+import ast
+from src.lowlevel import ast_add_on
 
 torchscript_dtype_numbers = [
     torch.uint8,
@@ -76,3 +78,42 @@ for dtype in float_dtype + int_dtype + bool_dtype:
     print(dtype,end=" ") ; test(dtype) ; print("")
 """
 
+
+def try_to_fix_dtype_in_returned_ast_code(code_ast,our_global,tmp_local):
+    """
+    jit replaces some default calling arguments (kwarg)
+    by numbers, so in raw.py we already removed some 
+    default values; but here we try to fix dtypes args
+    So we look for args which int value, and check if by
+    changing them to dtypes (via the correspondence table 
+    we found, see functions above) it solves the problem.
+    We assume only one arg refers to dtype, so we 
+    try one by one and undo changes if the problem isn't
+    solved. 
+    Note: this function is inplace: it fixes the code if possible.
+    """
+    pieces_of_code_to_check = [code_ast]
+    fixed = False
+    while not fixed and pieces_of_code_to_check != []:
+        piece_of_code = pieces_of_code_to_check.pop()
+        if isinstance(piece_of_code,ast.Call):
+            for i,arg in enumerate(piece_of_code.args):
+                if (ast_add_on.is_constant(arg)
+                and isinstance(arg.value,int)):
+                    save_value = arg.value
+                    piece_of_code.args[i] = (
+                        ast_add_on.make_ast_constant(
+                        get_torchscript_dtype(arg.value)
+                    ) ) # -> inplace change
+                    try:
+                        exec(code_ast, our_global, tmp_local)
+                        fixed[0] = True
+                        break
+                    except:
+                        piece_of_code.args[i] = save_value
+                else: pieces_of_code_to_check.append(arg)
+    if not fixed: raise Exception(
+        f"Sorry there are some hallucinations/bugs in the code generated"\
+        f"by jit tracer which make it impossible to exec, the code "\
+        f"is : {ast_add_on.ast_to_str(code_ast)}"
+    )
