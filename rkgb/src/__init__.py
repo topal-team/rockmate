@@ -1,7 +1,8 @@
-__all__ = ["raw","base"]
+__all__ = ["raw","base","forward"]
 
 from .core import base
 from .core import raw
+from .core import forward
 from . import lowlevel
 
 

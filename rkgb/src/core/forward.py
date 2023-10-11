@@ -5,14 +5,14 @@
 from typing import Union
 import ast
 import warnings
-from torch import Tensor
+import torch
 from src.lowlevel import ast_add_on
 from src.lowlevel import jit_patch
 from src.lowlevel import constants
 from src.lowlevel import preprocess_samples
 from src.lowlevel.variable_info import VariableInfo
 from src.core import base
-from src.core.raw import RawNode,RawGraph
+from src.core.raw import RawNode,RawVar,RawGraph
 
 # **********
 # * ForwardNode *
@@ -101,7 +101,7 @@ class ForwardGraph(base.Graph):
                 self.inputs.append(rn.target)
                 fn.is_input = True
                 input_info = VariableInfo(
-                    dict_inputs[rn.target],
+                    dict_inputs.dict[rn.target],
                     data_owner_name = rn.target)
                 fn.info = self.dict_info[rn.target] = input_info
                 if input_info.requires_grad:
@@ -128,13 +128,13 @@ class ForwardGraph(base.Graph):
                     )
                 fn.info = self.dict_info[rn.target] \
                     = self.detect_inplace_or_view(
-                    rn,tmp_local,dict_nodes,dict_inplace_ops)
+                    rn,fn,tmp_local,dict_nodes,dict_inplace_ops)
                 del tmp_local
         
         # get the output_node: if not requires_grad => raise Exception
         # which is catch in Rockmate, since it implies no Backward
         output_target = self.get_output_node_and_check_if_requires_grad(
-            raw_graph.output_raw_var,dict_nodes)
+            raw_graph.output_raw_var)
         self.outputs = [output_target]
         self.whole_module_output = output_target
 
@@ -169,8 +169,9 @@ class ForwardGraph(base.Graph):
             if req_target in done:
                 todo.pop()
             else:
-                if (req_rn.info.is_inplace 
-                or  req_rn.info.is_view
+                req_rn_info = self.dict_info[req_target]
+                if (req_rn_info.is_inplace 
+                or  req_rn_info.is_view
                 or  req_rn.fct == "getattr"):
                     if req_target in ready:
                         for req_rd in req_rn.deps_rand:
@@ -186,8 +187,8 @@ class ForwardGraph(base.Graph):
                         todo.extend(list(req_rn.deps))
                         ready.add(req_target)
                 else:
-                    req_x = req_rn.info.generate_value(our_global["device"])
-                    if isinstance(req_x,Tensor):
+                    req_x = req_rn_info.generate_value(our_global["device"])
+                    if isinstance(req_x,torch.Tensor):
                         req_x = req_x.clone()
                     tmp_local[req_target] = req_x
                     done.add(req_target)
@@ -228,7 +229,8 @@ class ForwardGraph(base.Graph):
             or current_raw_node.fct in constants.list_inplace_fct):
                 data_parents = set()
                 for req_rn in current_raw_node.deps:
-                    if req_rn.info.variable_type is Tensor:
+                    req_rn_info = self.dict_info[req_rn.target]
+                    if req_rn_info.variable_type is torch.Tensor:
                         data_parents.add(req_rn.mt)
                 if data_parents != set():
                     if current_raw_node.fct in constants.list_inplace_fct:
@@ -270,27 +272,28 @@ class ForwardGraph(base.Graph):
             data_owner_name = current_raw_node.target
             data_direct_parent_name = current_raw_node.target
             dict_inplace_ops[current_raw_node.mt] = set()
-        current_rn_info = VariableInfo(
+        current_node_info = VariableInfo(
             current_rn_value,
             is_view    = is_view,
             is_inplace = is_inplace,
             data_owner_name = data_owner_name,
             data_direct_parent_name = data_direct_parent_name)
         # ** Correct req_grad of data_parent **
-        if current_rn_info.requires_grad:
+        if (current_node_info.requires_grad
+        and current_raw_node.mt != data_owner_name):
             self.dict_info[data_owner_name].requires_grad = True
-        return current_rn_info
+        return current_node_info
     
 
     def get_output_node_and_check_if_requires_grad(
-            self,output_raw_var,dict_nodes):
-        if not isinstance(output_raw_var.val,ast.Name):
+            self,output_raw_var : RawVar):
+        if not isinstance(output_raw_var.value_ast,ast.Name):
             warnings.warn( # TO CHANGE COMMENTS 
                 f"According to Btools module's return isn't a variable."\
                 f"Thus we assume it's a constant. \n"\
                 f"AST type of the output: {type(output_raw_var.val)}")
             raise constants.ExceptionModuleDoesNotReqGrad
-        output_target = output_raw_var.val.id
+        output_target = output_raw_var.value_ast.id
         if not output_raw_var.has_node:
             warnings.warn(
                 f"Btools hasn't attached any node to the output."\
@@ -386,7 +389,6 @@ class ForwardGraph(base.Graph):
                 dot,view,directory,render_format
             )
 
-
     def print_forward_code(self):
         print("def main({}):".format(','.join(self.inputs)))
         for fn in self.nodes:
@@ -394,13 +396,13 @@ class ForwardGraph(base.Graph):
         print("\treturn {}".format(','.join(self.outputs)))
 
     def print_all_nodes(self,print_ast_not_str=True):
-        for rn in self.nodes:
+        for fn in self.nodes:
             if print_ast_not_str:
                 print(ast.dump(ast_add_on.make_ast_assign(
-                    (rn.target,rn.code_ast)),indent=4))
+                    (fn.target,fn.code_ast)),indent=4))
             else:
-                print(f"({rn.target}) : [{rn.fct}] :\n{rn.get_code()}")
-            print(rn.info)
+                print(f"({fn.target}) : [{fn.fct}] :\n{fn.get_code()}")
+            print(fn.info)
         print("DICT RANDOM OPERATIONS :\n",self.dict_rand)
 
 
