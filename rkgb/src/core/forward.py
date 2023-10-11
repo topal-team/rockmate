@@ -439,7 +439,7 @@ class ForwardGraph(base.Graph):
                     return tmp_local[output_targets[0]]
                 else:
                     return tuple(tmp_local[out] for out in output_targets)
-        return Module
+        return Module()
                 
 
 
