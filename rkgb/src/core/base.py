@@ -13,6 +13,7 @@ try:
 except ModuleNotFoundError:
     has_graphviz = False
 from src.lowlevel import ast_add_on
+from src.lowlevel import variable_info
 # import lowlevel.ast_add_on
 # from lowlevel import ast_add_on
 
@@ -251,7 +252,7 @@ class Graph():
         self.whole_module_output = None
         self.sources_req_grad = None
         self.dict_constants = dict()
-        self.dict_info = dict()
+        self.dict_info : dict[str,variable_info.VariableInfo] = dict()
         self.dict_rand = dict() # empty after S
         self.nodes = []
         self.output_nodes = []
@@ -364,8 +365,7 @@ class Graph():
         return sorted_list[::-1]
 
 
-    @staticmethod
-    def find_cutting_points(g):
+    def find_cutting_points(self):
         """
         DONT FORGET TO ADD A SOURCE TO DEPS RELATION IF NECESSARY
         returns the list of all 1-separators of the 'deps' relation
@@ -377,9 +377,10 @@ class Graph():
         Thus a cutting point must requires_grad.
         """
 
-        to_be_visited = list(g.output_nodes)
+        to_be_visited = list(self.output_nodes)
         seen = set(to_be_visited)
-        dict_nb_usages = dict([(m,len(m.get_all_standard_users())) for m in g.nodes])
+        dict_nb_usages = dict(
+            [(m,len(m.get_all_standard_users())) for m in self.nodes])
 
         separators = []
         while to_be_visited!=[]:
@@ -387,7 +388,7 @@ class Graph():
             to_be_visited.remove(n)
             seen.remove(n)
             if seen==set():
-                if g.does_node_requires_grad(n):
+                if self.does_node_requires_grad(n):
                     separators.append(n)
             for req_n in n.get_all_standard_deps():
                 seen.add(req_n)

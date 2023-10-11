@@ -8,8 +8,8 @@ from torch import Tensor
 from src.lowlevel import ast_add_on
 from src.lowlevel import jit_patch
 from src.lowlevel import constants
-from src.lowlevel import variable_info
 from src.lowlevel import preprocess_samples
+from src.lowlevel.variable_info import VariableInfo
 from src.core import base
 from src.core.raw import RawNode,RawGraph
 
@@ -48,6 +48,7 @@ class ForwardNode(base.Node):
         self.users = set()
         self.deps_rand = deps_rand if deps_rand else set()
         self.protected = False
+        self.info = None
 
     def get_all_standard_deps(self):
         return self.deps
@@ -98,10 +99,10 @@ class ForwardGraph(base.Graph):
             if rn.is_input:
                 self.inputs.append(rn.target)
                 fn.is_input = True
-                self.dict_info[rn.target] \
-                    = input_info = variable_info.VariableInfo(
-                        dict_inputs[rn.target],
-                        data_owner_name = rn.target)
+                input_info = VariableInfo(
+                    dict_inputs[rn.target],
+                    data_owner_name = rn.target)
+                fn.info = self.dict_info[rn.target] = input_info
                 if input_info.requires_grad:
                     self.sources_req_grad = True
             # deps:
@@ -114,7 +115,7 @@ class ForwardGraph(base.Graph):
 
             # info :
             if not build_dict_info:
-                self.dict_info[fn.target] = variable_info.VariableInfo()
+                fn.info = self.dict_info[fn.target] = VariableInfo()
             elif not rn.is_input:
                 # 1) Run node's code to generate the value
                 tmp_local = self.generate_deep_tmp_local(rn,our_global)
@@ -124,10 +125,10 @@ class ForwardGraph(base.Graph):
                     jit_patch.try_to_fix_dtype_in_returned_ast_code(
                         rn_code_str,our_global,tmp_local
                     )
-
-            self.dict_info[rn.target] = self.detect_inplace_or_view(
-                rn,tmp_local,dict_nodes,dict_inplace_ops)
-            del tmp_local
+                self.dict_info[rn.target] = fn.info \
+                    = self.detect_inplace_or_view(
+                    rn,tmp_local,dict_nodes,dict_inplace_ops)
+                del tmp_local
         
         # get the output_node: if not requires_grad => raise Exception
         # which is catch in Rockmate, since it implies no Backward
@@ -142,32 +143,12 @@ class ForwardGraph(base.Graph):
             dict_nodes[output_tar] 
             for output_tar in self.outputs]
 
+        self.fix_requires_grad(dict_nodes)
 
+        # Protect some node in case we want to cut:
+        cutting_points = self.find_cutting_points()
+        for cut_point in cutting_points: cut_point.protected = True
 
-    # --- Correct requires_grad ---
-    for dn in d_nodes:
-        info = dict_info[dn.mt]
-        if dict_info[info.data_owner_name].requires_grad:
-            info.requires_grad = True
-
-    # -> If none of users req_grad -> useless to req_grad
-    for dn in d_nodes[::-1]:
-        if dn.mt not in dg.outputs:
-            info = dict_info[dn.mt]
-            if info.requires_grad:
-                one_user_req_grad = False
-                for user_dn in dn.users:
-                    if dict_info[user_dn.mt].requires_grad:
-                        one_user_req_grad = True
-                        break
-                if not one_user_req_grad:
-                    info.requires_grad = False
-
-
-
-        # -- prepares the sequencing --
-        dg.prepare_cut()
-        return dg
 
 
     def generate_deep_tmp_local(self,raw_node,our_global):
@@ -228,13 +209,13 @@ class ForwardGraph(base.Graph):
 
         # === FIRST WAY TO RECOGNIZE A VIEW ===
         # -> data_ptr
-        if variable_info.VariableInfo.has_a_data_ptr(current_rn_value):
-            current_rn_data_ptr = variable_info.VariableInfo.get_data_ptr(current_rn_value)
+        if VariableInfo.has_a_data_ptr(current_rn_value):
+            current_rn_data_ptr = VariableInfo.get_data_ptr(current_rn_value)
             for o_name,o_value in tmp_local.items():
                 if (o_name != current_raw_node.target
                 and o_name in self.dict_info
-                and variable_info.VariableInfo.has_a_data_ptr(o_value)
-                and variable_info.VariableInfo.get_data_ptr(o_value) == current_rn_data_ptr):
+                and VariableInfo.has_a_data_ptr(o_value)
+                and VariableInfo.get_data_ptr(o_value) == current_rn_data_ptr):
                     data_parents.add(o_name)
                     data_owner_name = o_name
                     if o_value is current_rn_value: is_inplace = True
@@ -290,7 +271,7 @@ class ForwardGraph(base.Graph):
             data_owner_name = current_raw_node.target
             data_direct_parent_name = current_raw_node.target
             dict_inplace_ops[current_raw_node.mt] = set()
-        current_rn_info = variable_info.VariableInfo(
+        current_rn_info = VariableInfo(
             current_rn_value,
             is_view    = is_view,
             is_inplace = is_inplace,
@@ -337,7 +318,7 @@ class ForwardGraph(base.Graph):
             if (len(fn.users)==0 
             and fn.main_target != self.whole_module_output):
                 # no user and not output => inplace or view
-                fn_info : variable_info.VariableInfo = self.dict_info[fn.main_target]
+                fn_info = self.dict_info[fn.main_target]
                 assert(fn_info.is_view or fn_info.is_inplace)
 
                 # 1) In case fn is a view/inplace over self.whole_module_output
@@ -366,11 +347,30 @@ class ForwardGraph(base.Graph):
                         fn.users.add(user_fn)
 
 
-    def prepare_cut(self):
-        # in case, after simplifications, we will cut / sequentialize
-        # we need to protect the separators from "cheap" simplifications
-        seps = RK_get_1_separators(self)
-        for sep in seps: sep.protected = True
+    def fix_requires_grad(self,dict_nodes):
+        # fix 1) 
+        # if data_owner requires_grad => inplace/view of it should too
+        for fn in self.nodes:
+            fn_info = self.dict_info[fn.main_target]
+            if self.dict_info[fn_info.data_owner_name].requires_grad:
+                fn_info.requires_grad = True
+
+        # fix 2) 
+        # If none of users req_grad (even after fix 1) => useless to req_grad 
+        for fn in self.nodes[::-1]:
+            if (fn.main_target not in self.outputs
+            and self.dict_info[fn.main_target].requires_grad
+            and not any(selfuser_fn.)
+                info = dict_info[dn.mt]
+                if info.requires_grad:
+                    one_user_req_grad = False
+                    for user_dn in dn.users:
+                        if dict_info[user_dn.mt].requires_grad:
+                            one_user_req_grad = True
+                            break
+                    if not one_user_req_grad:
+                        info.requires_grad = False
+
 
 # ==========================
 
