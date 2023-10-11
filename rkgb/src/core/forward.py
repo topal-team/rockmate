@@ -373,7 +373,14 @@ class ForwardGraph(base.Graph):
         ):
         name = self._get_render_name(name)
         dot = base.Graph._get_graphviz_dot(name,dot)
-
+        for fn in self.nodes:
+            if fn.is_input: color = "blue"
+            elif fn.target in self.outputs: color = "red"
+            else: color = None
+            dot.node(fn.target,fn.get_code(),color=color)
+        for fn in self.nodes:
+            for req_fn in fn.deps:
+                dot.edge(req_fn.target,fn.target)
         if render:
             base.Graph._call_graphviz_to_render(
                 dot,view,directory,render_format
@@ -381,12 +388,10 @@ class ForwardGraph(base.Graph):
 
 
     def print_forward_code(self):
-        str_input = ','.join(self.inputs)
-        print(f"def main({str_input}):")
-        for dn in dg.nodes:
-            if not dn.is_input: print(f"\t{dn.get_code()}")
-        print(f"\treturn {dg.output}")
-
+        print("def main({}):".format(','.join(self.inputs)))
+        for fn in self.nodes:
+            if not fn.is_input: print(f"\t{fn.get_code()}")
+        print("\treturn {}".format(','.join(self.outputs)))
 
     def print_all_nodes(self,print_ast_not_str=True):
         for rn in self.nodes:
@@ -399,27 +404,6 @@ class ForwardGraph(base.Graph):
         print("DICT RANDOM OPERATIONS :\n",self.dict_rand)
 
 
-def print_ForwardGraph(dg : ForwardGraph,name=None,open=True,render_format="svg",dot=None,uniq_num=0):
-    if dot is None:
-        render = True
-        if name is None: name = aux_print_ForwardGraph_name(dg)
-        dot = graphviz.Digraph(name,comment=name)
-    else:
-        render = False
-    def uni(tar): return f"_{uniq_num}_{tar}"
-    def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
-    def edge(i1,i2,**kwargs): dot.edge(uni(i1),uni(i2), **kwargs)
-    for dn in dg.nodes:
-        if dn.is_input:
-            node(dn.target,dn.get_code(),color="blue")
-        elif dn.target in dg.outputs:
-            node(dn.target,dn.get_code(),color="red")
-        else: node(dn.target,dn.get_code())
-    for dn in dg.nodes:
-        for req_dn in dn.deps:
-            edge(req_dn.target,dn.target)
-    if render:
-        small_fcts.graph_render(dot,open,"D",render_format)
 
 # ==========================
 
