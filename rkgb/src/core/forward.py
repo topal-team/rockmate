@@ -2,6 +2,7 @@
 # ====== D structure =======
 # ==========================
 
+from typing import Union
 import ast
 import warnings
 from torch import Tensor
@@ -359,43 +360,44 @@ class ForwardGraph(base.Graph):
                         for user_fn in fn.users)):
                 fn.info.requires_grad = False
 
-# ==========================
+    def __str__(self):
+        return f"RawGraph with {len(self.nodes)} nodes."
+    
+    def render(self,
+            name=None,
+            view=True,
+            directory=base.Graph.default_render_directory,
+            render_format=base.Graph.default_render_format,
+            render=True,
+            dot=None
+        ):
+        name = self._get_render_name(name)
+        dot = base.Graph._get_graphviz_dot(name,dot)
 
-# ==========================
+        if render:
+            base.Graph._call_graphviz_to_render(
+                dot,view,directory,render_format
+            )
 
 
+    def print_forward_code(self):
+        str_input = ','.join(self.inputs)
+        print(f"def main({str_input}):")
+        for dn in dg.nodes:
+            if not dn.is_input: print(f"\t{dn.get_code()}")
+        print(f"\treturn {dg.output}")
 
-# ==========================
-# === printing functions ===
-# ==========================
 
-def print_all_fw_nodes(g,print_ast=True):
-    # g : B or D graph
-    print(g.dict_rand)
-    for n in g:
-        if print_ast:
-            print(ast.dump(ast_add_on.make_ast_assign(
-                (n.target,n.code_ast)),indent=4))
-        else:
-            print(f"({n.target}) : [{n.fct}] : {n.get_code()}")
-    if isinstance(g,ForwardGraph):
-        print("dict_info : ")
-        for (tar,info) in g.dict_info.items():
-            print(f"{tar} info : {info}")
+    def print_all_nodes(self,print_ast_not_str=True):
+        for rn in self.nodes:
+            if print_ast_not_str:
+                print(ast.dump(ast_add_on.make_ast_assign(
+                    (rn.target,rn.code_ast)),indent=4))
+            else:
+                print(f"({rn.target}) : [{rn.fct}] :\n{rn.get_code()}")
+            print(rn.info)
+        print("DICT RANDOM OPERATIONS :\n",self.dict_rand)
 
-def print_fw_code(dg : ForwardGraph):
-    print(dg.dict_rand)
-    str_input = ','.join(dg.inputs)
-    print(f"def main({str_input}):")
-    for dn in dg.nodes:
-        if not dn.is_input: print(f"\t{dn.get_code()}")
-    print(f"\treturn {dg.output}")
-
-def aux_print_ForwardGraph_message(dg : ForwardGraph):
-    return f"ForwardGraph - Forward graph : of size {len(dg.nodes)}"
-def aux_print_ForwardGraph_name(dg,name=None):
-    if name is not None: return name
-    else: return "Forward_ForwardGraph"
 
 def print_ForwardGraph(dg : ForwardGraph,name=None,open=True,render_format="svg",dot=None,uniq_num=0):
     if dot is None:

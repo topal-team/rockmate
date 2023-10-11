@@ -197,7 +197,7 @@ class RawGraph(base.Graph):
     def __str__(self):
         return (
             f"RawGraph with {len(self.nodes)} nodes "\
-            f"(remember this list may contain garbage)")
+            f"(remember this list may contain useless nodes)")
     def render(self,
             name=None,
             view=True,
@@ -217,6 +217,16 @@ class RawGraph(base.Graph):
             base.Graph._call_graphviz_to_render(
                 dot,view,directory,render_format
             )
+
+    def print_all_nodes(self,print_ast_not_str=True):
+        for rn in self.nodes:
+            if print_ast_not_str:
+                print(ast.dump(ast_add_on.make_ast_assign(
+                    (rn.target,rn.code_ast)),indent=4))
+            else:
+                print(f"({rn.target}) : [{rn.fct}] :\n{rn.get_code()}")
+        print("DICT RANDOM OPERATIONS :\n",self.dict_rand)
+
 
 # Draft of the general comment about how the parser works:
 # if the expr is simple (e.g. constant or self's attr)
