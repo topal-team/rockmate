@@ -303,7 +303,7 @@ def aux_init_S_to_K(model,verbose,d):
     global device
     device = d if d else (
         small_fcts.get_device_and_check_all_same_device(model,dict(),True))
-    if not (verbose is None): global_vars.ref_verbose[0] = verbose
+    if not (verbose is None): constants.ref_verbose[0] = verbose
     for p in model.parameters():
         if p.grad is None:
             p.grad = torch.zeros_like(p)
@@ -515,7 +515,7 @@ def aux_build_S_to_K(sg : S_graph,
             kdn_grad.mem     = kdn_data.mem
 
             # -> phantoms ins
-            if global_vars.ref_test_phantoms_detection[0]:
+            if constants.ref_test_phantoms_detection[0]:
                 exist_diff=res.mem_run_fwd - res.mem_fgt_fwd > 0
                 if exist_diff or exist_phs:
                     print(f"For node {mt}: mem_diff : {exist_diff} "\

@@ -441,35 +441,3 @@ class ForwardGraph(base.Graph):
                     return tuple(tmp_local[out] for out in output_targets)
         return Module()
                 
-
-
-
-
-# ==========================
-
-
-""" NOT maintained
-# ==========================
-# === test forward code ====
-# ==========================
-
-def test_fw_code(dg : ForwardGraph,model,dict_inputs : dict):
-    loc_dict = {}
-    loc_dict["self"] = model
-    for inp in dg.inputs:
-        loc_dict[inp] = dict_inputs[inp]
-    for rd_tar,code_ast in dg.dict_rand.items():
-        code = ast_add_on.make_str_assign(rd_tar,code_ast)
-        exec(code, globals(), loc_dict)
-    for dn in dg.nodes:
-        for req_rd in dn.deps_rand:
-            code = ast_add_on.make_str_assign((req_rd,dg.dict_rand[req_rd]))
-            exec(code,globals(),loc_dict)
-        if not dn.is_input:
-            exec(
-                dn.get_code(force_special_kwargs=True), 
-                globals(), loc_dict)
-    return loc_dict[dg.output]
-
-# ==========================
-"""

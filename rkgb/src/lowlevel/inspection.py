@@ -3,8 +3,8 @@
 # =====================
 
 from .imports import *
-from . import def_info,ast_add_on,small_fcts,global_vars
-from .global_vars import print_debug
+from . import def_info,ast_add_on,small_fcts,constants
+from .constants import print_debug
 import gc
 
 # ========================================
@@ -230,8 +230,8 @@ class inspector():
         t = self.timer.measure(fct)
         nb_repeat = 1
         measures = [t] ; tot = t
-        while (tot < global_vars.time_min_duration
-        or nb_repeat < global_vars.time_min_repeat):
+        while (tot < constants.time_min_duration
+        or nb_repeat < constants.time_min_repeat):
             if inter_fct: inter_fct()
             t = self.timer.measure(fct)
             measures.append(t)

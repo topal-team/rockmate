@@ -2,22 +2,29 @@
 # ====== S structure =======
 # ==========================
 
-from .utils import *
-from .Dtools import D_node,D_graph
+import sys
+import ast
+import torch
+import copy
+from src.lowlevel import ast_add_on
+from src.lowlevel import constants
+from src.lowlevel.variable_info import VariableInfo
+from src.core import base
+from src.core.forward import ForwardNode,ForwardGraph
 
 # ***********
-# * S_edges *
+# * SimplifiedEdge *
 # ***********
 
 # S edges (ie S_nodes.deps/users) are dict : (S_node -> str set)
-# Note that .deps/users won't be instances of S_edges class,
+# Note that .deps/users won't be instances of SimplifiedEdge class,
 # this class has only static methods. Since keeping standard dict
 # have advantage and some of the following functions aren't taking
 # dict_edges as inputs. 
 # /!\ By default the following operations are NOT inplace
 # inplace operations names end with "_inplace". 
 
-class S_edges():
+class SimplifiedEdge():
     @staticmethod
     def merge_inplace(de_main,de_sub):
         for k in de_sub.keys():
@@ -26,7 +33,7 @@ class S_edges():
     @staticmethod
     def merge(de1,de2):
         d = dict(de1)
-        S_edges.merge_inplace(d,de2)
+        SimplifiedEdge.merge_inplace(d,de2)
         return d
 
     @staticmethod
@@ -43,40 +50,17 @@ class S_edges():
     @staticmethod
     def add(de,sn,str_set):
         d = dict(de) # not inplace
-        S_edges.add_inplace(d,sn,str_set)
+        SimplifiedEdge.add_inplace(d,sn,str_set)
         return d
-
-    @staticmethod
-    def eq(de1,de2,raise_exception=False):
-        ds1 = dict((n.main_target,s) for (n,s) in de1.items())
-        ds2 = dict((n.main_target,s) for (n,s) in de2.items())
-        if not raise_exception:
-            return ds1 == ds2
-        else:
-            keys1 = base.Node.sort_targets(ds1.keys())
-            keys2 = base.Node.sort_targets(ds2.keys())
-            if len(keys1) != len(keys2): raise Exception(
-                "Difference of dict_edges: "\
-                "number of edges (keys) diff")
-            for i,(k1,k2) in enumerate(zip(keys1,keys2)):
-                if k1 != k2: raise Exception(
-                    f"Difference of dict_edges: "\
-                    f"{i}-th edge key diff : {k1} != {k2}")
-                if ds1[k1] != ds2[k2]: raise Exception(
-                    f"Difference of dict_edges: "\
-                    f"{i}-th edge labels diff : {ds1[k1]} != {ds2[k2]}")
-            return True
-        # since this function is an auxilary function for S_node.__eq__ method
-        # we cannot check s_nodes equalities, we just check .main_target
 
     @staticmethod
     def discard_sn_from_deps_of_its_users(sn):
         for user_sn in sn.users.keys():
-            S_edges.discard_inplace(user_sn.deps,sn)
+            SimplifiedEdge.discard_inplace(user_sn.deps,sn)
     @staticmethod
     def discard_sn_from_users_of_its_deps(sn):
         for req_sn in sn.deps.keys():
-            S_edges.discard_inplace(req_sn.users,sn)
+            SimplifiedEdge.discard_inplace(req_sn.users,sn)
 
     @staticmethod
     def make_users_using_deps(sn):
@@ -89,13 +73,13 @@ class S_edges():
 
     @staticmethod
     def discard_edge_inplace(req_sn,user_sn):
-        S_edges.discard_inplace(req_sn.users,user_sn)
-        S_edges.discard_inplace(user_sn.deps,req_sn)
+        SimplifiedEdge.discard_inplace(req_sn.users,user_sn)
+        SimplifiedEdge.discard_inplace(user_sn.deps,req_sn)
 
     @staticmethod
     def add_edge_inplace(req_sn,user_sn,str_set):
-        S_edges.add_inplace(req_sn.users,user_sn,str_set)
-        S_edges.add_inplace(user_sn.deps,req_sn,str_set)
+        SimplifiedEdge.add_inplace(req_sn.users,user_sn,str_set)
+        SimplifiedEdge.add_inplace(user_sn.deps,req_sn,str_set)
 
     @staticmethod
     def is_subset(de1,de2):
@@ -214,23 +198,23 @@ class S_node(base.Node):
         # if strong: delete aux_sn else aux_sn becomes an artefact
         # in any case cut as many edges as possible
 
-        merged_deps = S_edges.merge(self.deps,aux_sn.deps)
-        S_edges.discard_inplace(merged_deps,self)
+        merged_deps = SimplifiedEdge.merge(self.deps,aux_sn.deps)
+        SimplifiedEdge.discard_inplace(merged_deps,self)
 
         # -- disconnect aux_n with its children (if possible) --
         if strong: # e.g. for "view"
-            S_edges.discard_sn_from_deps_of_its_users(aux_sn)
-            merged_users = S_edges.merge(self.users,aux_sn.users)
-            S_edges.discard_inplace(merged_users,aux_sn)
+            SimplifiedEdge.discard_sn_from_deps_of_its_users(aux_sn)
+            merged_users = SimplifiedEdge.merge(self.users,aux_sn.users)
+            SimplifiedEdge.discard_inplace(merged_users,aux_sn)
             aux_sn.users = dict()
         else: # e.g. for "size"
             for user_sn in self.users.keys():
-                S_edges.discard_inplace(user_sn.deps,aux_sn)
-                S_edges.discard_inplace(aux_sn.users,user_sn)
+                SimplifiedEdge.discard_inplace(user_sn.deps,aux_sn)
+                SimplifiedEdge.discard_inplace(aux_sn.users,user_sn)
             merged_users = self.users
         # -- if aux_sn is deleted, remove it from parents' users --
         if len(aux_sn.users) == 0:
-            S_edges.discard_sn_from_users_of_its_deps(aux_sn)
+            SimplifiedEdge.discard_sn_from_users_of_its_deps(aux_sn)
             aux_sn.deps = dict()
             # -> aux_sn has been fully unplugged
         else:
@@ -242,8 +226,8 @@ class S_node(base.Node):
         # -- edges --
         self.deps = merged_deps
         self.users = merged_users
-        S_edges.make_users_using_deps(self)
-        S_edges.make_deps_using_users(self)
+        SimplifiedEdge.make_users_using_deps(self)
+        SimplifiedEdge.make_deps_using_users(self)
         if aux_sn in sg.output_nodes:
             sg.output_nodes[sg.output_nodes.index(aux_sn)] = self
     # -----
@@ -262,7 +246,7 @@ class S_node(base.Node):
                       f"{len(art_user_sn.deps)}\n{s}")
                 for other_user_sn in self.users.keys():
                     if art_user_sn in other_user_sn.deps.keys():
-                        S_edges.add_edge_inplace(
+                        SimplifiedEdge.add_edge_inplace(
                             self,other_user_sn,
                             other_user_sn.deps[art_user_sn])
                         # We add the names of the variables generated 
@@ -271,10 +255,10 @@ class S_node(base.Node):
                         # to get those vars we will no longer use
                         # art_user_sn since we already need self for
                         # something else.
-                    S_edges.discard_edge_inplace(
+                    SimplifiedEdge.discard_edge_inplace(
                         art_user_sn,other_user_sn)
                 if art_user_sn.users == dict():
-                    S_edges.discard_sn_from_users_of_its_deps(
+                    SimplifiedEdge.discard_sn_from_users_of_its_deps(
                         art_user_sn)
                     art_user_sn.deps = dict()
 
@@ -288,12 +272,12 @@ class S_node(base.Node):
 
 
 # ***********
-# * S_graph *
+# * SimplifiedGraph *
 # ***********
 
-class S_graph(base.Graph):
+class SimplifiedGraph(base.Graph):
     artefact_edges : list[tuple[S_node,S_node,set[str]]] = None
-    def __init__(self,dg : D_graph = None):
+    def __init__(self,dg : ForwardGraph = None):
         super().__init__("S")
         if not (dg is None):
             self.inherit_base_attributes(dg)
@@ -302,14 +286,6 @@ class S_graph(base.Graph):
         self.special_output_node = None # NOT in self.nodes
         self.dict_output_viewing_code = dict()
         self.artefact_edges = []
-
-    def __eq__(self,sg2,force_order=False,raise_exception=False):
-        sg1 = self
-        return small_fcts.check_attr(sg1,sg2,[
-            "inputs","outputs",
-            "nodes","dict_info","dict_constants"],
-            raise_exception=raise_exception)
-    __hash__ = base.Node.__hash__
 
     def make_inputs(self):
         inputs = set()
@@ -323,10 +299,10 @@ class S_graph(base.Graph):
         dict_info = self.dict_info
         init_node_users = list(self.init_node.users.items())
         for user_sn,used_targets in init_node_users:
-            S_edges.discard_inplace(user_sn.deps,self.init_node)
+            SimplifiedEdge.discard_inplace(user_sn.deps,self.init_node)
             if all(not dict_info[used_tgt].requires_grad
                    for used_tgt in used_targets):
-                S_edges.discard_inplace(self.init_node.users,user_sn)
+                SimplifiedEdge.discard_inplace(self.init_node.users,user_sn)
         # We need at least one first node = one user of init_node
         # -> Otherwise weird graph 
         # -> And dangerous for Rk_get_1_separators
@@ -349,7 +325,7 @@ class S_graph(base.Graph):
             for req_sn,req_targets in output_node.deps.items():
                 real_output_nodes.append(req_sn)
                 real_outputs.update(req_targets)
-                S_edges.discard_inplace(req_sn.users,output_node)
+                SimplifiedEdge.discard_inplace(req_sn.users,output_node)
             self.output_nodes = real_output_nodes
             self.outputs = list(real_outputs)
             self.special_output_node = output_node
@@ -375,7 +351,7 @@ class S_graph(base.Graph):
                       f"{sn.main_target} is_artefact, but with "\
                       f"len(deps)={len(sn.deps)} (should be 1)")
                 req_sn = list(sn.deps.keys())[0]
-                if S_edges.is_subset(sn.users,req_sn.users):
+                if SimplifiedEdge.is_subset(sn.users,req_sn.users):
                     print(f"{sn.main_target} is a useless "\
                           f"artefact of {req_sn.main_target}")
 
@@ -406,13 +382,13 @@ class S_graph(base.Graph):
                 del self.nodes[index]
                 real_sn = list(sn.deps.keys())[0]
                 for user_sn,used_targets in sn.users.items():
-                    S_edges.discard_inplace(user_sn.deps,sn)
-                    S_edges.add_edge_inplace(real_sn,user_sn,used_targets)
+                    SimplifiedEdge.discard_inplace(user_sn.deps,sn)
+                    SimplifiedEdge.add_edge_inplace(real_sn,user_sn,used_targets)
                     artefact_edges.append((real_sn,user_sn,used_targets))
-                S_edges.discard_inplace(real_sn.users,sn)
+                SimplifiedEdge.discard_inplace(real_sn.users,sn)
     def delete_artefact_edges(self):
         for (used_sn,user_sn,_) in self.artefact_edges:
-            S_edges.discard_edge_inplace(used_sn,user_sn)
+            SimplifiedEdge.discard_edge_inplace(used_sn,user_sn)
         # We do NOT set self.artefact_edges = []
 
 
@@ -429,7 +405,7 @@ class S_graph(base.Graph):
             root_sn.deps = dict((out_sn,set()) for out_sn in self.output_nodes)
             for out_sn in self.output_nodes:
                 out_sn.users[root_sn] = set()
-        self.nodes = RK_sort_based_on_deps(root_sn)
+        self.nodes = base.Graph.get_sorted_nodes_by_following_relation_deps(root_sn)
         if self.init_node in self.nodes: self.nodes.remove(self.init_node)
         if not real_root:
             self.nodes.remove(root_sn)
@@ -514,8 +490,8 @@ class S_graph(base.Graph):
 # = Init move from D to S  =
 # ==========================
 
-def D_to_S_init(dg : D_graph) -> S_graph:
-    sg = S_graph(dg)
+def D_to_S_init(dg : ForwardGraph) -> SimplifiedGraph:
+    sg = SimplifiedGraph(dg)
     init_node = S_node(main_target="sources",other_obj=sg)
     init_node.all_targets=[]
     s_nodes = sg.nodes
@@ -541,7 +517,7 @@ def D_to_S_init(dg : D_graph) -> S_graph:
     init_node.body_code = []
     sg.init_node = init_node
     # -> At the beginning (here), init_node contains only the 'real' inputs
-    # -> in D_graph these nodes have a dummy code `'code = 'INPUT'`,
+    # -> in ForwardGraph these nodes have a dummy code `'code = 'INPUT'`,
     # -> the "insert" method will put these dummy codes in init_node.body_code
     # -> that's why we clear init_node.body_code at the end of initialization
     sg.output_nodes = [dict_s_nodes[out] for out in dg.outputs]
@@ -602,11 +578,11 @@ def simplify_node(sn):
     # aux fct, insert n.code_ast in children's code, and then unplug it
     for user_sn in sn.users.keys():
         # -- plug user_sn directly to deps of sn --
-        S_edges.merge_inplace(user_sn.deps,sn.deps)
-        S_edges.discard_inplace(user_sn.deps,sn)
+        SimplifiedEdge.merge_inplace(user_sn.deps,sn.deps)
+        SimplifiedEdge.discard_inplace(user_sn.deps,sn)
         for (req_sn,str_set) in sn.deps.items():
-            S_edges.discard_inplace(req_sn.users,sn)
-            S_edges.add_inplace(req_sn.users,user_sn,str_set)
+            SimplifiedEdge.discard_inplace(req_sn.users,sn)
+            SimplifiedEdge.add_inplace(req_sn.users,user_sn,str_set)
         # -- insert the code --
         insert_code_ast(user_sn,sn)
         # -- handle randomness --
@@ -615,13 +591,13 @@ def simplify_node(sn):
     sn.deps  = dict()
     sn.users = dict()
 
-def simplify_cheap(sg : S_graph):
+def simplify_cheap(sg : SimplifiedGraph):
     # from root to leaves
     for sn in sg.nodes:
         if ( not (sn in sg.output_nodes)
-         and    (sn.main_fct in global_vars.list_cheap_fct
+         and    (sn.main_fct in constants.list_cheap_fct
             or 
-                (sn.main_fct in global_vars.list_optional_cheap_fct and not sn.protected)
+                (sn.main_fct in constants.list_optional_cheap_fct and not sn.protected)
          )):
             simplify_node(sn)
     sg.clear()
@@ -648,7 +624,7 @@ def size_children(sg,sn):
     return ret
 
 
-def simplify_size(sg : S_graph):
+def simplify_size(sg : SimplifiedGraph):
     # from leaves to root
     nodes = [sg.init_node] + list(sg.nodes) ; nodes.reverse()
     for sn in nodes:
@@ -687,13 +663,13 @@ def get_direct_real_deps(sn):
             return set([req_sn])
     return deps
 
-def simplify_view(sg : S_graph):
+def simplify_view(sg : SimplifiedGraph):
     # from root to leaves
     sg.init_node.is_artefact = True
     for sn in sg.nodes:
         sn_info = sg.dict_info[sn.main_target]
         if (sn_info.is_view
-        or  sn.main_fct in global_vars.list_view_fct # -> in case of viewing operations over parameters
+        or  sn.main_fct in constants.list_view_fct # -> in case of viewing operations over parameters
         or  sn.main_fct == "getattr"
         or  sn_info.is_inplace):
             # ASSERTION remaining getattr are related to views !! 
@@ -754,12 +730,12 @@ def simplify_view(sg : S_graph):
                     # -> Insert sn's code BOTH in art_req and real_req
 
                     # - plug art_req to sn's users -
-                    S_edges.merge_inplace(art_req.users,sn.users)
+                    SimplifiedEdge.merge_inplace(art_req.users,sn.users)
                     for (user_sn,str_set) in sn.users.items():
-                        S_edges.add_inplace(user_sn.deps,art_req,str_set)
+                        SimplifiedEdge.add_inplace(user_sn.deps,art_req,str_set)
                     # - unplug sn -
-                    S_edges.discard_inplace(art_req.users,sn)
-                    S_edges.discard_sn_from_deps_of_its_users(sn)
+                    SimplifiedEdge.discard_inplace(art_req.users,sn)
+                    SimplifiedEdge.discard_sn_from_deps_of_its_users(sn)
                     sn.deps = dict()
                     sn.users = dict()
                     if real_req: real_req.clear_children_artefact()
@@ -794,14 +770,14 @@ def create_random_snodes_from_dict_rand(sg,model,device):
         our_global.update(sg.dict_constants)
         if model: our_global["self"] = model
         if device: our_global["device"] = device
-        dict_info[name] = def_info.VariableInfo(
+        dict_info[name] = VariableInfo(
             eval(ast_add_on.ast_to_str(code_ast),our_global)
         )
     for sn in sg.nodes:
         for req_rd in sn.deps_rand:
             req_sn_rd = dict_random_sn[req_rd]
-            S_edges.add_inplace(sn.deps,req_sn_rd,set([req_rd]))
-            S_edges.add_inplace(req_sn_rd.users,sn,set([req_rd]))
+            SimplifiedEdge.add_inplace(sn.deps,req_sn_rd,set([req_rd]))
+            SimplifiedEdge.add_inplace(req_sn_rd.users,sn,set([req_rd]))
     sg.nodes = list(dict_random_sn.values()) + sg.nodes
 
 # ==========================
@@ -836,11 +812,11 @@ def D_to_S(dg,model=None,device=None):
 # ==== sequential parts ====
 # ==========================
 
-class S_graph_list(list):
+class SimplifiedGraph_list(list):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
 
-def copy_S_node(sn : S_node): # aux for copy_S_graph
+def copy_S_node(sn : S_node): # aux for copy_SimplifiedGraph
     new_sn = S_node()
     new_sn.is_artefact       = sn.is_artefact
     new_sn.main_code         = tuple(sn.main_code)
@@ -860,9 +836,9 @@ def copy_S_node(sn : S_node): # aux for copy_S_graph
     new_sn.unique_id         = sn.unique_id
     return new_sn
 
-def copy_S_graph(sg : S_graph):
+def copy_SimplifiedGraph(sg : SimplifiedGraph):
     # -> a copy of sg with fresh nodes
-    new_sg = S_graph()
+    new_sg = SimplifiedGraph()
     new_sg.inherit_base_attributes(sg)
     new_sg.whole_model_inputs = sg.whole_model_inputs
     new_sg.node_unique_id_generator = copy(sg.node_unique_id_generator)
@@ -875,8 +851,8 @@ def copy_S_graph(sg : S_graph):
         dict_nodes[sn.main_target] = new_sn
         for (req_sn,set_str) in sn.deps.items():
             new_req_sn = dict_nodes[req_sn.main_target]
-            S_edges.add_inplace(new_req_sn.users,new_sn,set_str)
-            S_edges.add_inplace(new_sn.deps,new_req_sn,set_str)
+            SimplifiedEdge.add_inplace(new_req_sn.users,new_sn,set_str)
+            SimplifiedEdge.add_inplace(new_sn.deps,new_req_sn,set_str)
 
     # * init_node *
     new_sg.init_node \
@@ -909,20 +885,20 @@ def copy_S_graph(sg : S_graph):
     return new_sg
 
 
-def cut(sg : S_graph): # -> list of S_graph
+def cut(sg : SimplifiedGraph): # -> list of SimplifiedGraph
     # Note: when this function is used, sg.init_node has been unhooked
-    sg = copy_S_graph(sg) # to protect from side effects
+    sg = copy_SimplifiedGraph(sg) # to protect from side effects
     # -> Add a temporary global source before get separators
     # -> Above all the node which don't have any deps
     sg.nodes.insert(0,sg.init_node) # it's not the original sg, no risk
     for first_sn,str_set in sg.init_node.users.items():
-        S_edges.add_inplace(first_sn.deps,sg.init_node,str_set)
+        SimplifiedEdge.add_inplace(first_sn.deps,sg.init_node,str_set)
 
-    seps = RK_get_1_separators(sg)
+    seps = sg.find_cutting_points()
     
     # -> remove tmp_source
     for first_sn in sg.init_node.users.keys():
-        S_edges.discard_inplace(first_sn.deps,sg.init_node)
+        SimplifiedEdge.discard_inplace(first_sn.deps,sg.init_node)
     
     seps = [sg.init_node] + seps
     # multiple output_nodes
@@ -931,9 +907,9 @@ def cut(sg : S_graph): # -> list of S_graph
 
     list_sg = []
     for block_nb in range(1,len(seps)):
-        new_sg = S_graph()
+        new_sg = SimplifiedGraph()
         new_sg.whole_model_inputs = sg.whole_model_inputs
-        new_sg.node_unique_id_generator = copy(sg.node_unique_id_generator)
+        new_sg.node_unique_id_generator = copy.copy(sg.node_unique_id_generator)
         new_sg.inherit_base_attributes(sg)
         list_sg.append(new_sg)
         # -- get nodes --
@@ -943,7 +919,6 @@ def cut(sg : S_graph): # -> list of S_graph
         last_i = sg.nodes.index(last_node)
         nodes = sg.nodes[first_i+1:last_i+1] # last IN, first NOT
         new_sg.nodes = nodes
-        print_debug(f"size of bloc {block_nb} : {last_i}-{first_i}")
         # -- input --
         if block_nb==1:
             new_sg.init_node = sg.init_node
@@ -956,14 +931,14 @@ def cut(sg : S_graph): # -> list of S_graph
             first_node_users = list(first_node.users.items())
             for (user_sn,str_set) in first_node_users:
                 inputs.update(str_set)
-                S_edges.discard_inplace(user_sn.deps,first_node)
-                #S_edges.add_inplace(user_sn.deps,ino,str_set)
-                S_edges.add_inplace(ino.users,user_sn,str_set)
+                SimplifiedEdge.discard_inplace(user_sn.deps,first_node)
+                #SimplifiedEdge.add_inplace(user_sn.deps,ino,str_set)
+                SimplifiedEdge.add_inplace(ino.users,user_sn,str_set)
                 if user_sn.is_artefact:
                     ino.insert(user_sn,strong=True,sg=sg)
                     nodes.remove(user_sn)
             for user_sn in ino.users.keys(): # Unhook ino (need due to `ino.insert`)
-                S_edges.discard_inplace(user_sn.deps,ino)
+                SimplifiedEdge.discard_inplace(user_sn.deps,ino)
             first_node.users = dict() # previous bloc's output node
             new_sg.inputs = list(inputs)
         # -- outputs --
@@ -976,7 +951,7 @@ def cut(sg : S_graph): # -> list of S_graph
     for i in range(len(list_sg)-1):
         list_sg[i].outputs = list(list_sg[i+1].inputs)
     list_sg[-1].outputs = sg.outputs
-    return S_graph_list(list_sg)
+    return SimplifiedGraph_list(list_sg)
 
 # ==========================
 
@@ -986,27 +961,27 @@ def cut(sg : S_graph): # -> list of S_graph
 # === printing functions ===
 # ==========================
 
-def aux_print_S_graph_message(sg : S_graph):
-    return f"S_graph - Simplified forward graph : {len(sg.nodes)} nodes"
+def aux_print_SimplifiedGraph_message(sg : SimplifiedGraph):
+    return f"SimplifiedGraph - Simplified forward graph : {len(sg.nodes)} nodes"
 
-def aux_print_S_graph_list_message(lsg : S_graph_list):
+def aux_print_SimplifiedGraph_list_message(lsg : SimplifiedGraph_list):
     s = "+".join([str(len(sg.nodes)) for sg in lsg])
     return (
-        f"S_graph_list - Sequentialized simplified forward graphs, "\
+        f"SimplifiedGraph_list - Sequentialized simplified forward graphs, "\
         f"{len(lsg)} blocks,\n     -> with {s} = "\
         f"{sum([len(sg.nodes) for sg in lsg])} nodes"
     )
 
-def aux_print_S_graph_name(sg : S_graph,name=None):
+def aux_print_SimplifiedGraph_name(sg : SimplifiedGraph,name=None):
     if name is not None: return name
-    else: return "Simplified_forward_S_graph"
+    else: return "Simplified_forward_SimplifiedGraph"
 
-def aux_print_S_graph_list_name(lsg : S_graph_list,name=None):
+def aux_print_SimplifiedGraph_list_name(lsg : SimplifiedGraph_list,name=None):
     if name is not None: return name
-    else: return "Sequentialized_Simplified_Forward_S_graph_list"
+    else: return "Sequentialized_Simplified_Forward_SimplifiedGraph_list"
 
 
-def aux_print_graph(dot,sg : S_graph,uniq_num):
+def aux_print_graph(dot,sg : SimplifiedGraph,uniq_num):
     def uni(tar): return f"_{uniq_num}_{tar}"
     def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
     def edge(i1,i2,str_set,**kwargs):
@@ -1047,24 +1022,9 @@ def aux_print_graph(dot,sg : S_graph,uniq_num):
             edge(out.mt,"output",sg.special_output_node.deps[out])
 
 
-def print_S_graph(sg : S_graph,name=None,open=True,render_format="svg",dot=None,uniq_num=0):
-    if dot is None:
-        render = True
-        name = aux_print_S_graph_name(sg,name)
-        dot = graphviz.Digraph(name,comment=name)
-    else:
-        render = False
-    aux_print_graph(dot,sg,uniq_num)
-    if render:
-        small_fcts.graph_render(dot,open,"S",render_format)
-
-
-def print_S_graph_list(lsg : S_graph_list,name=None,open=True,render_format="svg"):
-    name = aux_print_S_graph_list_name(lsg,name)
-    dot = graphviz.Digraph(name,comment=name)
+def print_SimplifiedGraph_list(lsg : SimplifiedGraph_list,dot,name=None,open=True,render_format="svg"):
     for i in range(len(lsg)):
         aux_print_graph(dot,lsg[i],i)
-    small_fcts.graph_render(dot,open,"S",render_format)
 
 # ==========================
 

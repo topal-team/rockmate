@@ -109,7 +109,7 @@ def make_all_graphs(model,
     bool_bg = ("B" in wanted_graphs) or bool_dg
 
     # check inputs
-    global_vars.ref_verbose[0] = verbose
+    constants.ref_verbose[0] = verbose
     dict_inputs = make_inputs(model,model_inputs,model_kwargs)
 
     # check device
@@ -132,7 +132,7 @@ def make_all_graphs(model,
     # -> save running stats
     saved_running_stats = dict()
     for m in model.modules():
-        for batch_fct in global_vars.list_batch_fct:
+        for batch_fct in constants.list_batch_fct:
             if isinstance(m,batch_fct):
                 r_mean = m.running_mean
                 r_var  = m.running_var
