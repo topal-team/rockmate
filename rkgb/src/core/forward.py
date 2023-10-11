@@ -48,7 +48,7 @@ class ForwardNode(base.Node):
         self.users = set()
         self.deps_rand = deps_rand if deps_rand else set()
         self.protected = False
-        self.info = None
+        self.info : VariableInfo = None
 
     def get_all_standard_deps(self):
         return self.deps
@@ -72,7 +72,7 @@ class ForwardGraph(base.Graph):
         model,
         dict_inputs : preprocess_samples.DictInputs,
         device,
-        build_dict_info=True,
+        build_variable_info=True,
     ):
         super().__init__("F")
         self.inherit_base_attributes(raw_graph) # => dict_rand / dict_constants
@@ -114,7 +114,7 @@ class ForwardGraph(base.Graph):
             self.nodes.append(fn)
 
             # info :
-            if not build_dict_info:
+            if not build_variable_info:
                 fn.info = self.dict_info[fn.target] = VariableInfo()
             elif not rn.is_input:
                 # 1) Run node's code to generate the value
@@ -125,7 +125,7 @@ class ForwardGraph(base.Graph):
                     jit_patch.try_to_fix_dtype_in_returned_ast_code(
                         rn_code_str,our_global,tmp_local
                     )
-                self.dict_info[rn.target] = fn.info \
+                fn.info = self.dict_info[rn.target] \
                     = self.detect_inplace_or_view(
                     rn,tmp_local,dict_nodes,dict_inplace_ops)
                 del tmp_local
@@ -143,7 +143,7 @@ class ForwardGraph(base.Graph):
             dict_nodes[output_tar] 
             for output_tar in self.outputs]
 
-        self.fix_requires_grad(dict_nodes)
+        self.fix_requires_grad()
 
         # Protect some node in case we want to cut:
         cutting_points = self.find_cutting_points()
@@ -157,22 +157,21 @@ class ForwardGraph(base.Graph):
         # (about shape, dtype etc) we previously collected, 
         # or by running their code in case of view or inplace nodes, 
         # in which case we first (i) generate their dependencies, 
-        # using dict_info; and also (ii) its random dependencies.
+        # using previously collected info; and (ii) its random dependencies.
         tmp_local = dict()
         done = set()
         ready = set()
         todo = list(raw_node.deps)
         while todo != []:
             req_rn = todo[-1]
-            req_tar = req_rn.target
-            if req_tar in done:
+            req_target = req_rn.target
+            if req_target in done:
                 todo.pop()
             else:
-                req_info = self.dict_info[req_tar]
-                if (req_info.is_inplace 
-                or  req_info.is_view
+                if (req_rn.info.is_inplace 
+                or  req_rn.info.is_view
                 or  req_rn.fct == "getattr"):
-                    if req_tar in ready:
+                    if req_target in ready:
                         for req_rd in req_rn.deps_rand:
                             if not req_rd in done:
                                 code = ast_add_on.make_str_assign(
@@ -180,17 +179,17 @@ class ForwardGraph(base.Graph):
                                 exec(code,our_global,tmp_local)
                                 done.add(req_rd)
                         exec(req_rn.get_code(),our_global,tmp_local)
-                        done.add(req_tar)
+                        done.add(req_target)
                         todo.pop()
                     else:
                         todo.extend(list(req_rn.deps))
-                        ready.add(req_tar)
+                        ready.add(req_target)
                 else:
-                    req_x = req_info.generate_value(our_global["device"])
+                    req_x = req_rn.info.generate_value(our_global["device"])
                     if isinstance(req_x,Tensor):
                         req_x = req_x.clone()
-                    tmp_local[req_tar] = req_x
-                    done.add(req_tar)
+                    tmp_local[req_target] = req_x
+                    done.add(req_target)
                     todo.pop()
         return tmp_local
     
@@ -228,8 +227,7 @@ class ForwardGraph(base.Graph):
             or current_raw_node.fct in constants.list_inplace_fct):
                 data_parents = set()
                 for req_rn in current_raw_node.deps:
-                    req_info = self.dict_info[req_rn.mt]
-                    if req_info.variable_type is Tensor:
+                    if req_rn.info.variable_type is Tensor:
                         data_parents.add(req_rn.mt)
                 if data_parents != set():
                     if current_raw_node.fct in constants.list_inplace_fct:
@@ -298,7 +296,6 @@ class ForwardGraph(base.Graph):
                 f"Thus we assume it's a constant.")
             raise constants.ExceptionModuleDoesNotReqGrad
         else:
-            output_node = dict_nodes[output_target]
             output_info = self.dict_info[output_target]
             if not output_info.requires_grad:
                 warnings.warn(
@@ -306,7 +303,7 @@ class ForwardGraph(base.Graph):
                     "Thus there is nothing to do.")
                 raise constants.ExceptionModuleDoesNotReqGrad
             else:
-                return output_target,output_node
+                return output_target
 
 
     def fix_missing_edges_for_inplace_operations(self,dict_nodes):
@@ -318,16 +315,15 @@ class ForwardGraph(base.Graph):
             if (len(fn.users)==0 
             and fn.main_target != self.whole_module_output):
                 # no user and not output => inplace or view
-                fn_info = self.dict_info[fn.main_target]
-                assert(fn_info.is_view or fn_info.is_inplace)
+                assert(fn.info.is_view or fn.info.is_inplace)
 
                 # 1) In case fn is a view/inplace over self.whole_module_output
                 # we might have to change self.outputs:
                 # example: a=f(x) ; b1=view(a) ; b2=inplace(b1) ; c1=inplace(a)
                 # then outputs=[a] => outputs=[b1,c1] => outputs=[b2,c1]
-                if fn_info.data_owner_name is self.whole_module_output:
-                    if fn_info.data_direct_parent_name in self.outputs:
-                        self.outputs.remove(fn_info.data_direct_parent_name)
+                if fn.info.data_owner_name is self.whole_module_output:
+                    if fn.info.data_direct_parent_name in self.outputs:
+                        self.outputs.remove(fn.info.data_direct_parent_name)
                     self.outputs.append(fn.main_target)
                     # => in the example:
                     # - "b1" replace "a"
@@ -339,7 +335,7 @@ class ForwardGraph(base.Graph):
                 # order in which operations were done, if the inplace operations "b"
                 # took place before "c" then it will appear before in the topo-order
                 # in which case we need to add an edge "b"->"c"
-                data_owner_node = dict_nodes[fn_info.data_owner_name]
+                data_owner_node = dict_nodes[fn.info.data_owner_name]
                 for user_fn in data_owner_node.users:
                     index_user = self.nodes.index(user_fn)
                     if index_user > fn_index:
@@ -347,30 +343,21 @@ class ForwardGraph(base.Graph):
                         fn.users.add(user_fn)
 
 
-    def fix_requires_grad(self,dict_nodes):
+    def fix_requires_grad(self):
         # fix 1) 
         # if data_owner requires_grad => inplace/view of it should too
+        fn : ForwardNode
         for fn in self.nodes:
-            fn_info = self.dict_info[fn.main_target]
-            if self.dict_info[fn_info.data_owner_name].requires_grad:
-                fn_info.requires_grad = True
-
+            if self.dict_info[fn.info.data_owner_name].requires_grad:
+                fn.info.requires_grad = True
         # fix 2) 
         # If none of users req_grad (even after fix 1) => useless to req_grad 
         for fn in self.nodes[::-1]:
             if (fn.main_target not in self.outputs
-            and self.dict_info[fn.main_target].requires_grad
-            and not any(selfuser_fn.)
-                info = dict_info[dn.mt]
-                if info.requires_grad:
-                    one_user_req_grad = False
-                    for user_dn in dn.users:
-                        if dict_info[user_dn.mt].requires_grad:
-                            one_user_req_grad = True
-                            break
-                    if not one_user_req_grad:
-                        info.requires_grad = False
-
+            and fn.info.requires_grad
+            and not any(user_fn.info.requires_grad 
+                        for user_fn in fn.users)):
+                fn.info.requires_grad = False
 
 # ==========================
 
