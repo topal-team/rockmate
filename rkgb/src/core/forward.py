@@ -405,6 +405,44 @@ class ForwardGraph(base.Graph):
             print(fn.info)
         print("DICT RANDOM OPERATIONS :\n",self.dict_rand)
 
+    def build_equivalent_torch_nn_module(
+            self,model : torch.nn.Module,device):
+        forward_graph = self
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.parameters = model.parameters
+            def forward(self,*args,**kwargs):
+                # 1) Prepare the environnement of exec
+                dict_inputs = preprocess_samples.DictInputs(model,args,kwargs)
+                tmp_local = dict_inputs.dict
+                our_global = globals().copy()
+                our_global["self"] = model
+                our_global["device"] = device
+                our_global.update(forward_graph.dict_constants)
+                # 2) exec each node one by one
+                fn : ForwardNode
+                for fn in forward_graph.nodes:
+                    for req_random in fn.deps_rand:
+                        if req_random not in tmp_local:
+                            code = ast_add_on.make_str_assign(
+                                (req_random,forward_graph.dict_rand[req_random]))
+                            exec(code,our_global,tmp_local)
+                    if not fn.is_input:
+                        exec(
+                            fn.get_code(force_special_kwargs=True),
+                            our_global,tmp_local
+                        )
+                # 3) return
+                output_targets = forward_graph.outputs
+                if len(output_targets)==1:
+                    return tmp_local[output_targets[0]]
+                else:
+                    return tuple(tmp_local[out] for out in output_targets)
+        return Module
+                
+
+
 
 
 # ==========================
