@@ -129,34 +129,19 @@ class ForwardGraph(base.Graph):
                 rn,tmp_local,dict_nodes,dict_inplace_ops)
             del tmp_local
         
-        output_target, output_forward_node \
-            = self.get_output_node_and_check_if_requires_grad(
-                raw_graph.output_raw_var,dict_nodes
-            )
-        self.output_nodes = [output_forward_node]
+        # get the output_node: if not requires_grad => raise Exception
+        # which is catch in Rockmate, since it implies no Backward
+        output_target = self.get_output_node_and_check_if_requires_grad(
+            raw_graph.output_raw_var,dict_nodes)
         self.outputs = [output_target]
         self.whole_module_output = output_target
 
+        self.fix_missing_edges_for_inplace_operations(dict_nodes)
+        # -> Might change self.outputs
+        self.output_nodes = [
+            dict_nodes[output_tar] 
+            for output_tar in self.outputs]
 
-    # --- missing edges for inplace operations ---
-    # -> May change the output
-    dict_dn = dict((dn.mt,dn) for dn in d_nodes)
-    for index_dn,dn in enumerate(d_nodes):
-        if len(dn.users)==0 and dn.mt != output_target:
-            info : def_info.VariableInfo = dict_info[dn.mt]
-            assert(info.is_view or info.is_inplace)
-            data_owner_name = info.data_owner_name
-            data_owner_dn = dict_dn[data_owner_name]
-            if data_owner_name is dg.whole_module_output:
-                # discard
-                if data_owner_name in dg.outputs:
-                    dg.outputs.remove(data_owner_name)
-                dg.outputs.append(dn.mt)
-            for user_dn in data_owner_dn.users:
-                index_user = d_nodes.index(user_dn)
-                if index_user > index_dn:
-                    user_dn.deps.add(dn)
-                    dn.users.add(dn)
 
 
     # --- Correct requires_grad ---
@@ -305,22 +290,22 @@ class ForwardGraph(base.Graph):
             data_owner_name = current_raw_node.target
             data_direct_parent_name = current_raw_node.target
             dict_inplace_ops[current_raw_node.mt] = set()
-        info = variable_info.VariableInfo(
+        current_rn_info = variable_info.VariableInfo(
             current_rn_value,
             is_view    = is_view,
             is_inplace = is_inplace,
             data_owner_name = data_owner_name,
             data_direct_parent_name = data_direct_parent_name)
         # ** Correct req_grad of data_parent **
-        if info.requires_grad:
-            self.dict_info[info.data_owner_name].requires_grad = True
-        return info
+        if current_rn_info.requires_grad:
+            self.dict_info[data_owner_name].requires_grad = True
+        return current_rn_info
     
 
     def get_output_node_and_check_if_requires_grad(
             self,output_raw_var,dict_nodes):
         if not isinstance(output_raw_var.val,ast.Name):
-            warnings.warn(
+            warnings.warn( # TO CHANGE COMMENTS 
                 f"According to Btools module's return isn't a variable."\
                 f"Thus we assume it's a constant. \n"\
                 f"AST type of the output: {type(output_raw_var.val)}")
@@ -333,7 +318,7 @@ class ForwardGraph(base.Graph):
             raise constants.ExceptionModuleDoesNotReqGrad
         else:
             output_node = dict_nodes[output_target]
-            output_info = self.dict_info[output_node.mt]
+            output_info = self.dict_info[output_target]
             if not output_info.requires_grad:
                 warnings.warn(
                     "None of the outputs require grad. "\
@@ -341,6 +326,44 @@ class ForwardGraph(base.Graph):
                 raise constants.ExceptionModuleDoesNotReqGrad
             else:
                 return output_target,output_node
+
+
+    def fix_missing_edges_for_inplace_operations(self,dict_nodes):
+        # example: a = f(x) ; b = inplace(a) ; c = g(a)
+        # by default: b doesn't have users, and there is a 
+        # direct edge from a to c, skipping b. We fix this.
+        fn : ForwardNode
+        for fn_index,fn in enumerate(self.nodes):
+            if (len(fn.users)==0 
+            and fn.main_target != self.whole_module_output):
+                # no user and not output => inplace or view
+                fn_info : variable_info.VariableInfo = self.dict_info[fn.main_target]
+                assert(fn_info.is_view or fn_info.is_inplace)
+
+                # 1) In case fn is a view/inplace over self.whole_module_output
+                # we might have to change self.outputs:
+                # example: a=f(x) ; b1=view(a) ; b2=inplace(b1) ; c1=inplace(a)
+                # then outputs=[a] => outputs=[b1,c1] => outputs=[b2,c1]
+                if fn_info.data_owner_name is self.whole_module_output:
+                    if fn_info.data_direct_parent_name in self.outputs:
+                        self.outputs.remove(fn_info.data_direct_parent_name)
+                    self.outputs.append(fn.main_target)
+                    # => in the example:
+                    # - "b1" replace "a"
+                    # - "c1" is added to the list, but "a" was already discarded
+                    # - "b2" replace "b1"
+
+                # 2) Add some edges, in the first example a->b->c instead of a->c
+                # for this we rely on the topo-order, since we respect the original
+                # order in which operations were done, if the inplace operations "b"
+                # took place before "c" then it will appear before in the topo-order
+                # in which case we need to add an edge "b"->"c"
+                data_owner_node = dict_nodes[fn_info.data_owner_name]
+                for user_fn in data_owner_node.users:
+                    index_user = self.nodes.index(user_fn)
+                    if index_user > fn_index:
+                        user_fn.deps.add(fn)
+                        fn.users.add(user_fn)
 
 
     def prepare_cut(self):
