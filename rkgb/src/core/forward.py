@@ -3,6 +3,7 @@
 # ==========================
 
 import ast
+import warnings
 from torch import Tensor
 from src.lowlevel import ast_add_on
 from src.lowlevel import jit_patch
@@ -128,40 +129,20 @@ class ForwardGraph(base.Graph):
                 rn,tmp_local,dict_nodes,dict_inplace_ops)
             del tmp_local
         
-
-    # --- translate output ---
-    o_var = bg.output_var
-    if not isinstance(o_var.val,ast.Name):
-        warnings.warn(
-            f"According to Btools module's return isn't a variable."\
-            f"Thus we assume it's a constant. \n"\
-            f"AST type of the output: {type(o_var.val)}")
-        raise global_vars.ExceptionModuleDoesNotReqGrad
-    str_val = o_var.val.id
-    if not o_var.has_node:
-        warnings.warn(
-            f"Btools hasn't attached any node to the output."\
-            f"Thus we assume it's a constant.")
-        raise global_vars.ExceptionModuleDoesNotReqGrad
-    else:
-        output_node = dict_nodes[str_val]
-        output_info = dict_info[output_node.mt]
-        if not output_info.requires_grad:
-            warnings.warn(
-                "None of the outputs require grad. "\
-                "Thus there is nothing to do.")
-            raise global_vars.ExceptionModuleDoesNotReqGrad
-        else:
-            dg.output_nodes = [output_node]
-    dg.outputs = [str_val] # maybe just a tuple constructor...
-    dg.whole_module_output = str_val
+        output_target, output_forward_node \
+            = self.get_output_node_and_check_if_requires_grad(
+                raw_graph.output_raw_var,dict_nodes
+            )
+        self.output_nodes = [output_forward_node]
+        self.outputs = [output_target]
+        self.whole_module_output = output_target
 
 
     # --- missing edges for inplace operations ---
     # -> May change the output
     dict_dn = dict((dn.mt,dn) for dn in d_nodes)
     for index_dn,dn in enumerate(d_nodes):
-        if len(dn.users)==0 and dn.mt != str_val:
+        if len(dn.users)==0 and dn.mt != output_target:
             info : def_info.VariableInfo = dict_info[dn.mt]
             assert(info.is_view or info.is_inplace)
             data_owner_name = info.data_owner_name
@@ -334,6 +315,32 @@ class ForwardGraph(base.Graph):
         if info.requires_grad:
             self.dict_info[info.data_owner_name].requires_grad = True
         return info
+    
+
+    def get_output_node_and_check_if_requires_grad(
+            self,output_raw_var,dict_nodes):
+        if not isinstance(output_raw_var.val,ast.Name):
+            warnings.warn(
+                f"According to Btools module's return isn't a variable."\
+                f"Thus we assume it's a constant. \n"\
+                f"AST type of the output: {type(output_raw_var.val)}")
+            raise constants.ExceptionModuleDoesNotReqGrad
+        output_target = output_raw_var.val.id
+        if not output_raw_var.has_node:
+            warnings.warn(
+                f"Btools hasn't attached any node to the output."\
+                f"Thus we assume it's a constant.")
+            raise constants.ExceptionModuleDoesNotReqGrad
+        else:
+            output_node = dict_nodes[output_target]
+            output_info = self.dict_info[output_node.mt]
+            if not output_info.requires_grad:
+                warnings.warn(
+                    "None of the outputs require grad. "\
+                    "Thus there is nothing to do.")
+                raise constants.ExceptionModuleDoesNotReqGrad
+            else:
+                return output_target,output_node
 
 
     def prepare_cut(self):
