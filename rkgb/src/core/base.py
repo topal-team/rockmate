@@ -240,6 +240,7 @@ class Node():
 # ==============================
 
 class Graph():
+    default_init_target_string = "sources"
     def __init__(
             self,
             graph_type : str,
@@ -305,21 +306,6 @@ class Graph():
     def does_node_requires_grad(self,n : Node):
         return n.does_requires_grad(self.dict_info)
 
-    def __hash__(self):
-        return id(self)
-    
-    """
-    # TO REMOVE
-    def _check_all_constructor_arguments_are_not_None(self,*args):
-        if None in args:
-            raise Exception(
-                f"To use a rkgb core graph constructor, be sure to "\
-                f"pass all arguments.\nTo build a graph you should "\
-                f"rather use the main class of rkgb: \nIn your case: "\
-                f"`rkgb.Build(model,samples,\"{type(self).__name__}\")`"
-            )
-    """
-    
 
     @staticmethod
     def get_sorted_nodes_by_following_relation_deps(

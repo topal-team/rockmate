@@ -264,17 +264,75 @@ class SimplifiedNode(base.Node):
 # * SimplifiedGraph *
 # ***********
 
+# in the description: I need to explain "init_node"
 class SimplifiedGraph(base.Graph):
-    edges_via_artifacts : list[tuple[SimplifiedNode,SimplifiedNode,set[str]]] = None
-    def __init__(self,dg : ForwardGraph = None):
+    def __init__(self,
+            forward_graph : ForwardGraph = None,
+            model=None,
+            device=None
+    ):
+        # 2 constructors: if given a forward_graph, then move from F to S
+        # otherwise return an empty simplified_graph
         super().__init__("S")
-        if not (dg is None):
-            self.inherit_base_attributes(dg)
-            self.whole_model_inputs = set(dg.inputs)
         self.init_node = None # NOT in self.nodes
         self.special_output_node = None # NOT in self.nodes
         self.dict_output_viewing_code = dict()
-        self.edges_via_artifacts = []
+        self.edges_via_artifacts : list[tuple[SimplifiedNode,SimplifiedNode,set[str]]] = []
+
+        # Move from forward.py to simplified.py
+        if forward_graph is not None:
+            if model is None or device is None: 
+                raise Exception(
+                    "You need to pass model and device to "\
+                    "SimplifiedGraph.__init__ to move from F to S")
+            self.inherit_base_attributes(forward_graph)
+            self.whole_model_inputs = set(forward_graph.inputs)
+
+            init_node = SimplifiedNode(
+                main_target=base.Graph.default_init_target_string,
+                simplified_graph=self)
+            init_node.all_targets=[]
+
+            dict_s_nodes = dict() # to translate D to S
+            for dn in dg.nodes:
+                sn = SimplifiedNode(
+                        main_target=dn.target,
+                        code=dn.code_ast,
+                        fct=dn.fct,
+                        protected=dn.protected,
+                        is_rand=dn.is_rand,
+                        deps_rand= set(dn.deps_rand),
+                        other_obj=sg)
+                self.nodes.append(sn)
+                dict_s_nodes[dn.target] = sn
+                for req_dn in dn.deps:
+                    req_sn = dict_s_nodes[req_dn.target]
+                    sn.deps[req_sn] = set((req_dn.target,))
+                    req_sn.users[sn] = set((req_dn.target,))
+            # -- merge all the inputs in the special "init_node" --
+            for inp in dg.inputs:
+                init_node.insert(dict_s_nodes[inp],strong=True,sg=sg)
+            init_node.body_code = []
+            sg.init_node = init_node
+            # -> At the beginning (here), init_node contains only the 'real' inputs
+            # -> in ForwardGraph these nodes have a dummy code `'code = 'INPUT'`,
+            # -> the "insert" method will put these dummy codes in init_node.body_code
+            # -> that's why we clear init_node.body_code at the end of initialization
+            sg.output_nodes = [dict_s_nodes[out] for out in dg.outputs]
+            sg.clear()
+            sg = D_to_S_init(dg)
+            simplify_cheap(sg)
+            simplify_size(sg)
+            simplify_view(sg)
+            create_random_snodes_from_dict_rand(sg,model,device)
+            sg.check_relations()
+            sg.refresh_info_data_name()
+            sg.make_targets_attrs()
+            sg.correct_label_over_edges()
+            sg.unhook_init_node()
+            sg.unhook_special_output_node()
+            sg.assert_ready()
+            return sg
 
     def make_inputs(self):
         inputs = set()
@@ -479,39 +537,6 @@ class SimplifiedGraph(base.Graph):
 # = Init move from D to S  =
 # ==========================
 
-def D_to_S_init(dg : ForwardGraph) -> SimplifiedGraph:
-    sg = SimplifiedGraph(dg)
-    init_node = SimplifiedNode(main_target="sources",other_obj=sg)
-    init_node.all_targets=[]
-    s_nodes = sg.nodes
-    dict_s_nodes = dict() # to translate D to S
-    for dn in dg.nodes:
-        sn = SimplifiedNode(
-                main_target=dn.target,
-                code=dn.code_ast,
-                fct=dn.fct,
-                protected=dn.protected,
-                is_rand=dn.is_rand,
-                deps_rand= set(dn.deps_rand),
-                other_obj=sg)
-        s_nodes.append(sn)
-        dict_s_nodes[dn.target] = sn
-        for req_dn in dn.deps:
-            req_sn = dict_s_nodes[req_dn.target]
-            sn.deps[req_sn] = set((req_dn.target,))
-            req_sn.users[sn] = set((req_dn.target,))
-    # -- merge all the inputs in the special "init_node" --
-    for inp in dg.inputs:
-        init_node.insert(dict_s_nodes[inp],strong=True,sg=sg)
-    init_node.body_code = []
-    sg.init_node = init_node
-    # -> At the beginning (here), init_node contains only the 'real' inputs
-    # -> in ForwardGraph these nodes have a dummy code `'code = 'INPUT'`,
-    # -> the "insert" method will put these dummy codes in init_node.body_code
-    # -> that's why we clear init_node.body_code at the end of initialization
-    sg.output_nodes = [dict_s_nodes[out] for out in dg.outputs]
-    sg.clear()
-    return sg
 
 # ==========================
 
@@ -777,20 +802,6 @@ def create_random_snodes_from_dict_rand(sg,model,device):
 # = Move from D to S graph =
 # ==========================
 
-def D_to_S(dg,model=None,device=None):
-    sg = D_to_S_init(dg)
-    simplify_cheap(sg)
-    simplify_size(sg)
-    simplify_view(sg)
-    create_random_snodes_from_dict_rand(sg,model,device)
-    sg.check_relations()
-    sg.refresh_info_data_name()
-    sg.make_targets_attrs()
-    sg.correct_label_over_edges()
-    sg.unhook_init_node()
-    sg.unhook_special_output_node()
-    sg.assert_ready()
-    return sg
 
 # ==========================
 

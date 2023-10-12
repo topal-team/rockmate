@@ -6,6 +6,7 @@ from .utils import *
 from .Ptools import P_structure, P_cluster, P_graph, P_node, Cluster_translator 
 from .Ktools import K_graph, K_C_node, K_D_node
 
+from src.core import base
 
 # ************
 # * H_C_node *
@@ -460,13 +461,13 @@ def P_graph_to_H_graph(
     # === Build the edges ===
     for hdn in hg.list_hdn:
         kdn = dict_hdn_to_kdn[hdn]
-        for kcn in kdn.deps if kdn.mt != "sources" else kdn.deps_global:
+        for kcn in kdn.deps if kdn.mt != base.Graph.default_init_target_string else kdn.deps_global:
             if kcn is not kg.loss_kcn:
                 if kcn in dict_kcn_to_hcn:
                     hcn = dict_kcn_to_hcn[kcn]
                     hdn.deps.add(hcn)
                     hcn.users.add(hdn)
-        for kcn in kdn.users_real if kdn.mt != "sources" else kdn.users_global:
+        for kcn in kdn.users_real if kdn.mt != base.Graph.default_init_target_string else kdn.users_global:
             if kcn is not kg.loss_kcn:
                 if kcn in dict_kcn_to_hcn:
                     hcn = dict_kcn_to_hcn[kcn]

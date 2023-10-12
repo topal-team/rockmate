@@ -80,7 +80,7 @@ class ForwardGraph(base.Graph):
         self.sources_req_grad = False # by default
 
         raw_nodes = raw_graph.get_toposorted_list_of_non_useless_nodes()
-        dict_nodes = dict()
+        dict_forward_nodes = dict()
         dict_inplace_ops = dict() 
         # dict : main target -> set targets of related inplace operations
 
@@ -108,10 +108,10 @@ class ForwardGraph(base.Graph):
                     self.sources_req_grad = True
             # deps:
             for req_rn in rn.deps:
-                req_fn = dict_nodes[req_rn.target]
+                req_fn = dict_forward_nodes[req_rn.target]
                 fn.deps.add(req_fn)
                 req_fn.users.add(fn)
-            dict_nodes[rn.target] = fn
+            dict_forward_nodes[rn.target] = fn
             self.nodes.append(fn)
 
             # info :
@@ -128,7 +128,7 @@ class ForwardGraph(base.Graph):
                     )
                 fn.info = self.dict_info[rn.target] \
                     = self.detect_inplace_or_view(
-                    rn,fn,tmp_local,dict_nodes,dict_inplace_ops)
+                    rn,fn,tmp_local,dict_forward_nodes,dict_inplace_ops)
                 del tmp_local
         
         # get the output_node: if not requires_grad => raise Exception
@@ -138,10 +138,10 @@ class ForwardGraph(base.Graph):
         self.outputs = [output_target]
         self.whole_module_output = output_target
 
-        self.fix_missing_edges_for_inplace_operations(dict_nodes)
+        self.fix_missing_edges_for_inplace_operations(dict_forward_nodes)
         # -> Might change self.outputs
         self.output_nodes = [
-            dict_nodes[output_tar] 
+            dict_forward_nodes[output_tar] 
             for output_tar in self.outputs]
 
         self.fix_requires_grad()
@@ -200,7 +200,7 @@ class ForwardGraph(base.Graph):
             current_raw_node,
             current_forward_node,
             tmp_local,
-            dict_nodes,
+            dict_forward_nodes,
             dict_inplace_ops):
         # - detect inplace operation -
         current_rn_value = tmp_local[current_raw_node.target]
@@ -249,21 +249,23 @@ class ForwardGraph(base.Graph):
                         req_req_name = req_req_rn.target
                         if req_req_name in data_parents:
                             data_direct_parents.add(req_req_name)
-            if len(data_direct_parents) == 0: raise Exception(
-                f"{current_raw_node.target} is an inplace or view op, it doesn't "\
-                f"share its data with any of its deps ?! (even deps of deps)")
+            if len(data_direct_parents) == 0:
+                raise Exception(
+                    f"{current_raw_node.target} is an inplace or "\
+                    f"view op, it doesn't share its data with any "\
+                    f"of its deps ?! (even deps of deps)")
             data_direct_parent_name = data_direct_parents.pop()
             o_info = self.dict_info[data_direct_parent_name]
             data_owner_name = o_info.data_owner_name
             # -> we must protect the data_owner from cheap simplification
             if is_inplace:
-                data_owner = dict_nodes[data_owner_name]
+                data_owner = dict_forward_nodes[data_owner_name]
                 data_owner.protected = True
             # -> If several inplace operations 
             # -> We must ensure we compute them in the original order
             if is_inplace:
                 for other_inplace_op in dict_inplace_ops[data_owner_name]:
-                    other_fn = dict_nodes[other_inplace_op]
+                    other_fn = dict_forward_nodes[other_inplace_op]
                     other_fn.users.add(current_forward_node)
                     current_forward_node.deps.add(other_fn)
                 dict_inplace_ops[data_owner_name].add(current_forward_node.mt)
@@ -310,7 +312,7 @@ class ForwardGraph(base.Graph):
                 return output_target
 
 
-    def fix_missing_edges_for_inplace_operations(self,dict_nodes):
+    def fix_missing_edges_for_inplace_operations(self,dict_forward_nodes):
         # example: a = f(x) ; b = inplace(a) ; c = g(a)
         # by default: b doesn't have users, and there is a 
         # direct edge from a to c, skipping b. We fix this.
@@ -339,7 +341,7 @@ class ForwardGraph(base.Graph):
                 # order in which operations were done, if the inplace operations "b"
                 # took place before "c" then it will appear before in the topo-order
                 # in which case we need to add an edge "b"->"c"
-                data_owner_node = dict_nodes[fn.info.data_owner_name]
+                data_owner_node = dict_forward_nodes[fn.info.data_owner_name]
                 for user_fn in data_owner_node.users:
                     index_user = self.nodes.index(user_fn)
                     if index_user > fn_index:

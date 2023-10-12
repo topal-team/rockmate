@@ -5,6 +5,8 @@
 from .utils import *
 from .Stools import S_node,S_graph
 
+from src.core import base
+
 # ************
 # * K_C_node *
 # ************
@@ -198,7 +200,7 @@ class K_graph(base.Graph):
         else:
             self.has_fake_input_kdn_grad = True
             self.input_kdn_grad=input_kdn_grad = K_D_node(
-                kdn_type = "grad", main_target = "sources",
+                kdn_type = "grad", main_target = base.Graph.default_init_target_string,
                 all_targets = self.sg.inputs,
                 other_obj = self)
             firsts_mt = [sn.mt for sn in self.sg.init_node.users]
@@ -566,7 +568,6 @@ def aux_build_S_to_K(sg : S_graph,
 
     # ** input nodes **
     # -> get input_kdn_data/grad from prev_kg
-    sources_mt = "sources"
     if prev_kg:
         is_sources = False
         nb_input_kdn = len(prev_kg.list_outputs_kdn_data)
@@ -582,12 +583,12 @@ def aux_build_S_to_K(sg : S_graph,
     else:
         is_sources = True
         kg.input_kdn_data=input_kdn_data = K_D_node(
-            kdn_type = "data", main_target = sources_mt,
+            kdn_type = "data", main_target = base.Graph.default_init_target_string,
             all_targets = sg.inputs,
             other_obj = kg)
         if sg.sources_req_grad or not is_really_first_graph:
             kg.input_kdn_grad=input_kdn_grad = K_D_node(
-                kdn_type = "grad", main_target = sources_mt,
+                kdn_type = "grad", main_target = base.Graph.default_init_target_string,
                 all_targets = sg.inputs,
                 other_obj = kg)
         else:
