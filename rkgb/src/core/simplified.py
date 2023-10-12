@@ -82,6 +82,7 @@ class SimplifiedNode(base.Node):
             main_target="No target",
             code=None,
             fct="",
+            info=None,
             protected=False,
             is_rand=False,
             deps_rand=None,
@@ -126,10 +127,10 @@ class SimplifiedNode(base.Node):
         self.container_targets = [] # later
         self.deps = SimplifiedEdgeDict()
         self.users = SimplifiedEdgeDict()
+        self.info : VariableInfo = info if info is not None else VariableInfo()
         self.protected = protected
         self.is_rand   = is_rand
         self.deps_rand = deps_rand if deps_rand else set()
-        self.info : VariableInfo = None
 
     def get_all_standard_deps(self):
         return set(self.deps.keys())
@@ -288,51 +289,60 @@ class SimplifiedGraph(base.Graph):
             self.inherit_base_attributes(forward_graph)
             self.whole_model_inputs = set(forward_graph.inputs)
 
-            init_node = SimplifiedNode(
+            self.init_node = init_node = SimplifiedNode(
                 main_target=base.Graph.default_init_target_string,
                 simplified_graph=self)
             init_node.all_targets=[]
 
-            dict_s_nodes = dict() # to translate D to S
-            for dn in dg.nodes:
+            # translate each node one by one
+            dict_simplified_nodes = dict()
+            fn : ForwardNode
+            for fn in forward_graph.nodes:
                 sn = SimplifiedNode(
-                        main_target=dn.target,
-                        code=dn.code_ast,
-                        fct=dn.fct,
-                        protected=dn.protected,
-                        is_rand=dn.is_rand,
-                        deps_rand= set(dn.deps_rand),
-                        other_obj=sg)
+                    main_target=fn.target,
+                    code=fn.code_ast,
+                    fct=fn.fct,
+                    info=fn.info,
+                    protected=fn.protected,
+                    is_rand=fn.is_rand,
+                    deps_rand=set(fn.deps_rand),
+                    simplified_graph=self)
                 self.nodes.append(sn)
-                dict_s_nodes[dn.target] = sn
-                for req_dn in dn.deps:
-                    req_sn = dict_s_nodes[req_dn.target]
-                    sn.deps[req_sn] = set((req_dn.target,))
-                    req_sn.users[sn] = set((req_dn.target,))
-            # -- merge all the inputs in the special "init_node" --
-            for inp in dg.inputs:
-                init_node.insert(dict_s_nodes[inp],strong=True,sg=sg)
+                dict_simplified_nodes[fn.target] = sn
+                for req_fn in fn.deps:
+                    req_sn = dict_simplified_nodes[req_fn.target]
+                    sn.deps[req_sn] = set((req_fn.target,))
+                    req_sn.users[sn] = set((req_fn.target,))
+
+            # merge all the inputs in the special `init_node`
+            for input_target in forward_graph.inputs:
+                init_node.insert(
+                    dict_simplified_nodes[input_target],
+                    strong=True,simplified_graph=self)
             init_node.body_code = []
-            sg.init_node = init_node
-            # -> At the beginning (here), init_node contains only the 'real' inputs
-            # -> in ForwardGraph these nodes have a dummy code `'code = 'INPUT'`,
-            # -> the "insert" method will put these dummy codes in init_node.body_code
-            # -> that's why we clear init_node.body_code at the end of initialization
-            sg.output_nodes = [dict_s_nodes[out] for out in dg.outputs]
-            sg.clear()
-            sg = D_to_S_init(dg)
-            simplify_cheap(sg)
-            simplify_size(sg)
-            simplify_view(sg)
-            create_random_snodes_from_dict_rand(sg,model,device)
-            sg.check_relations()
-            sg.refresh_info_data_name()
-            sg.make_targets_attrs()
-            sg.correct_label_over_edges()
-            sg.unhook_init_node()
-            sg.unhook_special_output_node()
-            sg.assert_ready()
-            return sg
+            # At the beginning (here), init_node contains only the 'real' inputs
+            # in ForwardGraph these nodes have a dummy code `code = 'INPUT'`,
+            # the "insert" method will put these dummy codes in init_node.body_code
+            # that's why we clear init_node.body_code at the end of initialization
+
+            self.output_nodes = [
+                dict_simplified_nodes[out] 
+                for out in forward_graph.outputs]
+            # TODO after this line
+            self.clear()
+            self.simplify_cheap()
+            self.simplify_size()
+            self.simplify_view()
+            self.create_random_snodes_from_dict_rand(model,device)
+            self.check_relations()
+            self.refresh_info_data_name()
+            self.make_targets_attrs()
+            self.correct_label_over_edges()
+            self.unhook_init_node()
+            self.unhook_special_output_node()
+            self.assert_ready()
+
+
 
     def make_inputs(self):
         inputs = set()

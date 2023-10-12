@@ -93,16 +93,16 @@ class ForwardGraph(base.Graph):
         rn : RawNode
         for rn in raw_nodes:
             fn = ForwardNode(rn.target,rn.code_ast,rn.fct,
-                    is_rand = rn.is_rand,
-                    deps_rand = set(rn.deps_rand),
-                    forward_graph=self)
+                is_rand=rn.is_rand,
+                deps_rand=set(rn.deps_rand),
+                forward_graph=self)
             # inputs:
             if rn.is_input:
                 self.inputs.append(rn.target)
                 fn.is_input = True
                 input_info = VariableInfo(
                     dict_inputs.dict[rn.target],
-                    data_owner_name = rn.target)
+                    data_owner_name=rn.target)
                 fn.info = self.dict_info[rn.target] = input_info
                 if input_info.requires_grad:
                     self.sources_req_grad = True
