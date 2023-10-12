@@ -328,8 +328,8 @@ class SimplifiedGraph(base.Graph):
             self.output_nodes = [
                 dict_simplified_nodes[out] 
                 for out in forward_graph.outputs]
-            # TODO after this line
             self.clear()
+            # TODO after this line
             self.simplify_cheap()
             self.simplify_size()
             self.simplify_view()
@@ -428,7 +428,51 @@ class SimplifiedGraph(base.Graph):
 
 
 
-    # ===== BLOC 2 : =====
+    # ===== BLOC 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
+    def refresh_info_data_name(self):
+        dict_info = self.dict_info
+        # First we need to know where each var is :
+        dict_nodes = dict() # any target -> main_target
+        for sn in self.nodes:
+            for tar in sn.all_targets:
+                dict_nodes[tar] = sn
+        for name,info in dict_info.items():
+            if name in dict_nodes:
+                owner_sn = dict_nodes[info.data_owner_name]
+                if owner_sn.is_artifact:
+                    info.data_owner_name = "PARAM"
+                else:
+                    info.data_owner_name = owner_sn.main_target
+
+    def correct_label_over_edges(self):
+        for sn in self.nodes:
+            sn_code = sn.get_code()
+            for req_sn,used_targets in sn.deps.items():
+                _used_target = list(used_targets)
+                for tar in _used_target:
+                    if not tar in sn_code:
+                        used_targets.discard(tar)
+                req_sn.users[sn] = set(used_targets)
+                    
+    def make_targets_attrs(self):
+        # -> tensor_targets ; inplace_targets ; container_targets
+        dict_info = self.dict_info
+        for sn in self.nodes:
+            if not sn.is_artifact:
+                tensors = []
+                containers = []
+                for tar in sn.all_targets:
+                    info = dict_info[tar]
+                    variable_type = info.variable_type
+                    if variable_type == torch.Tensor:
+                        if info.data_owner_name != "PARAM":
+                            tensors.append(tar)
+                    elif variable_type == tuple or variable_type == list:
+                        containers.append(tar)
+                sn.tensor_targets = tensors
+                sn.container_targets = containers
+                sn.inplace_targets = [c[0] for c in sn.inplace_code]
+
     def unhook_init_node(self):
         dict_info = self.dict_info
         init_node_users = list(self.init_node.users.items())
@@ -463,7 +507,6 @@ class SimplifiedGraph(base.Graph):
             self.outputs = list(real_outputs)
             self.special_output_node = output_node
             # keep special_output_node.deps
-
         # unhook viewing operations over the outputs
         self.outputs = outputs = []
         self.dict_output_viewing_code = dict_view_code = dict() # mt -> ast code for viewing stuff
@@ -474,55 +517,10 @@ class SimplifiedGraph(base.Graph):
             )
             dict_view_code[out.mt] = viewing_code
             outputs.append(out.mt)
+    # ===== END BLOC 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
             
 
         
-    def refresh_info_data_name(self):
-        dict_info = self.dict_info
-        # First we need to know where each var is :
-        dict_nodes = dict() # any target -> main_target
-        for sn in self.nodes:
-            for tar in sn.all_targets:
-                dict_nodes[tar] = sn
-        for name,info in dict_info.items():
-            if name in dict_nodes:
-                owner_sn = dict_nodes[info.data_owner_name]
-                if owner_sn.is_artifact:
-                    info.data_owner_name = "PARAM"
-                else:
-                    info.data_owner_name = owner_sn.main_target
-
-
-    def correct_label_over_edges(self):
-        for sn in self.nodes:
-            sn_code = sn.get_code()
-            for req_sn,used_targets in sn.deps.items():
-                _used_target = list(used_targets)
-                for tar in _used_target:
-                    if not tar in sn_code:
-                        used_targets.discard(tar)
-                req_sn.users[sn] = set(used_targets)
-
-                    
-    def make_targets_attrs(self):
-        # -> tensor_targets ; inplace_targets ; container_targets
-        dict_info = self.dict_info
-        for sn in self.nodes:
-            if not sn.is_artifact:
-                tensors = []
-                containers = []
-                for tar in sn.all_targets:
-                    info = dict_info[tar]
-                    variable_type = info.variable_type
-                    if variable_type == torch.Tensor:
-                        if info.data_owner_name != "PARAM":
-                            tensors.append(tar)
-                    elif variable_type == tuple or variable_type == list:
-                        containers.append(tar)
-                sn.tensor_targets = tensors
-                sn.container_targets = containers
-                sn.inplace_targets = [c[0] for c in sn.inplace_code]
-
             
 
     # === To handle artifacts in Ptools ===
