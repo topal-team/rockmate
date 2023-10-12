@@ -16,7 +16,7 @@ from src.core.forward import ForwardNode,ForwardGraph
 # * SimplifiedEdge *
 # ***********
 
-# S edges (ie S_nodes.deps/users) are dict : (S_node -> str set)
+# S edges (ie SimplifiedNodes.deps/users) are dict : (SimplifiedNode -> str set)
 # Note that .deps/users won't be instances of SimplifiedEdge class,
 # this class has only static methods. Since keeping standard dict
 # have advantage and some of the following functions aren't taking
@@ -68,7 +68,6 @@ class DictSimplifiedEdge(dict):
         for (user_sn,set_targets) in sn.users.items():
             user_sn.deps[sn] = set(set_targets)
 
-    @staticmethod
     def issubset(self,bigger_dict):
         for (sn,set_targets) in self.items():
             if sn not in bigger_dict: return False
@@ -78,17 +77,20 @@ class DictSimplifiedEdge(dict):
 
 
 # **********
-# * S_node *
+# * SimplifiedNode *
 # **********
 
-class S_node(base.Node):
+class SimplifiedNode(base.Node):
     def __init__(self,
-            main_target="No target",code=None,fct="",
+            main_target="No target",
+            code=None,
+            fct="",
             protected=False,
-            is_rand=False,deps_rand=None,
-            other_obj = None):
+            is_rand=False,
+            deps_rand=None,
+            simplified_graph=None):
         """
-        A S_node is composed by one "real" computation, defining the
+        A SimplifiedNode is composed by one "real" computation, defining the
         "main_target", and followed by size / view operations over it.
         Attributes :
         .main_target : str
@@ -108,13 +110,14 @@ class S_node(base.Node):
         .main_fct   : str  : fct used in .main_code
         .protected  : bool : see Doc (1-separator of the graph)
         .is_artefact: bool : see Doc (useful size node)
-        .deps       : (S_node,str set) dict = dict_edges
+        .deps       : (SimplifiedNode,str set) dict = dict_edges
             -> required nodes with the list of vars needed per node.
         .users      : dict_edges : reciprocal of .deps
         .is_rand    : bool
         .deps_rand  : str set : because we don't want random src nodes here
         """
-        super().__init__("S",other_obj,main_target=main_target)
+        super().__init__("S",main_target,
+            parent_structure_with_id_generator=simplified_graph)
         self.is_artefact = False
         self.main_code = (main_target,code)
         self.main_fct = fct
@@ -129,6 +132,7 @@ class S_node(base.Node):
         self.protected = protected
         self.is_rand   = is_rand
         self.deps_rand = deps_rand if deps_rand else set()
+        self.info : VariableInfo = None
 
     def get_all_standard_deps(self):
         return set(self.deps.keys())
@@ -136,57 +140,54 @@ class S_node(base.Node):
         return set(self.users.keys())
 
     # -----
-    def insert_code(self,aux_sn,sg):
-        # -> aux function of .insert method
-        # -> but used directly sometimes
-        dict_info = sg.dict_info
-        aux_mt = aux_sn.main_target
-        aux_info = dict_info[aux_mt]
-        if not aux_info.is_inplace:
-            if aux_sn.main_code is None: print(
-                f"Warning : we tried to insert {aux_mt}'s "\
-                f"node in {self.main_target}'s node, but aux_sn's "\
-                f"main_code is empty ? How could this be possible ?!",
-                file = sys.stderr)
-            else:
-                self.body_code.append(aux_sn.main_code)
+    def insert_code(self,sn_to_insert,simplified_graph):
+        sn_info = sn_to_insert.info
+        # 1) main_code:
+        main_code_to_insert = sn_to_insert.main_code
+        if not sn_info.is_inplace:
+            if main_code_to_insert is None:
+                raise Exception("Try to insert empty code")
+            self.body_code.append(main_code_to_insert)
         else:
-            # -> we need to push inplace code (and its deps)
-            data_parents = []
-            data_owner = aux_info.data_owner_name
-            p_info = aux_info
-            p_name = p_info.data_direct_parent_name
-            while p_name != data_owner:
-                data_parents.append(p_name)
-                p_info = dict_info[p_name]
-                p_name = p_info.data_direct_parent_name
-            ic = self.inplace_code
-            bc = self.body_code
-            already_in_ic = set(c[0] for c in ic)
-            for code in bc:
-                if (code[0] in data_parents
-                and code[0] not in already_in_ic):
-                    ic.append(code)
-            ic.append(aux_sn.main_code)
-            bc.append((aux_mt,ast.Name(aux_info.data_direct_parent_name)))
-        # anyway :
-        self.inplace_code.extend(aux_sn.inplace_code)
-        self.body_code.extend(aux_sn.body_code)
+            # -> we want to push 'sn' to inplace code 
+            # so we have to push its deps that were in body_code to inplace_code
+            # eg: a = f(x) ; v = view(a) ; ip = inplace(v) ; b = f(ip)
+            # Since ip requires v, then v is pushed in inplace code
+            # so the final code will look like:
+            # _a = f(x) ; v = view(_a) ; ip = inplace(v)
+            # a = _a.detach() ; v = view(a) ; ip = v ; b = f(ip)
+            sn_data_parents = []
+            parent_name = sn_info.data_direct_parent_name
+            while parent_name != sn_info.data_owner_name:
+                sn_data_parents.append(parent_name)
+                parent_info = simplified_graph.dict_info[parent_name]
+                parent_name = parent_info.data_direct_parent_name
+            already_in_inplace_code = set(c[0] for c in self.inplace_code)
+            for code in self.body_code:
+                if (code[0] in sn_data_parents
+                and code[0] not in already_in_inplace_code):
+                    self.inplace_code.append(code)
+            self.inplace_code.append(main_code_to_insert)
+            self.body_code.append((
+                sn_to_insert.main_target,
+                ast.Name(sn_info.data_direct_parent_name)
+            )) # the equivalent of `ip = v` in the example above
 
-        self.all_targets.extend(aux_sn.all_targets)
-        self.is_rand = self.is_rand or aux_sn.is_rand
-        self.deps_rand.update(aux_sn.deps_rand)
-    # -----
+        # 2) No matter inplace or not: add the body part
+        self.body_code.extend(sn_to_insert.body_code)
+        self.inplace_code.extend(sn_to_insert.inplace_code)
+        self.all_targets.extend(sn_to_insert.all_targets)
+        self.is_rand = self.is_rand or sn_to_insert.is_rand
+        self.deps_rand.update(sn_to_insert.deps_rand)
 
 
-    # -----
-    def insert(self,aux_sn,strong,sg):
+    def insert(self,sn_to_insert,strong,sg):
         # this is the fct to merge nodes : we insert "aux_sn" in "self"
         # if strong: delete aux_sn else aux_sn becomes an artefact
         # in any case cut as many edges as possible
 
-        merged_deps = SimplifiedEdge.merge(self.deps,aux_sn.deps)
-        SimplifiedEdge.discard_inplace(merged_deps,self)
+        merged_deps = self.deps.merge(aux_sn.deps)
+        merged_deps.discard_inplace(self)
 
         # -- disconnect aux_n with its children (if possible) --
         if strong: # e.g. for "view"
@@ -263,7 +264,7 @@ class S_node(base.Node):
 # ***********
 
 class SimplifiedGraph(base.Graph):
-    artefact_edges : list[tuple[S_node,S_node,set[str]]] = None
+    artefact_edges : list[tuple[SimplifiedNode,SimplifiedNode,set[str]]] = None
     def __init__(self,dg : ForwardGraph = None):
         super().__init__("S")
         if not (dg is None):
@@ -388,7 +389,7 @@ class SimplifiedGraph(base.Graph):
             real_root = True
         else:
             real_root = False
-            root_sn = S_node("Tmp_root")
+            root_sn = SimplifiedNode("Tmp_root")
             root_sn.deps = dict((out_sn,set()) for out_sn in self.output_nodes)
             for out_sn in self.output_nodes:
                 out_sn.users[root_sn] = set()
@@ -479,12 +480,12 @@ class SimplifiedGraph(base.Graph):
 
 def D_to_S_init(dg : ForwardGraph) -> SimplifiedGraph:
     sg = SimplifiedGraph(dg)
-    init_node = S_node(main_target="sources",other_obj=sg)
+    init_node = SimplifiedNode(main_target="sources",other_obj=sg)
     init_node.all_targets=[]
     s_nodes = sg.nodes
     dict_s_nodes = dict() # to translate D to S
     for dn in dg.nodes:
-        sn = S_node(
+        sn = SimplifiedNode(
                 main_target=dn.target,
                 code=dn.code_ast,
                 fct=dn.fct,
@@ -741,10 +742,10 @@ def simplify_view(sg : SimplifiedGraph):
 # -> we can insert random nodes from dict_rand
 
 def create_random_snodes_from_dict_rand(sg,model,device):
-    dict_random_sn = dict() # str -> S_node
+    dict_random_sn = dict() # str -> SimplifiedNode
     dict_info = sg.dict_info
     for name,code_ast in sg.dict_rand.items():
-        dict_random_sn[name] = S_node(
+        dict_random_sn[name] = SimplifiedNode(
             main_target = name,
             code       = code_ast,
             fct        = "--Random function--",
@@ -803,8 +804,8 @@ class SimplifiedGraph_list(list):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
 
-def copy_S_node(sn : S_node): # aux for copy_SimplifiedGraph
-    new_sn = S_node()
+def copy_SimplifiedNode(sn : SimplifiedNode): # aux for copy_SimplifiedGraph
+    new_sn = SimplifiedNode()
     new_sn.is_artefact       = sn.is_artefact
     new_sn.main_code         = tuple(sn.main_code)
     new_sn.main_fct          = sn.main_fct
@@ -833,7 +834,7 @@ def copy_SimplifiedGraph(sg : SimplifiedGraph):
     new_sg.nodes = new_nodes = []
     # dict_nodes[new_init.main_target] = new_init # TO REMOVE
     for sn in sg.nodes:
-        new_sn = copy_S_node(sn)
+        new_sn = copy_SimplifiedNode(sn)
         new_nodes.append(new_sn)
         dict_nodes[sn.main_target] = new_sn
         for (req_sn,set_str) in sn.deps.items():
@@ -844,7 +845,7 @@ def copy_SimplifiedGraph(sg : SimplifiedGraph):
     # * init_node *
     new_sg.init_node \
         = new_init \
-        = copy_S_node(sg.init_node)
+        = copy_SimplifiedNode(sg.init_node)
     new_init.users = dict(
         (dict_nodes[u.mt],set_str) \
         for u,set_str in sg.init_node.users.items())
@@ -855,7 +856,7 @@ def copy_SimplifiedGraph(sg : SimplifiedGraph):
     if sg.special_output_node is not None:
         new_sg.special_output_node \
             = special_out \
-            = copy_S_node(sg.special_output_node)
+            = copy_SimplifiedNode(sg.special_output_node)
         special_out.deps = dict(
             (dict_nodes[r.mt],set_str) \
             for r,set_str in sg.special_output_node.deps.items())
@@ -911,7 +912,7 @@ def cut(sg : SimplifiedGraph): # -> list of SimplifiedGraph
             new_sg.init_node = sg.init_node
             new_sg.inputs = sg.inputs
         else:
-            ino = copy_S_node(sg.init_node)
+            ino = copy_SimplifiedNode(sg.init_node)
             # -> we want the init_code but NOT the deps
             new_sg.init_node = ino
             inputs = set()
