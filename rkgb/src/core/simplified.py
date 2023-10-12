@@ -424,50 +424,34 @@ class SimplifiedGraph(base.Graph):
                     raise Exception(
                       f"{user_sn.main_target} in {sn.main_target}.users "\
                       f"but one sided relation...")
-                
-    # === To handle artifacts in Ptools ===
-    def discard_all_artifacts(self):
-        # Do this only once the order is fixed!
-        # And K_graph is generated
-        # -> better do a copy first
-        snodes = list(self.nodes)
-        nb_nodes = len(snodes)
-        edges_via_artifacts = self.edges_via_artifacts
-        for i,sn in enumerate(snodes[::-1]):
-            index = nb_nodes-i-1
-            if sn.is_artifact:
-                del self.nodes[index]
-                real_sn = list(sn.deps.keys())[0]
-                for user_sn,used_targets in sn.users.items():
-                    SimplifiedEdgeDict.discard_inplace(user_sn.deps,sn)
-                    SimplifiedEdgeDict.add_edge_inplace(real_sn,user_sn,used_targets)
-                    edges_via_artifacts.append((real_sn,user_sn,used_targets))
-                SimplifiedEdgeDict.discard_inplace(real_sn.users,sn)
-    def delete_edges_via_artifacts(self):
-        for (used_sn,user_sn,_) in self.edges_via_artifacts:
-            SimplifiedEdgeDict.discard_edge_inplace(used_sn,user_sn)
-        # We do NOT set self.edges_via_artifacts = []
 
-
-    def clear(self):
-        # -- (re)-sorting nodes -- 
-        # due to merging, the topo order may not be correct anymore
-        # by the way, remove unplugged nodes
-        if len(self.output_nodes)==1:
+    def toposort_nodes(self):
+        # As we're doing some merges, we will have to re-sort
+        # 1) Find (or build) the node at the root of the deps relation
+        if len(self.output_nodes)==1: # Simple case:
             root_sn = self.output_nodes[0]
             real_root = True
-        else:
+        else: 
+            # We need to generate a node, parent to all output_nodes
+            # in the deps relation (like a very last node to the graph)
             real_root = False
             root_sn = SimplifiedNode("Tmp_root")
             root_sn.deps = dict((out_sn,set()) for out_sn in self.output_nodes)
             for out_sn in self.output_nodes:
                 out_sn.users[root_sn] = set()
+        # 2) sort
         self.nodes = base.Graph.get_sorted_nodes_by_following_relation_deps(root_sn)
+        # 3) remove the fake root (if created) and the init_node
+        # because we don't want the init_node in self.nodes
+        # but it was fetch by following deps will sorting
         if self.init_node in self.nodes: self.nodes.remove(self.init_node)
         if not real_root:
             self.nodes.remove(root_sn)
             for out_sn in root_sn.deps:
                 del out_sn.users[root_sn]
+
+    def clear(self):
+        self.toposort_nodes()
         self.check_artifact()
         self.check_relations()
         self.make_inputs()
@@ -538,6 +522,30 @@ class SimplifiedGraph(base.Graph):
                   f"After simplifications, all remaining "\
                   f"\"size\" should be \"artifacts\", but "\
                   f"{sn.main_target} isn't an artifact")
+            
+
+    # === To handle artifacts in Ptools ===
+    def discard_all_artifacts(self):
+        # Do this only once the order is fixed!
+        # And K_graph is generated
+        # -> better do a copy first
+        snodes = list(self.nodes)
+        nb_nodes = len(snodes)
+        edges_via_artifacts = self.edges_via_artifacts
+        for i,sn in enumerate(snodes[::-1]):
+            index = nb_nodes-i-1
+            if sn.is_artifact:
+                del self.nodes[index]
+                real_sn = list(sn.deps.keys())[0]
+                for user_sn,used_targets in sn.users.items():
+                    SimplifiedEdgeDict.discard_inplace(user_sn.deps,sn)
+                    SimplifiedEdgeDict.add_edge_inplace(real_sn,user_sn,used_targets)
+                    edges_via_artifacts.append((real_sn,user_sn,used_targets))
+                SimplifiedEdgeDict.discard_inplace(real_sn.users,sn)
+    def delete_edges_via_artifacts(self):
+        for (used_sn,user_sn,_) in self.edges_via_artifacts:
+            SimplifiedEdgeDict.discard_edge_inplace(used_sn,user_sn)
+        # We do NOT set self.edges_via_artifacts = []
 
 
 # ==========================

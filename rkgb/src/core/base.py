@@ -309,15 +309,15 @@ class Graph():
 
     @staticmethod
     def get_sorted_nodes_by_following_relation_deps(
-            origin_node : Node):
+            root_node : Node):
         """Toposort nodes
-        /!\ origin_node is the source of .deps relation 
+        /!\ root_node is the source of .deps relation 
         /!\ => e.g. the output node of the graph"""
 
         # Compute incoming degree (= len(users) (not len(deps)))
         degree = dict()
-        degree[origin_node] = 0
-        to_visit = [origin_node]
+        degree[root_node] = 0
+        to_visit = [root_node]
         while to_visit != []:
             n = to_visit.pop()
             for req_n in n.get_all_standard_deps():
@@ -332,7 +332,7 @@ class Graph():
         # Explore nodes by increasing lexicographic-order of their n.main_target
         # BUT a node is explored iff all its users are explored => toposort
         sorted_list = []
-        to_explore = set([origin_node]) # TO CHANGE: to a max heap structure
+        to_explore = set([root_node]) # TO CHANGE: to a max heap structure
         while to_explore: # not empty
             n = max(to_explore,key=lambda n : n.get_num())
             to_explore.discard(n)
