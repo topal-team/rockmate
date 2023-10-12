@@ -13,31 +13,28 @@ from src.core import base
 from src.core.forward import ForwardNode,ForwardGraph
 
 # ***********
-# * SimplifiedEdge *
+# * SimplifiedEdgeDict *
 # ***********
 
-# S edges (ie SimplifiedNodes.deps/users) are dict : (SimplifiedNode -> str set)
-# Note that .deps/users won't be instances of SimplifiedEdge class,
-# this class has only static methods. Since keeping standard dict
-# have advantage and some of the following functions aren't taking
-# dict_edges as inputs. 
+# S edges (ie SimplifiedNodes.deps/users) are 
+# dict : (SimplifiedNode -> str set)
 # /!\ By default the following operations are NOT inplace
 # inplace operations names end with "_inplace". 
 
-class DictSimplifiedEdge(dict):
+class SimplifiedEdgeDict(dict):
     def merge_inplace(self,sub_dict):
         for sn,set_targets2 in sub_dict.items():
             set_targets1 = self[sn] if sn in self else set()
             self[sn] = set_targets1.union(set_targets2)
     def merge(self,sub_dict):
-        new_dict = DictSimplifiedEdge(self)
+        new_dict = SimplifiedEdgeDict(self)
         new_dict.merge_inplace(sub_dict)
         return new_dict
 
     def discard_inplace(self,sn_to_discard):
         if sn_to_discard in self: del self[sn_to_discard]
     def discard(self,sn_to_discard):
-        return DictSimplifiedEdge(
+        return SimplifiedEdgeDict(
             (sn,set_targets) 
             for (sn,set_targets) in self.items() 
             if sn != sn_to_discard)
@@ -46,7 +43,7 @@ class DictSimplifiedEdge(dict):
         set_targets_before = self[sn_to_add] if sn_to_add in self else set()
         self[sn_to_add] = set_targets_before.union(set_targets_to_add)
     def add(self,sn_to_add,set_targets_to_add):
-        new_dict = DictSimplifiedEdge(self)
+        new_dict = SimplifiedEdgeDict(self)
         new_dict.add_inplace(sn_to_add,set_targets_to_add)
         return new_dict
 
@@ -127,8 +124,8 @@ class SimplifiedNode(base.Node):
         self.tensor_targets = [] # later
         self.inplace_targets = [] # later
         self.container_targets = [] # later
-        self.deps = DictSimplifiedEdge()
-        self.users = DictSimplifiedEdge()
+        self.deps = SimplifiedEdgeDict()
+        self.users = SimplifiedEdgeDict()
         self.protected = protected
         self.is_rand   = is_rand
         self.deps_rand = deps_rand if deps_rand else set()
@@ -139,7 +136,6 @@ class SimplifiedNode(base.Node):
     def get_all_standard_users(self):
         return set(self.users.keys())
 
-    # -----
     def insert_code(self,sn_to_insert,simplified_graph):
         sn_info = sn_to_insert.info
         # 1) main_code:
@@ -181,44 +177,49 @@ class SimplifiedNode(base.Node):
         self.deps_rand.update(sn_to_insert.deps_rand)
 
 
-    def insert(self,sn_to_insert,strong,sg):
-        # this is the fct to merge nodes : we insert "aux_sn" in "self"
-        # if strong: delete aux_sn else aux_sn becomes an artefact
+    def insert(self,sn_to_insert,strong,simplified_graph):
+        # this is the fct to merge nodes
+        # if strong: delete sn_to_insert else it becomes an artefact
         # in any case cut as many edges as possible
 
-        merged_deps = self.deps.merge(aux_sn.deps)
+        # deps of self after the merge
+        merged_deps = self.deps.merge(sn_to_insert.deps)
         merged_deps.discard_inplace(self)
 
-        # -- disconnect aux_n with its children (if possible) --
-        if strong: # e.g. for "view"
-            SimplifiedEdge.discard_sn_from_deps_of_its_users(aux_sn)
-            merged_users = SimplifiedEdge.merge(self.users,aux_sn.users)
-            SimplifiedEdge.discard_inplace(merged_users,aux_sn)
-            aux_sn.users = dict()
-        else: # e.g. for "size"
+        # 1) disconnect sn_to_insert from its users
+        # except if artifact, in which case by definition 
+        # artifact.users := sn_to_insert.users - self.users
+        if strong: # e.g. for "view"; sn_to_insert.users = empty
+            SimplifiedEdgeDict.discard_sn_from_deps_of_its_users(sn_to_insert)
+            merged_users = self.users.merge(sn_to_insert)
+            merged_users.discard_inplace(sn_to_insert)
+            sn_to_insert.users = SimplifiedEdgeDict()
+        else: # e.g. for "size"; sn_to_insert.users -= self.users
             for user_sn in self.users.keys():
-                SimplifiedEdge.discard_inplace(user_sn.deps,aux_sn)
-                SimplifiedEdge.discard_inplace(aux_sn.users,user_sn)
+                user_sn.deps.discard_inplace(sn_to_insert)
+                sn_to_insert.users.discard_inplace(user_sn)
             merged_users = self.users
-        # -- if aux_sn is deleted, remove it from parents' users --
-        if len(aux_sn.users) == 0:
-            SimplifiedEdge.discard_sn_from_users_of_its_deps(aux_sn)
-            aux_sn.deps = dict()
+
+        # 2) disconnect sn_to_insert from its deps if it will 
+        # be deleted, ie if: sn_to_insert.users = empty
+        if sn_to_insert.users == dict():
+            SimplifiedEdgeDict.discard_sn_from_users_of_its_deps(sn_to_insert)
+            sn_to_insert.deps = SimplifiedEdgeDict()
             # -> aux_sn has been fully unplugged
         else:
-            aux_sn.is_artefact = True
-            # -> artefact
+            sn_to_insert.is_artefact = True
 
-        # -- insert aux_sn code --
-        self.insert_code(aux_sn,sg)
-        # -- edges --
+        # 3) insert the code; set the new edges
+        # and replace sn_to_insert by self in output_nodes if needed
+        self.insert_code(sn_to_insert,simplified_graph)
         self.deps = merged_deps
         self.users = merged_users
-        SimplifiedEdge.make_users_using_deps(self)
-        SimplifiedEdge.make_deps_using_users(self)
-        if aux_sn in sg.output_nodes:
-            sg.output_nodes[sg.output_nodes.index(aux_sn)] = self
-    # -----
+        SimplifiedEdgeDict.make_users_using_deps(self)
+        SimplifiedEdgeDict.make_deps_using_users(self)
+        if sn_to_insert in simplified_graph.output_nodes:
+            i = simplified_graph.output_nodes.index(sn_to_insert)
+            simplified_graph.output_nodes[i] = self
+
 
     def clear_children_artefact(self):
         # clean useless artefact children of self
@@ -234,7 +235,7 @@ class SimplifiedNode(base.Node):
                       f"{len(art_user_sn.deps)}\n{s}")
                 for other_user_sn in self.users.keys():
                     if art_user_sn in other_user_sn.deps.keys():
-                        SimplifiedEdge.add_edge_inplace(
+                        SimplifiedEdgeDict.add_edge_inplace(
                             self,other_user_sn,
                             other_user_sn.deps[art_user_sn])
                         # We add the names of the variables generated 
@@ -243,10 +244,10 @@ class SimplifiedNode(base.Node):
                         # to get those vars we will no longer use
                         # art_user_sn since we already need self for
                         # something else.
-                    SimplifiedEdge.discard_edge_inplace(
+                    SimplifiedEdgeDict.discard_edge_inplace(
                         art_user_sn,other_user_sn)
                 if art_user_sn.users == dict():
-                    SimplifiedEdge.discard_sn_from_users_of_its_deps(
+                    SimplifiedEdgeDict.discard_sn_from_users_of_its_deps(
                         art_user_sn)
                     art_user_sn.deps = dict()
 
@@ -287,10 +288,10 @@ class SimplifiedGraph(base.Graph):
         dict_info = self.dict_info
         init_node_users = list(self.init_node.users.items())
         for user_sn,used_targets in init_node_users:
-            SimplifiedEdge.discard_inplace(user_sn.deps,self.init_node)
+            SimplifiedEdgeDict.discard_inplace(user_sn.deps,self.init_node)
             if all(not dict_info[used_tgt].requires_grad
                    for used_tgt in used_targets):
-                SimplifiedEdge.discard_inplace(self.init_node.users,user_sn)
+                SimplifiedEdgeDict.discard_inplace(self.init_node.users,user_sn)
         # We need at least one first node = one user of init_node
         # -> Otherwise weird graph 
         # -> And dangerous for Rk_get_1_separators
@@ -313,7 +314,7 @@ class SimplifiedGraph(base.Graph):
             for req_sn,req_targets in output_node.deps.items():
                 real_output_nodes.append(req_sn)
                 real_outputs.update(req_targets)
-                SimplifiedEdge.discard_inplace(req_sn.users,output_node)
+                SimplifiedEdgeDict.discard_inplace(req_sn.users,output_node)
             self.output_nodes = real_output_nodes
             self.outputs = list(real_outputs)
             self.special_output_node = output_node
@@ -339,7 +340,7 @@ class SimplifiedGraph(base.Graph):
                       f"{sn.main_target} is_artefact, but with "\
                       f"len(deps)={len(sn.deps)} (should be 1)")
                 req_sn = list(sn.deps.keys())[0]
-                if SimplifiedEdge.issubset(sn.users,req_sn.users):
+                if SimplifiedEdgeDict.issubset(sn.users,req_sn.users):
                     print(f"{sn.main_target} is a useless "\
                           f"artefact of {req_sn.main_target}")
 
@@ -370,13 +371,13 @@ class SimplifiedGraph(base.Graph):
                 del self.nodes[index]
                 real_sn = list(sn.deps.keys())[0]
                 for user_sn,used_targets in sn.users.items():
-                    SimplifiedEdge.discard_inplace(user_sn.deps,sn)
-                    SimplifiedEdge.add_edge_inplace(real_sn,user_sn,used_targets)
+                    SimplifiedEdgeDict.discard_inplace(user_sn.deps,sn)
+                    SimplifiedEdgeDict.add_edge_inplace(real_sn,user_sn,used_targets)
                     artefact_edges.append((real_sn,user_sn,used_targets))
-                SimplifiedEdge.discard_inplace(real_sn.users,sn)
+                SimplifiedEdgeDict.discard_inplace(real_sn.users,sn)
     def delete_artefact_edges(self):
         for (used_sn,user_sn,_) in self.artefact_edges:
-            SimplifiedEdge.discard_edge_inplace(used_sn,user_sn)
+            SimplifiedEdgeDict.discard_edge_inplace(used_sn,user_sn)
         # We do NOT set self.artefact_edges = []
 
 
@@ -566,11 +567,11 @@ def simplify_node(sn):
     # aux fct, insert n.code_ast in children's code, and then unplug it
     for user_sn in sn.users.keys():
         # -- plug user_sn directly to deps of sn --
-        SimplifiedEdge.merge_inplace(user_sn.deps,sn.deps)
-        SimplifiedEdge.discard_inplace(user_sn.deps,sn)
+        SimplifiedEdgeDict.merge_inplace(user_sn.deps,sn.deps)
+        SimplifiedEdgeDict.discard_inplace(user_sn.deps,sn)
         for (req_sn,set_targets) in sn.deps.items():
-            SimplifiedEdge.discard_inplace(req_sn.users,sn)
-            SimplifiedEdge.add_inplace(req_sn.users,user_sn,set_targets)
+            SimplifiedEdgeDict.discard_inplace(req_sn.users,sn)
+            SimplifiedEdgeDict.add_inplace(req_sn.users,user_sn,set_targets)
         # -- insert the code --
         insert_code_ast(user_sn,sn)
         # -- handle randomness --
@@ -718,12 +719,12 @@ def simplify_view(sg : SimplifiedGraph):
                     # -> Insert sn's code BOTH in art_req and real_req
 
                     # - plug art_req to sn's users -
-                    SimplifiedEdge.merge_inplace(art_req.users,sn.users)
+                    SimplifiedEdgeDict.merge_inplace(art_req.users,sn.users)
                     for (user_sn,set_targets) in sn.users.items():
-                        SimplifiedEdge.add_inplace(user_sn.deps,art_req,set_targets)
+                        SimplifiedEdgeDict.add_inplace(user_sn.deps,art_req,set_targets)
                     # - unplug sn -
-                    SimplifiedEdge.discard_inplace(art_req.users,sn)
-                    SimplifiedEdge.discard_sn_from_deps_of_its_users(sn)
+                    SimplifiedEdgeDict.discard_inplace(art_req.users,sn)
+                    SimplifiedEdgeDict.discard_sn_from_deps_of_its_users(sn)
                     sn.deps = dict()
                     sn.users = dict()
                     if real_req: real_req.clear_children_artefact()
@@ -764,8 +765,8 @@ def create_random_snodes_from_dict_rand(sg,model,device):
     for sn in sg.nodes:
         for req_rd in sn.deps_rand:
             req_sn_rd = dict_random_sn[req_rd]
-            SimplifiedEdge.add_inplace(sn.deps,req_sn_rd,set([req_rd]))
-            SimplifiedEdge.add_inplace(req_sn_rd.users,sn,set([req_rd]))
+            SimplifiedEdgeDict.add_inplace(sn.deps,req_sn_rd,set([req_rd]))
+            SimplifiedEdgeDict.add_inplace(req_sn_rd.users,sn,set([req_rd]))
     sg.nodes = list(dict_random_sn.values()) + sg.nodes
 
 # ==========================
@@ -839,8 +840,8 @@ def copy_SimplifiedGraph(sg : SimplifiedGraph):
         dict_nodes[sn.main_target] = new_sn
         for (req_sn,set_str) in sn.deps.items():
             new_req_sn = dict_nodes[req_sn.main_target]
-            SimplifiedEdge.add_inplace(new_req_sn.users,new_sn,set_str)
-            SimplifiedEdge.add_inplace(new_sn.deps,new_req_sn,set_str)
+            SimplifiedEdgeDict.add_inplace(new_req_sn.users,new_sn,set_str)
+            SimplifiedEdgeDict.add_inplace(new_sn.deps,new_req_sn,set_str)
 
     # * init_node *
     new_sg.init_node \
@@ -880,13 +881,13 @@ def cut(sg : SimplifiedGraph): # -> list of SimplifiedGraph
     # -> Above all the node which don't have any deps
     sg.nodes.insert(0,sg.init_node) # it's not the original sg, no risk
     for first_sn,set_targets in sg.init_node.users.items():
-        SimplifiedEdge.add_inplace(first_sn.deps,sg.init_node,set_targets)
+        SimplifiedEdgeDict.add_inplace(first_sn.deps,sg.init_node,set_targets)
 
     seps = sg.find_cutting_points()
     
     # -> remove tmp_source
     for first_sn in sg.init_node.users.keys():
-        SimplifiedEdge.discard_inplace(first_sn.deps,sg.init_node)
+        SimplifiedEdgeDict.discard_inplace(first_sn.deps,sg.init_node)
     
     seps = [sg.init_node] + seps
     # multiple output_nodes
@@ -919,14 +920,14 @@ def cut(sg : SimplifiedGraph): # -> list of SimplifiedGraph
             first_node_users = list(first_node.users.items())
             for (user_sn,set_targets) in first_node_users:
                 inputs.update(set_targets)
-                SimplifiedEdge.discard_inplace(user_sn.deps,first_node)
-                #SimplifiedEdge.add_inplace(user_sn.deps,ino,set_targets)
-                SimplifiedEdge.add_inplace(ino.users,user_sn,set_targets)
+                SimplifiedEdgeDict.discard_inplace(user_sn.deps,first_node)
+                #SimplifiedEdges.add_inplace(user_sn.deps,ino,set_targets)
+                SimplifiedEdgeDict.add_inplace(ino.users,user_sn,set_targets)
                 if user_sn.is_artefact:
                     ino.insert(user_sn,strong=True,sg=sg)
                     nodes.remove(user_sn)
             for user_sn in ino.users.keys(): # Unhook ino (need due to `ino.insert`)
-                SimplifiedEdge.discard_inplace(user_sn.deps,ino)
+                SimplifiedEdgeDict.discard_inplace(user_sn.deps,ino)
             first_node.users = dict() # previous bloc's output node
             new_sg.inputs = list(inputs)
         # -- outputs --
