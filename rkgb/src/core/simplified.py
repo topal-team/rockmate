@@ -334,7 +334,7 @@ class SimplifiedGraph(base.Graph):
             self.simplify_size()
             self.simplify_view()
             self.create_random_snodes_from_dict_rand(model,device)
-            self.check_relations()
+            self.check_edges_are_reciprocal()
             self.refresh_info_data_name()
             self.make_targets_attrs()
             self.correct_label_over_edges()
@@ -344,14 +344,91 @@ class SimplifiedGraph(base.Graph):
 
 
 
+    # ===== BLOC 1 : CLEAR and CHECK =====
+    def clear(self):
+        self.toposort_nodes()
+        self.check_artifact()
+        self.check_edges_are_reciprocal()
+        self.make_inputs()
+        
+    def toposort_nodes(self):
+        # As we're doing some merges, we will have to re-sort
+        # 1) Find (or build) the node at the root of the deps relation
+        if len(self.output_nodes)==1: # Simple case:
+            root_sn = self.output_nodes[0]
+            real_root = True
+        else: 
+            # We need to generate a node, parent to all output_nodes
+            # in the deps relation (like a very last node to the graph)
+            real_root = False
+            root_sn = SimplifiedNode("Tmp_root")
+            root_sn.deps = dict((out_sn,set()) for out_sn in self.output_nodes)
+            for out_sn in self.output_nodes:
+                out_sn.users[root_sn] = set()
+        # 2) sort
+        self.nodes = base.Graph.get_sorted_nodes_by_following_relation_deps(root_sn)
+        # 3) remove the fake root (if created) and the init_node
+        # because we don't want the init_node in self.nodes
+        # but it was fetch by following deps will sorting
+        if self.init_node in self.nodes: self.nodes.remove(self.init_node)
+        if not real_root:
+            self.nodes.remove(root_sn)
+            for out_sn in root_sn.deps:
+                del out_sn.users[root_sn]
+
+    def check_artifact(self):
+        for sn in self.nodes:
+            if sn.is_artifact:
+                if len(sn.deps)!=1:
+                    raise Exception(
+                      f"{sn.main_target} is_artifact, but with "\
+                      f"len(deps)={len(sn.deps)} (should be 1)")
+                req_sn = list(sn.deps.keys())[0]
+                if SimplifiedEdgeDict.issubset(sn.users,req_sn.users):
+                    print(f"{sn.main_target} is a useless "\
+                          f"artifact of {req_sn.main_target} "\
+                          f"it should have been unplugged.")
+
+    def check_edges_are_reciprocal(self):
+        for sn in self.nodes:
+            for (req_sn,set_targets) in sn.deps.items():
+                if (sn not in req_sn.users) or set_targets != req_sn.users[sn]:
+                    raise Exception(
+                      f"{req_sn.main_target} in {sn.main_target}.deps "\
+                      f"but one sided edge...")
+            for (user_sn,set_targets) in sn.users.items():
+                if (sn not in user_sn.deps) or set_targets != user_sn.deps[sn]:
+                    raise Exception(
+                      f"{user_sn.main_target} in {sn.main_target}.users "\
+                      f"but one sided edge...")
+
     def make_inputs(self):
         inputs = set()
         for used_targets in self.init_node.users.values():
             inputs.update(used_targets)
             # -> labels over the edges
         self.inputs = list(inputs)
-        self.whole_model_inputs.update(set(self.inputs))
+                
+    def assert_ready(self):
+        # check if ready to be given to S_to_K
+        # ie main_targets are tensors, except if artifact -> sizes
+        for sn in self.nodes:
+            sn_info = sn.info
+            if not (sn_info.variable_type in [torch.Tensor,torch.Size]):
+                raise Exception(
+                  f"After simplifications there should be only "\
+                  f"tensors and sizes, but {sn_info.variable_type} "\
+                  f"found for {sn.main_target}.")
+            if sn_info.variable_type==torch.Size and not sn.is_artifact:
+                raise Exception(
+                  f"After simplifications, all remaining "\
+                  f"\"size\" should be \"artifacts\", but "\
+                  f"{sn.main_target} isn't an artifact")
+    # ===== END BLOC 1 : CLEAR and CHECK =====
 
+
+
+    # ===== BLOC 2 : =====
     def unhook_init_node(self):
         dict_info = self.dict_info
         init_node_users = list(self.init_node.users.items())
@@ -369,7 +446,6 @@ class SimplifiedGraph(base.Graph):
                 if len(sn.deps)==0 ]
             first_sn = min(all_without_deps,key=lambda sn : sn.get_num())
             self.init_node.users[first_sn] = set()
-                
 
     def unhook_special_output_node(self):
         assert(len(self.output_nodes)==1)
@@ -400,62 +476,6 @@ class SimplifiedGraph(base.Graph):
             outputs.append(out.mt)
             
 
-    def check_artifact(self):
-        for sn in self.nodes:
-            if sn.is_artifact:# and not (sn is self.init_node):
-                if len(sn.deps)!=1:
-                    raise Exception(
-                      f"{sn.main_target} is_artifact, but with "\
-                      f"len(deps)={len(sn.deps)} (should be 1)")
-                req_sn = list(sn.deps.keys())[0]
-                if SimplifiedEdgeDict.issubset(sn.users,req_sn.users):
-                    print(f"{sn.main_target} is a useless "\
-                          f"artifact of {req_sn.main_target}")
-
-    def check_relations(self):
-        for sn in self.nodes:
-            for (req_sn,set_targets) in sn.deps.items():
-                if (sn not in req_sn.users) or set_targets != req_sn.users[sn]:
-                    raise Exception(
-                      f"{req_sn.main_target} in {sn.main_target}.deps "\
-                      f"but one sided relation...")
-            for (user_sn,set_targets) in sn.users.items():
-                if (sn not in user_sn.deps) or set_targets != user_sn.deps[sn]:
-                    raise Exception(
-                      f"{user_sn.main_target} in {sn.main_target}.users "\
-                      f"but one sided relation...")
-
-    def toposort_nodes(self):
-        # As we're doing some merges, we will have to re-sort
-        # 1) Find (or build) the node at the root of the deps relation
-        if len(self.output_nodes)==1: # Simple case:
-            root_sn = self.output_nodes[0]
-            real_root = True
-        else: 
-            # We need to generate a node, parent to all output_nodes
-            # in the deps relation (like a very last node to the graph)
-            real_root = False
-            root_sn = SimplifiedNode("Tmp_root")
-            root_sn.deps = dict((out_sn,set()) for out_sn in self.output_nodes)
-            for out_sn in self.output_nodes:
-                out_sn.users[root_sn] = set()
-        # 2) sort
-        self.nodes = base.Graph.get_sorted_nodes_by_following_relation_deps(root_sn)
-        # 3) remove the fake root (if created) and the init_node
-        # because we don't want the init_node in self.nodes
-        # but it was fetch by following deps will sorting
-        if self.init_node in self.nodes: self.nodes.remove(self.init_node)
-        if not real_root:
-            self.nodes.remove(root_sn)
-            for out_sn in root_sn.deps:
-                del out_sn.users[root_sn]
-
-    def clear(self):
-        self.toposort_nodes()
-        self.check_artifact()
-        self.check_relations()
-        self.make_inputs()
-        
         
     def refresh_info_data_name(self):
         dict_info = self.dict_info
@@ -503,25 +523,6 @@ class SimplifiedGraph(base.Graph):
                 sn.container_targets = containers
                 sn.inplace_targets = [c[0] for c in sn.inplace_code]
 
-                
-    def assert_ready(self):
-        # check if ready to be given to S_to_K
-        # ie main_targets are tensors, except if artifact -> sizes
-        for sn in self.nodes:
-            if not (sn.main_target in self.dict_info):
-                raise Exception(
-                  f"{sn.main_target} not in dict_info ??")
-            info = self.dict_info[sn.main_target]
-            if not (info.variable_type in [torch.Tensor,torch.Size]):
-                raise Exception(
-                  f"After simplifications there should "\
-                  f"only be tensors or sizes, but {info.variable_type} "\
-                  f"found for {sn.main_target}.")
-            if info.variable_type==torch.Size and not sn.is_artifact:
-                raise Exception(
-                  f"After simplifications, all remaining "\
-                  f"\"size\" should be \"artifacts\", but "\
-                  f"{sn.main_target} isn't an artifact")
             
 
     # === To handle artifacts in Ptools ===
