@@ -180,7 +180,7 @@ def get_twremat_graph(
         mem_outputs = 0
         cnode_deps = [
             cn.unique_id
-            for cn in cnode.deps_through_size_artefacts
+            for cn in cnode.deps_through_size_artifacts
             if cn in K_graph.list_kcn
         ]
 

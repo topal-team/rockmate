@@ -106,7 +106,7 @@ class SimplifiedNode(base.Node):
             -> in case of inplace op: "a = b.relu_" -> "a = b" in body_code
         .main_fct   : str  : fct used in .main_code
         .protected  : bool : see Doc (1-separator of the graph)
-        .is_artefact: bool : see Doc (useful size node)
+        .is_artifact: bool : see Doc (useful size node)
         .deps       : (SimplifiedNode,str set) dict = dict_edges
             -> required nodes with the list of vars needed per node.
         .users      : dict_edges : reciprocal of .deps
@@ -115,7 +115,7 @@ class SimplifiedNode(base.Node):
         """
         super().__init__("S",main_target,
             parent_structure_with_id_generator=simplified_graph)
-        self.is_artefact = False
+        self.is_artifact = False
         self.main_code = (main_target,code)
         self.main_fct = fct
         self.inplace_code = [] # list of tar * AST
@@ -179,7 +179,7 @@ class SimplifiedNode(base.Node):
 
     def insert(self,sn_to_insert,strong,simplified_graph):
         # this is the fct to merge nodes
-        # if strong: delete sn_to_insert else it becomes an artefact
+        # if strong: delete sn_to_insert else it becomes an artifact
         # in any case cut as many edges as possible
 
         # deps of self after the merge
@@ -207,7 +207,7 @@ class SimplifiedNode(base.Node):
             sn_to_insert.deps = SimplifiedEdgeDict()
             # -> aux_sn has been fully unplugged
         else:
-            sn_to_insert.is_artefact = True
+            sn_to_insert.is_artifact = True
 
         # 3) insert the code; set the new edges
         # and replace sn_to_insert by self in output_nodes if needed
@@ -221,11 +221,11 @@ class SimplifiedNode(base.Node):
             simplified_graph.output_nodes[i] = self
 
 
-    def clear_children_artefact(self):
-        # clean useless artefact children of self
+    def clear_children_artifact(self): # TODO
+        # clean useless artifact children of self
         children = dict(self.users)
         for art_user_sn in children.keys():
-            if art_user_sn.is_artefact:
+            if art_user_sn.is_artifact:
                 if set(art_user_sn.deps.keys()) != {self}:
                     s = ",".join(
                       [aux_sn.main_target for aux_sn in art_user_sn.deps])
@@ -251,13 +251,13 @@ class SimplifiedNode(base.Node):
                         art_user_sn)
                     art_user_sn.deps = dict()
 
-    def clear_siblings_artefact(self):
+    def clear_siblings_artifact(self): # TODO
         real_deps = set()
         for req_sn in self.deps.keys():
-            if not req_sn.is_artefact:
+            if not req_sn.is_artifact:
                 real_deps.add(req_sn)
         for req_sn in real_deps:
-            req_sn.clear_children_artefact()
+            req_sn.clear_children_artifact()
 
 
 # ***********
@@ -265,7 +265,7 @@ class SimplifiedNode(base.Node):
 # ***********
 
 class SimplifiedGraph(base.Graph):
-    artefact_edges : list[tuple[SimplifiedNode,SimplifiedNode,set[str]]] = None
+    edges_via_artifacts : list[tuple[SimplifiedNode,SimplifiedNode,set[str]]] = None
     def __init__(self,dg : ForwardGraph = None):
         super().__init__("S")
         if not (dg is None):
@@ -274,7 +274,7 @@ class SimplifiedGraph(base.Graph):
         self.init_node = None # NOT in self.nodes
         self.special_output_node = None # NOT in self.nodes
         self.dict_output_viewing_code = dict()
-        self.artefact_edges = []
+        self.edges_via_artifacts = []
 
     def make_inputs(self):
         inputs = set()
@@ -332,17 +332,17 @@ class SimplifiedGraph(base.Graph):
             outputs.append(out.mt)
             
 
-    def check_artefact(self):
+    def check_artifact(self):
         for sn in self.nodes:
-            if sn.is_artefact:# and not (sn is self.init_node):
+            if sn.is_artifact:# and not (sn is self.init_node):
                 if len(sn.deps)!=1:
                     raise Exception(
-                      f"{sn.main_target} is_artefact, but with "\
+                      f"{sn.main_target} is_artifact, but with "\
                       f"len(deps)={len(sn.deps)} (should be 1)")
                 req_sn = list(sn.deps.keys())[0]
                 if SimplifiedEdgeDict.issubset(sn.users,req_sn.users):
                     print(f"{sn.main_target} is a useless "\
-                          f"artefact of {req_sn.main_target}")
+                          f"artifact of {req_sn.main_target}")
 
     def check_relations(self):
         for sn in self.nodes:
@@ -357,28 +357,28 @@ class SimplifiedGraph(base.Graph):
                       f"{user_sn.main_target} in {sn.main_target}.users "\
                       f"but one sided relation...")
                 
-    # === To handle artefacts in Ptools ===
-    def discard_all_artefacts(self):
+    # === To handle artifacts in Ptools ===
+    def discard_all_artifacts(self):
         # Do this only once the order is fixed!
         # And K_graph is generated
         # -> better do a copy first
         snodes = list(self.nodes)
         nb_nodes = len(snodes)
-        artefact_edges = self.artefact_edges
+        edges_via_artifacts = self.edges_via_artifacts
         for i,sn in enumerate(snodes[::-1]):
             index = nb_nodes-i-1
-            if sn.is_artefact:
+            if sn.is_artifact:
                 del self.nodes[index]
                 real_sn = list(sn.deps.keys())[0]
                 for user_sn,used_targets in sn.users.items():
                     SimplifiedEdgeDict.discard_inplace(user_sn.deps,sn)
                     SimplifiedEdgeDict.add_edge_inplace(real_sn,user_sn,used_targets)
-                    artefact_edges.append((real_sn,user_sn,used_targets))
+                    edges_via_artifacts.append((real_sn,user_sn,used_targets))
                 SimplifiedEdgeDict.discard_inplace(real_sn.users,sn)
-    def delete_artefact_edges(self):
-        for (used_sn,user_sn,_) in self.artefact_edges:
+    def delete_edges_via_artifacts(self):
+        for (used_sn,user_sn,_) in self.edges_via_artifacts:
             SimplifiedEdgeDict.discard_edge_inplace(used_sn,user_sn)
-        # We do NOT set self.artefact_edges = []
+        # We do NOT set self.edges_via_artifacts = []
 
 
     def clear(self):
@@ -400,7 +400,7 @@ class SimplifiedGraph(base.Graph):
             self.nodes.remove(root_sn)
             for out_sn in root_sn.deps:
                 del out_sn.users[root_sn]
-        self.check_artefact()
+        self.check_artifact()
         self.check_relations()
         self.make_inputs()
         
@@ -415,7 +415,7 @@ class SimplifiedGraph(base.Graph):
         for name,info in dict_info.items():
             if name in dict_nodes:
                 owner_sn = dict_nodes[info.data_owner_name]
-                if owner_sn.is_artefact:
+                if owner_sn.is_artifact:
                     info.data_owner_name = "PARAM"
                 else:
                     info.data_owner_name = owner_sn.main_target
@@ -436,7 +436,7 @@ class SimplifiedGraph(base.Graph):
         # -> tensor_targets ; inplace_targets ; container_targets
         dict_info = self.dict_info
         for sn in self.nodes:
-            if not sn.is_artefact:
+            if not sn.is_artifact:
                 tensors = []
                 containers = []
                 for tar in sn.all_targets:
@@ -454,7 +454,7 @@ class SimplifiedGraph(base.Graph):
                 
     def assert_ready(self):
         # check if ready to be given to S_to_K
-        # ie main_targets are tensors, except if artefact -> sizes
+        # ie main_targets are tensors, except if artifact -> sizes
         for sn in self.nodes:
             if not (sn.main_target in self.dict_info):
                 raise Exception(
@@ -465,11 +465,11 @@ class SimplifiedGraph(base.Graph):
                   f"After simplifications there should "\
                   f"only be tensors or sizes, but {info.variable_type} "\
                   f"found for {sn.main_target}.")
-            if info.variable_type==torch.Size and not sn.is_artefact:
+            if info.variable_type==torch.Size and not sn.is_artifact:
                 raise Exception(
                   f"After simplifications, all remaining "\
-                  f"\"size\" should be \"artefacts\", but "\
-                  f"{sn.main_target} isn't an artefact")
+                  f"\"size\" should be \"artifacts\", but "\
+                  f"{sn.main_target} isn't an artifact")
 
 
 # ==========================
@@ -602,7 +602,7 @@ def simplify_cheap(sg : SimplifiedGraph):
 
 # 1) merge the size nodes which have the same parent
 # 2) insert the size nodes in the body code of the
-#    parent, and keep them only if needed -> artefact
+#    parent, and keep them only if needed -> artifact
 
 def size_children(sg,sn):
     # give the list of child nodes of sn which are size
@@ -643,7 +643,7 @@ def simplify_size(sg : SimplifiedGraph):
 def get_all_real_deps(sn):
     return set(
         req_sn for req_sn in sn.deps.keys() 
-        if not req_sn.is_artefact)
+        if not req_sn.is_artifact)
 
 def get_direct_real_deps(sn):
     deps = get_all_real_deps(sn)
@@ -654,7 +654,7 @@ def get_direct_real_deps(sn):
 
 def simplify_view(sg : SimplifiedGraph):
     # from root to leaves
-    sg.init_node.is_artefact = True
+    sg.init_node.is_artifact = True
     for sn in sg.nodes:
         sn_info = sg.dict_info[sn.main_target]
         if (sn_info.is_view
@@ -667,8 +667,8 @@ def simplify_view(sg : SimplifiedGraph):
             if len(real_deps)==1:
                 req_sn = real_deps.pop()
                 req_sn.insert(sn,strong=True,sg=sg)
-                req_sn.clear_children_artefact()
-                req_sn.clear_siblings_artefact()
+                req_sn.clear_children_artifact()
+                req_sn.clear_siblings_artifact()
             elif len(real_deps) > 1:
                 if not sn_info.is_inplace: print(
                     f"Warning : {sn.main_target} is a view op (not "\
@@ -689,13 +689,13 @@ def simplify_view(sg : SimplifiedGraph):
                         file = sys.stderr)
                     else:
                         inplace_real_node.insert(sn,strong=True,sg=sg)
-                        inplace_real_node.clear_siblings_artefact()
+                        inplace_real_node.clear_siblings_artifact()
             elif len(real_deps)==0 and len(sn.deps)>0:
                 # experimental : I assume that views which don't 
                 # require any real tensor are views over parameters
                 # so mem=0 and no bwd K_node, so I can insert them
-                # in their parents even if they are artefacts.
-                # But artefact nodes aren't safe, they might disappear
+                # in their parents even if they are artifacts.
+                # But artifact nodes aren't safe, they might disappear
                 # if self.users sub set of self.parent.users
                 # so I must share the code with artifacts' parent
                 # It's not a problem to insert the code in different 
@@ -705,14 +705,14 @@ def simplify_view(sg : SimplifiedGraph):
                 if sn_info.is_inplace: raise Exception(
                     f"Sorry we do not support inplace operations over "\
                     f"parameters (or anything that isn't a Tensor). \n"\
-                    f"Here {sn.main_target} only deps on artefacts, but"\
+                    f"Here {sn.main_target} only deps on artifacts, but"\
                     f"sn_info.is_inplace=True :/")
                 for art_req in sn.deps.keys():
                     if len(art_req.deps)==0:
                         assert(art_req is sg.init_node)
                         real_req = None
                     else:
-                        assert(len(art_req.deps)==1) # as an artefact
+                        assert(len(art_req.deps)==1) # as an artifact
                         real_req = list(art_req.deps.keys())[0]
                         real_req.insert_code(sn,sg)
                     art_req.insert_code(sn,sg)
@@ -727,7 +727,7 @@ def simplify_view(sg : SimplifiedGraph):
                     SimplifiedEdgeDict.discard_sn_from_deps_of_its_users(sn)
                     sn.deps = dict()
                     sn.users = dict()
-                    if real_req: real_req.clear_children_artefact()
+                    if real_req: real_req.clear_children_artifact()
 
     sg.clear()
 
@@ -807,7 +807,7 @@ class SimplifiedGraph_list(list):
 
 def copy_SimplifiedNode(sn : SimplifiedNode): # aux for copy_SimplifiedGraph
     new_sn = SimplifiedNode()
-    new_sn.is_artefact       = sn.is_artefact
+    new_sn.is_artifact       = sn.is_artifact
     new_sn.main_code         = tuple(sn.main_code)
     new_sn.main_fct          = sn.main_fct
     new_sn.inplace_code      = [tuple(c) for c in sn.inplace_code]
@@ -862,10 +862,10 @@ def copy_SimplifiedGraph(sg : SimplifiedGraph):
             (dict_nodes[r.mt],set_str) \
             for r,set_str in sg.special_output_node.deps.items())
         
-    # * artefact edges *
-    new_artefact_edges = new_sg.artefact_edges
-    for (req_sn,user_sn,used_targets) in sg.artefact_edges:
-        new_artefact_edges.append((
+    # * artifact edges *
+    new_edges_via_artifacts = new_sg.edges_via_artifacts
+    for (req_sn,user_sn,used_targets) in sg.edges_via_artifacts:
+        new_edges_via_artifacts.append((
             dict_nodes[req_sn.mt],
             dict_nodes[user_sn.mt],
             set(used_targets)
@@ -923,7 +923,7 @@ def cut(sg : SimplifiedGraph): # -> list of SimplifiedGraph
                 SimplifiedEdgeDict.discard_inplace(user_sn.deps,first_node)
                 #SimplifiedEdges.add_inplace(user_sn.deps,ino,set_targets)
                 SimplifiedEdgeDict.add_inplace(ino.users,user_sn,set_targets)
-                if user_sn.is_artefact:
+                if user_sn.is_artifact:
                     ino.insert(user_sn,strong=True,sg=sg)
                     nodes.remove(user_sn)
             for user_sn in ino.users.keys(): # Unhook ino (need due to `ino.insert`)
@@ -976,7 +976,7 @@ def aux_print_graph(dot,sg : SimplifiedGraph,uniq_num):
     def edge(i1,i2,set_targets,**kwargs):
         dot.edge(uni(i1),uni(i2),label="\n".join(set_targets),**kwargs)
     for sn in sg.nodes:
-        if sn.is_artefact:
+        if sn.is_artifact:
             node(sn.main_target,sn.get_code(),style="dashed")
         else:
             node(sn.main_target,sn.get_code())

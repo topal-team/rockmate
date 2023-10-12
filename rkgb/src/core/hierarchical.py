@@ -482,7 +482,7 @@ def P_graph_to_H_graph(
         hdn.deps.add(loss_hcn)
         loss_hcn.users.add(hdn)
 
-    # -> artefacts edges
+    # -> artifacts edges
     for kcn,hcn in dict_kcn_to_hcn.items():
         for req_via_art_kcn in kcn.deps_through_artifacts:
             if req_via_art_kcn in dict_kcn_to_hcn:

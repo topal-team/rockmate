@@ -328,25 +328,25 @@ def aux_build_S_to_K(sg : S_graph,
         our_global = def_inspection.generate_our_global(sg,model,device)
         info = sg.dict_info[mt]
 
-        # For artefact nodes :
+        # For artifact nodes :
         #   -> if KCN2 only need KCN1.size, it means in sg there is
-        #   -> an artefact node for KCN1.size to avoid useless dep
+        #   -> an artifact node for KCN1.size to avoid useless dep
         #   -> between KCN2 and KCN1. We decided to do NOT have KDN(size)
         #   -> in fact we just need KCN1 to be ordered before KCN2 in
         #   -> the toposort. To do so we create a tmp special dep:
-        #   -> "deps_through_artifacts" when we find artefact in sn.deps
-        if sn.is_artefact: return ()
+        #   -> "deps_through_artifacts" when we find artifact in sn.deps
+        if sn.is_artifact: return ()
 
         # *** build the fwd part ***
         sn_deps = set(sn.deps.keys())
         if sg.init_node in sn_deps:
             raise Exception("sg.init_node has been unhooked ?!?")
 
-        # -> handle artefact deps :
+        # -> handle artifact deps :
         kcn_deps_art_kcn = set()
         sn_deps_copy = set(sn_deps)
         for req_sn in sn_deps_copy:
-            if req_sn.is_artefact:
+            if req_sn.is_artifact:
                 sn_deps.discard(req_sn)
                 req_real_sn = list(req_sn.deps.keys())[0] # art's parent
                 kcn_deps_art_kcn.add(dict_KCN_fwd[req_real_sn.main_target])

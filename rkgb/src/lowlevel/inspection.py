@@ -39,7 +39,7 @@ def generate_tmp_local(sn,sg,our_global,device):
             set_req_sn_todo.remove(req_sn)
         if not (req_sn is sg.init_node):
             # we create the main_target value, and we run the body_code
-            # but the body_code may requires some artefacts
+            # but the body_code may requires some artifacts
             # thus we need req of req
             req_sn_mt = req_sn.main_target
             main_info = sg.dict_info[req_sn_mt]
@@ -290,7 +290,7 @@ class inspector():
 
     def fct_fgt_bwd(self):
         for req_sn in self.sn.deps.keys():
-            if not req_sn.is_artefact:
+            if not req_sn.is_artifact:
                 for tar in req_sn.tensor_targets:
                     self.tmp_local[tar].grad = None
     def fct_prepare_bwd(self):

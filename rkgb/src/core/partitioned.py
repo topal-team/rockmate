@@ -234,7 +234,7 @@ class P_graph(base.Graph):
     pn_wrapping_it : P_node = None # -> pn representing self in an upper graph
     _first_nodes : list[P_node] = None
     cluster = None # just for debug + printing
-    without_artefacts = False
+    without_artifacts = False
     def __init__(self,graph_id,p_structure=None,other_pg=None,dict_info=None):
         if p_structure is None and other_pg is None and dict_info is None:
             raise Exception(
@@ -326,18 +326,18 @@ class P_graph(base.Graph):
 
     def recompute_edges(self,sg : S_graph):
         # NOT OPTIMAL AT ALL -> To improve if to slow
-        # find artefact_edges in P_graph
+        # find edges_via_artifacts in P_graph
         # Moreover, recomputing edges is not necessary
         # it's just that it's cleaner to have an accurate P_graph
         # at the end
-        if not self.without_artefacts:
-            self.without_artefacts = True
-            all_related_to_artefacts = set().union(
-                set(e[0] for e in sg.artefact_edges),
-                set(e[1] for e in sg.artefact_edges),
+        if not self.without_artifacts:
+            self.without_artifacts = True
+            all_related_to_artifacts = set().union(
+                set(e[0] for e in sg.edges_via_artifacts),
+                set(e[1] for e in sg.edges_via_artifacts),
             )
             dict_where = dict()
-            for sn in all_related_to_artefacts:
+            for sn in all_related_to_artifacts:
                 for pn in self.nodes:
                     pn : P_node
                     if pn.sn is sn:
@@ -348,7 +348,7 @@ class P_graph(base.Graph):
             
             # search edges we might have to delete
             suspicious_edges : set[tuple[P_node,P_node]] = set()
-            for (req_sn,user_sn,_) in sg.artefact_edges:
+            for (req_sn,user_sn,_) in sg.edges_via_artifacts:
                 if req_sn in dict_where and user_sn in dict_where:
                     req_pn = dict_where[req_sn]
                     user_pn = dict_where[user_sn]
@@ -356,7 +356,7 @@ class P_graph(base.Graph):
                         suspicious_edges.add((req_pn,user_pn))
 
             # for suspicious edges, we need to see if there is any
-            # S edge from one to the other (all artefact edges have
+            # S edge from one to the other (all artifact edges have
             # been deleted, that's why we need to recompute P edges)
             for req_pn,user_pn in suspicious_edges:
                 if req_pn.sub_cluster is not None:
@@ -1756,7 +1756,7 @@ def S_to_P(
     ],
     min_size_to_trigger_partitioning = 4):
     sg = copy_S_graph(sg)
-    sg.discard_all_artefacts()
+    sg.discard_all_artifacts()
     p_structure = P_structure(sg,
         min_size_to_trigger_partitioning = min_size_to_trigger_partitioning)
     p_structure.make_dict_mt_to_ano_info(model)
@@ -1766,7 +1766,7 @@ def S_to_P(
         main_cluster.partition(partitioner)
     main_cluster.make_sub_cluster_original()
     p_structure.make_graphs_names()
-    sg.delete_artefact_edges()
+    sg.delete_edges_via_artifacts()
     main_cluster.recompute_all_interfaces_and_edges()
     return p_structure
 
