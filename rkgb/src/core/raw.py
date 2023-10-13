@@ -64,9 +64,6 @@ class RawNode(base.Node):
         self.deps = set()
         if raw_parser is not None: raw_parser.all_raw_nodes.append(self)
 
-    def get_all_standard_deps(self):
-        return self.deps
-
 
 
 class RawVar:

@@ -51,11 +51,6 @@ class ForwardNode(base.Node):
         self.protected = False
         self.info : VariableInfo = None
 
-    def get_all_standard_deps(self):
-        return self.deps
-    def get_all_standard_users(self):
-        return self.users
-
 
 # ***********
 # * ForwardGraph *

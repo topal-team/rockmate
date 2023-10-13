@@ -80,18 +80,18 @@ class Node():
         else:
             self.unique_id = id(self)
 
-    # Methods that must be overridden by subclasses:
-    def _raise_NotImplementedError(self,method_name):
-        raise NotImplementedError(
-            f"{self}'s class ({type(self).__name__}) should "\
-            f"overwrite \"{method_name}\" method.")
     def get_all_standard_deps(self):
-        """To get all the deps of the same:
-        - Include soft ones (via artifacts)
-        - Jump over data nodes (for B and H graphs)"""
-        self._raise_NotImplementedError("get_all_standard_deps")
+        if hasattr(self,"deps"):
+            return self.deps
+        else: raise Exception(
+            f"{type(self).__name__} should overwrite "\
+            f"the method `get_all_standard_deps`.")
     def get_all_standard_users(self):
-        self._raise_NotImplementedError("get_all_standard_users")
+        if hasattr(self,"users"):
+            return self.users
+        else: raise Exception(
+            f"{type(self).__name__} should overwrite "\
+            f"the method `get_all_standard_users`.")
 
     # =================================
     # === main_target / mt / target ===

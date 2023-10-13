@@ -12,65 +12,6 @@ from src.lowlevel.variable_info import VariableInfo
 from src.core import base
 from src.core.forward import ForwardNode,ForwardGraph
 
-# ***********
-# * SimplifiedEdgeDict *
-# ***********
-
-# S edges (ie SimplifiedNodes.deps/users) are 
-# dict : (SimplifiedNode -> str set)
-# /!\ By default the following operations are NOT inplace
-# inplace operations names end with "_inplace". 
-
-class SimplifiedEdgeDict(dict):
-    def merge_inplace(self,sub_dict):
-        for sn,set_targets2 in sub_dict.items():
-            set_targets1 = self[sn] if sn in self else set()
-            self[sn] = set_targets1.union(set_targets2)
-    def merge(self,sub_dict):
-        new_dict = SimplifiedEdgeDict(self)
-        new_dict.merge_inplace(sub_dict)
-        return new_dict
-
-    def discard_inplace(self,sn_to_discard):
-        if sn_to_discard in self: del self[sn_to_discard]
-    def discard(self,sn_to_discard):
-        return SimplifiedEdgeDict(
-            (sn,set_targets) 
-            for (sn,set_targets) in self.items() 
-            if sn != sn_to_discard)
-
-    def add_inplace(self,sn_to_add,set_targets_to_add):
-        set_targets_before = self[sn_to_add] if sn_to_add in self else set()
-        self[sn_to_add] = set_targets_before.union(set_targets_to_add)
-    def add(self,sn_to_add,set_targets_to_add):
-        new_dict = SimplifiedEdgeDict(self)
-        new_dict.add_inplace(sn_to_add,set_targets_to_add)
-        return new_dict
-
-    @staticmethod
-    def discard_sn_from_deps_of_its_users(sn):
-        for user_sn in sn.users.keys():
-            user_sn.deps.discard_inplace(sn)
-    @staticmethod
-    def discard_sn_from_users_of_its_deps(sn):
-        for req_sn in sn.deps.keys():
-            req_sn.users.discard_inplace(sn)
-
-    @staticmethod
-    def make_users_using_deps(sn):
-        for (req_sn,set_targets) in sn.deps.items():
-            req_sn.users[sn] = set(set_targets)
-    @staticmethod
-    def make_deps_using_users(sn):
-        for (user_sn,set_targets) in sn.users.items():
-            user_sn.deps[sn] = set(set_targets)
-
-    def issubset(self,bigger_dict):
-        for (sn,set_targets) in self.items():
-            if sn not in bigger_dict: return False
-            if set_targets > bigger_dict[sn]: return False
-        return True
-
 
 
 # **********
@@ -125,17 +66,12 @@ class SimplifiedNode(base.Node):
         self.tensor_targets = [] # later
         self.inplace_targets = [] # later
         self.container_targets = [] # later
-        self.deps = SimplifiedEdgeDict()
-        self.users = SimplifiedEdgeDict()
+        self.deps = set()
+        self.users = set()
         self.info : VariableInfo = info if info is not None else VariableInfo()
         self.protected = protected
         self.is_rand   = is_rand
         self.deps_rand = deps_rand if deps_rand else set()
-
-    def get_all_standard_deps(self):
-        return set(self.deps.keys())
-    def get_all_standard_users(self):
-        return set(self.users.keys())
 
     def insert_code(self,sn_to_insert,simplified_graph):
         sn_info = sn_to_insert.info
