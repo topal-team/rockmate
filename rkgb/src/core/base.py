@@ -241,6 +241,8 @@ class Node():
 
 class Graph():
     default_init_target_string = "sources"
+    default_param_target_string = "PARAM"
+
     def __init__(
             self,
             graph_type : str,

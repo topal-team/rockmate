@@ -2,10 +2,12 @@
 # = INSPECTION OF KCN =
 # =====================
 
-from .imports import *
-from . import def_info,ast_add_on,small_fcts,constants
-from .constants import print_debug
+import sys
 import gc
+from src.lowlevel import ast_add_on
+from src.lowlevel import constants
+from src.lowlevel.variable_info import VariableInfo
+from src.core import base
 
 # ========================================
 # = CREATE A FRESH ENVIRONNEMENT TO EXEC =
@@ -140,7 +142,8 @@ def get_useful_vars(sn,sg,our_global,device):
                 data_owner_name = name
             else:
                 data_owner_name = dict_info[name].data_owner_name
-            if data_owner_name == "PARAM": continue
+            if data_owner_name == base.Graph.default_param_target_string:
+                continue
             for explicit_var in explicit_vars:
                 if val is explicit_var:
                     explicit_deps.append(data_owner_name)
@@ -202,12 +205,6 @@ class Inspection_result():
         self.mem_fgt_bwd  = 0
         self.time_run_fwd = 0
         self.time_run_bwd = 0
-    def __eq__(self,res2,raise_exception=False):
-        return small_fcts.check_attr(self,res2,
-            ["mem_del_fwd","overhead_fwd","overhead_bwd",
-            "mem_run_fwd","mem_run_bwd",
-            "mem_fgt_fwd","mem_fgt_bwd"],
-            raise_exception=raise_exception)
 
 class inspector():
     # -> We define an inspector class to save every intermediate 

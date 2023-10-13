@@ -268,18 +268,17 @@ class SimplifiedGraph(base.Graph):
                 dict_simplified_nodes[out] 
                 for out in forward_graph.outputs]
             self.clear()
-            # TODO after this line
-            self.simplify_cheap()
-            self.simplify_size()
-            self.simplify_view()
-            self.create_random_snodes_from_dict_rand(model,device)
+            self.simplify_cheap() # TODO
+            self.simplify_size() # TODO
+            self.simplify_view() # TODO
+            self.create_random_snodes_from_dict_rand(model,device) # TODO
             self.check_edges_are_reciprocal()
-            self.refresh_info_data_name()
+            self.refresh_node_info_data_owner_name()
             self.make_dict_of_labels_on_edges()
             self.make_targets_attrs()
             self.make_inputs()
-            self.unhook_init_node()
-            self.unhook_special_output_node()
+            self.unhook_init_node() # TODO
+            self.unhook_special_output_node() # TODO
             self.assert_ready()
 
 
@@ -333,14 +332,14 @@ class SimplifiedGraph(base.Graph):
         sn : SimplifiedNode
         for sn in self.nodes:
             for req_sn in sn.deps:
-                if sn not in req_sn.users:
-                    raise Exception(f"{req_sn.mt} in {sn.mt}.deps but not reciprocal")
+                if sn not in req_sn.users: raise Exception(
+                    f"{req_sn.mt} in {sn.mt}.deps but not reciprocal")
             for user_sn in sn.users:
-                if sn not in user_sn.deps:
-                    raise Exception(f"{user_sn.mt} in {sn.mt}.users but not reciprocal")
+                if sn not in user_sn.deps: raise Exception(
+                    f"{user_sn.mt} in {sn.mt}.users but not reciprocal")
 
     def assert_ready(self):
-        # check if ready to be given to S_to_K
+        # Check if ready to build the backward graphs
         # ie main_targets are tensors, except if artifact -> sizes
         for sn in self.nodes:
             sn_info = sn.info
@@ -359,7 +358,7 @@ class SimplifiedGraph(base.Graph):
 
 
     # ===== BLOC 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
-    def refresh_info_data_name(self):
+    def refresh_node_info_data_owner_name(self):
         dict_info = self.dict_info
         # First we need to know where each var is :
         dict_nodes = dict() # any target -> main_target
@@ -370,7 +369,7 @@ class SimplifiedGraph(base.Graph):
             if name in dict_nodes:
                 owner_sn = dict_nodes[info.data_owner_name]
                 if owner_sn.is_artifact:
-                    info.data_owner_name = "PARAM"
+                    info.data_owner_name = base.Graph.default_param_target_string
                 else:
                     info.data_owner_name = owner_sn.main_target
 
@@ -397,7 +396,8 @@ class SimplifiedGraph(base.Graph):
                     info = dict_info[tar]
                     variable_type = info.variable_type
                     if variable_type == torch.Tensor:
-                        if info.data_owner_name != "PARAM":
+                        if info.data_owner_name \
+                        != base.Graph.default_param_target_string:
                             tensors.append(tar)
                     elif variable_type == tuple or variable_type == list:
                         containers.append(tar)
@@ -415,21 +415,31 @@ class SimplifiedGraph(base.Graph):
 
     def unhook_init_node(self):
         dict_info = self.dict_info
-        init_node_users = list(self.init_node.users.items())
-        for user_sn,used_targets in init_node_users:
-            SimplifiedEdgeDict.discard_inplace(user_sn.deps,self.init_node)
-            if all(not dict_info[used_tgt].requires_grad
-                   for used_tgt in used_targets):
-                SimplifiedEdgeDict.discard_inplace(self.init_node.users,user_sn)
-        # We need at least one first node = one user of init_node
-        # -> Otherwise weird graph 
-        # -> And dangerous for Rk_get_1_separators
+        init_node = self.init_node
+        dict_labels = self.dict_of_labels_on_edges
+        all_init_node_users = set(init_node.users)
+        for user_sn in all_init_node_users:
+            # 1) Remove init_node from other nodes deps ie unplug it
+            user_sn.deps.discard(init_node)
+            # 2) If there is no requires_grad link from init_node to user_sn
+            # then we don't need to consider it in init_node.users
+            # we only want to keep the nodes that produces gradients 
+            # on the input (to make the backward graph)
+            used_targets = dict_labels[(init_node,user_sn)]
+            if not any(
+                    dict_info[target].requires_grad
+                    for target in used_targets):
+                init_node.users.discard(user_sn)
+        # 3) BUT, we need at least one node in init_node.users
+        # so we have 1 first node where to start find_cutting_points.
+        # Thus in case we remove all the users at stage (2),
+        # we add back the first one in the topological order
         if len(self.init_node.users)==0:
             all_without_deps = [
                 sn for sn in self.nodes 
                 if len(sn.deps)==0 ]
-            first_sn = min(all_without_deps,key=lambda sn : sn.get_num())
-            self.init_node.users[first_sn] = set()
+            first_sn = min(all_without_deps,key=base.Node.get_num)
+            self.init_node.users.add(first_sn)
 
     def unhook_special_output_node(self):
         assert(len(self.output_nodes)==1)
