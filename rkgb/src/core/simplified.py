@@ -68,6 +68,8 @@ class SimplifiedNode(base.Node):
         self.container_targets = [] # later
         self.deps = set()
         self.users = set()
+        self.soft_deps = set()
+        self.soft_users = set()
         self.info : VariableInfo = info if info is not None else VariableInfo()
         self.protected = protected
         self.is_rand   = is_rand
@@ -171,7 +173,7 @@ class SimplifiedNode(base.Node):
             if artifact_sn.deps != {self}:
                 raise Exception(
                     f"Error with artifact {artifact_sn.mt}, "\
-                    f"its only dependance should be {self.mt}, "\
+                    f"its only dependence should be {self.mt}, "\
                     f"but deps = {artifact_sn.deps}")
 
             # update and unplug if obsolete
@@ -349,11 +351,11 @@ class SimplifiedGraph(base.Graph):
 
     # ===== BLOC 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
     def create_nodes_for_random_operations_from_dict_rand(self,model,device):
-        dict_random_node = dict() # str -> SimplifiedNode
+        dict_random_nodes = dict() # str -> SimplifiedNode
         dict_info = self.dict_info
         # 1) Generate all the random nodes, via self.dict_rand
         for random_variable_name,code_ast in self.dict_rand.items():
-            dict_random_node[random_variable_name] \
+            dict_random_nodes[random_variable_name] \
                 = random_variable_node \
                 = SimplifiedNode(
                     main_target=random_variable_name,
@@ -374,10 +376,20 @@ class SimplifiedGraph(base.Graph):
         sn : SimplifiedNode
         for sn in self.nodes:
             for req_rd_target in sn.deps_rand:
-                req_rd_node = dict_random_node[req_rd_target]
+                req_rd_node = dict_random_nodes[req_rd_target]
                 req_rd_node.users.add(sn)
                 sn.deps.add(req_rd_node)
-        self.nodes = list(dict_random_node.values()) + self.nodes
+        # 3) Set them as user of self.init_node, since, by definition
+        # of dict_rand, these nodes don't have dependencies. Then try
+        # to insert (to be sure to keep only node<=>Tensor), otherwise
+        # put in a the beginning of self.nodes.
+        random_variable_node : SimplifiedNode
+        init_node = self.init_node
+        for random_variable_node in dict_random_nodes.values():
+            if random_variable_node.info.variable_type != torch.Tensor:
+                init_node.insert(random_variable_node,True,self)
+            else:
+                self.nodes.insert(0,random_variable_node)
 
     def refresh_node_info_data_owner_name(self):
         dict_info = self.dict_info
@@ -485,7 +497,10 @@ class SimplifiedGraph(base.Graph):
         a = f(x) ; v = view(a)
         Instead of returning 'v', we decide to return 'a',
         and the viewing operation will be done outside.
-        This is due to how Rockmate creates an equivalent torch.nn.Module
+        This is due to how Rockmate creates an equivalent torch.nn.Module.
+        But since 'v' can still be used by other variables
+        (e.g. c = g(v) and c is a 2nd output). So we don't remove 
+        'v = view(a)' from Node(a), we just duplicate it in self.dict_output_viewing_code
         """
         self.outputs = []
         self.dict_output_viewing_code = dict()
@@ -502,11 +517,7 @@ class SimplifiedGraph(base.Graph):
         
             
 
-    # === To handle artifacts in Ptools ===
-    def discard_all_artifacts(self):
-        # Do this only once the order is fixed!
-        # And K_graph is generated
-        # -> better do a copy first
+    def remove_artifacts_and_replace_them_by_soft_edges(self):
         snodes = list(self.nodes)
         nb_nodes = len(snodes)
         edges_via_artifacts = self.edges_via_artifacts
