@@ -308,6 +308,12 @@ class Graph():
     def does_node_requires_grad(self,n : Node):
         return n.does_requires_grad(self.dict_info)
 
+    def make_copy_of_globals(self,model,device):
+        our_global = globals().copy()
+        our_global.update(self.dict_constants)
+        our_global["self"] = model
+        our_global["device"] = device
+        return our_global
 
     @staticmethod
     def get_sorted_nodes_by_following_relation_deps(

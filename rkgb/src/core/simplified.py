@@ -269,7 +269,7 @@ class SimplifiedGraph(base.Graph):
             self.simplify_cheap() # TODO
             self.simplify_size() # TODO
             self.simplify_view() # TODO
-            self.create_random_snodes_from_dict_rand(model,device) # TODO
+            self.create_nodes_for_random_operations_from_dict_rand(model,device)
             self.check_edges_are_reciprocal()
             self.refresh_node_info_data_owner_name()
             self.make_dict_of_labels_on_edges()
@@ -357,6 +357,37 @@ class SimplifiedGraph(base.Graph):
 
 
     # ===== BLOC 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
+    def create_nodes_for_random_operations_from_dict_rand(self,model,device):
+        dict_random_node = dict() # str -> SimplifiedNode
+        dict_info = self.dict_info
+        # 1) Generate all the random nodes, via self.dict_rand
+        for random_variable_name,code_ast in self.dict_rand.items():
+            dict_random_node[random_variable_name] \
+                = random_variable_node \
+                = SimplifiedNode(
+                    main_target=random_variable_name,
+                    code=code_ast,
+                    fct="--Random function--",
+                    protected=True,
+                    is_rand=True,
+                    simplified_graph=self)
+            # -> We need to generate VariableInfo
+            # to do so we generate the value by running the code
+            our_global = self.make_copy_of_globals(model,device)
+            dict_info[random_variable_name] \
+                = random_variable_node.info \
+                = VariableInfo(eval(ast_add_on.ast_to_str(code_ast),our_global))
+        # 2) Link them in the graph, via node.deps_rand
+        # Note: by definition, these nodes don't have deps, only users
+        # So they can be put at the beginning of self.nodes (the topo-order)
+        sn : SimplifiedNode
+        for sn in self.nodes:
+            for req_rd_target in sn.deps_rand:
+                req_rd_node = dict_random_node[req_rd_target]
+                req_rd_node.users.add(sn)
+                sn.deps.add(req_rd_node)
+        self.nodes = list(dict_random_node.values()) + self.nodes
+
     def refresh_node_info_data_owner_name(self):
         dict_info = self.dict_info
         # First we need to know where each var is :
@@ -726,35 +757,6 @@ def simplify_view(sg : SimplifiedGraph):
 #  Insert random operations 
 #  which were in dict_rand
 # ==========================
-# -> Now that we simplified everything,
-# -> we can insert random nodes from dict_rand
-
-def create_random_snodes_from_dict_rand(sg,model,device):
-    dict_random_sn = dict() # str -> SimplifiedNode
-    dict_info = sg.dict_info
-    for name,code_ast in sg.dict_rand.items():
-        dict_random_sn[name] = SimplifiedNode(
-            main_target = name,
-            code       = code_ast,
-            fct        = "--Random function--",
-            protected  = True,
-            is_rand    = True,
-            other_obj  = sg)
-        # -> We need to generate ".info" from def_info.py
-        # -> to do so we first need to generate the variable <name>
-        our_global = globals().copy()
-        our_global.update(sg.dict_constants)
-        if model: our_global["self"] = model
-        if device: our_global["device"] = device
-        dict_info[name] = VariableInfo(
-            eval(ast_add_on.ast_to_str(code_ast),our_global)
-        )
-    for sn in sg.nodes:
-        for req_rd in sn.deps_rand:
-            req_sn_rd = dict_random_sn[req_rd]
-            SimplifiedEdgeDict.add_inplace(sn.deps,req_sn_rd,set([req_rd]))
-            SimplifiedEdgeDict.add_inplace(req_sn_rd.users,sn,set([req_rd]))
-    sg.nodes = list(dict_random_sn.values()) + sg.nodes
 
 # ==========================
 

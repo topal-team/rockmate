@@ -79,10 +79,7 @@ class ForwardGraph(base.Graph):
         dict_inplace_ops = dict() 
         # dict : main target -> set targets of related inplace operations
 
-        our_global = globals().copy()
-        our_global["self"] = model
-        our_global["device"] = device
-        our_global.update(self.dict_constants)
+        our_global = self.make_copy_of_globals(model,device)
 
         # Translate each node one by one following the topo-order
         rn : RawNode
@@ -411,12 +408,9 @@ class ForwardGraph(base.Graph):
                 self.parameters = model.parameters
             def forward(self,*args,**kwargs):
                 # 1) Prepare the environnement of exec
+                our_global = forward_graph.make_copy_of_globals(model,device)
                 dict_inputs = preprocess_samples.DictInputs(model,args,kwargs)
                 tmp_local = dict_inputs.dict
-                our_global = globals().copy()
-                our_global["self"] = model
-                our_global["device"] = device
-                our_global.update(forward_graph.dict_constants)
                 # 2) exec each node one by one
                 fn : ForwardNode
                 for fn in forward_graph.nodes:

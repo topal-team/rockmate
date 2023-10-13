@@ -14,10 +14,7 @@ from src.core import base
 # ========================================
 
 def generate_our_global(sg,model,device):
-    our_global = globals().copy()
-    our_global.update(sg.dict_constants)
-    our_global["self"] = model
-    our_global["device"] = device
+    our_global = sg.make_copy_of_globals(model,device)
     for inp in sg.whole_model_inputs.union(set(sg.inputs)):
         info = sg.dict_info[inp]
         x = info.generate_value(device)
