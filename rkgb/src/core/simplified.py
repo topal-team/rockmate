@@ -375,10 +375,11 @@ class SimplifiedGraph(base.Graph):
         # So they can be put at the beginning of self.nodes (the topo-order)
         sn : SimplifiedNode
         for sn in self.nodes:
-            for req_rd_target in sn.deps_rand:
-                req_rd_node = dict_random_nodes[req_rd_target]
-                req_rd_node.users.add(sn)
-                sn.deps.add(req_rd_node)
+            if not sn.is_artifact:
+                for req_rd_target in sn.deps_rand:
+                    req_rd_node = dict_random_nodes[req_rd_target]
+                    req_rd_node.users.add(sn)
+                    sn.deps.add(req_rd_node)
         # 3) Set them as user of self.init_node, since, by definition
         # of dict_rand, these nodes don't have dependencies. Then try
         # to insert (to be sure to keep only node<=>Tensor), otherwise
@@ -391,13 +392,27 @@ class SimplifiedGraph(base.Graph):
             else:
                 self.nodes.insert(0,random_variable_node)
 
+    def remove_artifacts_and_replace_them_by_soft_edges(self):
+        nb_nodes = len(self.nodes)
+        artifact_sn : SimplifiedNode
+        for index,artifact_sn in enumerate(self.nodes[::-1]):
+            if artifact_sn.is_artifact:
+                del self.nodes[nb_nodes-index-1]
+                parent_sn = next(iter(artifact_sn.deps))
+                parent_sn.users.discard(artifact_sn)
+                for user_sn in artifact_sn.users:
+                    user_sn.deps.discard(artifact_sn)
+                    user_sn.soft_deps.add(parent_sn)
+                    parent_sn.soft_users.add(user_sn)
+
     def refresh_node_info_data_owner_name(self):
         dict_info = self.dict_info
         # First we need to know where each var is :
         dict_nodes = dict() # any target -> main_target
         for sn in self.nodes:
             for tar in sn.all_targets:
-                dict_nodes[tar] = sn
+                if tar not in dict_nodes:
+                    dict_nodes[tar] = sn
         for name,info in dict_info.items():
             if name in dict_nodes:
                 owner_sn = dict_nodes[info.data_owner_name]
@@ -516,26 +531,6 @@ class SimplifiedGraph(base.Graph):
 
         
             
-
-    def remove_artifacts_and_replace_them_by_soft_edges(self):
-        snodes = list(self.nodes)
-        nb_nodes = len(snodes)
-        edges_via_artifacts = self.edges_via_artifacts
-        for i,sn in enumerate(snodes[::-1]):
-            index = nb_nodes-i-1
-            if sn.is_artifact:
-                del self.nodes[index]
-                real_sn = list(sn.deps.keys())[0]
-                for user_sn,used_targets in sn.users.items():
-                    SimplifiedEdgeDict.discard_inplace(user_sn.deps,sn)
-                    SimplifiedEdgeDict.add_edge_inplace(real_sn,user_sn,used_targets)
-                    edges_via_artifacts.append((real_sn,user_sn,used_targets))
-                SimplifiedEdgeDict.discard_inplace(real_sn.users,sn)
-    def delete_edges_via_artifacts(self):
-        for (used_sn,user_sn,_) in self.edges_via_artifacts:
-            SimplifiedEdgeDict.discard_edge_inplace(used_sn,user_sn)
-        # We do NOT set self.edges_via_artifacts = []
-
 
 # ==========================
 # ==== Simplification 1 ====
