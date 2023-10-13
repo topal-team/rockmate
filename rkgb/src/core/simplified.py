@@ -160,43 +160,34 @@ class SimplifiedNode(base.Node):
             simplified_graph.output_nodes[i] = self
 
 
-    def clear_children_artifact(self): # TODO
-        # clean useless artifact children of self
-        children = dict(self.users)
-        for art_user_sn in children.keys():
-            if art_user_sn.is_artifact:
-                if set(art_user_sn.deps.keys()) != {self}:
-                    s = ",".join(
-                      [aux_sn.main_target for aux_sn in art_user_sn.deps])
-                    raise Exception(
-                      f"{self.main_target} should be the only "\
-                      f"parent of {art_user_sn.main_target} : "\
-                      f"{len(art_user_sn.deps)}\n{s}")
-                for other_user_sn in self.users.keys():
-                    if art_user_sn in other_user_sn.deps.keys():
-                        SimplifiedEdgeDict.add_edge_inplace(
-                            self,other_user_sn,
-                            other_user_sn.deps[art_user_sn])
-                        # We add the names of the variables generated 
-                        # by the code of art_user_sn (present in self)
-                        # which are used in other_user_sn. Because
-                        # to get those vars we will no longer use
-                        # art_user_sn since we already need self for
-                        # something else.
-                    SimplifiedEdgeDict.discard_edge_inplace(
-                        art_user_sn,other_user_sn)
-                if art_user_sn.users == dict():
-                    SimplifiedEdgeDict.discard_sn_from_users_of_its_deps(
-                        art_user_sn)
-                    art_user_sn.deps = dict()
+    def remove_obsolete_child_artifacts(self):
+        # An artifact is obsolete if it no longer have
+        # any user that isn't an user of its parent.
+        child_artifacts = [
+            user_sn for user_sn in self.users 
+            if user_sn.is_artifact]
+        for artifact_sn in child_artifacts:
+            # Check everything is going fine
+            if artifact_sn.deps != {self}:
+                raise Exception(
+                    f"Error with artifact {artifact_sn.mt}, "\
+                    f"its only dependance should be {self.mt}, "\
+                    f"but deps = {artifact_sn.deps}")
 
-    def clear_siblings_artifact(self): # TODO
-        real_deps = set()
-        for req_sn in self.deps.keys():
-            if not req_sn.is_artifact:
-                real_deps.add(req_sn)
-        for req_sn in real_deps:
-            req_sn.clear_children_artifact()
+            # update and unplug if obsolete
+            artifact_sn.users -= self.users
+            if artifact_sn.users == set():
+                self.users.discard(artifact_sn)
+                artifact_sn.deps = set()
+
+    def remove_obsolete_sibling_artifacts(self):
+        # 1) get the deps 2) remove child artifacts of them
+        # and children of deps of self are: siblings of self
+        non_artifact_deps = [
+            req_sn for req_sn in self.deps
+            if not req_sn.is_artifact]
+        for req_sn in non_artifact_deps:
+            req_sn.remove_obsolete_child_artifacts()
 
 
 # ***********
@@ -685,8 +676,8 @@ def simplify_view(sg : SimplifiedGraph):
             if len(real_deps)==1:
                 req_sn = real_deps.pop()
                 req_sn.insert(sn,strong=True,sg=sg)
-                req_sn.clear_children_artifact()
-                req_sn.clear_siblings_artifact()
+                req_sn.remove_obsolete_child_artifacts()
+                req_sn.remove_obsolete_sibling_artifacts()
             elif len(real_deps) > 1:
                 if not sn_info.is_inplace: print(
                     f"Warning : {sn.main_target} is a view op (not "\
@@ -707,7 +698,7 @@ def simplify_view(sg : SimplifiedGraph):
                         file = sys.stderr)
                     else:
                         inplace_real_node.insert(sn,strong=True,sg=sg)
-                        inplace_real_node.clear_siblings_artifact()
+                        inplace_real_node.remove_obsolete_sibling_artifacts()
             elif len(real_deps)==0 and len(sn.deps)>0:
                 # experimental : I assume that views which don't 
                 # require any real tensor are views over parameters
@@ -745,7 +736,7 @@ def simplify_view(sg : SimplifiedGraph):
                     SimplifiedEdgeDict.discard_sn_from_deps_of_its_users(sn)
                     sn.deps = dict()
                     sn.users = dict()
-                    if real_req: real_req.clear_children_artifact()
+                    if real_req: real_req.remove_obsolete_child_artifacts()
 
     sg.clear()
 
