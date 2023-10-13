@@ -172,8 +172,8 @@ class K_graph(base.Graph):
         # ** init and final codes **
         self.init_code = sg.init_node.get_code_ast()
         self.dict_output_viewing_code = sg.dict_output_viewing_code 
-        if not (sg.special_output_node is None):
-            self.outputs_wrapping_code = sg.special_output_node.get_code_ast()
+        if not (sg.wrapper_output_node is None):
+            self.outputs_wrapping_code = sg.wrapper_output_node.get_code_ast()
         else:
             self.outputs_wrapping_code = ast.parse("")
 

@@ -529,7 +529,7 @@ class P_cluster():
                     dict_inputs_used_mt[user_sn.mt].add(ino.mt)
 
         # == check if cluster contains sg.output_nodes ==
-        if sg.special_output_node is None: # sg has only one output_node
+        if sg.wrapper_output_node is None: # sg has only one output_node
             out_node = sg.output_nodes[0]
             if out_node in self.s_nodes:
                 outputs.update(sg.outputs)
@@ -542,7 +542,7 @@ class P_cluster():
         else:
             for out_node in sg.output_nodes:
                 if out_node in self.s_nodes:
-                    out_targets = sg.special_output_node.deps[out_node]
+                    out_targets = sg.wrapper_output_node.deps[out_node]
                     outputs.update(out_targets)
                     if out_node.mt not in outputs_mt:
                         outputs_mt.append(out_node.mt)

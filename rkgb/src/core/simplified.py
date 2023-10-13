@@ -205,6 +205,9 @@ class SimplifiedNode(base.Node):
 
 # in the description: I need to explain "init_node"
 class SimplifiedGraph(base.Graph):
+    init_node : SimplifiedNode = None # NOT in self.nodes
+    wrapper_output_node : SimplifiedNode = None # NOT in self.nodes
+    dict_output_viewing_code : dict[str,ast.Module] = None
     dict_of_labels_on_edges : dict[tuple[SimplifiedNode,SimplifiedNode],set[str]] = None
     edges_via_artifacts : list[tuple[SimplifiedNode,SimplifiedNode]] = None
     def __init__(self,
@@ -215,11 +218,6 @@ class SimplifiedGraph(base.Graph):
         # 2 constructors: if given a forward_graph, then move from F to S
         # otherwise return an empty simplified_graph
         super().__init__("S")
-        self.init_node = None # NOT in self.nodes
-        self.special_output_node = None # NOT in self.nodes
-        self.dict_output_viewing_code = dict()
-
-        # Move from forward.py to simplified.py
         if forward_graph is not None:
             if model is None or device is None: 
                 raise Exception(
@@ -277,8 +275,9 @@ class SimplifiedGraph(base.Graph):
             self.make_dict_of_labels_on_edges()
             self.make_targets_attrs()
             self.make_inputs()
-            self.unhook_init_node() # TODO
-            self.unhook_special_output_node() # TODO
+            self.unplug_init_node()
+            self.if_multiple_outputs_break_the_wrapper_in_multiple_nodes()
+            self.make_dict_output_viewing_code()
             self.assert_ready()
 
 
@@ -413,7 +412,7 @@ class SimplifiedGraph(base.Graph):
             inputs.update(used_targets)
         self.inputs = list(inputs)
 
-    def unhook_init_node(self):
+    def unplug_init_node(self):
         dict_info = self.dict_info
         init_node = self.init_node
         dict_labels = self.dict_of_labels_on_edges
@@ -441,32 +440,40 @@ class SimplifiedGraph(base.Graph):
             first_sn = min(all_without_deps,key=base.Node.get_num)
             self.init_node.users.add(first_sn)
 
-    def unhook_special_output_node(self):
+    def if_multiple_outputs_break_the_wrapper_in_multiple_nodes(self):
+        """
+        example: a = f(x) ; b = g(y) ; return (a,b)
+        before this function, due to raw.py, we have only 
+        one output node, equal to the tuple: c = (a,b); return c
+        in this method, we unplug Node(c) from the graph, and set:
+        - self.output_nodes := [Node(a),Node(b)]
+        - self.wrapper_output_node := Node(c), 
+        """
         assert(len(self.output_nodes)==1)
-        output_node = self.output_nodes[0]
-        output = output_node.main_target
-        output_info = self.dict_info[output]
-        if output_info.variable_type in [tuple,list]:
-            real_output_nodes = []
-            real_outputs = set()
-            for req_sn,req_targets in output_node.deps.items():
-                real_output_nodes.append(req_sn)
-                real_outputs.update(req_targets)
-                SimplifiedEdgeDict.discard_inplace(req_sn.users,output_node)
-            self.output_nodes = real_output_nodes
-            self.outputs = list(real_outputs)
-            self.special_output_node = output_node
-            # keep special_output_node.deps
-        # unhook viewing operations over the outputs
-        self.outputs = outputs = []
-        self.dict_output_viewing_code = dict_view_code = dict() # mt -> ast code for viewing stuff
-        for out in self.output_nodes:
-            bc = out.make_body_code_ast()
+        self.wrapper_output_node = wrapper_output_node = self.output_nodes[0]
+        if wrapper_output_node.info.variable_type in [tuple,list]:
+            self.output_nodes = list(wrapper_output_node.deps)
+            for real_output_node in self.output_nodes:
+                real_output_node.users.discard(wrapper_output_node) # unplug
+
+    def make_dict_output_viewing_code(self):
+        """
+        Note: use it after "if_multiple_outputs_break_the_wrapper_in_multiple_nodes"
+        Example:
+        a = f(x) ; v = view(a)
+        Instead of returning 'v', we decide to return 'a',
+        and the viewing operation will be done outside.
+        This is due to how Rockmate creates an equivalent torch.nn.Module
+        """
+        self.outputs = []
+        self.dict_output_viewing_code = dict()
+        for output_node in self.output_nodes:
+            body_code = output_node.make_body_code_ast()
             viewing_code = ast_add_on.make_ast_list_assign(
-                bc,force_special_kwargs=True
+                body_code,force_special_kwargs=True
             )
-            dict_view_code[out.mt] = viewing_code
-            outputs.append(out.mt)
+            self.dict_output_viewing_code[output_node.mt] = viewing_code
+            self.outputs.append(output_node.mt)
     # ===== END BLOC 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
             
 
@@ -495,18 +502,6 @@ class SimplifiedGraph(base.Graph):
         for (used_sn,user_sn,_) in self.edges_via_artifacts:
             SimplifiedEdgeDict.discard_edge_inplace(used_sn,user_sn)
         # We do NOT set self.edges_via_artifacts = []
-
-
-# ==========================
-
-
-# ==========================
-# = Init move from D to S  =
-# ==========================
-
-
-# ==========================
-
 
 
 # ==========================
@@ -832,13 +827,13 @@ def copy_SimplifiedGraph(sg : SimplifiedGraph):
     # * output_nodes *
     new_sg.dict_output_viewing_code = dict(sg.dict_output_viewing_code )
     new_sg.output_nodes = [dict_nodes[out.mt] for out in sg.output_nodes]
-    if sg.special_output_node is not None:
-        new_sg.special_output_node \
+    if sg.wrapper_output_node is not None:
+        new_sg.wrapper_output_node \
             = special_out \
-            = copy_SimplifiedNode(sg.special_output_node)
+            = copy_SimplifiedNode(sg.wrapper_output_node)
         special_out.deps = dict(
             (dict_nodes[r.mt],set_str) \
-            for r,set_str in sg.special_output_node.deps.items())
+            for r,set_str in sg.wrapper_output_node.deps.items())
         
     # * artifact edges *
     new_edges_via_artifacts = new_sg.edges_via_artifacts
@@ -911,7 +906,7 @@ def cut(sg : SimplifiedGraph): # -> list of SimplifiedGraph
         # -- outputs --
         if block_nb == len(seps)-1:
             new_sg.output_nodes = sg.output_nodes
-            new_sg.special_output_node = sg.special_output_node
+            new_sg.wrapper_output_node = sg.wrapper_output_node
             new_sg.dict_output_viewing_code = sg.dict_output_viewing_code
         else:
             new_sg.output_nodes = [last_node]
@@ -981,12 +976,12 @@ def aux_print_graph(dot,sg : SimplifiedGraph,uniq_num):
 
     # -- outputs --
     node("output",f"OUTPUT",color="green",style="dashed")
-    if sg.special_output_node is None:
+    if sg.wrapper_output_node is None:
         assert(len(sg.output_nodes)==1)
         edge(sg.output_nodes[0].mt,"output",sg.outputs)
     else:
         for out in sg.output_nodes:
-            edge(out.mt,"output",sg.special_output_node.deps[out])
+            edge(out.mt,"output",sg.wrapper_output_node.deps[out])
 
 
 def print_SimplifiedGraph_list(lsg : SimplifiedGraph_list,dot,name=None,open=True,render_format="svg"):
