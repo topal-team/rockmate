@@ -3,9 +3,10 @@
 # ==========================
 
 import sys
+import copy
+import warnings
 import ast
 import torch
-import copy
 from src.lowlevel import ast_add_on
 from src.lowlevel import constants
 from src.lowlevel.variable_info import VariableInfo
@@ -49,9 +50,8 @@ class SimplifiedNode(base.Node):
         .main_fct   : str  : fct used in .main_code
         .protected  : bool : see Doc (1-separator of the graph)
         .is_artifact: bool : see Doc (useful size node)
-        .deps       : (SimplifiedNode,str set) dict = dict_edges
-            -> required nodes with the list of vars needed per node.
-        .users      : dict_edges : reciprocal of .deps
+        .deps       : set[SimplifiedNode]
+        .users      : set[SimplifiedNode]
         .is_rand    : bool
         .deps_rand  : str set : because we don't want random src nodes here
         """
@@ -120,29 +120,31 @@ class SimplifiedNode(base.Node):
         # in any case cut as many edges as possible
 
         # deps of self after the merge
-        merged_deps = self.deps.merge(sn_to_insert.deps)
-        merged_deps.discard_inplace(self)
+        merged_deps = self.deps.union(sn_to_insert.deps)
+        merged_deps.discard(self)
 
         # 1) disconnect sn_to_insert from its users
         # except if artifact, in which case by definition 
         # artifact.users := sn_to_insert.users - self.users
         if strong: # e.g. for "view"; sn_to_insert.users = empty
-            SimplifiedEdgeDict.discard_sn_from_deps_of_its_users(sn_to_insert)
-            merged_users = self.users.merge(sn_to_insert)
-            merged_users.discard_inplace(sn_to_insert)
-            sn_to_insert.users = SimplifiedEdgeDict()
+            for user_sn in sn_to_insert.users:
+                user_sn.deps.discard(sn_to_insert)
+            merged_users = self.users.union(sn_to_insert.users)
+            merged_users.discard(sn_to_insert)
+            sn_to_insert.users = set()
         else: # e.g. for "size"; sn_to_insert.users -= self.users
-            for user_sn in self.users.keys():
-                user_sn.deps.discard_inplace(sn_to_insert)
-                sn_to_insert.users.discard_inplace(user_sn)
+            for user_sn in self.users:
+                user_sn.deps.discard(sn_to_insert)
+                sn_to_insert.users.discard(user_sn)
             merged_users = self.users
 
         # 2) disconnect sn_to_insert from its deps if it will 
         # be deleted, ie if: sn_to_insert.users = empty
-        if sn_to_insert.users == dict():
-            SimplifiedEdgeDict.discard_sn_from_users_of_its_deps(sn_to_insert)
-            sn_to_insert.deps = SimplifiedEdgeDict()
-            # -> aux_sn has been fully unplugged
+        if sn_to_insert.users == set():
+            for req_sn in sn_to_insert.deps:
+                req_sn.users.discard(sn_to_insert)
+            sn_to_insert.deps = set()
+            # -> sn_to_insert has been fully unplugged
         else:
             sn_to_insert.is_artifact = True
 
@@ -151,8 +153,8 @@ class SimplifiedNode(base.Node):
         self.insert_code(sn_to_insert,simplified_graph)
         self.deps = merged_deps
         self.users = merged_users
-        SimplifiedEdgeDict.make_users_using_deps(self)
-        SimplifiedEdgeDict.make_deps_using_users(self)
+        for req_sn in merged_deps: req_sn.users.add(self)
+        for user_sn in merged_users: user_sn.deps.add(self)
         if sn_to_insert in simplified_graph.output_nodes:
             i = simplified_graph.output_nodes.index(sn_to_insert)
             simplified_graph.output_nodes[i] = self
@@ -248,8 +250,8 @@ class SimplifiedGraph(base.Graph):
                 dict_simplified_nodes[fn.target] = sn
                 for req_fn in fn.deps:
                     req_sn = dict_simplified_nodes[req_fn.target]
-                    sn.deps[req_sn] = set((req_fn.target,))
-                    req_sn.users[sn] = set((req_fn.target,))
+                    req_sn.users.add(sn)
+                    sn.deps.add(req_sn)
 
             # merge all the inputs in the special `init_node`
             for input_target in forward_graph.inputs:
@@ -273,8 +275,9 @@ class SimplifiedGraph(base.Graph):
             self.create_random_snodes_from_dict_rand(model,device)
             self.check_edges_are_reciprocal()
             self.refresh_info_data_name()
-            self.make_targets_attrs()
             self.make_dict_of_labels_on_edges()
+            self.make_targets_attrs()
+            self.make_inputs()
             self.unhook_init_node()
             self.unhook_special_output_node()
             self.assert_ready()
@@ -286,66 +289,56 @@ class SimplifiedGraph(base.Graph):
         self.toposort_nodes()
         self.check_artifact()
         self.check_edges_are_reciprocal()
-        self.make_inputs()
         
     def toposort_nodes(self):
         # As we're doing some merges, we will have to re-sort
         # 1) Find (or build) the node at the root of the deps relation
         if len(self.output_nodes)==1: # Simple case:
             root_sn = self.output_nodes[0]
-            real_root = True
+            fake_tmp_root = False
         else: 
             # We need to generate a node, parent to all output_nodes
             # in the deps relation (like a very last node to the graph)
-            real_root = False
+            fake_tmp_root = True
             root_sn = SimplifiedNode("Tmp_root")
-            root_sn.deps = dict((out_sn,set()) for out_sn in self.output_nodes)
+            root_sn.deps = set(self.output_nodes)
             for out_sn in self.output_nodes:
-                out_sn.users[root_sn] = set()
+                out_sn.users.add(root_sn)
         # 2) sort
         self.nodes = base.Graph.get_sorted_nodes_by_following_relation_deps(root_sn)
         # 3) remove the fake root (if created) and the init_node
         # because we don't want the init_node in self.nodes
         # but it was fetch by following deps will sorting
         if self.init_node in self.nodes: self.nodes.remove(self.init_node)
-        if not real_root:
+        if fake_tmp_root:
             self.nodes.remove(root_sn)
             for out_sn in root_sn.deps:
-                del out_sn.users[root_sn]
+                out_sn.users.discard()
 
     def check_artifact(self):
+        sn : SimplifiedNode
         for sn in self.nodes:
             if sn.is_artifact:
-                if len(sn.deps)!=1:
-                    raise Exception(
-                      f"{sn.main_target} is_artifact, but with "\
-                      f"len(deps)={len(sn.deps)} (should be 1)")
-                req_sn = list(sn.deps.keys())[0]
-                if SimplifiedEdgeDict.issubset(sn.users,req_sn.users):
-                    print(f"{sn.main_target} is a useless "\
-                          f"artifact of {req_sn.main_target} "\
-                          f"it should have been unplugged.")
+                if len(sn.deps)!=1: raise Exception(
+                    f"{sn.main_target} is_artifact, but with several "\
+                    f"deps ({len(sn.deps)}), should have only one.")
+                parent_sn = next(iter(sn.deps))
+                if sn.users.issubset(parent_sn.users):
+                    warnings.warn(
+                        f"{sn.main_target} is a useless "\
+                        f"artifact of {parent_sn.main_target}, "\
+                        f"it should have been unplugged.")
 
     def check_edges_are_reciprocal(self):
+        sn : SimplifiedNode
         for sn in self.nodes:
-            for (req_sn,set_targets) in sn.deps.items():
-                if (sn not in req_sn.users) or set_targets != req_sn.users[sn]:
-                    raise Exception(
-                      f"{req_sn.main_target} in {sn.main_target}.deps "\
-                      f"but one sided edge...")
-            for (user_sn,set_targets) in sn.users.items():
-                if (sn not in user_sn.deps) or set_targets != user_sn.deps[sn]:
-                    raise Exception(
-                      f"{user_sn.main_target} in {sn.main_target}.users "\
-                      f"but one sided edge...")
+            for req_sn in sn.deps:
+                if sn not in req_sn.users:
+                    raise Exception(f"{req_sn.mt} in {sn.mt}.deps but not reciprocal")
+            for user_sn in sn.users:
+                if sn not in user_sn.deps:
+                    raise Exception(f"{user_sn.mt} in {sn.mt}.users but not reciprocal")
 
-    def make_inputs(self):
-        inputs = set()
-        for used_targets in self.init_node.users.values():
-            inputs.update(used_targets)
-            # -> labels over the edges
-        self.inputs = list(inputs)
-                
     def assert_ready(self):
         # check if ready to be given to S_to_K
         # ie main_targets are tensors, except if artifact -> sizes
@@ -411,6 +404,14 @@ class SimplifiedGraph(base.Graph):
                 sn.tensor_targets = tensors
                 sn.container_targets = containers
                 sn.inplace_targets = [c[0] for c in sn.inplace_code]
+
+    def make_inputs(self):
+        inputs = set()
+        for user_of_init_sn in self.init_node.users:
+            used_targets = self.dict_of_labels_on_edges[
+                (self.init_node,user_of_init_sn)]
+            inputs.update(used_targets)
+        self.inputs = list(inputs)
 
     def unhook_init_node(self):
         dict_info = self.dict_info
