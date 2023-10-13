@@ -14,7 +14,6 @@ from src.core import base
 from src.core.forward import ForwardNode,ForwardGraph
 
 
-
 # **********
 # * SimplifiedNode *
 # **********
@@ -74,6 +73,11 @@ class SimplifiedNode(base.Node):
         self.protected = protected
         self.is_rand   = is_rand
         self.deps_rand = deps_rand if deps_rand else set()
+
+    def get_all_standard_deps(self):
+        return self.deps.union(self.soft_deps)
+    def get_all_standard_users(self):
+        return self.users.union(self.soft_users)
 
     def insert_code(self,sn_to_insert,simplified_graph):
         sn_info = sn_to_insert.info
@@ -264,9 +268,8 @@ class SimplifiedGraph(base.Graph):
             self.simplify_view() # TODO
             self.create_nodes_for_random_operations_from_dict_rand(model,device)
             self.check_edges_are_reciprocal()
-            self.refresh_node_info_data_owner_name()
             self.make_dict_of_labels_on_edges()
-            self.make_targets_attrs()
+            self.make_targets_attributes_and_fix_info_data_owner_name()
             self.make_inputs()
             self.unplug_init_node()
             self.if_multiple_outputs_break_the_wrapper_in_multiple_nodes()
@@ -405,22 +408,6 @@ class SimplifiedGraph(base.Graph):
                     user_sn.soft_deps.add(parent_sn)
                     parent_sn.soft_users.add(user_sn)
 
-    def refresh_node_info_data_owner_name(self):
-        dict_info = self.dict_info
-        # First we need to know where each var is :
-        dict_nodes = dict() # any target -> main_target
-        for sn in self.nodes:
-            for tar in sn.all_targets:
-                if tar not in dict_nodes:
-                    dict_nodes[tar] = sn
-        for name,info in dict_info.items():
-            if name in dict_nodes:
-                owner_sn = dict_nodes[info.data_owner_name]
-                if owner_sn.is_artifact:
-                    info.data_owner_name = base.Graph.default_param_target_string
-                else:
-                    info.data_owner_name = owner_sn.main_target
-
     def make_dict_of_labels_on_edges(self):
         self.dict_of_labels_on_edges = dict_labels = dict()
         for sn in self.nodes:
@@ -433,21 +420,22 @@ class SimplifiedGraph(base.Graph):
                 dict_labels[(req_sn,sn)] = used_targets
                 dict_labels[(sn,req_sn)] = used_targets
                     
-    def make_targets_attrs(self):
+    def make_targets_attributes_and_fix_info_data_owner_name(self):
         # -> tensor_targets ; inplace_targets ; container_targets
         dict_info = self.dict_info
+        sn : SimplifiedNode
         for sn in self.nodes:
             if not sn.is_artifact:
+                sn_main_target = sn.main_target
                 tensors = []
                 containers = []
                 for tar in sn.all_targets:
                     info = dict_info[tar]
-                    variable_type = info.variable_type
-                    if variable_type == torch.Tensor:
-                        if info.data_owner_name \
-                        != base.Graph.default_param_target_string:
-                            tensors.append(tar)
-                    elif variable_type == tuple or variable_type == list:
+                    target_type = info.variable_type
+                    if target_type == torch.Tensor and not info.is_param:
+                        tensors.append(tar)
+                        info.data_owner_name = sn_main_target
+                    elif target_type == tuple or target_type == list:
                         containers.append(tar)
                 sn.tensor_targets = tensors
                 sn.container_targets = containers
@@ -706,6 +694,7 @@ def simplify_view(sg : SimplifiedGraph):
                         inplace_real_node.insert(sn,strong=True,sg=sg)
                         inplace_real_node.remove_obsolete_sibling_artifacts()
             elif len(real_deps)==0 and len(sn.deps)>0:
+                # TODO : change sn.info.is_param
                 # experimental : I assume that views which don't 
                 # require any real tensor are views over parameters
                 # so mem=0 and no bwd K_node, so I can insert them
