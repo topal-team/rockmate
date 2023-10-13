@@ -267,6 +267,8 @@ class SimplifiedNode(base.Node):
 
 # in the description: I need to explain "init_node"
 class SimplifiedGraph(base.Graph):
+    dict_of_labels_on_edges : dict[tuple[SimplifiedNode,SimplifiedNode],set[str]] = None
+    edges_via_artifacts : list[tuple[SimplifiedNode,SimplifiedNode]] = None
     def __init__(self,
             forward_graph : ForwardGraph = None,
             model=None,
@@ -278,7 +280,6 @@ class SimplifiedGraph(base.Graph):
         self.init_node = None # NOT in self.nodes
         self.special_output_node = None # NOT in self.nodes
         self.dict_output_viewing_code = dict()
-        self.edges_via_artifacts : list[tuple[SimplifiedNode,SimplifiedNode,set[str]]] = []
 
         # Move from forward.py to simplified.py
         if forward_graph is not None:
@@ -337,7 +338,7 @@ class SimplifiedGraph(base.Graph):
             self.check_edges_are_reciprocal()
             self.refresh_info_data_name()
             self.make_targets_attrs()
-            self.correct_label_over_edges()
+            self.make_dict_of_labels_on_edges()
             self.unhook_init_node()
             self.unhook_special_output_node()
             self.assert_ready()
@@ -444,15 +445,17 @@ class SimplifiedGraph(base.Graph):
                 else:
                     info.data_owner_name = owner_sn.main_target
 
-    def correct_label_over_edges(self):
+    def make_dict_of_labels_on_edges(self):
+        self.dict_of_labels_on_edges = dict_labels = dict()
         for sn in self.nodes:
             sn_code = sn.get_code()
-            for req_sn,used_targets in sn.deps.items():
-                _used_target = list(used_targets)
-                for tar in _used_target:
-                    if not tar in sn_code:
-                        used_targets.discard(tar)
-                req_sn.users[sn] = set(used_targets)
+            req_sn : SimplifiedNode
+            for req_sn in sn.deps:
+                used_targets = set()
+                for target in req_sn.all_targets:
+                    if target in sn_code: used_targets.add(target)
+                dict_labels[(req_sn,sn)] = used_targets
+                dict_labels[(sn,req_sn)] = used_targets
                     
     def make_targets_attrs(self):
         # -> tensor_targets ; inplace_targets ; container_targets
