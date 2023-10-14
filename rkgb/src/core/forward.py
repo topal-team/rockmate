@@ -80,6 +80,8 @@ class ForwardGraph(base.Graph):
         # dict : main target -> set targets of related inplace operations
 
         our_global = self.make_copy_of_globals(model,device)
+        all_param_data_ptrs = VariableInfo.find_all_data_ptr_of_params(model)
+        # to recognize a view over a parameter
 
         # Translate each node one by one following the topo-order
         rn : RawNode
@@ -120,7 +122,10 @@ class ForwardGraph(base.Graph):
                     )
                 fn.info = self.dict_info[rn.target] \
                     = self.detect_inplace_or_view(
-                    rn,fn,tmp_local,dict_forward_nodes,dict_inplace_ops)
+                    rn,fn,tmp_local,
+                    dict_forward_nodes,
+                    dict_inplace_ops,
+                    all_param_data_ptrs)
                 del tmp_local
         
         # get the output_node: if not requires_grad => raise Exception
@@ -193,26 +198,32 @@ class ForwardGraph(base.Graph):
             current_forward_node,
             tmp_local,
             dict_forward_nodes,
-            dict_inplace_ops):
+            dict_inplace_ops,
+            all_param_data_ptrs):
         # - detect inplace operation -
         current_rn_value = tmp_local[current_raw_node.target]
         is_view    = False # by default
-        is_inplace = False # by default
+        is_inplace = False
+        is_param   = False
         data_parents = set() # variables which have the same data_ptr
 
         # === FIRST WAY TO RECOGNIZE A VIEW ===
         # -> data_ptr
         if VariableInfo.has_a_data_ptr(current_rn_value):
             current_rn_data_ptr = VariableInfo.get_data_ptr(current_rn_value)
-            for o_name,o_value in tmp_local.items():
-                if (o_name != current_raw_node.target
-                and o_name in self.dict_info
-                and VariableInfo.has_a_data_ptr(o_value)
-                and VariableInfo.get_data_ptr(o_value) == current_rn_data_ptr):
-                    data_parents.add(o_name)
-                    data_owner_name = o_name
-                    if o_value is current_rn_value: is_inplace = True
-                    else: is_view = True
+            if current_rn_data_ptr in all_param_data_ptrs:
+                is_param = True
+                is_view = True
+            else:
+                for o_name,o_value in tmp_local.items():
+                    if (o_name != current_raw_node.target
+                    and o_name in self.dict_info
+                    and VariableInfo.has_a_data_ptr(o_value)
+                    and VariableInfo.get_data_ptr(o_value) == current_rn_data_ptr):
+                        data_parents.add(o_name)
+                        data_owner_name = o_name
+                        if o_value is current_rn_value: is_inplace = True
+                        else: is_view = True
 
         # === SECOND WAY TO RECOGNIZE A VIEW ===
         # -> main_fct is a view/inplace function
@@ -231,7 +242,7 @@ class ForwardGraph(base.Graph):
                         is_view = True
 
         # === register ===
-        if is_inplace or is_view:
+        if (is_inplace or is_view) and not is_param:
             current_rn_deps_names = set(
                 req_rn.target for req_rn in current_raw_node.deps)
             data_direct_parents = current_rn_deps_names & data_parents
@@ -270,6 +281,7 @@ class ForwardGraph(base.Graph):
             current_rn_value,
             is_view    = is_view,
             is_inplace = is_inplace,
+            is_param   = is_param,
             data_owner_name = data_owner_name,
             data_direct_parent_name = data_direct_parent_name)
         # ** Correct req_grad of data_parent **

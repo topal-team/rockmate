@@ -21,11 +21,13 @@ class VariableInfo():
         value=None,
         is_view=False,
         is_inplace=False,
+        is_param=False,
         data_owner_name=None,
         data_direct_parent_name=None
     ):
         self.is_view    = is_view
         self.is_inplace = is_inplace
+        self.is_param   = is_param
         self.data_owner_name = data_owner_name
         if data_direct_parent_name is None:
             self.data_direct_parent_name = data_owner_name
@@ -110,6 +112,13 @@ class VariableInfo():
                     return v_ptr
             return None
         else: return None
+
+    @staticmethod
+    def find_all_data_ptr_of_params(model : torch.nn.Module):
+        all_data_ptrs = set()
+        for param in model.parameters:
+            data_ptr = VariableInfo.get_data_ptr(param)
+            if data_ptr is not None: all_data_ptrs.add(data_ptr)
 
 
     def __eq__(self,i2,raise_exception=False):

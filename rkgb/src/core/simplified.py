@@ -67,17 +67,17 @@ class SimplifiedNode(base.Node):
         self.container_targets = [] # later
         self.deps = set()
         self.users = set()
-        self.soft_deps = set()
-        self.soft_users = set()
+        self.deps_through_artifacts = set()
+        self.users_through_artifacts = set()
         self.info : VariableInfo = info if info is not None else VariableInfo()
         self.protected = protected
         self.is_rand   = is_rand
         self.deps_rand = deps_rand if deps_rand else set()
 
     def get_all_standard_deps(self):
-        return self.deps.union(self.soft_deps)
+        return self.deps.union(self.deps_through_artifacts)
     def get_all_standard_users(self):
-        return self.users.union(self.soft_users)
+        return self.users.union(self.users_through_artifacts)
 
     def insert_code(self,sn_to_insert,simplified_graph):
         sn_info = sn_to_insert.info
@@ -405,15 +405,15 @@ class SimplifiedGraph(base.Graph):
                 parent_sn.users.discard(artifact_sn)
                 for user_sn in artifact_sn.users:
                     user_sn.deps.discard(artifact_sn)
-                    user_sn.soft_deps.add(parent_sn)
-                    parent_sn.soft_users.add(user_sn)
+                    user_sn.deps_through_artifacts.add(parent_sn)
+                    parent_sn.users_through_artifacts.add(user_sn)
 
     def make_dict_of_labels_on_edges(self):
         self.dict_of_labels_on_edges = dict_labels = dict()
         for sn in self.nodes:
             sn_code = sn.get_code()
             req_sn : SimplifiedNode
-            for req_sn in sn.deps:
+            for req_sn in sn.deps.union(sn.deps_through_artifacts):
                 used_targets = set()
                 for target in req_sn.all_targets:
                     if target in sn_code: used_targets.add(target)
