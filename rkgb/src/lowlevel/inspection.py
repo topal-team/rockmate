@@ -139,7 +139,7 @@ def get_useful_vars(sn,sg,our_global,device):
                 data_owner_name = name
             else:
                 data_owner_name = dict_info[name].data_owner_name
-            if data_owner_name == base.Graph.default_param_target_string:
+            if dict_info[name].is_param:
                 continue
             for explicit_var in explicit_vars:
                 if val is explicit_var:

@@ -461,13 +461,13 @@ def P_graph_to_H_graph(
     # === Build the edges ===
     for hdn in hg.list_hdn:
         kdn = dict_hdn_to_kdn[hdn]
-        for kcn in kdn.deps if kdn.mt != base.Graph.default_init_target_string else kdn.deps_global:
+        for kcn in kdn.deps if kdn.mt != constants.constant_init_target_string else kdn.deps_global:
             if kcn is not kg.loss_kcn:
                 if kcn in dict_kcn_to_hcn:
                     hcn = dict_kcn_to_hcn[kcn]
                     hdn.deps.add(hcn)
                     hcn.users.add(hdn)
-        for kcn in kdn.users_real if kdn.mt != base.Graph.default_init_target_string else kdn.users_global:
+        for kcn in kdn.users_real if kdn.mt != constants.constant_init_target_string else kdn.users_global:
             if kcn is not kg.loss_kcn:
                 if kcn in dict_kcn_to_hcn:
                     hcn = dict_kcn_to_hcn[kcn]

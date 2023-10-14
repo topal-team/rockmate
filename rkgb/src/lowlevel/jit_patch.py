@@ -1,4 +1,5 @@
 import sys
+import warnings
 import torch
 import ast
 from src.lowlevel import ast_add_on
@@ -21,10 +22,9 @@ torchscript_dtype_numbers = [
     None, # 14
     torch.bfloat16
 ]
-default_dtype = torch.float32
-
 
 def get_torchscript_dtype(t):
+    default_dtype = torch.get_default_dtype()
     if isinstance(t,torch.dtype):
         return t
     else:
@@ -34,23 +34,22 @@ def get_torchscript_dtype(t):
             f"nor an integer, what is it ??? : {t}"
         )
         if t > 15: 
-            dt = default_dtype
-            problem = True
+            dtype = default_dtype
+            unknown_so_default = True
         else:
-            dt = torchscript_dtype_numbers[t]
-            if dt is None:
-                dt = default_dtype
-                problem = True
-            else: problem = False
-        if problem: print("Warning : "\
+            dtype = torchscript_dtype_numbers[t]
+            if dtype is None:
+                dtype = default_dtype
+                unknown_so_default = True
+            else: unknown_so_default = False
+        if unknown_so_default: warnings.warn(
             f"TorchScript usually changes torch.dtype by "\
             f"weird integers. For basic dtypes we know their "\
             f"corresponding numbers, but here a {t} was found "\
             f"what is the corresponding dtype ?? \n"\
-            f"{default_dtype} is used as the default dtype",
-            file = sys.stderr
+            f"{default_dtype} is used as the default dtype."
         )
-        return dt
+        return dtype
     
 
 """ TO KEEP

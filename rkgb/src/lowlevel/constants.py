@@ -4,6 +4,10 @@
 import torch
 import sys
 
+
+constant_init_target_string = "__sources__"
+constant_function_for_constructors = "__constructor__"
+
 time_min_duration = 0
 time_min_repeat = 5
 
@@ -55,8 +59,7 @@ list_rand_fct = [
     "torch.empty",
     "torch.rrelu",
 ]
-# -> ONLY used for root nodes
-# -> ie nodes without dependencies
+# -> ONLY used nodes without dependencies
 
 list_optional_cheap_fct = [
     "torch.add",
@@ -65,8 +68,6 @@ list_optional_cheap_fct = [
     "torch.div",
     "torch.floor_divide",
 ]
-
-list_cheap_fct = ["list constructor", "tuple constructor"]
 
 list_inplace_fct = [
 ]

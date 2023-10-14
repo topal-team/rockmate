@@ -125,15 +125,15 @@ def is_constant(v):
     if python_version >= 3.8:
         return isinstance(v,ast.Constant)
     else:
-        rep = type(v) in [
+        answer = type(v) in [
             ast.Num,ast.Str,ast.Bytes,
             ast.NameConstant]
-        if rep:
+        if answer:
             if isinstance(v,ast.Num):
                 setattr(v,"value",v.n)
             elif isinstance(v,ast.Str) or isinstance(v,ast.Bytes):
                 setattr(v,"value",v.s)
-        return rep
+        return answer
 
 # ==========================
 

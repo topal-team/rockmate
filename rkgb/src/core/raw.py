@@ -80,13 +80,10 @@ class RawVar:
         self.value_ast = value_ast
         self.has_node = False  # by default
         self.is_rand = False  # by default
-        if node: # to improve via "multiple_outputs" branch
-            if node.deps == set() and not node.is_input:
-                if node.is_rand:
-                    raw_parser.dict_rand[node.target] = node.code_ast
-                    self.is_rand = True
-                else:  # node without deps but neither input or rand
-                    self.value_ast = node.code_ast
+        if node: # compared to before, we don't automatically simplify when deps=empty
+            if node.is_rand and node.deps == set() and not node.is_input:
+                raw_parser.dict_rand[node.target] = node.code_ast
+                self.is_rand = True
             else:
                 self.has_node = True
                 self.node = node
@@ -440,9 +437,10 @@ class RawParser():
         # Not simplified / inserted here, might change TO CHANGE ?
         # -> because I need to precise the calling_node...
         target = self.get_unique_name(target)
-        constr = "list" if isinstance(expr,ast.List) else "tuple"
         new_node = RawNode(
-            target=target, fct=f"{constr} constructor",raw_parser=self)
+            target=target,
+            fct=constants.constant_function_for_constructors,
+            raw_parser=self)
         args_raw_vars = [self.handle_expr(None,e) for e in expr.elts]
         args_ast = [v.use_value_ast(calling_node=new_node) for v in args_raw_vars]
         if isinstance(expr,ast.List):

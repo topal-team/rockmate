@@ -79,6 +79,7 @@ class SimplifiedNode(base.Node):
     def get_all_standard_users(self):
         return self.users.union(self.users_through_artifacts)
 
+    # === INSERT ===
     def insert_code(self,sn_to_insert,simplified_graph):
         sn_info = sn_to_insert.info
         # 1) main_code:
@@ -164,6 +165,55 @@ class SimplifiedNode(base.Node):
         if sn_to_insert in simplified_graph.output_nodes:
             i = simplified_graph.output_nodes.index(sn_to_insert)
             simplified_graph.output_nodes[i] = self
+    # === END INSERT ===
+
+
+    # === SUBSTITUTE ===
+    def substitute_an_id_by_a_code_in_self(
+            self,id_to_replace,code_replacing,dict_info):
+        """
+        e.g. id_to_replace = "a"; code_replacing = AST("f(x)")
+        with self's code: AST(b = g(a))
+        this method change self's code, to: AST(b = g(f(a)))
+        """
+        main_code_expr = self.main_code[1]
+        if (isinstance(main_code_expr,ast.Subscript)
+        and isinstance(main_code_expr.value,ast.Name)
+        and main_code_expr.value.id == id_to_replace
+        and ast_add_on.is_constant(main_code_expr.slice)
+        and (isinstance(code_replacing,ast.List)
+          or isinstance(code_replacing,ast.Tuple))):
+            # Special case for ast.Subscript,
+            # e.g. "a = [x,y]" and "b = a[0]"
+            # we can set "b = x", and then substitute
+            # "b" by "x" in Node(b).users, so we avoid 
+            # defining the useless variable "b", and 
+            # instead directly use "x"
+            index = main_code_expr.slice.value
+            assert(isinstance(index,int)) 
+            # Otherwise: slice with a string ??? Like : a = b["attr"] ???
+            self.main_code = (
+                self.main_target,
+                code_replacing.elts[index])
+            self.substitute_self_by_its_code_in_its_users(dict_info)
+        else:
+            self.main_code = (
+                self.main_target,
+                ast_add_on.substitute(
+                    main_code_expr,
+                    id_to_replace,
+                    code_replacing))
+
+    def substitute_self_by_its_code_in_its_users(self,dict_info):
+        """
+        e.g. a = f(x) ; b = g(a), calling this function 
+        on 'a' => b = g(f(x)); useful notably for list 
+        constructors, as we want nodes to represent tensors,
+        not tuple or list of tensors.
+        """
+        # TODO: first need info.view_targets / inplace_targets
+        pass
+    # === END SUBSTITUTE ===
 
 
     def remove_obsolete_child_artifacts(self):
@@ -224,7 +274,7 @@ class SimplifiedGraph(base.Graph):
             self.whole_model_inputs = set(forward_graph.inputs)
 
             self.init_node = init_node = SimplifiedNode(
-                main_target=base.Graph.default_init_target_string,
+                main_target=constants.constant_init_target_string,
                 simplified_graph=self)
             init_node.all_targets=[]
 
@@ -492,6 +542,7 @@ class SimplifiedGraph(base.Graph):
             self.output_nodes = list(wrapper_output_node.deps)
             for real_output_node in self.output_nodes:
                 real_output_node.users.discard(wrapper_output_node) # unplug
+            self.nodes.remove(wrapper_output_node)
 
     def make_dict_output_viewing_code(self):
         """
@@ -515,6 +566,11 @@ class SimplifiedGraph(base.Graph):
             self.dict_output_viewing_code[output_node.mt] = viewing_code
             self.outputs.append(output_node.mt)
     # ===== END BLOC 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
+
+
+
+    # ===== BLOC 3 : SIMPLIFY CONSTRUCTORS AND CHEAP OPERATIONS =====
+    # ===== END BLOC 3 : SIMPLIFY CONSTRUCTORS AND CHEAP OPERATIONS =====
             
 
         
