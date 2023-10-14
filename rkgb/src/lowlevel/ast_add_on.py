@@ -137,3 +137,18 @@ def is_constant(v):
 
 # ==========================
 
+def substitute(main_code,sub_id,sub_code):
+    r"""
+    Substitute ast.Name(sub_id) in main_code by sub_code
+    """
+    if isinstance(main_code,ast.Name):
+        if main_code.id == sub_id: return sub_code
+        else: return main_code
+    elif isinstance(main_code,ast.AST):
+        for attr in main_code._fields:
+            if attr != "ctx":
+                old_val = getattr(main_code,attr)
+                new_val = substitute(old_val,sub_id,sub_code)
+                if not new_val is old_val:
+                    setattr(main_code,attr,new_val)
+    return main_code
