@@ -240,6 +240,7 @@ class Node():
 # ==============================
 
 class Graph():
+    node_class = Node
     def __init__(
             self,
             graph_type : str,
@@ -312,12 +313,32 @@ class Graph():
         our_global["device"] = device
         return our_global
 
-    @staticmethod
-    def get_sorted_nodes_by_following_relation_deps(
-            root_node : Node):
-        """Toposort nodes
-        /!\ root_node is the source of .deps relation 
-        /!\ => e.g. the output node of the graph"""
+
+    def make_temporary_global_root_node_to_deps_relation(self):
+        """return bool * Node
+        bool : True <=> it's a fresh node (=> it must be removed after)
+        """
+        if len(self.output_nodes)==1:
+            return False,self.output_nodes[0]
+        else:
+            fresh_root = self.node_class()
+            if not hasattr(fresh_root,"deps") or not hasattr(fresh_root,"users"):
+                raise Exception(
+                    f"{type(self).__name__} should overwrite the method: "\
+                    f"`make_temporary_global_root_node_to_deps_relation`.")
+            fresh_root.deps = set(self.output_nodes)
+            for out_node in self.output_nodes:
+                out_node.users.add(fresh_root)
+            return True,fresh_root
+    def remove_temporary_global_root_node(self,fresh_root):
+        for out_node in self.output_nodes:
+            out_node.users.discard(fresh_root)
+
+    def get_sorted_nodes_by_following_deps_relation(self):
+        is_it_a_tmp_fresh_root , root_node \
+            = self.make_temporary_global_root_node_to_deps_relation()
+        # /!\ root_node is the source of .deps relation 
+        # /!\ => e.g. the output node of the graph
 
         # Compute incoming degree (= len(users) (not len(deps)))
         degree = dict()
@@ -352,16 +373,16 @@ class Graph():
                 else:
                     degree[req_n] = d-1
 
+        if is_it_a_tmp_fresh_root:
+            self.remove_temporary_global_root_node(root_node)
+            sorted_list.remove(root_node)
+
         # return from first to last
         return sorted_list[::-1]
 
 
     def find_cutting_points(self):
         """
-        DONT FORGET TO ADD A SOURCE TO DEPS RELATION IF NECESSARY
-        returns the list of all 1-separators of the 'deps' relation
-        used on F (to protect), S (to cut), P (to partition)
-
         Note : We don't want a block where nothing requires_grad.
         Because it implies that we don't have a output_bdn_grad 
         and that Fe/Be make no sense.

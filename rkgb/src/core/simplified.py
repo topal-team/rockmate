@@ -252,6 +252,7 @@ class SimplifiedNode(base.Node):
 
 # in the description: I need to explain "init_node"
 class SimplifiedGraph(base.Graph):
+    node_class = SimplifiedNode
     init_node : SimplifiedNode = None # NOT in self.nodes
     wrapper_output_node : SimplifiedNode = None # NOT in self.nodes
     dict_output_viewing_code : dict[str,ast.Module] = None
@@ -349,7 +350,7 @@ class SimplifiedGraph(base.Graph):
             for out_sn in self.output_nodes:
                 out_sn.users.add(root_sn)
         # 2) sort
-        self.nodes = base.Graph.get_sorted_nodes_by_following_relation_deps(root_sn)
+        self.nodes = base.Graph.get_sorted_nodes_by_following_deps_relation(root_sn)
         # 3) remove the fake root (if created) and the init_node
         # because we don't want the init_node in self.nodes
         # but it was fetch by following deps will sorting

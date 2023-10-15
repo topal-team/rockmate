@@ -20,7 +20,7 @@ from src.core.raw import RawNode,RawVar,RawGraph
 
 class ForwardNode(base.Node):
     def __init__(self,
-            target,
+            target="No target",
             code_ast=None,
             fct="",
             is_rand=False,
@@ -63,6 +63,7 @@ class ForwardNode(base.Node):
 # 2) exec the code to generate the node value
 # 3) extract the info for this node, and forget the tensors
 class ForwardGraph(base.Graph):
+    node_class = ForwardNode
     def __init__(self,
         raw_graph : RawGraph,
         model,
@@ -71,7 +72,8 @@ class ForwardGraph(base.Graph):
         build_variable_info=True,
     ):
         super().__init__("F")
-        self.inherit_base_attributes(raw_graph) # => dict_rand / dict_constants
+        self.inherit_base_attributes(raw_graph)
+        # => dict_rand / dict_constants / outputs 
         self.sources_req_grad = False # by default
 
         raw_nodes = raw_graph.get_toposorted_list_of_non_useless_nodes()
@@ -128,15 +130,10 @@ class ForwardGraph(base.Graph):
                     all_param_data_ptrs)
                 del tmp_local
         
-        # get the output_node: if not requires_grad => raise Exception
-        # which is catch in Rockmate, since it implies no Backward
-        output_target = self.get_output_node_and_check_if_requires_grad(
-            raw_graph.output_raw_var)
-        self.outputs = [output_target]
-        self.whole_module_output = output_target
+        self.check_if_output_requires_grad()
 
         self.fix_missing_edges_for_inplace_operations(dict_forward_nodes)
-        # -> Might change self.outputs
+        # -> Might change self.outputs (previously inherited)
         self.output_nodes = [
             dict_forward_nodes[output_tar] 
             for output_tar in self.outputs]
@@ -289,31 +286,16 @@ class ForwardGraph(base.Graph):
         and current_raw_node.mt != data_owner_name):
             self.dict_info[data_owner_name].requires_grad = True
         return current_node_info
-    
 
-    def get_output_node_and_check_if_requires_grad(
-            self,output_raw_var : RawVar):
-        if not isinstance(output_raw_var.value_ast,ast.Name):
-            warnings.warn( # TO CHANGE COMMENTS 
-                f"According to Btools module's return isn't a variable."\
-                f"Thus we assume it's a constant. \n"\
-                f"AST type of the output: {type(output_raw_var.val)}")
-            raise constants.ExceptionModuleDoesNotReqGrad
-        output_target = output_raw_var.value_ast.id
-        if not output_raw_var.has_node:
+
+    def check_if_output_requires_grad(self):
+        assert(len(self.output_nodes)==1)
+        output_node = self.output_nodes[0]
+        if not output_node.info.requires_grad:
             warnings.warn(
-                f"Btools hasn't attached any node to the output."\
-                f"Thus we assume it's a constant.")
+                "None of the outputs require grad. "\
+                "Thus there is nothing to do.")
             raise constants.ExceptionModuleDoesNotReqGrad
-        else:
-            output_info = self.dict_info[output_target]
-            if not output_info.requires_grad:
-                warnings.warn(
-                    "None of the outputs require grad. "\
-                    "Thus there is nothing to do.")
-                raise constants.ExceptionModuleDoesNotReqGrad
-            else:
-                return output_target
 
 
     def fix_missing_edges_for_inplace_operations(self,dict_forward_nodes):

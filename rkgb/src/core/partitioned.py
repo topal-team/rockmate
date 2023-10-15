@@ -1283,9 +1283,10 @@ class Partitioner_bottom_to_top(Partitioner):
             for i in range(len(list_nodes)-1):
                 pn = list_nodes[i]
                 next_pn = list_nodes[i+1]
-                if len(pn.users) != 1: return False
-                if list(pn.users)[0] is not next_pn: return False
-                if len(next_pn.deps) != 1: return False
+                if len(pn.users_global) != 1: return False
+                if list(pn.users_global)[0] is not next_pn: return False
+                if len(next_pn.deps_global) != 1: return False
+                # We check global edges, since a chain with external deps isn't a chain
             return True
 
         def is_seq(self):

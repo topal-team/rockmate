@@ -22,6 +22,7 @@
 #  .code attributes are AST objects
 
 from typing import Union
+import warnings
 import ast
 import torch
 from torch import Tensor
@@ -34,7 +35,7 @@ from src.core import base
 
 class RawNode(base.Node):
     def __init__(self, 
-            target,
+            target="No target",
             code_ast=None, 
             fct="", 
             is_input=False,
@@ -116,6 +117,7 @@ class RawGraph(base.Graph):
     -> The only important attribute is "output_raw_var"
        which gives the source of the "deps" relation
     """
+    node_class = RawNode
     def __init__(self,
             model : torch.nn.Module,
             dict_inputs : preprocess_samples.DictInputs,
@@ -136,27 +138,38 @@ class RawGraph(base.Graph):
         self.nodes = parser.all_raw_nodes
         self.dict_rand = parser.dict_rand
         self.dict_constants = parser.dict_constants
+        self.set_output_attributes_and_check_if_constant()
+
+    def set_output_attributes_and_check_if_constant(self):
+        """
+        get the output_node: if not requires_grad => raise Exception
+        which is catch in Rockmate, since it implies no Backward
+        """
+        if not isinstance(self.output_raw_var.value_ast,ast.Name):
+            warnings.warn( # TO CHANGE COMMENTS 
+                f"The RawParser found that the output isn't an "\
+                f"ast.Name, we assume it's a constant. \nAST type "\
+                f"of the output: {type(self.output_raw_var.val)}")
+            raise constants.ExceptionModuleDoesNotReqGrad
+        if not self.output_raw_var.has_node:
+            warnings.warn(
+                f"RawParser hasn't attached any node to the output."\
+                f"Thus we assume it's a constant.")
+            raise constants.ExceptionModuleDoesNotReqGrad
+        else:
+            self.whole_module_output = self.output_raw_var.value_ast.id
+            self.output_nodes = [self.output_raw_var.node]
+            self.outputs = [self.whole_module_output]
 
 
     def get_toposorted_list_of_non_useless_nodes(self):
-        # While parsing we create a node for every piece
-        # of code, including e.g. "fv_10 = [1,1]", but 
-        # usually code pieces that don't have dependencies, 
-        # are inserted directly where they are used
-        # ie use "a = f([1,1])", instead of "a = f(fv_10)"
-        # with "fv_10 = [1,1]".
-        # TO CHANGE ? (see multiple_outputs branch ???)
-        # 1) Trace through the deps relation from the output
-        if not self.output_raw_var.has_node:
-            list_raw_nodes = []
-        else:
-            list_raw_nodes \
-                = base.Graph.get_sorted_nodes_by_following_relation_deps(
-                self.output_raw_var.node)
-            
-        # 2) Reinsert some nodes (which are missing because they don't
-        # have any users in the deps relation of the output_node,
-        # but might still be important: e.g. some inplace operations).
+        list_raw_nodes = self.get_sorted_nodes_by_following_deps_relation()
+        # Reinsert some nodes:
+        # In the toposorting function, we collect nodes by following 
+        # the deps relation from the output_nodes all the way to the
+        # first nodes. But some nodes corresponding to inplace operations
+        # are missed, as they don't have users:
+        # e.g. a = f(x) ; i = inplace(a) ; output = g(a)
         # TO IMPROVE / CHANGE ??? I think its kind greedy strategy...
         to_insert_back = [
             rn for rn in self.nodes
