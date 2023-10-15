@@ -35,7 +35,6 @@ class ForwardNode(base.Node):
         .deps      : ForwardNode set : required nodes to run .code_ast
         .deps_rand : str set : required random targets
         .users     : ForwardNode set : reciprocal of .deps
-        .protected : bool : whether self is a 1-separator of the graph
         """
         super().__init__("F",target,
             parent_structure_with_id_generator=forward_graph)
@@ -48,7 +47,6 @@ class ForwardNode(base.Node):
         self.deps = set()
         self.users = set()
         self.deps_rand = deps_rand if deps_rand else set()
-        self.protected = False
         self.info : VariableInfo = None
 
 
@@ -139,11 +137,6 @@ class ForwardGraph(base.Graph):
             for output_tar in self.outputs]
 
         self.fix_requires_grad()
-
-        # Protect some node in case we want to cut:
-        cutting_points = self.find_cutting_points()
-        for cut_point in cutting_points: cut_point.protected = True
-
 
 
     def generate_deep_tmp_local(self,raw_node,our_global):
@@ -257,10 +250,6 @@ class ForwardGraph(base.Graph):
             data_direct_parent_name = data_direct_parents.pop()
             o_info = self.dict_info[data_direct_parent_name]
             data_owner_name = o_info.data_owner_name
-            # -> we must protect the data_owner from cheap simplification
-            if is_inplace:
-                data_owner = dict_forward_nodes[data_owner_name]
-                data_owner.protected = True
             # -> If several inplace operations 
             # -> We must ensure we compute them in the original order
             if is_inplace:

@@ -383,16 +383,23 @@ class Graph():
 
     def find_cutting_points(self):
         """
+        self MUST HAVE a global sink to deps relation
+        ie a very first node / like SimplifiedGraph.init_node
         Note : We don't want a block where nothing requires_grad.
         Because it implies that we don't have a output_bdn_grad 
         and that Fe/Be make no sense.
         Thus a cutting point must requires_grad.
         """
 
-        to_be_visited = list(self.output_nodes)
+        is_it_a_tmp_fresh_root , root_node \
+            = self.make_temporary_global_root_node_to_deps_relation()
+        # root_node is the source of .deps relation => e.g. output_node
+
+        to_be_visited = [root_node]
         seen = set(to_be_visited)
         dict_nb_usages = dict(
-            [(m,len(m.get_all_standard_users())) for m in self.nodes])
+            [(m,len(m.get_all_standard_users())) 
+             for m in self.nodes])
 
         separators = []
         while to_be_visited!=[]:
@@ -408,7 +415,11 @@ class Graph():
                 if dict_nb_usages[req_n]==0:
                     to_be_visited.append(req_n)
         separators.reverse()
+
+        if is_it_a_tmp_fresh_root:
+            self.remove_temporary_global_root_node(root_node)
         return separators
+
 
     # RENDER :
     default_render_directory = "graphviz_dir"
