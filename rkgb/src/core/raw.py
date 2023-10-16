@@ -198,7 +198,51 @@ class RawGraph(base.Graph):
                 to_insert_back = [] # -> Give up
             else:
                 to_insert_back = retry_list
-        return list_raw_nodes
+        return self.clear_redundancies(list_raw_nodes)
+    
+
+    def clear_redundancies(self,list_raw_nodes):
+        """
+        A lot of very tiny nodes share the exact same code:
+        e.g. v1 = [0,1]; v2 = [0,1], x1 = v1[1], x2 = v2[1]
+        So we identify similar codes (v2 similar to v1)
+        and we substitute v2 by v1 in other nodes' code,
+        so x2 = v1[1], so we recognize x2 similar to x1 etc.
+        """
+        dict_code_to_node = dict() 
+        # string code -> node; e.g. AST([0,1]) -> Node(v1)
+        dict_alias = dict()
+        # node -> node; e.g. Node(v2) -> Node(v1)
+        list_raw_nodes_without_redundancies = []
+        node : RawNode
+        for node in list_raw_nodes:
+            # 1) Correct code via aliases in deps
+            new_deps = set()
+            for req_node in node.deps:
+                if req_node in dict_alias:
+                    alias_of_req_node = dict_alias[req_node]
+                    node.code_ast = ast_add_on.substitute(
+                        node.code_ast,
+                        req_node.target,
+                        ast.Name(alias_of_req_node.target)
+                    )
+                    new_deps.add(alias_of_req_node)
+                else:
+                    new_deps.add(alias_of_req_node)
+            node.deps = new_deps
+
+            # 2) Check if an other node has the exam same code
+            if node in self.output_nodes:
+                list_raw_nodes_without_redundancies.append(node)
+                continue # don't change the output
+            code_str = ast_add_on.ast_to_str(node.code_ast)
+            if code_str in dict_code_to_node:
+                dict_alias[node] = dict_code_to_node[code_str]
+            else:
+                dict_code_to_node[code_str] = node
+                list_raw_nodes_without_redundancies.append(node)
+        return list_raw_nodes_without_redundancies
+
 
 
     def __str__(self):
