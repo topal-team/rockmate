@@ -211,10 +211,57 @@ class SimplifiedNode(base.Node):
         constructors, as we want nodes to represent tensors,
         not tuple or list of tensors.
         """
-        # TODO: first need info.view_targets / inplace_targets
-        pass
-    # === END SUBSTITUTE ===
+        self_info = self.info
+        self_deps = self.deps
+        self_target = self.main_target # to avoid getattr() inside for loops
+        user_sn : SimplifiedNode
+        for user_sn in self.users:
+            # 1) unplug self and plug its users with its deps:
+            # user_sn now directly depends on deps of self 
+            # (since self's code is integrated in user_sn's code)
+            user_sn.deps.update(self_deps)
+            user_sn.deps.discard(self)
+            for req_sn in self_deps:
+                req_sn.users.discard(self)
+                req_sn.users.add(user_sn)
+            # 2) insert the code
+            user_sn.substitute_an_id_by_a_code_in_self(
+                self.target,self.main_code,dict_info)
+            # 3) handle randomness
+            user_sn.is_rand = user_sn.is_rand or self.is_rand
+            user_sn.deps_rand.update(self.deps_rand)
+            # 4) data_direct_parent_name
+            if user_sn.info.data_direct_parent_name == self_target:
+                if self_info.data_direct_parent_name == self_target:
+                    new_direct_parent = user_sn.main_target
+                else:
+                    new_direct_parent = self_info.data_direct_parent_name
+                user_sn.info.data_direct_parent_name = new_direct_parent
 
+        if self_info.inplace_targets != set():
+            raise Exception(
+                f"A substitution (ie inserting the code inside the users) "\
+                f"on a node which has some side inplace operations, "\
+                f"shouldn't happen. Code substituted: {self.get_code()}"
+            )
+
+        # Correct the data_owner of views of self (as we are removing self)
+        if (self_info.view_targets != set() 
+        and len(self.users)==1): # Only 1 user => it's fine, otherwise impossible
+            unique_user_sn : SimplifiedNode = next(iter(self.users))
+            unique_user_target = unique_user_sn.main_target
+            for view_target in self_info.view_targets:
+                view_info = dict_info[view_target]
+                view_info.data_owner_name = unique_user_target # instead of self
+                # data_direct_parent_name already changed
+            assert(unique_user_target in self_info.view_targets) # TO REMOVE
+            view_targets = set(self_info.view_targets) # I prefer to copy; TO REMOVE
+            view_targets.discard(unique_user_target)
+            unique_user_sn.info.view_targets = view_targets
+            unique_user_sn.info.is_view = False
+        self.deps = set()
+        self.users = set()
+    # === END SUBSTITUTE ===
 
     def remove_obsolete_child_artifacts(self):
         # An artifact is obsolete if it no longer have
