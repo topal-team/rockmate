@@ -402,7 +402,6 @@ class SimplifiedGraph(base.Graph):
     # ===== END BLOC 1 : CLEAR and CHECK =====
 
 
-
     # ===== BLOC 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
     def create_nodes_for_random_operations_from_dict_rand(self,model,device):
         dict_random_nodes = dict() # str -> SimplifiedNode
@@ -567,7 +566,6 @@ class SimplifiedGraph(base.Graph):
             self.dict_output_viewing_code[output_node.mt] = viewing_code
             self.outputs.append(output_node.mt)
     # ===== END BLOC 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
-
 
 
     # ===== BLOC 3 : SIMPLIFY CONSTRUCTORS AND CHEAP OPERATIONS =====

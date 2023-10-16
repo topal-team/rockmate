@@ -76,7 +76,6 @@ class ForwardGraph(base.Graph):
 
         raw_nodes = raw_graph.get_toposorted_list_of_non_useless_nodes()
         dict_forward_nodes = dict()
-        dict_inplace_ops = dict() 
         # dict : main target -> set targets of related inplace operations
 
         our_global = self.make_copy_of_globals(model,device)
@@ -124,7 +123,6 @@ class ForwardGraph(base.Graph):
                     = self.detect_inplace_or_view(
                     rn,fn,tmp_local,
                     dict_forward_nodes,
-                    dict_inplace_ops,
                     all_param_data_ptrs)
                 del tmp_local
         
@@ -188,10 +186,9 @@ class ForwardGraph(base.Graph):
             current_forward_node,
             tmp_local,
             dict_forward_nodes,
-            dict_inplace_ops,
             all_param_data_ptrs):
-        # - detect inplace operation -
-        current_rn_value = tmp_local[current_raw_node.target]
+        current_target = current_raw_node.target
+        current_rn_value = tmp_local[current_target]
         is_view    = False # by default
         is_inplace = False
         is_param   = False
@@ -199,14 +196,16 @@ class ForwardGraph(base.Graph):
 
         # === FIRST WAY TO RECOGNIZE A VIEW ===
         # -> data_ptr
-        if VariableInfo.has_a_data_ptr(current_rn_value):
+        if (VariableInfo.has_a_data_ptr(current_rn_value)
+        and not (current_raw_node.fct is
+                constants.constant_function_for_constructors)): # TO TEST
             current_rn_data_ptr = VariableInfo.get_data_ptr(current_rn_value)
             if current_rn_data_ptr in all_param_data_ptrs:
                 is_param = True
                 is_view = True
             else:
                 for o_name,o_value in tmp_local.items():
-                    if (o_name != current_raw_node.target
+                    if (o_name != current_target
                     and o_name in self.dict_info
                     and VariableInfo.has_a_data_ptr(o_value)
                     and VariableInfo.get_data_ptr(o_value) == current_rn_data_ptr):
@@ -235,7 +234,7 @@ class ForwardGraph(base.Graph):
         if (is_inplace or is_view) and not is_param:
             current_rn_deps_names = set(
                 req_rn.target for req_rn in current_raw_node.deps)
-            data_direct_parents = current_rn_deps_names & data_parents
+            data_direct_parents = current_rn_deps_names.intersection(data_parents)
             if len(data_direct_parents) == 0:
                 for req_rn in current_raw_node.deps:
                     for req_req_rn in req_rn.deps:
@@ -244,25 +243,31 @@ class ForwardGraph(base.Graph):
                             data_direct_parents.add(req_req_name)
             if len(data_direct_parents) == 0:
                 raise Exception(
-                    f"{current_raw_node.target} is an inplace or "\
+                    f"{current_target} is an inplace or "\
                     f"view op, it doesn't share its data with any "\
                     f"of its deps ?! (even deps of deps)")
             data_direct_parent_name = data_direct_parents.pop()
-            o_info = self.dict_info[data_direct_parent_name]
-            data_owner_name = o_info.data_owner_name
-            # -> If several inplace operations 
-            # -> We must ensure we compute them in the original order
+            direct_parent_info = self.dict_info[data_direct_parent_name]
+            data_owner_name = direct_parent_info.data_owner_name
+            owner_info = self.dict_info[data_owner_name]
+
             if is_inplace:
-                for other_inplace_op in dict_inplace_ops[data_owner_name]:
+                # If several inplace operations:
+                # We must ensure we compute them in the original order
+                # so we look for all the already registered inplace 
+                # operations over the same data_owner_name, and we 
+                # put the new one as a user of the others
+                for other_inplace_op in owner_info.inplace_targets:
                     other_fn = dict_forward_nodes[other_inplace_op]
                     other_fn.users.add(current_forward_node)
                     current_forward_node.deps.add(other_fn)
-                dict_inplace_ops[data_owner_name].add(current_forward_node.mt)
-                
+                owner_info.inplace_targets.add(current_target)
+            elif is_view:
+                owner_info.view_targets.add(current_target)
         else:
-            data_owner_name = current_raw_node.target
-            data_direct_parent_name = current_raw_node.target
-            dict_inplace_ops[current_raw_node.mt] = set()
+            data_owner_name = current_target
+            data_direct_parent_name = current_target
+
         current_node_info = VariableInfo(
             current_rn_value,
             is_view    = is_view,
@@ -270,9 +275,10 @@ class ForwardGraph(base.Graph):
             is_param   = is_param,
             data_owner_name = data_owner_name,
             data_direct_parent_name = data_direct_parent_name)
-        # ** Correct req_grad of data_parent **
+        # Correct req_grad of data_parent: 
+        # if current req grad, then its data_parent too
         if (current_node_info.requires_grad
-        and current_raw_node.mt != data_owner_name):
+        and current_target != data_owner_name):
             self.dict_info[data_owner_name].requires_grad = True
         return current_node_info
 

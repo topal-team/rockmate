@@ -34,6 +34,8 @@ class VariableInfo():
         else:
             self.data_direct_parent_name = data_direct_parent_name
         # -> in case is_view or is_inplace
+        self.inplace_targets = set()
+        self.view_targets = set()
         if value is None:
             self.variable_type = None
         else:

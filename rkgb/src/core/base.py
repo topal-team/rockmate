@@ -390,11 +390,9 @@ class Graph():
         and that Fe/Be make no sense.
         Thus a cutting point must requires_grad.
         """
-
         is_it_a_tmp_fresh_root , root_node \
             = self.make_temporary_global_root_node_to_deps_relation()
         # root_node is the source of .deps relation => e.g. output_node
-
         to_be_visited = [root_node]
         seen = set(to_be_visited)
         dict_nb_usages = dict(
