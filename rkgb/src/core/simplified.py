@@ -628,6 +628,7 @@ class SimplifiedGraph(base.Graph):
                 sn.substitute_self_by_its_code_in_its_users(self.dict_info)
         self.clear()
 
+
     def optional_simplify_cheap_operations(self):
         """
         Note: from root to leaves (init_node to output_nodes)
@@ -641,6 +642,7 @@ class SimplifiedGraph(base.Graph):
                 # with this new conditions, no need to protect against over simplification
                 sn.substitute_self_by_its_code_in_its_users(self.dict_info)
         self.clear()
+
 
     def simplify_sizes(self):
         """
@@ -673,7 +675,99 @@ class SimplifiedGraph(base.Graph):
                         sn.insert(size_sn,strong=True,simplified_graph=self)
                     else: # might stay as artifact
                         sn.insert(size_sn,strong=False,simplified_graph=self)
+        # artifact are introduced in this method, 
+        # so we finish by setting init_node has an artifact too;
+        # only useful in: simplify_view, the next stage
+        self.init_node.is_artifact = True
         self.clear()
+
+
+    def simplify_view(self):
+        """
+        Note: from root to leaves (init_node to output_nodes)
+        """
+        sn : SimplifiedNode
+        for sn in self.nodes:
+            if (sn not in self.output_nodes
+            and sn.main_fct != constants.constructor_function_string
+            and sn.deps != set()
+            and (sn.info.is_view
+                or sn.info.is_inplace
+                or sn.info.is_param
+                or sn.main_fct == "getattr") # those not simplified via constructors
+                # or sn.main_fct in constants.list_view_fct)
+                # Normally, all fct in list_view_fct were already 
+                # detected and info.is_view/param/inplace
+            ):
+                # 1) We look for one clear parent of sn
+                # ie a node sn depend on, in which we could insert sn code, 
+                # will being sure we don't create cycles in the graph
+                sn_non_artefact_deps = [
+                    req_sn for req_sn in sn.deps if not req_sn.is_artifact]
+                sn_non_artefact_deps_set = set(sn_non_artefact_deps)
+                parent_sn : SimplifiedNode = None
+                while parent_sn is None and sn_non_artefact_deps != []:
+                    req_sn = sn_non_artefact_deps.pop()
+                    if req_sn.main_target == sn.info.data_direct_parent_name:
+                        parent_sn = req_sn
+                    else:
+                        req_sn_deps = copy(req_sn.deps)
+                        req_sn_deps.add(req_sn)
+                        if req_sn_deps >= sn.deps:
+                            parent_sn = req_sn
+
+                if parent_sn is None and sn_non_artefact_deps_set != set():
+                    # we look for the deps whose index as an element of self.nodes 
+                    # is the biggest, but without using self.nodes.index() to keep it linear
+                    index_node = self.nodes.index(sn) -1
+                    while self.nodes[index_node] not in sn_non_artefact_deps_set:
+                        index_node -= 1
+                    parent_sn = self.nodes[index_node]
+
+                if parent_sn is not None:
+                    parent_sn.insert(sn,strong=True,simplified_graph=self)
+                    parent_sn.remove_obsolete_child_artifacts()
+                    parent_sn.remove_obsolete_sibling_artifacts()
+                else:
+                    # ie all deps are artifacts
+                    if sn.info.is_inplace:
+                        raise Exception(
+                            f"sorry we don't support inplace operations over "\
+                            f"parameters, or anything that look as such. \n"\
+                            f"Here {sn.main_target} only depends on artifacts, "\
+                            f"but sn.info.is_inplace=True.\nCode:\n {sn.get_code()}")
+                    if not sn.info.is_param:
+                        raise Exception(
+                            "view without any dependencies except artifacts "\
+                            "and it's not a parameter: I didn't thought this can exist")
+                    # => View over parameters, so mem=0 and no backward node
+                    # so I can insert sn's code in ALL its deps (which are all artifacts)
+                    # but artifact nodes are temporary, so what is important is to 
+                    # insert the code in the parent of the artifacts.
+                    # TODO FINISH AFTER
+                    for art_req in sn.deps.keys():
+                        if len(art_req.deps)==0:
+                            assert(art_req is sg.init_node)
+                            real_req = None
+                        else:
+                            assert(len(art_req.deps)==1) # as an artefact
+                            real_req = list(art_req.deps.keys())[0]
+                            real_req.insert_code(sn,sg)
+                        art_req.insert_code(sn,sg)
+                        # -> Insert sn's code BOTH in art_req and real_req
+
+                        # - plug art_req to sn's users -
+                        S_edges.merge_inplace(art_req.users,sn.users)
+                        for (user_sn,str_set) in sn.users.items():
+                            S_edges.add_inplace(user_sn.deps,art_req,str_set)
+                        # - unplug sn -
+                        S_edges.discard_inplace(art_req.users,sn)
+                        S_edges.discard_sn_from_deps_of_its_users(sn)
+                        sn.deps = dict()
+                        sn.users = dict()
+                        if real_req: real_req.clear_children_artefact()
+
+        sg.clear()
 
 
 
