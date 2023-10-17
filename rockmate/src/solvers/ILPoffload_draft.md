@@ -10,9 +10,9 @@ We use indices $i,j$ to represent the computation step (i,j) during stage i, and
 
 $Comp$ of shape [T, T], binary: $Comp(i,j) =1$ if compute j on stage i
 
-$Alive$ of shape [T, T, E], binary: $Alive(i,j,k)=1$ if variable k is alive at step (i,j)
+$Alive$ of shape [T, T, E], binary (can be continuous): $Alive(i,j,k)=1$ if variable k is alive at step (i,j)
 
-$Ocp$ of shape [T, T, L], binary: whether tensor l occupies GPU memory
+$Ocp$ of shape [T, T, L], binary (can be continuous): whether tensor l occupies GPU memory
 
 $time$ of shape [T, T], continuous: time spent during step (i,j)
 
