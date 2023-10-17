@@ -73,18 +73,14 @@ class ForwardGraph(base.Graph):
         self.inherit_base_attributes(raw_graph)
         # => dict_rand / dict_constants / outputs 
         self.sources_req_grad = False # by default
-
-        raw_nodes = raw_graph.get_toposorted_list_of_non_useless_nodes()
         dict_forward_nodes = dict()
-        # dict : main target -> set targets of related inplace operations
-
         our_global = self.make_copy_of_globals(model,device)
         all_param_data_ptrs = VariableInfo.find_all_data_ptr_of_params(model)
         # to recognize a view over a parameter
 
         # Translate each node one by one following the topo-order
         rn : RawNode
-        for rn in raw_nodes:
+        for rn in raw_graph.nodes:
             fn = ForwardNode(rn.target,rn.code_ast,rn.fct,
                 is_rand=rn.is_rand,
                 deps_rand=set(rn.deps_rand),

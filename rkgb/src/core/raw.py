@@ -139,6 +139,8 @@ class RawGraph(base.Graph):
         self.dict_rand = parser.dict_rand
         self.dict_constants = parser.dict_constants
         self.set_output_attributes_and_check_if_constant()
+        self.toposort_and_keep_only_useful_nodes()
+        self.clear_redundancies_in_self_nodes()
 
     def set_output_attributes_and_check_if_constant(self):
         """
@@ -162,7 +164,7 @@ class RawGraph(base.Graph):
             self.outputs = [self.whole_module_output]
 
 
-    def get_toposorted_list_of_non_useless_nodes(self):
+    def toposort_and_keep_only_useful_nodes(self):
         list_raw_nodes = self.get_sorted_nodes_by_following_deps_relation()
         # Reinsert some nodes:
         # In the toposorting function, we collect nodes by following 
@@ -198,10 +200,10 @@ class RawGraph(base.Graph):
                 to_insert_back = [] # -> Give up
             else:
                 to_insert_back = retry_list
-        return self.clear_redundancies(list_raw_nodes)
+        self.nodes = list_raw_nodes
     
 
-    def clear_redundancies(self,list_raw_nodes):
+    def clear_redundancies_in_self_nodes(self):
         """
         A lot of very tiny nodes share the exact same code:
         e.g. v1 = [0,1]; v2 = [0,1], x1 = v1[1], x2 = v2[1]
@@ -215,7 +217,7 @@ class RawGraph(base.Graph):
         # node -> node; e.g. Node(v2) -> Node(v1)
         list_raw_nodes_without_redundancies = []
         node : RawNode
-        for node in list_raw_nodes:
+        for node in self.nodes:
             # 1) Correct code via aliases in deps
             new_deps = set()
             for req_node in node.deps:
@@ -241,7 +243,7 @@ class RawGraph(base.Graph):
             else:
                 dict_code_to_node[code_str] = node
                 list_raw_nodes_without_redundancies.append(node)
-        return list_raw_nodes_without_redundancies
+        self.nodes = list_raw_nodes_without_redundancies
 
 
 
