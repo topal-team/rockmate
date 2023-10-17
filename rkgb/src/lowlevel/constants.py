@@ -5,8 +5,8 @@ import torch
 import sys
 
 
-constant_init_target_string = "__sources__"
-constant_function_for_constructors = "__constructor__"
+init_target_string = "__sources__"
+constructor_function_string = "__constructor__"
 
 time_min_duration = 0
 time_min_repeat = 5
@@ -61,7 +61,7 @@ list_rand_fct = [
 ]
 # -> ONLY used nodes without dependencies
 
-list_optional_cheap_fct = [
+list_cheap_functions = [
     "torch.add",
     "torch.sub",
     "torch.mul",

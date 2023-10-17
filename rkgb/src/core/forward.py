@@ -194,7 +194,7 @@ class ForwardGraph(base.Graph):
         # -> data_ptr
         if (VariableInfo.has_a_data_ptr(current_rn_value)
         and not (current_raw_node.fct is
-                constants.constant_function_for_constructors)): # TO TEST
+                constants.constructor_function_string)): # TO TEST
             current_rn_data_ptr = VariableInfo.get_data_ptr(current_rn_value)
             if current_rn_data_ptr in all_param_data_ptrs:
                 is_param = True

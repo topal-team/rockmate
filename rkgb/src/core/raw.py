@@ -498,7 +498,7 @@ class RawParser():
         target = self.get_unique_name(target)
         new_node = RawNode(
             target=target,
-            fct=constants.constant_function_for_constructors,
+            fct=constants.constructor_function_string,
             raw_parser=self)
         args_raw_vars = [self.handle_expr(None,e) for e in expr.elts]
         args_ast = [v.use_value_ast(calling_node=new_node) for v in args_raw_vars]

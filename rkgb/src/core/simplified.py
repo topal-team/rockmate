@@ -322,7 +322,7 @@ class SimplifiedGraph(base.Graph):
             self.whole_model_inputs = set(forward_graph.inputs)
 
             self.init_node = init_node = SimplifiedNode(
-                main_target=constants.constant_init_target_string,
+                main_target=constants.init_target_string,
                 simplified_graph=self)
             init_node.all_targets=[]
 
@@ -361,7 +361,8 @@ class SimplifiedGraph(base.Graph):
                 dict_simplified_nodes[out] 
                 for out in forward_graph.outputs]
             self.clear()
-            self.simplify_cheap() # TODO
+            self.simplify_constructors()
+            self.optional_simplify_cheap_operations()
             self.simplify_size() # TODO
             self.simplify_view() # TODO
             self.create_nodes_for_random_operations_from_dict_rand(model,device)
@@ -379,7 +380,7 @@ class SimplifiedGraph(base.Graph):
     # ===== BLOC 1 : CLEAR and CHECK =====
     def clear(self):
         self.toposort_nodes()
-        self.check_artifact()
+        self.check_artifact() # TO REMOVE ?
         self.check_edges_are_reciprocal()
         
     def toposort_nodes(self):
@@ -616,94 +617,30 @@ class SimplifiedGraph(base.Graph):
 
 
     # ===== BLOC 3 : SIMPLIFY CONSTRUCTORS AND CHEAP OPERATIONS =====
+    def simplify_constructors(self):
+        # from root to leaves (inputs to outputs)
+        sn : SimplifiedNode
+        for sn in self.nodes:
+            if (sn not in self.output_nodes
+            and sn.main_fct == constants.constructor_function_string):
+                sn.substitute_self_by_its_code_in_its_users(self.dict_info)
+        self.clear()
+
+    def optional_simplify_cheap_operations(self):
+        # from root to leaves (inputs to outputs)
+        sn : SimplifiedNode
+        for sn in self.nodes:
+            if (sn not in self.output_nodes
+            and sn.main_fct in constants.list_cheap_functions
+            and len(sn.deps) <= 2
+            and len(sn.users) == 1):
+                # with this new conditions, no need to protect against over simplification
+                sn.substitute_self_by_its_code_in_its_users(self.dict_info)
+        self.clear()
     # ===== END BLOC 3 : SIMPLIFY CONSTRUCTORS AND CHEAP OPERATIONS =====
             
 
         
-            
-
-# ==========================
-# ==== Simplification 1 ====
-# === remove cheap nodes ===
-# ==========================
-
-def insert_code_ast(main_sn,sub_sn):
-    mc = main_sn.main_code[1]
-    st = sub_sn.main_target
-    sc = sub_sn.main_code[1]
-    # st : sub target, sc : sub code
-    # mc : main_sn.main_code
-    # assert main_code is has depth=1 (no sub calls)
-    if isinstance(mc,ast.Call):
-        args = []
-        kwds = []
-        for s in mc.args:
-            if isinstance(s,ast.Name) and s.id == st:
-                args.append(sc)
-            else: args.append(s)
-        for k in mc.keywords:
-            if isinstance(k.value,ast.Name) and k.value.id == st:
-                kwds.append(ast.Keyword(k.arg,sc))
-            else: kwds.append(k)
-        ret = ast.Call(mc.func,args,kwds)
-        main_sn.main_code = (main_sn.main_target,ret)
-    elif (isinstance(mc,ast.Tuple)
-        or isinstance(mc,ast.List)):
-        l = []
-        for s in mc.elts:
-            if isinstance(s,ast.Name) and s.id == st:
-                l.append(sc)
-            else: l.append(s)
-        ret = type(mc)(l) # ast.Tuple/List(...)
-        main_sn.main_code = (main_sn.main_target,ret)
-    elif isinstance(mc,ast.Subscript):
-        assert(isinstance(sc,ast.List)
-            or isinstance(sc,ast.Tuple))
-        ret = sc.elts[mc.slice.value]
-        main_sn.main_code = (main_sn.main_target,ret)
-        simplify_node(main_sn)
-    else:
-        print(ast.dump(mc,indent=4))
-        raise Exception(
-            f"unknown type of code where we should "\
-            f"insert things: {type(mc.value)}")
-
-def simplify_node(sn):
-    # aux fct, insert n.code_ast in children's code, and then unplug it
-    for user_sn in sn.users.keys():
-        # -- plug user_sn directly to deps of sn --
-        SimplifiedEdgeDict.merge_inplace(user_sn.deps,sn.deps)
-        SimplifiedEdgeDict.discard_inplace(user_sn.deps,sn)
-        for (req_sn,set_targets) in sn.deps.items():
-            SimplifiedEdgeDict.discard_inplace(req_sn.users,sn)
-            SimplifiedEdgeDict.add_inplace(req_sn.users,user_sn,set_targets)
-        # -- insert the code --
-        insert_code_ast(user_sn,sn)
-        # -- handle randomness --
-        user_sn.is_rand = user_sn.is_rand or sn.is_rand
-        user_sn.deps_rand.update(sn.deps_rand)
-    sn.deps  = dict()
-    sn.users = dict()
-
-def simplify_cheap(sg : SimplifiedGraph):
-    # from root to leaves
-    for sn in sg.nodes:
-        if ( not (sn in sg.output_nodes)
-         and    (sn.main_fct in constants.list_cheap_fct
-            or 
-                (sn.main_fct in constants.list_optional_cheap_fct and not sn.protected)
-         )):
-            simplify_node(sn)
-    sg.clear()
-
-# ==========================
-
-
-
-# ==========================
-# ==== Simplification 2 ====
-# === insert size nodes ====
-# ==========================
 
 # 1) merge the size nodes which have the same parent
 # 2) insert the size nodes in the body code of the
