@@ -363,7 +363,7 @@ class SimplifiedGraph(base.Graph):
             self.clear()
             self.simplify_constructors()
             self.optional_simplify_cheap_operations()
-            self.simplify_size() # TODO
+            self.simplify_sizes()
             self.simplify_view() # TODO
             self.create_nodes_for_random_operations_from_dict_rand(model,device)
             self.check_edges_are_reciprocal()
@@ -616,9 +616,11 @@ class SimplifiedGraph(base.Graph):
     # ===== END BLOC 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
 
 
-    # ===== BLOC 3 : SIMPLIFY CONSTRUCTORS AND CHEAP OPERATIONS =====
+    # ===== BLOC 3 : SIMPLIFICATIONS =====
     def simplify_constructors(self):
-        # from root to leaves (inputs to outputs)
+        """
+        Note: from root to leaves (init_node to output_nodes)
+        """
         sn : SimplifiedNode
         for sn in self.nodes:
             if (sn not in self.output_nodes
@@ -627,7 +629,9 @@ class SimplifiedGraph(base.Graph):
         self.clear()
 
     def optional_simplify_cheap_operations(self):
-        # from root to leaves (inputs to outputs)
+        """
+        Note: from root to leaves (init_node to output_nodes)
+        """
         sn : SimplifiedNode
         for sn in self.nodes:
             if (sn not in self.output_nodes
@@ -637,48 +641,45 @@ class SimplifiedGraph(base.Graph):
                 # with this new conditions, no need to protect against over simplification
                 sn.substitute_self_by_its_code_in_its_users(self.dict_info)
         self.clear()
-    # ===== END BLOC 3 : SIMPLIFY CONSTRUCTORS AND CHEAP OPERATIONS =====
-            
 
-        
-
-# 1) merge the size nodes which have the same parent
-# 2) insert the size nodes in the body code of the
-#    parent, and keep them only if needed -> artifact
-
-def size_children(sg,sn):
-    # give the list of child nodes of sn which are size
-    ret = []
-    for user_sn in sn.users.keys():
-        if sg.dict_info[user_sn.main_target].variable_type == torch.Size:
-            ret.append(user_sn)
-    return ret
-
-
-def simplify_size(sg : SimplifiedGraph):
-    # from leaves to root
-    nodes = [sg.init_node] + list(sg.nodes) ; nodes.reverse()
-    for sn in nodes:
-        if not (sn in sg.output_nodes):
-            list_size = size_children(sg,sn)
-            if list_size != []:
-                # -- merge into one node --
-                size_sn = list_size[0]
-                for other_sn in list_size[1:]:
-                    size_sn.insert(other_sn,strong=True,sg=sg)
-                # -- insert their code --
-                if (sn is sg.init_node
-                or sg.dict_info[sn.main_target].variable_type == torch.Size):
-                    sn.insert(size_sn,strong=True,sg=sg)
-                else: sn.insert(size_sn,strong=False,sg=sg)
-    sg.clear()
-
-# ==========================
+    def simplify_sizes(self):
+        """
+        1) merge the size nodes which have the same parent
+        2) insert the size nodes in the body code of the
+           parent, and keep them only if needed -> artifact
+        Note: from leaves to root (output_nodes to init_node)
+        """
+        nodes = [self.init_node] + self.nodes
+        nodes.reverse()
+        sn : SimplifiedNode
+        for sn in nodes:
+            if sn not in self.output_nodes:
+                users_that_are_sizes = [
+                    user_sn for user_sn in sn.users
+                    if user_sn.info.variable_type == torch.Size
+                ]
+                if users_that_are_sizes != []:
+                    # 1) merge all "size"-type users together
+                    size_sn = users_that_are_sizes[0]
+                    size_sn : SimplifiedNode
+                    for other_size_sn in users_that_are_sizes[1:]:
+                        size_sn.insert(
+                            sn_to_insert=other_size_sn,
+                            strong=True,
+                            simplified_graph=self)
+                    # 2) insert them in the parent node
+                    if (sn is self.init_node
+                    or  sn.info.variable_type == torch.Size):
+                        sn.insert(size_sn,strong=True,simplified_graph=self)
+                    else: # might stay as artifact
+                        sn.insert(size_sn,strong=False,simplified_graph=self)
+        self.clear()
 
 
 
-# ==========================
-# ==== Simplification 3 ====
+    # ===== END BLOC 3 : SIMPLIFICATIONS =====
+
+
 # === remove view nodes ====
 # ==========================
 
