@@ -122,13 +122,13 @@ class ForwardGraph(base.Graph):
                     all_param_data_ptrs)
                 del tmp_local
         
-        self.check_if_output_requires_grad()
 
         self.fix_missing_edges_for_inplace_operations(dict_forward_nodes)
         # -> Might change self.outputs (previously inherited)
         self.output_nodes = [
             dict_forward_nodes[output_tar] 
             for output_tar in self.outputs]
+        self.check_if_output_requires_grad()
 
         self.fix_requires_grad()
 
