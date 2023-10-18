@@ -369,6 +369,7 @@ class SimplifiedGraph(base.Graph):
             self.simplify_sizes()
             self.simplify_view()
             self.create_nodes_for_random_operations_from_dict_rand(model,device)
+            self.remove_artifacts_and_replace_them_by_soft_edges()
             self.check_edges_are_reciprocal()
             self.make_dict_of_labels_on_edges()
             self.make_targets_attributes_and_fix_info_data_owner_name()
@@ -586,8 +587,9 @@ class SimplifiedGraph(base.Graph):
         - self.wrapper_output_node := Node(c), 
         """
         assert(len(self.output_nodes)==1)
-        self.wrapper_output_node = wrapper_output_node = self.output_nodes[0]
+        wrapper_output_node = self.output_nodes[0]
         if wrapper_output_node.info.variable_type in [tuple,list]:
+            self.wrapper_output_node = wrapper_output_node
             self.output_nodes = list(wrapper_output_node.deps)
             for real_output_node in self.output_nodes:
                 real_output_node.users.discard(wrapper_output_node) # unplug
@@ -806,61 +808,49 @@ class SimplifiedGraph(base.Graph):
             dot=None):
         name = base.Graph._get_render_name(name)
         dot = base.Graph._get_graphviz_dot(name,dot)
+        # Reminder: at the end of __init__, artifacts are removed
+        # and replace by soft edges "deps_through_artifacts"
+        def edge(sn1,sn2,style=None):
+            used_targets = self.dict_of_labels_on_edges[(sn1,sn2)]
+            dot.edge(
+                sn1.main_target,sn2.main_target,
+                label=used_targets,
+                style=style)
+        # 1) nodes and edges
+        sn : SimplifiedNode
+        for sn in self.nodes:
+            dot.node(sn.main_target,sn.get_code())
+        for sn in self.nodes:
+            for req_sn in sn.deps:
+                edge(req_sn,sn)
+            for req_sn in sn.deps_through_artifacts:
+                edge(req_sn,sn,style="dashed")
+        # 2) init node
+        dot.node(self.init_node.main_target,
+            "INPUT\n"+self.init_node.get_code(),
+            color=constants.render_color_special,
+            style="dashed")
+        for user_sn in self.init_node.users:
+            edge(self.init_node,user_sn,style="dashed")
+        # 3) output nodes
+        wrapper_node = self.wrapper_output_node
+        if wrapper_node is None:
+            assert(len(self.output_nodes)==1)
+            output_node = self.output_nodes[0]
+            dot.node("output","OUTPUT",
+                color=constants.render_color_special,
+                style="dashed")
+            dot.edge(output_node.main_target,"output",style="dashed")
+        else:
+            dot.node(
+                wrapper_node.main_target,
+                "OUTPUT\n"+wrapper_node.get_code(),
+                color=constants.render_color_special,
+                style="dashed")
+            for output_node in self.output_nodes:
+                edge(wrapper_node,output_node,style="dashed")
         if render:
             base.Graph._call_graphviz_to_render(
                 dot,view,directory,render_format
             )
-
-
-# ==========================
-# === printing functions ===
-# ==========================
-
-
-def aux_print_graph(dot,sg : SimplifiedGraph,uniq_num):
-    def uni(tar): return f"_{uniq_num}_{tar}"
-    def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
-    def edge(i1,i2,set_targets,**kwargs):
-        dot.edge(uni(i1),uni(i2),label="\n".join(set_targets),**kwargs)
-    for sn in sg.nodes:
-        if sn.is_artifact:
-            node(sn.main_target,sn.get_code(),style="dashed")
-        else:
-            node(sn.main_target,sn.get_code())
-    for sn in sg.nodes:
-        for (req_sn,set_targets) in sn.deps.items():
-            edge(req_sn.main_target,sn.main_target,set_targets)
-
-    # -- inputs --
-    ino_mt = sg.init_node.main_target
-    ino_code = sg.init_node.get_code()
-    ino_users = list(sg.init_node.users.items())
-    if len(ino_users)!=0:
-        node("input",f"INPUT",color="green",style="dashed")
-        if ino_code != "":
-            # "input" -> init_node -> first_nodes
-            node(ino_mt,ino_code,style="dashed")
-            edge("input",ino_mt,sg.inputs)
-            for user_sn,used_targets in ino_users:
-                edge(ino_mt,user_sn.mt,used_targets,style="dashed")
-        else:
-            # "input" -> first_nodes
-            for user_sn,used_targets in ino_users:
-                edge("input",user_sn.mt,used_targets,style="dashed")
-
-    # -- outputs --
-    node("output",f"OUTPUT",color="green",style="dashed")
-    if sg.wrapper_output_node is None:
-        assert(len(sg.output_nodes)==1)
-        edge(sg.output_nodes[0].mt,"output",sg.outputs)
-    else:
-        for out in sg.output_nodes:
-            edge(out.mt,"output",sg.wrapper_output_node.deps[out])
-
-
-def print_SimplifiedGraph_list(lsg : SimplifiedGraph_list,dot,name=None,open=True,render_format="svg"):
-    for i in range(len(lsg)):
-        aux_print_graph(dot,lsg[i],i)
-
-# ==========================
 
