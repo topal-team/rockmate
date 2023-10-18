@@ -118,9 +118,10 @@ class VariableInfo():
     @staticmethod
     def find_all_data_ptr_of_params(model : torch.nn.Module):
         all_data_ptrs = set()
-        for param in model.parameters:
+        for param in model.parameters():
             data_ptr = VariableInfo.get_data_ptr(param)
             if data_ptr is not None: all_data_ptrs.add(data_ptr)
+        return all_data_ptrs
 
 
     def __eq__(self,i2,raise_exception=False):

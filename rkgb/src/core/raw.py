@@ -230,7 +230,7 @@ class RawGraph(base.Graph):
                     )
                     new_deps.add(alias_of_req_node)
                 else:
-                    new_deps.add(alias_of_req_node)
+                    new_deps.add(req_node)
             node.deps = new_deps
 
             # 2) Check if an other node has the exam same code

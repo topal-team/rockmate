@@ -7,6 +7,7 @@
 
 import copy
 import sys
+import torch
 try:
     import graphviz
     has_graphviz = True

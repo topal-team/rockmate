@@ -151,4 +151,8 @@ def substitute(main_code,sub_id,sub_code):
                 new_val = substitute(old_val,sub_id,sub_code)
                 if not new_val is old_val:
                     setattr(main_code,attr,new_val)
+    elif isinstance(main_code,list):
+        return [
+            substitute(old_val,sub_id,sub_code)
+            for old_val in main_code]
     return main_code
