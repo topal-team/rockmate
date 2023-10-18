@@ -24,7 +24,6 @@ class SimplifiedNode(base.Node):
             code=None,
             fct="",
             info=None,
-            protected=False,
             is_rand=False,
             deps_rand=None,
             simplified_graph=None):
@@ -47,7 +46,6 @@ class SimplifiedNode(base.Node):
             -> for every tar except main_target:
             -> in case of inplace op: "a = b.relu_" -> "a = b" in body_code
         .main_fct   : str  : fct used in .main_code
-        .protected  : bool : see Doc (1-separator of the graph)
         .is_artifact: bool : see Doc (useful size node)
         .deps       : set[SimplifiedNode]
         .users      : set[SimplifiedNode]
@@ -71,7 +69,6 @@ class SimplifiedNode(base.Node):
         self.deps_through_artifacts = set()
         self.users_through_artifacts = set()
         self.info : VariableInfo = info if info is not None else VariableInfo()
-        self.protected = protected
         self.is_rand   = is_rand
         self.deps_rand = deps_rand if deps_rand else set()
 
@@ -307,7 +304,7 @@ class SimplifiedGraph(base.Graph):
     dict_output_viewing_code : dict[str,ast.Module] = None
     dict_of_labels_on_edges : dict[tuple[SimplifiedNode,SimplifiedNode],set[str]] = None
     edges_via_artifacts : list[tuple[SimplifiedNode,SimplifiedNode]] = None
-    sequentialized_list_of_bloc_of_nodes = list[list[SimplifiedNode]] = None
+    sequentialized_list_of_bloc_of_nodes : list[list[SimplifiedNode]] = None
     def __init__(self,
             forward_graph : ForwardGraph = None,
             model=None,
@@ -338,7 +335,6 @@ class SimplifiedGraph(base.Graph):
                     code=fn.code_ast,
                     fct=fn.fct,
                     info=fn.info,
-                    protected=fn.protected,
                     is_rand=fn.is_rand,
                     deps_rand=set(fn.deps_rand),
                     simplified_graph=self)
@@ -464,7 +460,6 @@ class SimplifiedGraph(base.Graph):
                     main_target=random_variable_name,
                     code=code_ast,
                     fct="--Random function--",
-                    protected=True,
                     is_rand=True,
                     simplified_graph=self)
             # -> We need to generate VariableInfo
