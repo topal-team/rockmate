@@ -5,6 +5,7 @@
 ======================================
 """
 
+import ast
 import copy
 import sys
 import torch
@@ -166,9 +167,13 @@ class Node():
             return ast_add_on.make_ast_list_assign(code,
                 force_special_kwargs=force_special_kwargs)
     def get_code(self,force_special_kwargs=False):
-        return ast_add_on.ast_to_str(
-            self.get_code_ast(force_special_kwargs)
-        )
+        code_ast = self.get_code_ast(force_special_kwargs)
+        try:
+            return ast_add_on.ast_to_str(code_ast)
+        except:
+            raise Exception(
+                "Problem to ast.unparse code:\n"
+                + ast.dump(code_ast,indent=4))
     
     # -> For S, BC
     # This function is a way to see what the final

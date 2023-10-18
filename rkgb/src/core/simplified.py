@@ -225,7 +225,7 @@ class SimplifiedNode(base.Node):
                 req_sn.users.add(user_sn)
             # 2) insert the code
             user_sn.substitute_an_id_by_a_code_in_self(
-                self.target,self.main_code,dict_info)
+                self.target,self.main_code[1],dict_info)
             # 3) handle randomness
             user_sn.is_rand = user_sn.is_rand or self.is_rand
             user_sn.deps_rand.update(self.deps_rand)
@@ -396,7 +396,7 @@ class SimplifiedGraph(base.Graph):
             for out_sn in self.output_nodes:
                 out_sn.users.add(root_sn)
         # 2) sort
-        self.nodes = base.Graph.get_sorted_nodes_by_following_deps_relation(root_sn)
+        self.nodes = self.get_sorted_nodes_by_following_deps_relation()
         # 3) remove the fake root (if created) and the init_node
         # because we don't want the init_node in self.nodes
         # but it was fetch by following deps will sorting
@@ -801,7 +801,7 @@ class SimplifiedGraph(base.Graph):
             render_format=base.Graph.default_render_format,
             render=True,
             dot=None):
-        name = base.Graph._get_render_name(name)
+        name = self._get_render_name(name)
         dot = base.Graph._get_graphviz_dot(name,dot)
         # Reminder: at the end of __init__, artifacts are removed
         # and replace by soft edges "deps_through_artifacts"
