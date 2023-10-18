@@ -307,6 +307,7 @@ class SimplifiedGraph(base.Graph):
     dict_output_viewing_code : dict[str,ast.Module] = None
     dict_of_labels_on_edges : dict[tuple[SimplifiedNode,SimplifiedNode],set[str]] = None
     edges_via_artifacts : list[tuple[SimplifiedNode,SimplifiedNode]] = None
+    sequentialized_list_of_bloc_of_nodes = list[list[SimplifiedNode]] = None
     def __init__(self,
             forward_graph : ForwardGraph = None,
             model=None,
@@ -768,6 +769,31 @@ class SimplifiedGraph(base.Graph):
                     sn.users = set()
         self.clear()
     # ===== END BLOC 3 : SIMPLIFICATIONS =====
+
+    def make_sequentialized_list_of_bloc_of_nodes(self):
+        if self.sequentialized_list_of_bloc_of_nodes is None:
+            # 1) re-plug self.init_node 
+            # 2) find cutting points 
+            # 3) unplug self.init_node
+            for user_sn in self.init_node.users:
+                user_sn.deps.add(self.init_node)
+            self.nodes.insert(0,self.init_node)
+            cutting_points = self.find_cutting_points()
+            self.nodes.remove(self.init_node)
+            for user_sn in self.init_node.users:
+                user_sn.deps.remove(self.init_node)
+            # 4) cut self.nodes in blocs following cutting_points 
+            list_blocs = []
+            current_bloc = []
+            for sn in self.nodes:
+                current_bloc.append(sn)
+                if sn is cutting_points[0]:
+                    cutting_points.pop(0)
+                    list_blocs.append(current_bloc)
+                    current_bloc = []
+            if current_bloc != []: list_blocs.append(current_bloc)
+            self.sequentialized_list_of_bloc_of_nodes = list_blocs
+
 
     def __str__(self):
         return f"Simplified Forward Graph with {len(self.nodes)} nodes."
