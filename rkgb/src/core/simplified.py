@@ -57,6 +57,7 @@ class SimplifiedNode(base.Node):
         super().__init__("S",main_target,
             parent_structure_with_id_generator=simplified_graph)
         self.is_artifact = False
+        self.parent_sn_as_an_artifact : SimplifiedNode = None
         self.main_code = (main_target,code)
         self.main_fct = fct
         self.inplace_code = [] # list of tar * AST
@@ -154,6 +155,7 @@ class SimplifiedNode(base.Node):
             # -> sn_to_insert has been fully unplugged
         else:
             sn_to_insert.is_artifact = True
+            sn_to_insert.parent_sn_as_an_artifact = self
 
         # 3) insert the code; set the new edges
         # and replace sn_to_insert by self in output_nodes if needed
@@ -364,7 +366,7 @@ class SimplifiedGraph(base.Graph):
             self.simplify_constructors()
             self.optional_simplify_cheap_operations()
             self.simplify_sizes()
-            self.simplify_view() # TODO
+            self.simplify_view()
             self.create_nodes_for_random_operations_from_dict_rand(model,device)
             self.check_edges_are_reciprocal()
             self.make_dict_of_labels_on_edges()
@@ -744,132 +746,33 @@ class SimplifiedGraph(base.Graph):
                     # so I can insert sn's code in ALL its deps (which are all artifacts)
                     # but artifact nodes are temporary, so what is important is to 
                     # insert the code in the parent of the artifacts.
-                    # TODO FINISH AFTER
-                    for art_req in sn.deps.keys():
-                        if len(art_req.deps)==0:
-                            assert(art_req is sg.init_node)
-                            real_req = None
-                        else:
-                            assert(len(art_req.deps)==1) # as an artefact
-                            real_req = list(art_req.deps.keys())[0]
-                            real_req.insert_code(sn,sg)
-                        art_req.insert_code(sn,sg)
-                        # -> Insert sn's code BOTH in art_req and real_req
-
-                        # - plug art_req to sn's users -
-                        S_edges.merge_inplace(art_req.users,sn.users)
-                        for (user_sn,str_set) in sn.users.items():
-                            S_edges.add_inplace(user_sn.deps,art_req,str_set)
-                        # - unplug sn -
-                        S_edges.discard_inplace(art_req.users,sn)
-                        S_edges.discard_sn_from_deps_of_its_users(sn)
-                        sn.deps = dict()
-                        sn.users = dict()
-                        if real_req: real_req.clear_children_artefact()
-
-        sg.clear()
-
-
-
+                    artifact_req_sn : SimplifiedNode
+                    for artifact_req_sn in sn.deps:
+                        # 1) duplicate the code in artifact's parent
+                        if sn is not self.init_node:
+                            artifact_req_sn \
+                                .parent_sn_as_an_artifact \
+                                .insert_code(sn,self)
+                        # 2) put it inside the artifact too, 
+                        # TO REMOVE / useless as we discard all the artifact by the end ?
+                        artifact_req_sn.insert_code(sn,self)
+                        # 3) plug artifact_req_sn to sn's users
+                        artifact_req_sn.users.update(sn.users)
+                        for user_sn in sn.users:
+                            user_sn.deps.add(artifact_req_sn)
+                        artifact_req_sn.users.discard(sn)
+                        # 4) clear artifact if possible # TO IMPROVE
+                        if sn is not self.init_node:
+                            artifact_req_sn \
+                                .parent_sn_as_an_artifact \
+                                .remove_obsolete_child_artifacts()
+                    # 5) unplug sn
+                    for user_sn in sn.users:
+                        user_sn.deps.discard(sn)
+                    sn.deps = set()
+                    sn.users = set()
+        self.clear()
     # ===== END BLOC 3 : SIMPLIFICATIONS =====
-
-
-# === remove view nodes ====
-# ==========================
-
-def get_all_real_deps(sn):
-    return set(
-        req_sn for req_sn in sn.deps.keys() 
-        if not req_sn.is_artifact)
-
-def get_direct_real_deps(sn):
-    deps = get_all_real_deps(sn)
-    for req_sn in deps:
-        if get_all_real_deps(req_sn) ==  deps-set([req_sn]):
-            return set([req_sn])
-    return deps
-
-def simplify_view(sg : SimplifiedGraph):
-    # from root to leaves
-    sg.init_node.is_artifact = True
-    for sn in sg.nodes:
-        sn_info = sg.dict_info[sn.main_target]
-        if (sn_info.is_view
-        or  sn.main_fct in constants.list_view_fct # -> in case of viewing operations over parameters
-        or  sn.main_fct == "getattr"
-        or  sn_info.is_inplace):
-            # ASSERTION remaining getattr are related to views !! 
-            # we also consider inplace ops as views
-            real_deps = get_direct_real_deps(sn)
-            if len(real_deps)==1:
-                req_sn = real_deps.pop()
-                req_sn.insert(sn,strong=True,sg=sg)
-                req_sn.remove_obsolete_child_artifacts()
-                req_sn.remove_obsolete_sibling_artifacts()
-            elif len(real_deps) > 1:
-                if not sn_info.is_inplace: print(
-                    f"Warning : {sn.main_target} is a view op (not "\
-                    f"inplace), with several tensor deps, thus it's "\
-                    f"impossible to simplify it, very dangerous...\n"\
-                    f"deps are : {[req_sn.main_target for req_sn in real_deps]}",
-                    file = sys.stderr)
-                else:
-                    inplace_real_node = None
-                    for req_sn in real_deps:
-                        if req_sn.main_target == sn_info.data_owner_name:
-                            inplace_real_node = req_sn
-                            break
-                    if inplace_real_node is None: print(
-                        f"Warning : {sn.main_target} comes from an "\
-                        f"inplace operations, but it's main tensor "\
-                        f"isn't in {sn.main_target}'s node deps",
-                        file = sys.stderr)
-                    else:
-                        inplace_real_node.insert(sn,strong=True,sg=sg)
-                        inplace_real_node.remove_obsolete_sibling_artifacts()
-            elif len(real_deps)==0 and len(sn.deps)>0:
-                # TODO : change sn.info.is_param
-                # experimental : I assume that views which don't 
-                # require any real tensor are views over parameters
-                # so mem=0 and no bwd K_node, so I can insert them
-                # in their parents even if they are artifacts.
-                # But artifact nodes aren't safe, they might disappear
-                # if self.users sub set of self.parent.users
-                # so I must share the code with artifacts' parent
-                # It's not a problem to insert the code in different 
-                # nodes because view operations are cheap.
-                # But I must avoid creating cycle dependencies, so
-                # for the moment I assert len(sn.deps)==1
-                if sn_info.is_inplace: raise Exception(
-                    f"Sorry we do not support inplace operations over "\
-                    f"parameters (or anything that isn't a Tensor). \n"\
-                    f"Here {sn.main_target} only deps on artifacts, but"\
-                    f"sn_info.is_inplace=True :/")
-                for art_req in sn.deps.keys():
-                    if len(art_req.deps)==0:
-                        assert(art_req is sg.init_node)
-                        real_req = None
-                    else:
-                        assert(len(art_req.deps)==1) # as an artifact
-                        real_req = list(art_req.deps.keys())[0]
-                        real_req.insert_code(sn,sg)
-                    art_req.insert_code(sn,sg)
-                    # -> Insert sn's code BOTH in art_req and real_req
-
-                    # - plug art_req to sn's users -
-                    SimplifiedEdgeDict.merge_inplace(art_req.users,sn.users)
-                    for (user_sn,set_targets) in sn.users.items():
-                        SimplifiedEdgeDict.add_inplace(user_sn.deps,art_req,set_targets)
-                    # - unplug sn -
-                    SimplifiedEdgeDict.discard_inplace(art_req.users,sn)
-                    SimplifiedEdgeDict.discard_sn_from_deps_of_its_users(sn)
-                    sn.deps = dict()
-                    sn.users = dict()
-                    if real_req: real_req.remove_obsolete_child_artifacts()
-
-    sg.clear()
-
-# ==========================
 
 
 # ==========================
