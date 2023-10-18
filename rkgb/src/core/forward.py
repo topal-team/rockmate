@@ -343,7 +343,7 @@ class ForwardGraph(base.Graph):
                 fn.info.requires_grad = False
 
     def __str__(self):
-        return f"RawGraph with {len(self.nodes)} nodes."
+        return f"Forward Graph with {len(self.nodes)} nodes."
     
     def render(self,
             name=None,

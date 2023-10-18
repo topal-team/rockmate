@@ -463,9 +463,7 @@ class Graph():
         )
     """ SKELETON FOR RENDER :
     def __str__(self):
-        return (
-            f"RawGraph with {len(self.nodes)} nodes "\
-            f"(remember this list may contain garbage)")
+        return f"Raw Graph with {len(self.nodes)} nodes."
     def render(self,
             name=None,
             view=True,

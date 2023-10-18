@@ -377,8 +377,6 @@ class SimplifiedGraph(base.Graph):
             self.make_dict_output_viewing_code()
             self.assert_ready()
 
-
-
     # ===== BLOC 1 : CLEAR and CHECK =====
     def clear(self):
         self.toposort_nodes()
@@ -630,7 +628,6 @@ class SimplifiedGraph(base.Graph):
                 sn.substitute_self_by_its_code_in_its_users(self.dict_info)
         self.clear()
 
-
     def optional_simplify_cheap_operations(self):
         """
         Note: from root to leaves (init_node to output_nodes)
@@ -644,7 +641,6 @@ class SimplifiedGraph(base.Graph):
                 # with this new conditions, no need to protect against over simplification
                 sn.substitute_self_by_its_code_in_its_users(self.dict_info)
         self.clear()
-
 
     def simplify_sizes(self):
         """
@@ -682,7 +678,6 @@ class SimplifiedGraph(base.Graph):
         # only useful in: simplify_view, the next stage
         self.init_node.is_artifact = True
         self.clear()
-
 
     def simplify_view(self):
         """
@@ -774,179 +769,26 @@ class SimplifiedGraph(base.Graph):
         self.clear()
     # ===== END BLOC 3 : SIMPLIFICATIONS =====
 
-
-# ==========================
-# ==== Cut the graph in ====
-# ==== sequential parts ====
-# ==========================
-
-class SimplifiedGraph_list(list):
-    def __init__(self,*args,**kwargs):
-        super().__init__(*args,**kwargs)
-
-def copy_SimplifiedNode(sn : SimplifiedNode): # aux for copy_SimplifiedGraph
-    new_sn = SimplifiedNode()
-    new_sn.is_artifact       = sn.is_artifact
-    new_sn.main_code         = tuple(sn.main_code)
-    new_sn.main_fct          = sn.main_fct
-    new_sn.inplace_code      = [tuple(c) for c in sn.inplace_code]
-    new_sn.body_code         = [tuple(c) for c in sn.body_code]
-    new_sn.main_target       = sn.main_target
-    new_sn.all_targets       = list(sn.all_targets)
-    new_sn.tensor_targets    = list(sn.tensor_targets)
-    new_sn.inplace_targets   = list(sn.inplace_targets)
-    new_sn.container_targets = list(sn.container_targets)
-    new_sn.is_rand           = sn.is_rand
-    new_sn.deps_rand         = set(sn.deps_rand)
-    new_sn.deps              = dict() # /!\
-    new_sn.users             = dict() # /!\
-    new_sn.protected         = sn.protected
-    new_sn.unique_id         = sn.unique_id
-    return new_sn
-
-def copy_SimplifiedGraph(sg : SimplifiedGraph):
-    # -> a copy of sg with fresh nodes
-    new_sg = SimplifiedGraph()
-    new_sg.inherit_base_attributes(sg)
-    new_sg.whole_model_inputs = sg.whole_model_inputs
-    new_sg.node_unique_id_generator = copy(sg.node_unique_id_generator)
-    dict_nodes = {}
-    new_sg.nodes = new_nodes = []
-    # dict_nodes[new_init.main_target] = new_init # TO REMOVE
-    for sn in sg.nodes:
-        new_sn = copy_SimplifiedNode(sn)
-        new_nodes.append(new_sn)
-        dict_nodes[sn.main_target] = new_sn
-        for (req_sn,set_str) in sn.deps.items():
-            new_req_sn = dict_nodes[req_sn.main_target]
-            SimplifiedEdgeDict.add_inplace(new_req_sn.users,new_sn,set_str)
-            SimplifiedEdgeDict.add_inplace(new_sn.deps,new_req_sn,set_str)
-
-    # * init_node *
-    new_sg.init_node \
-        = new_init \
-        = copy_SimplifiedNode(sg.init_node)
-    new_init.users = dict(
-        (dict_nodes[u.mt],set_str) \
-        for u,set_str in sg.init_node.users.items())
-    
-    # * output_nodes *
-    new_sg.dict_output_viewing_code = dict(sg.dict_output_viewing_code )
-    new_sg.output_nodes = [dict_nodes[out.mt] for out in sg.output_nodes]
-    if sg.wrapper_output_node is not None:
-        new_sg.wrapper_output_node \
-            = special_out \
-            = copy_SimplifiedNode(sg.wrapper_output_node)
-        special_out.deps = dict(
-            (dict_nodes[r.mt],set_str) \
-            for r,set_str in sg.wrapper_output_node.deps.items())
-        
-    # * artifact edges *
-    new_edges_via_artifacts = new_sg.edges_via_artifacts
-    for (req_sn,user_sn,used_targets) in sg.edges_via_artifacts:
-        new_edges_via_artifacts.append((
-            dict_nodes[req_sn.mt],
-            dict_nodes[user_sn.mt],
-            set(used_targets)
-        ))
-
-    return new_sg
-
-
-def cut(sg : SimplifiedGraph): # -> list of SimplifiedGraph
-    # Note: when this function is used, sg.init_node has been unhooked
-    sg = copy_SimplifiedGraph(sg) # to protect from side effects
-    # -> Add a temporary global source before get separators
-    # -> Above all the node which don't have any deps
-    sg.nodes.insert(0,sg.init_node) # it's not the original sg, no risk
-    for first_sn,set_targets in sg.init_node.users.items():
-        SimplifiedEdgeDict.add_inplace(first_sn.deps,sg.init_node,set_targets)
-
-    seps = sg.find_cutting_points()
-    
-    # -> remove tmp_source
-    for first_sn in sg.init_node.users.keys():
-        SimplifiedEdgeDict.discard_inplace(first_sn.deps,sg.init_node)
-    
-    seps = [sg.init_node] + seps
-    # multiple output_nodes
-    if not (seps[-1] is sg.nodes[-1]):
-        seps.append(sg.nodes[-1])
-
-    list_sg = []
-    for block_nb in range(1,len(seps)):
-        new_sg = SimplifiedGraph()
-        new_sg.whole_model_inputs = sg.whole_model_inputs
-        new_sg.node_unique_id_generator = copy.copy(sg.node_unique_id_generator)
-        new_sg.inherit_base_attributes(sg)
-        list_sg.append(new_sg)
-        # -- get nodes --
-        first_node = seps[block_nb-1]
-        last_node = seps[block_nb]
-        first_i = sg.nodes.index(first_node)
-        last_i = sg.nodes.index(last_node)
-        nodes = sg.nodes[first_i+1:last_i+1] # last IN, first NOT
-        new_sg.nodes = nodes
-        # -- input --
-        if block_nb==1:
-            new_sg.init_node = sg.init_node
-            new_sg.inputs = sg.inputs
-        else:
-            ino = copy_SimplifiedNode(sg.init_node)
-            # -> we want the init_code but NOT the deps
-            new_sg.init_node = ino
-            inputs = set()
-            first_node_users = list(first_node.users.items())
-            for (user_sn,set_targets) in first_node_users:
-                inputs.update(set_targets)
-                SimplifiedEdgeDict.discard_inplace(user_sn.deps,first_node)
-                #SimplifiedEdges.add_inplace(user_sn.deps,ino,set_targets)
-                SimplifiedEdgeDict.add_inplace(ino.users,user_sn,set_targets)
-                if user_sn.is_artifact:
-                    ino.insert(user_sn,strong=True,sg=sg)
-                    nodes.remove(user_sn)
-            for user_sn in ino.users.keys(): # Unhook ino (need due to `ino.insert`)
-                SimplifiedEdgeDict.discard_inplace(user_sn.deps,ino)
-            first_node.users = dict() # previous bloc's output node
-            new_sg.inputs = list(inputs)
-        # -- outputs --
-        if block_nb == len(seps)-1:
-            new_sg.output_nodes = sg.output_nodes
-            new_sg.wrapper_output_node = sg.wrapper_output_node
-            new_sg.dict_output_viewing_code = sg.dict_output_viewing_code
-        else:
-            new_sg.output_nodes = [last_node]
-    for i in range(len(list_sg)-1):
-        list_sg[i].outputs = list(list_sg[i+1].inputs)
-    list_sg[-1].outputs = sg.outputs
-    return SimplifiedGraph_list(list_sg)
-
-# ==========================
-
+    def __str__(self):
+        return f"Simplified Forward Graph with {len(self.nodes)} nodes."
+    def render(self,
+            name=None,
+            view=True,
+            directory=base.Graph.default_render_directory,
+            render_format=base.Graph.default_render_format,
+            render=True,
+            dot=None):
+        name = base.Graph._get_render_name(name)
+        dot = base.Graph._get_graphviz_dot(name,dot)
+        if render:
+            base.Graph._call_graphviz_to_render(
+                dot,view,directory,render_format
+            )
 
 
 # ==========================
 # === printing functions ===
 # ==========================
-
-def aux_print_SimplifiedGraph_message(sg : SimplifiedGraph):
-    return f"SimplifiedGraph - Simplified forward graph : {len(sg.nodes)} nodes"
-
-def aux_print_SimplifiedGraph_list_message(lsg : SimplifiedGraph_list):
-    s = "+".join([str(len(sg.nodes)) for sg in lsg])
-    return (
-        f"SimplifiedGraph_list - Sequentialized simplified forward graphs, "\
-        f"{len(lsg)} blocks,\n     -> with {s} = "\
-        f"{sum([len(sg.nodes) for sg in lsg])} nodes"
-    )
-
-def aux_print_SimplifiedGraph_name(sg : SimplifiedGraph,name=None):
-    if name is not None: return name
-    else: return "Simplified_forward_SimplifiedGraph"
-
-def aux_print_SimplifiedGraph_list_name(lsg : SimplifiedGraph_list,name=None):
-    if name is not None: return name
-    else: return "Sequentialized_Simplified_Forward_SimplifiedGraph_list"
 
 
 def aux_print_graph(dot,sg : SimplifiedGraph,uniq_num):
