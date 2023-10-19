@@ -2,8 +2,6 @@
 # ====== S structure =======
 # ==========================
 
-import sys
-import copy
 import warnings
 import ast
 import torch
@@ -275,9 +273,10 @@ class SimplifiedNode(base.Node):
                     f"Error with artifact {artifact_sn.mt}, "\
                     f"its only dependence should be {self.mt}, "\
                     f"but deps = {artifact_sn.deps}")
-
             # update and unplug if obsolete
             artifact_sn.users -= self.users
+            for user_sn in self.users:
+                user_sn.deps.discard(artifact_sn)
             if artifact_sn.users == set():
                 self.users.discard(artifact_sn)
                 artifact_sn.deps = set()
@@ -378,7 +377,7 @@ class SimplifiedGraph(base.Graph):
     # ===== BLOC 1 : CLEAR and CHECK =====
     def clear(self):
         self.toposort_nodes()
-        self.check_artifact() # TO REMOVE ?
+        self.check_artifact() # TO REMOVE after all tests passed
         self.check_edges_are_reciprocal()
         
     def toposort_nodes(self):
@@ -706,7 +705,7 @@ class SimplifiedGraph(base.Graph):
                     if req_sn.main_target == sn.info.data_direct_parent_name:
                         parent_sn = req_sn
                     else:
-                        req_sn_deps = copy(req_sn.deps)
+                        req_sn_deps = req_sn.deps.copy()
                         req_sn_deps.add(req_sn)
                         if req_sn_deps >= sn.deps:
                             parent_sn = req_sn
