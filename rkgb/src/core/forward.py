@@ -389,10 +389,17 @@ class ForwardGraph(base.Graph):
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.parameters = model.parameters
+                # Inherits all attributes from model:
+                for k, v in model.__dict__.items():
+                    if (
+                        not "forward" in k
+                        and not "backward" in k
+                        and k not in ["training"]
+                    ):
+                        self.__dict__[k] = v
             def forward(self,*args,**kwargs):
                 # 1) Prepare the environnement of exec
-                our_global = forward_graph.make_copy_of_globals(model,device)
+                our_global = forward_graph.make_copy_of_globals(self,device)
                 dict_inputs = preprocess_samples.DictInputs(model,args,kwargs)
                 tmp_local = dict_inputs.dict
                 # 2) exec each node one by one

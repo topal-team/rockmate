@@ -211,18 +211,39 @@ class RawGraph(base.Graph):
         and we substitute v2 by v1 in other nodes' code,
         so x2 = v1[1], so we recognize x2 similar to x1 etc.
         """
+        # I) Check if we can replace the constants
+        # directly by their value; or at least avoid having 
+        # a lot of nodes referring to the same value
+        dict_constant_alias = dict()
+        dict_constant_value_to_name = dict()
+        dict_constant_number_to_name = dict()
+        dict_constants_at_the_beginning = dict(self.dict_constants)
+        self.dict_constants = dict()
+        for cst_name,cst_value in dict_constants_at_the_beginning.items():
+            cst_number = int(cst_name.split("_")[2])
+            dict_constant_number_to_name[cst_number] = cst_name
+            if type(cst_value) in [int,str,bool]:
+                dict_constant_alias[cst_name] \
+                    = ast_add_on.make_ast_constant(cst_value)
+            elif cst_value in dict_constant_value_to_name:
+                dict_constant_alias[cst_name] \
+                    = ast.Name(dict_constant_value_to_name[cst_value])
+            else:
+                dict_constant_value_to_name[cst_value] = cst_name
+                self.dict_constants[cst_name] = cst_value
+        # II) clear redundancies in self.nodes' code
+        dict_node_alias = dict()
+        # node -> node; e.g. Node(v2) -> Node(v1)
         dict_code_to_node = dict() 
         # string code -> node; e.g. AST([0,1]) -> Node(v1)
-        dict_alias = dict()
-        # node -> node; e.g. Node(v2) -> Node(v1)
         list_raw_nodes_without_redundancies = []
         node : RawNode
         for node in self.nodes:
             # 1) Correct code via aliases in deps
             new_deps = set()
             for req_node in node.deps:
-                if req_node in dict_alias:
-                    alias_of_req_node = dict_alias[req_node]
+                if req_node in dict_node_alias:
+                    alias_of_req_node = dict_node_alias[req_node]
                     node.code_ast = ast_add_on.substitute(
                         node.code_ast,
                         req_node.target,
@@ -232,14 +253,27 @@ class RawGraph(base.Graph):
                 else:
                     new_deps.add(req_node)
             node.deps = new_deps
+            # 2) Correct the constants
+            code_str = node.get_code()
+            # Look for "_cst_{number}" 
+            for str_after_cst_ in code_str.split("_cst_")[1:]:
+                cst_number = int(
+                    str_after_cst_[:str_after_cst_.index("_")])
+                cst_name = dict_constant_number_to_name[cst_number]
+                if cst_name in dict_constant_alias:
+                    node.code_ast = ast_add_on.substitute(
+                        node.code_ast,
+                        cst_name,
+                        dict_constant_alias[cst_name]
+                    )
 
-            # 2) Check if an other node has the exam same code
+            # 3) Check if an other node has the exam same code
             if node in self.output_nodes:
                 list_raw_nodes_without_redundancies.append(node)
                 continue # don't change the output
             code_str = ast_add_on.ast_to_str(node.code_ast)
             if code_str in dict_code_to_node:
-                dict_alias[node] = dict_code_to_node[code_str]
+                dict_node_alias[node] = dict_code_to_node[code_str]
             else:
                 dict_code_to_node[code_str] = node
                 list_raw_nodes_without_redundancies.append(node)

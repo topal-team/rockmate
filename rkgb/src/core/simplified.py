@@ -925,3 +925,12 @@ class SimplifiedGraph(base.Graph):
                 dot,view,directory,render_format
             )
         
+
+    def build_equivalent_torch_nn_sequential(
+            self,model : torch.nn.Module,device):
+        simplified_graph = self
+        self.make_sequentialized_list_of_bloc_of_nodes()
+        blocs_nodes = self.sequentialized_list_of_bloc_of_nodes
+        class BlocModule(torch.nn.Module):
+            def __init__(self,nodes,outputs,):
+                pass
