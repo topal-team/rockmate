@@ -318,7 +318,7 @@ class SimplifiedGraph(base.Graph):
                     "You need to pass model and device to "\
                     "SimplifiedGraph.__init__ to move from F to S")
             self.inherit_base_attributes(forward_graph)
-            self.whole_model_inputs = set(forward_graph.inputs)
+            self.whole_model_inputs = set(forward_graph.input_targets)
 
             self.init_node = init_node = SimplifiedNode(
                 main_target=constants.init_target_string,
@@ -345,7 +345,7 @@ class SimplifiedGraph(base.Graph):
                     sn.deps.add(req_sn)
 
             # merge all the inputs in the special `init_node`
-            for input_target in forward_graph.inputs:
+            for input_target in forward_graph.input_targets:
                 init_node.insert(
                     dict_simplified_nodes[input_target],
                     strong=True,simplified_graph=self)
@@ -357,7 +357,7 @@ class SimplifiedGraph(base.Graph):
 
             self.output_nodes = [
                 dict_simplified_nodes[out] 
-                for out in forward_graph.outputs]
+                for out in forward_graph.output_targets]
             self.clear()
             self.simplify_constructors()
             self.optional_simplify_cheap_operations()
@@ -541,7 +541,7 @@ class SimplifiedGraph(base.Graph):
             used_targets = self.dict_of_labels_on_edges[
                 (self.init_node,user_of_init_sn)]
             inputs.update(used_targets)
-        self.inputs = list(inputs)
+        self.input_targets = list(inputs)
 
     def unplug_init_node(self):
         dict_info = self.dict_info
@@ -601,7 +601,7 @@ class SimplifiedGraph(base.Graph):
         (e.g. c = g(v) and c is a 2nd output). So we don't remove 
         'v = view(a)' from Node(a), we just duplicate it in self.dict_output_viewing_code
         """
-        self.outputs = []
+        self.output_targets = []
         self.dict_output_viewing_code = dict()
         for output_node in self.output_nodes:
             body_code = output_node.make_body_code_ast()
@@ -609,7 +609,7 @@ class SimplifiedGraph(base.Graph):
                 body_code,force_special_kwargs=True
             )
             self.dict_output_viewing_code[output_node.mt] = viewing_code
-            self.outputs.append(output_node.mt)
+            self.output_targets.append(output_node.mt)
     # ===== END BLOC 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
 
 
@@ -955,6 +955,9 @@ class SimplifiedGraph(base.Graph):
             # Mais du coup, est-ce qu'on se restreint au nn.Sequential normale
             # ie celui où les inputs ne sont pas des global_vars
             # mais du coup nn.Transformer est vraiment qu'un gros bloc.
+
+            # l'autre problème c'est les _modules;
+            # est-ce que je mets tous les _modules à tout le monde ?
 
 
         class BlocModule(torch.nn.Module):

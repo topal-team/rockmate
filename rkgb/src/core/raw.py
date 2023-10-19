@@ -161,7 +161,7 @@ class RawGraph(base.Graph):
         else:
             self.whole_module_output = self.output_raw_var.value_ast.id
             self.output_nodes = [self.output_raw_var.node]
-            self.outputs = [self.whole_module_output]
+            self.output_targets = [self.whole_module_output]
 
 
     def toposort_and_keep_only_useful_nodes(self):

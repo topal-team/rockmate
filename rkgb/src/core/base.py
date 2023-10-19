@@ -254,8 +254,8 @@ class Graph():
             node_unique_id_generator : Node_unique_id_generator = None):
         self.graph_type = graph_type # string: R, F, S, P, B, H
         # == base attribute ==
-        self.inputs = []
-        self.outputs = [] # str list -> interfaces
+        self.input_targets = []
+        self.output_targets = []
         self.whole_module_output = None
         self.sources_req_grad = None
         self.dict_constants = dict()
@@ -298,8 +298,8 @@ class Graph():
     # -> For any type of graph
     def inherit_base_attributes(self,other_graph):
         for attr in [
-            "inputs",
-            "outputs",
+            "input_targets",
+            "output_targets",
             "whole_module_output",
             "sources_req_grad",
             "dict_constants",

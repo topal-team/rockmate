@@ -71,7 +71,7 @@ class ForwardGraph(base.Graph):
     ):
         super().__init__("F")
         self.inherit_base_attributes(raw_graph)
-        # => dict_rand / dict_constants / outputs 
+        # => dict_rand / dict_constants / output_targets 
         self.sources_req_grad = False # by default
         dict_forward_nodes = dict()
         our_global = self.make_copy_of_globals(model,device)
@@ -87,7 +87,7 @@ class ForwardGraph(base.Graph):
                 forward_graph=self)
             # inputs:
             if rn.is_input:
-                self.inputs.append(rn.target)
+                self.input_targets.append(rn.target)
                 fn.is_input = True
                 input_info = VariableInfo(
                     dict_inputs.dict[rn.target],
@@ -124,10 +124,10 @@ class ForwardGraph(base.Graph):
         
 
         self.fix_missing_edges_for_inplace_operations(dict_forward_nodes)
-        # -> Might change self.outputs (previously inherited)
+        # -> Might change self.output_targets (previously inherited)
         self.output_nodes = [
             dict_forward_nodes[output_tar] 
-            for output_tar in self.outputs]
+            for output_tar in self.output_targets]
         self.check_if_output_requires_grad()
 
         self.fix_requires_grad()
@@ -301,13 +301,14 @@ class ForwardGraph(base.Graph):
                 assert(fn.info.is_view or fn.info.is_inplace)
 
                 # 1) In case fn is a view/inplace over self.whole_module_output
-                # we might have to change self.outputs:
+                # we might have to change self.output_targets:
                 # example: a=f(x) ; b1=view(a) ; b2=inplace(b1) ; c1=inplace(a)
                 # then outputs=[a] => outputs=[b1,c1] => outputs=[b2,c1]
                 if fn.info.data_owner_name is self.whole_module_output:
-                    if fn.info.data_direct_parent_name in self.outputs:
-                        self.outputs.remove(fn.info.data_direct_parent_name)
-                    self.outputs.append(fn.main_target)
+                    if fn.info.data_direct_parent_name in self.output_targets:
+                        self.output_targets.remove(
+                            fn.info.data_direct_parent_name)
+                    self.output_targets.append(fn.main_target)
                     # => in the example:
                     # - "b1" replace "a"
                     # - "c1" is added to the list, but "a" was already discarded
@@ -336,7 +337,7 @@ class ForwardGraph(base.Graph):
         # fix 2) 
         # If none of users req_grad (even after fix 1) => useless to req_grad 
         for fn in self.nodes[::-1]:
-            if (fn.main_target not in self.outputs
+            if (fn.main_target not in self.output_targets
             and fn.info.requires_grad
             and not any(user_fn.info.requires_grad 
                         for user_fn in fn.users)):
@@ -357,7 +358,7 @@ class ForwardGraph(base.Graph):
         dot = base.Graph._get_graphviz_dot(name,dot)
         for fn in self.nodes:
             if fn.is_input: color = "blue"
-            elif fn.target in self.outputs: color = "red"
+            elif fn.target in self.output_targets: color = "red"
             else: color = None
             dot.node(fn.target,fn.get_code(),color=color)
             for req_fn in fn.deps:
@@ -368,10 +369,10 @@ class ForwardGraph(base.Graph):
             )
 
     def print_forward_code(self):
-        print("def main({}):".format(','.join(self.inputs)))
+        print("def main({}):".format(','.join(self.input_targets)))
         for fn in self.nodes:
             if not fn.is_input: print(f"\t{fn.get_code()}")
-        print("\treturn {}".format(','.join(self.outputs)))
+        print("\treturn {}".format(','.join(self.output_targets)))
 
     def print_all_nodes(self,print_ast_not_str=True):
         for fn in self.nodes:
@@ -416,7 +417,7 @@ class ForwardGraph(base.Graph):
                             our_global,tmp_local
                         )
                 # 3) return
-                output_targets = forward_graph.outputs
+                output_targets = forward_graph.output_targets
                 if len(output_targets)==1:
                     return tmp_local[output_targets[0]]
                 else:
