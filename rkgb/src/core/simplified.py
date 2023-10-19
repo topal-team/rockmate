@@ -925,12 +925,58 @@ class SimplifiedGraph(base.Graph):
                 dot,view,directory,render_format
             )
         
-
+    """ WIP TODO
     def build_equivalent_torch_nn_sequential(
             self,model : torch.nn.Module,device):
         simplified_graph = self
         self.make_sequentialized_list_of_bloc_of_nodes()
         blocs_nodes = self.sequentialized_list_of_bloc_of_nodes
+        # Module for one bloc:
+        def make_BlocModule(input_targets,nodes,output_targets):
+            # ugly way to do it, but I want to respect the input/outputs
+            # and, above all, I didn't find a way to pass the kwargs
+            # otherwise, I want the result to be clean.
+
+
+            # The problem is that, if I store kwargs in a global dict after
+            # I receive them, it's not very natural,
+            # en gros est-ce que le "tgt" dans nn.Transformer 
+            # devrait etre dans un global dict qu'on partage entre
+            # les blocs, ou alors contraindre à qu'il ne soit soit use 
+            # que dans le premier bloc; 
+            # => en fait c'est meme bcp bcp plus naturel avec la notion
+            # de nn.Sequential
+            # mais en fait dans Rockmate on ne prend pas un nn.Sequential !
+            # on considère que les inputs du 1er bloc sont des globals vars
+            # intouchable et donc utilisable partout
+            # mais c'est complètement faux !!!
+            # D'ailleurs comme ça se passe si on a de l'inplace sur les 
+            # inputs ??? Jamais prévu ça !
+            # Mais du coup, est-ce qu'on se restreint au nn.Sequential normale
+            # ie celui où les inputs ne sont pas des global_vars
+            # mais du coup nn.Transformer est vraiment qu'un gros bloc.
+
+
         class BlocModule(torch.nn.Module):
-            def __init__(self,nodes,outputs,):
-                pass
+            def __init__(self,input_targets,nodes,output_targets):
+                super().__init__()
+                self.input_targets = input_targets
+                self.code_strings = [rn.get_code() for rn in nodes]
+                self.output_targets = output_targets
+            def forward(self,*args):
+                dict_local = locals()
+                dict_local.update(simplified_graph.dict_constants)
+                for input_target,input_value in zip(self.input_targets,args):
+                    dict_local[input_target] = input_value
+                for line_of_code in self.code_strings:
+                    exec(line_of_code)
+                if len(self.output_targets)==1:
+                    return dict_local[self.output_targets[0]]
+                else:
+                    return tuple(
+                        dict_local[output_target] 
+                        for output_target in self.output_targets)
+        # Build the sequence
+        if blocs_nodes
+    """
+
