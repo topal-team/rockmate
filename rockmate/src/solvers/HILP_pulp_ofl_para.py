@@ -626,9 +626,14 @@ class ModelPULP:
                     )
         for t in range(T):
             for k in range(T):
+                if self.enable_offload:
+                    weight_mem = lpSum(self.AliveW[t,k,w]*self.weight_size[w]
+                                       for w in range(W))
+                else:
+                    weight_mem = 0
                 j = self.hcn2sub_c[k]
                 self.md += (self.U[(t, k)] >= 0, "")
-                self.md += (self.U[(t, k)] <= self.peak_budget, "")
+                self.md += (self.U[(t, k)] <= self.peak_budget - weight_mem, "")
                 if j is None or not accurate_mem:
                     # don't consider correction_term
                     self.md += (
@@ -642,7 +647,7 @@ class ModelPULP:
                             for eidx_d, (k_, i_) in enumerate(self.delete_list)
                             if k == k_
                         )
-                        <= self.peak_budget,
+                        <= self.peak_budget - weight_mem,
                         "",
                     )
                 else:
@@ -694,7 +699,7 @@ class ModelPULP:
                                     for eidx_d, (k_, i_) in enumerate(self.delete_list)
                                     if k == k_
                                 )
-                                <= self.peak_budget,
+                                <= self.peak_budget - weight_mem,
                                 "",
                             )
                         if not (
@@ -710,7 +715,7 @@ class ModelPULP:
                                     for eidx_d, (k_, i_) in enumerate(self.delete_list)
                                     if k == k_
                                 )
-                                <= self.peak_budget,
+                                <= self.peak_budget - weight_mem,
                                 "",
                             )
                 if t == self.loss_idx and self.save_budget:
