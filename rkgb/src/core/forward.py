@@ -360,7 +360,6 @@ class ForwardGraph(base.Graph):
             elif fn.target in self.outputs: color = "red"
             else: color = None
             dot.node(fn.target,fn.get_code(),color=color)
-        for fn in self.nodes:
             for req_fn in fn.deps:
                 dot.edge(req_fn.target,fn.target)
         if render:

@@ -809,13 +809,12 @@ class SimplifiedGraph(base.Graph):
             used_targets = self.dict_of_labels_on_edges[(sn1,sn2)]
             dot.edge(
                 sn1.main_target,sn2.main_target,
-                label=used_targets,
+                label="\n".join(used_targets),
                 style=style)
         # 1) nodes and edges
         sn : SimplifiedNode
         for sn in self.nodes:
             dot.node(sn.main_target,sn.get_code())
-        for sn in self.nodes:
             for req_sn in sn.deps:
                 edge(req_sn,sn)
             for req_sn in sn.deps_through_artifacts:
@@ -835,7 +834,8 @@ class SimplifiedGraph(base.Graph):
             dot.node("output","OUTPUT",
                 color=constants.render_color_special,
                 style="dashed")
-            dot.edge(output_node.main_target,"output",style="dashed")
+            dot.edge(output_node.main_target,"output",
+                self.whole_module_output,style="dashed")
         else:
             dot.node(
                 wrapper_node.main_target,
@@ -849,3 +849,80 @@ class SimplifiedGraph(base.Graph):
                 dot,view,directory,render_format
             )
 
+    def render_sequentialized(self,
+            name=None,
+            view=True,
+            directory=base.Graph.default_render_directory,
+            render_format=base.Graph.default_render_format,
+            render=True,
+            dot=None):
+        name = self._get_render_name(name)
+        dot = base.Graph._get_graphviz_dot(name,dot)
+        self.make_sequentialized_list_of_bloc_of_nodes()
+        # Auxiliary functions
+        def make_unique(target,bloc_id):
+            return str(bloc_id)+"_"+target
+        def node(bloc_id,target,label,**kwargs):
+            dot.node(
+                make_unique(target,bloc_id),
+                label,**kwargs)
+        def edge(bloc_id,sn1,sn2,style=None):
+            used_targets = self.dict_of_labels_on_edges[(sn1,sn2)]
+            dot.edge(
+                make_unique(sn1.main_target,bloc_id),
+                make_unique(sn2.main_target,bloc_id),
+                label="\n".join(used_targets),
+                style=style)
+        # Build each bloc one by one
+        blocs = self.sequentialized_list_of_bloc_of_nodes
+        len_blocs = len(blocs)
+        wrapper_node = self.wrapper_output_node
+        for bloc_id,bloc_nodes in enumerate(blocs):
+            # 1) input
+            if bloc_id == 0:
+                node(bloc_id,
+                    self.init_node.main_target,
+                    "GLOBAL INPUT\n"+self.init_node.get_code(),
+                    color=constants.render_color_special,
+                    style="dashed")
+            else:
+                node(bloc_id,
+                    blocs[bloc_id-1][-1].main_target,
+                    f"INPUT bloc {bloc_id+1}",
+                    color=constants.render_color_special,
+                    style="dashed")
+            # 2) nodes and edges
+            for sn in bloc_nodes:
+                node(bloc_id,sn.main_target,sn.get_code())
+                for req_sn in sn.deps:
+                    edge(bloc_id,req_sn,sn)
+                for req_sn in sn.deps_through_artifacts:
+                    edge(req_sn,sn,style="dashed")
+            # 3) output
+            if (bloc_id == len_blocs-1
+            and wrapper_node is not None):
+                node(bloc_id,
+                    wrapper_node.main_target,
+                    "OUTPUT\n"+wrapper_node.get_code(),
+                    color=constants.render_color_special,
+                    style="dashed")
+                for output_node in self.output_nodes:
+                    edge(bloc_id,wrapper_node,output_node,style="dashed")
+            else:
+                node(bloc_id,
+                    "output","OUTPUT",
+                    color=constants.render_color_special,
+                    style="dashed")
+                dot.edge(
+                    make_unique(bloc_nodes[-1].main_target,bloc_id),
+                    make_unique("output",bloc_id),
+                    style="dashed")
+            # 4) special case init_node:
+            if bloc_id == 0:
+                for user_sn in self.init_node.users:
+                    edge(bloc_id,self.init_node,user_sn,style="dashed")
+        if render:
+            base.Graph._call_graphviz_to_render(
+                dot,view,directory,render_format
+            )
+        
