@@ -230,22 +230,28 @@ class ModelPULP:
                 "AliveW",
                 [(t, i, j) for t in range(T) for i in range(T) for j in range(W)],
                 cat="Continuous",
+                lowBound = 0,
+                upBound=1
             )  # weight w is alive at the start of step j.
             self.OflW = LpVariable.dicts(
                 "OflW",
                 [(t, i, j) for t in range(T) for i in range(T) for j in range(W)],
                 cat="Continuous",
+                lowBound = 0,
+                upBound=1
             )
             self.PrfW = LpVariable.dicts(
                 "PrfW",
                 [(t, i, j) for t in range(T) for i in range(T) for j in range(W)],
                 cat="Continuous",
+                lowBound = 0,
+                upBound=1
             )
-            self.weight_size = [0 for _ in range(W)]
-            self.weight2hcn = {w: [w, 2*T-w-1] for w in range(W)}
+            self.weight_size = [1e7 for _ in range(W)]
+            self.weight2hcn = {w: [w, T-w-1] for w in range(W)}
             self.hcn2weight = {k:w for w in self.weight2hcn for k in self.weight2hcn[w]}
-            self.bandwidthOfl = 4 * 1024**2  # byte/ms
-            self.bandwidthPrf = 4 * 1024**2  # byte/ms
+            self.bandwidthOfl = 12 * 1024**2  # byte/ms
+            self.bandwidthPrf = 12 * 1024**2  # byte/ms
 
         self.Time = LpVariable.dicts(
             "Time", [(t, i) for t in range(T) for i in range(T)], cat="Continuous"
@@ -271,14 +277,14 @@ class ModelPULP:
                 if self.enable_offload:
                     self.md += (
                         self.Time[t, i] >= 
-                        lpSum(self.PrfW[t,i,w] /self.bandwidthPrf
-                        * self.weight_size[w] for w in range(W)),
+                        lpSum(self.weight_size[w] /self.bandwidthPrf
+                        * self.PrfW[t,i,w] for w in range(W)),
                         "",
                     )
                     self.md += (
                         self.Time[t, i] >= 
-                        lpSum(self.OflW[t,i,w]/self.bandwidthOfl
-                        * self.weight_size[w] for w in range(W)),
+                        lpSum(self.weight_size[w]/self.bandwidthOfl
+                        * self.OflW[t,i,w] for w in range(W)),
                         "",
                     )
 
@@ -351,6 +357,8 @@ class ModelPULP:
                 "",
             )
 
+        
+
         # options don't conflict
         for i in range(T):
             for t in range(T):
@@ -395,8 +403,8 @@ class ModelPULP:
                         "",
                     )
             if self.enable_offload:
-                for w in self.weight_deps:
-                    for k in self.weight_deps[w]:
+                for w in self.weight2hcn:
+                    for k in self.weight2hcn[w]:
                         self.md += (self.sumComp[(k, t)] <= self.AliveW[t, k, w], "")
 
         #### Options-related constraints
@@ -453,7 +461,7 @@ class ModelPULP:
                         else:
                             self.OflWProg[(t,i,w)] = (lpSum(self.OflW[t,ii,w] for ii in range(i)) + 
                                 lpSum(self.OflW[tt,ii,w] for tt in range(t) for ii in range(T)) +
-                                lpSum(self.OflW[tt,ii,w] for tt in range(bwd_i, T) for ii in range(T)))
+                                lpSum(self.OflW[tt,ii,w] for tt in range(bwd_i+1, T) for ii in range(T)))
                         self.md += (
                             self.AliveW[t, i, w] + self.OflWProg[(t,i,w)]
                             >= 1,
@@ -462,20 +470,31 @@ class ModelPULP:
                         if i < T - 1:
                             self.md += (
                                 self.AliveW[t, i + 1, w]
-                                <= self.AliveW[t, i, w] - self.Comp[t, i],
+                                <= self.AliveW[t, i, w] + self.sumComp[(i,t)],
                                 "",
                             )
                             self.md += (
                                 self.AliveW[t, i + 1, w]
-                                >= self.AliveW[t, i, w] + self.Comp[t, i],
+                                >= self.AliveW[t, i, w] - self.sumComp[(i,t)],
                                 "",
                             )
                             self.md += (
                                 self.AliveW[t, i + 1, w]
                                 <= self.AliveW[t, i, w] + self.PrfW[t, i, w],
+                                ""
                             )
-            
-        
+            for w in range(W):
+                for t in range(T-1):
+                    self.md += (
+                        self.AliveW[t+1, 0, w]
+                        <= self.AliveW[t, T-1, w] + self.PrfW[T-1, T-1, w],
+                        ""
+                    )
+                self.md += (
+                    self.AliveW[0, 0, w]
+                    <= self.AliveW[T-1, T-1, w] + self.PrfW[T-1, T-1, w],
+                    ""
+                )
 
         ##### Memory constraints
         # we don't keep eyes on the alive status all the time
@@ -509,7 +528,7 @@ class ModelPULP:
             for i in range(I):
                 if t + 1 < T:
                     self.md += (
-                        self.T[t + 1, i]
+                        self.AliveT[t + 1, i]
                         == self.alive[(t, max(_deps_d[i] + _users_d[i]), i)],
                         "",
                     )
@@ -627,6 +646,7 @@ class ModelPULP:
         for t in range(T):
             for k in range(T):
                 if self.enable_offload:
+                    # weight_mem = 0
                     weight_mem = lpSum(self.AliveW[t,k,w]*self.weight_size[w]
                                        for w in range(W))
                 else:
@@ -727,16 +747,16 @@ class ModelPULP:
         for k in range(T):
             self.md += (self.U[(self.loss_idx, k)] <= self.save_budget, "")
 
-    def solve(self, solver=None):
+    def solve(self, solver=""):
         # self.md.message("\n\nRestarting solve\n\n")
-        solver = get_solver(solver, msg=0)
+        # solver = get_solver(solver, msg=0)
         # solver = solver or solver_name[0]
-        # try:
-        #     solver = get_solver(solver, msg=0)
-        # except:
-        #     avail_solver = listSolvers(onlyAvailable=True)[0]
+        try:
+            solver = get_solver(solver, msg=0)
+        except:
+            avail_solver = listSolvers(onlyAvailable=True)[0]
         #     print(f"Cannot get {solver}, will use {avail_solver}")
-        #     solver = get_solver(avail_solver, msg=0)
+            solver = get_solver(avail_solver, msg=0)
 
         status = self.md.solve(solver)
         self.status = LpStatus[status]  # readable status
