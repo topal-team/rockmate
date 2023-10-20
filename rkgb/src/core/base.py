@@ -154,7 +154,7 @@ class Node():
             for (tar,acode) in self.body_code]
         return bc
     def get_code_ast(self,force_special_kwargs=False):
-        if self.node_type == "R" or self.node_type == "F":
+        if hasattr(self,"code_ast"):
             return ast_add_on.make_ast_assign(
                 (self.main_target,self.code_ast),
                 force_special_kwargs=force_special_kwargs
@@ -201,24 +201,14 @@ class Node():
     # =====================
     # === requires_grad ===
     # -> For any type of node
-    def does_requires_grad(self,dict_info):
-        if self.main_target is None:
-            if self.node_type == "P" or self.node_type == 'HC':
-                if self.is_leaf:
-                    raise Exception(
-                        "'main_target == None' should imply 'not self.is_leaf'"
-                    )
-                return True # a subgraph always requires_grad
-            else:
-                raise Exception(
-                    f"Apart from P_nodes and H_C_nodes,\n"\
-                    f"self.main_target shouldn't be None, "\
-                    f"error with a {self.node_type}_node"
-                )
-        else:
-            return (self.main_target in dict_info # -> otherwise : special nodes
-                and hasattr(dict_info[self.main_target],"requires_grad")
-                and dict_info[self.main_target].requires_grad)
+    def does_requires_grad(self):
+        return (
+            self.info is not None
+            and hasattr(self.info,"requires_grad")
+            and self.info.requires_grad
+        )
+        # Overwritten in partitioned.py and hierarchical.py
+        # where a node might represent a sub_graph.
     # =====================
 
     # ================
@@ -252,7 +242,7 @@ class Graph():
             graph_type : str,
             other_object_with_id_generator = None,
             node_unique_id_generator : Node_unique_id_generator = None):
-        self.graph_type = graph_type # string: R, F, S, P, B, H
+        self.graph_type = graph_type # string: R, F, S, P, W, H
         # == base attribute ==
         self.input_targets = []
         self.output_targets = []

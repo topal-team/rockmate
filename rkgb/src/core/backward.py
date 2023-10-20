@@ -145,7 +145,7 @@ class WholeAllocationNode(base.Node):
 class WholeGraph(base.Graph):
     has_fake_input_kdn_grad = False
     def __init__(self,sg : SimplifiedGraph):
-        super().__init__("K")
+        super().__init__("W")
         if not (sg is None): self.inherit_base_attributes(sg)
         self.dict_rand = dict() # random operations have been inserted at the end of simplification
         self.sg = sg

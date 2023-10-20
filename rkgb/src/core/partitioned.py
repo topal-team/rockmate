@@ -216,6 +216,12 @@ class P_node(base.Node):
         return self.deps
     def get_all_standard_users(self):
         return self.users
+    
+    def does_requires_grad(self):
+        if not self.is_leaf:
+            return True
+        else:
+            return self.simplified_node.does_requires_grad()
 
     @property
     def size(self):
