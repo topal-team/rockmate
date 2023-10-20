@@ -2,11 +2,15 @@
 # ====== K structure =======
 # ==========================
 
-from .utils import *
-from .Stools import S_node,S_graph
-
+import warnings
+import ast
+import torch
+from src.lowlevel import ast_add_on
 from src.lowlevel import constants
+from src.lowlevel import measure
+from src.lowlevel import inspection
 from src.core import base
+from src.core.simplified import SimplifiedNode,SimplifiedGraph
 
 # ************
 # * K_C_node *
@@ -142,7 +146,7 @@ class K_D_node(base.Node):
 
 class K_graph(base.Graph):
     has_fake_input_kdn_grad = False
-    def __init__(self,sg : S_graph):
+    def __init__(self,sg : SimplifiedGraph):
         super().__init__("K")
         if not (sg is None): self.inherit_base_attributes(sg)
         self.dict_rand = dict() # random operations have been inserted at the end of simplification
@@ -253,7 +257,7 @@ class K_graph(base.Graph):
                 leaves_kcn.add(kcn)
         root_kdn = K_D_node(deps = leaves_kcn,other_obj=self)
         root_kcn = K_C_node(deps_real=set([root_kdn]),other_obj=self)
-        self.list_kcn = l = RK_sort_based_on_deps(root_kcn)
+        self.list_kcn = l = self.get_sorted_nodes_by_following_deps_relation()
         l.remove(root_kcn)
 
     def make_kcns_number(self):
@@ -301,23 +305,15 @@ class K_graph(base.Graph):
 # = Move from S to K graph =
 # ==========================
 
-# aux function to handle verbose and device
-def aux_init_S_to_K(model,verbose,d):
-    global device
-    device = d if d else (
-        small_fcts.get_device_and_check_all_same_device(model,dict(),True))
-    if not (verbose is None): constants.ref_verbose[0] = verbose
+# the function that does it all
+def aux_build_S_to_K(sg : SimplifiedGraph,
+        model,
+        device,
+        do_inspection=True):
+    kg = K_graph(sg)
     for p in model.parameters():
         if p.grad is None:
             p.grad = torch.zeros_like(p)
-
-# the function that does it all
-def aux_build_S_to_K(sg : S_graph,
-        model,
-        prev_kg : K_graph=None,
-        is_really_first_graph=False,
-        do_inspection=True):
-    kg = K_graph(sg)
     dict_KCN_fwd = kg.dict_KCN_fwd
     dict_KCN_bwd = kg.dict_KCN_bwd
     dict_KDN_data = kg.dict_KDN_data
@@ -325,10 +321,9 @@ def aux_build_S_to_K(sg : S_graph,
     dict_KDN_phantoms = kg.dict_KDN_phantoms
 
     # ============  
-    def handle_node(sn : S_node):
+    def handle_node(sn : SimplifiedNode):
         mt = sn.main_target
-        print_debug(f"start to handle {mt}'s S_node in S_to_K")
-        our_global = def_inspection.generate_our_global(sg,model,device)
+        our_global = inspection.generate_our_global(sg,model,device)
         info = sg.dict_info[mt]
 
         # For artifact nodes :
@@ -399,7 +394,7 @@ def aux_build_S_to_K(sg : S_graph,
             exist_phs,
             original_phs,
             hasattr_base) = (
-                def_inspection.get_useful_vars(sn,sg,our_global,device))
+                inspection.get_useful_vars(sn,sg,our_global,device))
             all_deps_mt = set(explicit_deps).union(
                 set(data_ptr_only_ph_deps.values()).union(
                 set([t[1] for t in valid_view_ph_deps.values()])))
@@ -495,9 +490,9 @@ def aux_build_S_to_K(sg : S_graph,
         # *** inspection ***
         if (not do_inspection
         or device == torch.device("cpu")):
-            res = def_inspection.Inspection_result()
+            res = inspection.Inspection_result()
         else:
-            ins = def_inspection.inspector(sn,sg,our_global,device)
+            ins = inspection.inspector(sn,sg,our_global,device)
             ins.measure_fwd()
             ins.measure_bwd()
             res = ins.ret
@@ -622,7 +617,7 @@ def aux_build_S_to_K(sg : S_graph,
     return kg
 
 
-def S_to_K(sg : S_graph,model,verbose=None,device=None):
+def S_to_K(sg : SimplifiedGraph,model,verbose=None,device=None):
     aux_init_S_to_K(model,verbose,device)
     return aux_build_S_to_K(sg,model,prev_kg = None,is_really_first_graph=True)
 
@@ -787,8 +782,8 @@ def copy_K_graph(kg : K_graph):
 # -> Need better edges for input_kdn_data/grad
 # -> 1) include kcn bwd nodes
 # -> 2) deps_real or fake
-# -> Recognize inputs in def_inspection when opening grad_fn
-def K_list_to_K(kl : K_graph_list,sg : S_graph) -> K_graph:
+# -> Recognize inputs in inspection when opening grad_fn
+def K_list_to_K(kl : K_graph_list,sg : SimplifiedGraph) -> K_graph:
     kl = [copy_K_graph(block_kg) for block_kg in kl]
     nb_block = len(kl)
     whole_kg = K_graph(sg)
@@ -926,10 +921,10 @@ def aux_print_graph(dot,kg,uniq_num):
             lbl = kcn.get_code() if kcn.is_fwd else f"backward of {mt}"
             node(kcn.name,lbl,color=get_color(kcn),tooltip = (
                 f"Time : {kcn.time}\n"\
-                f"Mem overhead : {irotor.MemSize(kcn.overhead)}"))
+                f"Mem overhead : {measure.MemSize(kcn.overhead)}"))
     def print_kdn(kdn):
         node(kdn.name,kdn.name,color=get_color(kdn),
-            tooltip = f"Mem {irotor.MemSize(kdn.mem)}")
+            tooltip = f"Mem {measure.MemSize(kdn.mem)}")
 
     for kcn in kg.list_kcn: print_kcn(kcn)
     for kdn in kg.list_kdn: print_kdn(kdn)
