@@ -57,7 +57,7 @@ class Node():
             target = None, mt = None, # aliases
             parent_structure_with_id_generator = None, # to get unique_id from it
             unique_id_generator : Node_unique_id_generator = None):
-        self.node_type = node_type # str: R, F, S, P, BC, BD, HC, HD
+        self.node_type = node_type # str: R, F, S, P, WC, WD, HC, HD
         # == init main_target ==
         if not (main_target is None):
             self.main_target = main_target
@@ -146,7 +146,7 @@ class Node():
 
     # =============================
     # === generate ast/str code ===
-    # -> For B, D, S, BC
+    # -> For B, D, S, WC
     def make_body_code_ast(self):
         dict_ic = dict(self.inplace_code)
         bc = [
@@ -175,7 +175,7 @@ class Node():
                 "Problem to ast.unparse code:\n"
                 + ast.dump(code_ast,indent=4))
     
-    # -> For S, BC
+    # -> For S, WC
     # This function is a way to see what the final
     # code will look like (including detach). But it's
     # never used in Rockmate, the translator/compiler isn't that simple.
@@ -289,8 +289,9 @@ class Graph():
         self.nodes = list_nodes
 
     def __iter__(self):
-        if self.graph_type == "B": return iter(self.list_bcn)
-        else: return iter(self.nodes)
+        return iter(self.nodes)
+        # for graphs with Computation/Allocation nodes,
+        # iter over self.computation_nodes
     # =================================
 
     # ===============================
