@@ -18,7 +18,7 @@ class H_C_node(base.Node):
             sub_cluster = None,
             is_fwd = True,
             number = -1):
-        super().__init__("HC",mt = main_target)
+        super().__init__(main_target)
         self.name = name  # e.g. Fwd_1
         self.sub_cluster = sub_cluster
         self.is_fwd = is_fwd
@@ -64,9 +64,9 @@ class H_D_node(base.Node):
         self.deps = set()
         self.users = set()
         if kdn is None:
-            super().__init__("HD")
+            super().__init__()
         else:
-            super().__init__("HD",mt = kdn.mt)
+            super().__init__(kdn.mt)
             self.kdn = kdn
             self.name = H_D_node.make_name_from_kdn(kdn)
             self.mem = kdn.mem
@@ -95,7 +95,7 @@ class H_D_node(base.Node):
 # ***********
 class H_graph(base.Graph):
     def __init__(self, name, h_cluster = None, other_obj = None):
-        super().__init__("H",other_obj)
+        super().__init__(other_obj)
         # /!\ All the HCN's and HDN's should be in the same level. /!\ 
         self.name = name
         self.dict_hn = dict()  #  name -> HN

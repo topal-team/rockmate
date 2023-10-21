@@ -30,7 +30,7 @@ class WholeComputationNode(base.Node):
             deps_through_artifacts=None,
             backward_graph=None):
         # ** informative **
-        super().__init__("WC",main_target,
+        super().__init__(main_target,
             parent_structure_with_id_generator=backward_graph)
         mt = main_target
         atars = all_targets
@@ -97,7 +97,7 @@ class WholeAllocationNode(base.Node):
             deps      = None,
             other_obj = None):
         # ** informative **
-        super().__init__("KD",other_obj,main_target=main_target)
+        super().__init__(other_obj,main_target=main_target)
         self.kdn_type = kdn_type # data, grad or phantoms
         mt = main_target
         atars = all_targets
@@ -145,7 +145,7 @@ class WholeAllocationNode(base.Node):
 class WholeGraph(base.Graph):
     has_fake_input_kdn_grad = False
     def __init__(self,sg : SimplifiedGraph):
-        super().__init__("W")
+        super().__init__()
         if not (sg is None): self.inherit_base_attributes(sg)
         self.dict_rand = dict() # random operations have been inserted at the end of simplification
         self.sg = sg

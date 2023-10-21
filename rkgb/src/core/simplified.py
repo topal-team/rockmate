@@ -50,7 +50,7 @@ class SimplifiedNode(base.Node):
         .is_rand    : bool
         .deps_rand  : str set : because we don't want random src nodes here
         """
-        super().__init__("S",main_target,
+        super().__init__(main_target,
             parent_structure_with_id_generator=simplified_graph)
         self.is_artifact = False
         self.parent_sn_as_an_artifact : SimplifiedNode = None
@@ -311,7 +311,7 @@ class SimplifiedGraph(base.Graph):
     ):
         # 2 constructors: if given a forward_graph, then move from F to S
         # otherwise return an empty simplified_graph
-        super().__init__("S")
+        super().__init__()
         if forward_graph is not None:
             if model is None or device is None: 
                 raise Exception(

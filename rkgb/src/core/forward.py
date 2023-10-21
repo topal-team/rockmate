@@ -36,7 +36,7 @@ class ForwardNode(base.Node):
         .deps_rand : str set : required random targets
         .users     : ForwardNode set : reciprocal of .deps
         """
-        super().__init__("F",target,
+        super().__init__(target,
             parent_structure_with_id_generator=forward_graph)
         if code_ast is None:
             code_ast = ast_add_on.make_ast_constant("/!\\ not defined /!\\")
@@ -69,7 +69,7 @@ class ForwardGraph(base.Graph):
         device,
         build_variable_info=True,
     ):
-        super().__init__("F")
+        super().__init__()
         self.inherit_base_attributes(raw_graph)
         # => dict_rand / dict_constants / output_targets 
         self.sources_req_grad = False # by default

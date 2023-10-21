@@ -50,7 +50,7 @@ class RawNode(base.Node):
         .deps      : RawNode set : required nodes to run .code_ast
         .deps_rand : str set : required random targets
         """
-        super().__init__("R",target,
+        super().__init__(target,
             parent_structure_with_id_generator=raw_parser)
         if code_ast is None:
             self.code_ast = ast_add_on.make_ast_constant("/!\\ NO CODE /!\\")
@@ -123,7 +123,7 @@ class RawGraph(base.Graph):
             dict_inputs : preprocess_samples.DictInputs,
             impose_device=True
         ):
-        super().__init__("R")
+        super().__init__()
         # - use jit -
         samples_for_jit = dict_inputs.to_list_args(model)
         with torch.no_grad():

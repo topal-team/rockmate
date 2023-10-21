@@ -52,12 +52,10 @@ class Node_unique_id_generator():
 class Node():
     def __init__(
             self,
-            node_type : str,
             main_target : str = None,
             target = None, mt = None, # aliases
             parent_structure_with_id_generator = None, # to get unique_id from it
             unique_id_generator : Node_unique_id_generator = None):
-        self.node_type = node_type # str: R, F, S, P, WC, WD, HC, HD
         # == init main_target ==
         if not (main_target is None):
             self.main_target = main_target
@@ -224,7 +222,7 @@ class Node():
             s = self.name
         else: 
             s = self.main_target
-        return f"{self.node_type}_Node({s})"
+        return f"{type(self).__name__}({s})"
 # ============================
 
 
@@ -239,10 +237,8 @@ class Graph():
     node_class = Node
     def __init__(
             self,
-            graph_type : str,
             other_object_with_id_generator = None,
             node_unique_id_generator : Node_unique_id_generator = None):
-        self.graph_type = graph_type # string: R, F, S, P, W, H
         # == base attribute ==
         self.input_targets = []
         self.output_targets = []

@@ -179,7 +179,7 @@ class P_node(base.Node):
             main_target = None,
             sub_graph   = None, # FOR DYNAMIC PARTITIONING
             sn          = None):
-        super().__init__("P",other_obj=main_graph)
+        super().__init__(other_obj=main_graph)
         self.main_graph  = main_graph
         self.sub_cluster = sub_c = sub_cluster
         self.main_target = mt = main_target
@@ -248,7 +248,7 @@ class P_graph(base.Graph):
                 "a p_structure or an other_pg (since they both have a dict_info)."
             )
         other_obj = p_structure if other_pg is None else other_pg
-        super().__init__("P",other_obj)
+        super().__init__(other_obj)
         self.dict_info = other_obj.dict_info if dict_info is None else dict_info
         self.output_nodes = set()
         # Note: self.nodes contains only the nodes of self
