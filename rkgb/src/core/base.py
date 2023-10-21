@@ -296,9 +296,6 @@ class Graph():
             setattr(self,attr,copy.copy(getattr(other_graph,attr)))
     # ===============================
 
-    def does_node_requires_grad(self,n : Node):
-        return n.does_requires_grad(self.dict_info)
-
     def make_copy_of_globals(self,model,device):
         our_global = globals().copy()
         our_global.update(self.dict_constants)
@@ -398,7 +395,7 @@ class Graph():
             to_be_visited.remove(n)
             seen.remove(n)
             if seen==set():
-                if self.does_node_requires_grad(n):
+                if n.does_requires_grad():
                     separators.append(n)
             for req_n in n.get_all_standard_deps():
                 seen.add(req_n)

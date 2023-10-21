@@ -305,6 +305,7 @@ class SimplifiedGraph(base.Graph):
     edges_via_artifacts : list[tuple[SimplifiedNode,SimplifiedNode]] = None
     sequentialized_list_of_bloc_of_nodes : list[list[SimplifiedNode]] = None
     is_sequentialization_aggressive : bool = None
+    init_node_users_in_sequentialization : list[SimplifiedNode] = None
     def __init__(self,
             forward_graph : ForwardGraph = None,
             model=None,
@@ -768,7 +769,7 @@ class SimplifiedGraph(base.Graph):
         self.clear()
     # ===== END BLOC 3 : SIMPLIFICATIONS =====
 
-    def make_sequentialized_list_of_bloc_of_nodes(self,aggressive=False):
+    def make_sequentialized_list_of_bloc_of_nodes(self,aggressive=None):
         """
         'aggressive' is True <=> models' inputs are considered 
         as global variables usable in any bloc.
@@ -784,7 +785,12 @@ class SimplifiedGraph(base.Graph):
         torch.nn.Sequential.
         """
         if (self.is_sequentialization_aggressive is None # first time
-        or self.is_sequentialization_aggressive != aggressive): # change aggressiveness
+        or (aggressive is not None
+            and self.is_sequentialization_aggressive != aggressive)
+            # change aggressiveness
+            ): 
+            if aggressive is None:
+                aggressive = False
             init_node = self.init_node
             init_node_users_beside_this_context = init_node.users
             if aggressive:
@@ -815,6 +821,7 @@ class SimplifiedGraph(base.Graph):
             init_node.users = init_node_users_beside_this_context
             self.sequentialized_list_of_bloc_of_nodes = list_blocs
             self.is_sequentialization_aggressive = aggressive
+            self.init_node_users_in_sequentialization = init_node_users_in_this_context
 
 
     def __str__(self):
@@ -875,6 +882,7 @@ class SimplifiedGraph(base.Graph):
             )
 
     def render_sequentialized(self,
+            aggressive=None,
             name=None,
             view=True,
             directory=base.Graph.default_render_directory,
@@ -883,7 +891,7 @@ class SimplifiedGraph(base.Graph):
             dot=None):
         name = self._get_render_name(name)
         dot = base.Graph._get_graphviz_dot(name,dot)
-        self.make_sequentialized_list_of_bloc_of_nodes()
+        self.make_sequentialized_list_of_bloc_of_nodes(aggressive)
         # Auxiliary functions
         def make_unique(target,bloc_id):
             return str(bloc_id)+"_"+target
@@ -944,7 +952,7 @@ class SimplifiedGraph(base.Graph):
                     style="dashed")
             # 4) special case init_node:
             if bloc_id == 0:
-                for user_sn in self.init_node.users:
+                for user_sn in self.init_node_users_in_sequentialization:
                     edge(bloc_id,self.init_node,user_sn,style="dashed")
         if render:
             base.Graph._call_graphviz_to_render(
