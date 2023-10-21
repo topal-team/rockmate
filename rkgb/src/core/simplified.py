@@ -304,6 +304,7 @@ class SimplifiedGraph(base.Graph):
     dict_of_labels_on_edges : dict[tuple[SimplifiedNode,SimplifiedNode],set[str]] = None
     edges_via_artifacts : list[tuple[SimplifiedNode,SimplifiedNode]] = None
     sequentialized_list_of_bloc_of_nodes : list[list[SimplifiedNode]] = None
+    is_sequentialization_aggressive : bool = None
     def __init__(self,
             forward_graph : ForwardGraph = None,
             model=None,
@@ -547,8 +548,9 @@ class SimplifiedGraph(base.Graph):
         dict_info = self.dict_info
         init_node = self.init_node
         dict_labels = self.dict_of_labels_on_edges
-        all_init_node_users = set(init_node.users)
-        for user_sn in all_init_node_users:
+        init_node.users_through_artifacts = set(init_node.users)
+        # as this might change, we save original init_node's users
+        for user_sn in init_node.users_through_artifacts:
             # 1) Remove init_node from other nodes deps ie unplug it
             user_sn.deps.discard(init_node)
             # 2) If there is no requires_grad link from init_node to user_sn
@@ -766,18 +768,40 @@ class SimplifiedGraph(base.Graph):
         self.clear()
     # ===== END BLOC 3 : SIMPLIFICATIONS =====
 
-    def make_sequentialized_list_of_bloc_of_nodes(self):
-        if self.sequentialized_list_of_bloc_of_nodes is None:
-            # 1) re-plug self.init_node 
+    def make_sequentialized_list_of_bloc_of_nodes(self,aggressive=False):
+        """
+        'aggressive' is True <=> models' inputs are considered 
+        as global variables usable in any bloc.
+        Which isn't conventional with classic torch.nn.Sequential, 
+        where inputs are simply fed in the first layer.
+        So if `aggressive` we consider consider inputs as global vars,
+        and so we don't have the edges, and so the graph is simpler
+        and a good sequential structure can emerge. And it's always
+        like that in rkgb->Rockmate, as init_node have as few `.users`
+        as possible after `self.unplug_init_node`.
+        But this method, `make_sequentialized...`, is purely for external
+        usage, so the user might prefer to respect the conventional 
+        torch.nn.Sequential.
+        """
+        if (self.is_sequentialization_aggressive is None # first time
+        or self.is_sequentialization_aggressive != aggressive): # change aggressiveness
+            init_node = self.init_node
+            init_node_users_beside_this_context = init_node.users
+            if aggressive:
+                init_node_users_in_this_context = init_node.users_through_artifacts
+            else:
+                init_node_users_in_this_context = init_node.users
+            init_node.users = init_node_users_in_this_context
+            # 1) re-plug init_node 
             # 2) find cutting points 
-            # 3) unplug self.init_node
-            for user_sn in self.init_node.users:
-                user_sn.deps.add(self.init_node)
-            self.nodes.insert(0,self.init_node)
+            # 3) unplug init_node
+            for user_sn in init_node_users_in_this_context:
+                user_sn.deps.add(init_node)
+            self.nodes.insert(0,init_node)
             cutting_points = self.find_cutting_points()
-            self.nodes.remove(self.init_node)
-            for user_sn in self.init_node.users:
-                user_sn.deps.remove(self.init_node)
+            self.nodes.remove(init_node)
+            for user_sn in init_node.users:
+                user_sn.deps.remove(init_node)
             # 4) cut self.nodes in blocs following cutting_points 
             list_blocs = []
             current_bloc = []
@@ -788,7 +812,9 @@ class SimplifiedGraph(base.Graph):
                     list_blocs.append(current_bloc)
                     current_bloc = []
             if current_bloc != []: list_blocs.append(current_bloc)
+            init_node.users = init_node_users_beside_this_context
             self.sequentialized_list_of_bloc_of_nodes = list_blocs
+            self.is_sequentialization_aggressive = aggressive
 
 
     def __str__(self):
