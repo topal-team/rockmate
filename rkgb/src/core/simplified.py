@@ -959,45 +959,42 @@ class SimplifiedGraph(base.Graph):
                 dot,view,directory,render_format
             )
         
-    """ WIP TODO
     def build_equivalent_torch_nn_sequential(
-            self,model : torch.nn.Module,device):
+            self,model : torch.nn.Module,device,aggressive = None):
         simplified_graph = self
-        self.make_sequentialized_list_of_bloc_of_nodes()
+        self.make_sequentialized_list_of_bloc_of_nodes(aggressive)
         blocs_nodes = self.sequentialized_list_of_bloc_of_nodes
-        # Module for one bloc:
-        def make_BlocModule(input_targets,nodes,output_targets):
-            # ugly way to do it, but I want to respect the input/outputs
-            # and, above all, I didn't find a way to pass the kwargs
-            # otherwise, I want the result to be clean.
-
-
-            # The problem is that, if I store kwargs in a global dict after
-            # I receive them, it's not very natural,
-            # en gros est-ce que le "tgt" dans nn.Transformer 
-            # devrait etre dans un global dict qu'on partage entre
-            # les blocs, ou alors contraindre à qu'il ne soit soit use 
-            # que dans le premier bloc; 
-            # => en fait c'est meme bcp bcp plus naturel avec la notion
-            # de nn.Sequential
-            # mais en fait dans Rockmate on ne prend pas un nn.Sequential !
-            # on considère que les inputs du 1er bloc sont des globals vars
-            # intouchable et donc utilisable partout
-            # mais c'est complètement faux !!!
-            # D'ailleurs comme ça se passe si on a de l'inplace sur les 
-            # inputs ??? Jamais prévu ça !
-            # Mais du coup, est-ce qu'on se restreint au nn.Sequential normale
-            # ie celui où les inputs ne sont pas des global_vars
-            # mais du coup nn.Transformer est vraiment qu'un gros bloc.
-
-            # l'autre problème c'est les _modules;
-            # est-ce que je mets tous les _modules à tout le monde ?
-
-
+        init_node_users_here = self.init_node_users_in_sequentialization
+        init_node = simplified_graph.init_node
         class BlocModule(torch.nn.Module):
-            def __init__(self,input_targets,nodes,output_targets):
+            def __init__(self,
+                    input_targets,
+                    nodes,
+                    output_targets,
+                    dict_whole_model_inputs):
                 super().__init__()
                 self.input_targets = input_targets
+                codes = []
+                for sn in nodes:
+                    code = sn.get_code()
+                    if sn in init_node_users_here:
+                        used_targets = simplified_graph\
+                            .dict_of_labels_on_edges[(init_node,sn)]
+                        for used_input in used_targets:
+                            code = code.replace(used_input,???)
+                            setattr(self,
+                                f"__whole_model_input_{used_input}",
+                                dict_whole_model_inputs[used_input])
+                            
+        """ PROBLEM WITH GLOBAL INPUTS => sizes over inputs,
+        are considered as inputs => computed in self.init_node => init_code;
+        should I do a first layer to the nn.Sequential to compute them,
+        then via a globally shared dict, transfer it to the others;
+        for instance, __dict_whole_model_inputs__ = dict(),
+        and everyone share the same __dict_whole_model_inputs__
+        """
+
+                            code = code.replace(input,f"")
                 self.code_strings = [rn.get_code() for rn in nodes]
                 self.output_targets = output_targets
             def forward(self,*args):
@@ -1013,7 +1010,4 @@ class SimplifiedGraph(base.Graph):
                     return tuple(
                         dict_local[output_target] 
                         for output_target in self.output_targets)
-        # Build the sequence
-        if blocs_nodes
-    """
 
