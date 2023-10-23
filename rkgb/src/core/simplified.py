@@ -303,7 +303,7 @@ class SimplifiedGraph(base.Graph):
     dict_output_viewing_code : dict[str,ast.Module] = None
     dict_of_labels_on_edges : dict[tuple[SimplifiedNode,SimplifiedNode],set[str]] = None
     edges_via_artifacts : list[tuple[SimplifiedNode,SimplifiedNode]] = None
-    sequentialized_list_of_bloc_of_nodes : list[list[SimplifiedNode]] = None
+    sequentialized_list_of_blocks_of_nodes : list[list[SimplifiedNode]] = None
     is_sequentialization_aggressive : bool = None
     init_node_users_in_sequentialization : list[SimplifiedNode] = None
     def __init__(self,
@@ -376,7 +376,7 @@ class SimplifiedGraph(base.Graph):
             self.make_dict_output_viewing_code()
             self.assert_ready()
 
-    # ===== BLOC 1 : CLEAR and CHECK =====
+    # ===== BLOCK 1 : CLEAR and CHECK =====
     def clear(self):
         self.toposort_nodes()
         self.check_artifact() # TO REMOVE after all tests passed
@@ -446,10 +446,10 @@ class SimplifiedGraph(base.Graph):
                   f"After simplifications, all remaining "\
                   f"\"size\" should be \"artifacts\", but "\
                   f"{sn.main_target} isn't an artifact")
-    # ===== END BLOC 1 : CLEAR and CHECK =====
+    # ===== END BLOCK 1 : CLEAR and CHECK =====
 
 
-    # ===== BLOC 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
+    # ===== BLOCK 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
     def create_nodes_for_random_operations_from_dict_rand(self,model,device):
         dict_random_nodes = dict() # str -> SimplifiedNode
         dict_info = self.dict_info
@@ -613,10 +613,10 @@ class SimplifiedGraph(base.Graph):
             )
             self.dict_output_viewing_code[output_node.mt] = viewing_code
             self.output_targets.append(output_node.mt)
-    # ===== END BLOC 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
+    # ===== END BLOCK 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
 
 
-    # ===== BLOC 3 : SIMPLIFICATIONS =====
+    # ===== BLOCK 3 : SIMPLIFICATIONS =====
     def simplify_constructors(self):
         """
         Note: from root to leaves (init_node to output_nodes)
@@ -767,12 +767,12 @@ class SimplifiedGraph(base.Graph):
                     sn.deps = set()
                     sn.users = set()
         self.clear()
-    # ===== END BLOC 3 : SIMPLIFICATIONS =====
+    # ===== END BLOCK 3 : SIMPLIFICATIONS =====
 
-    def make_sequentialized_list_of_bloc_of_nodes(self,aggressive=None):
+    def make_sequentialized_list_of_blocks_of_nodes(self,aggressive=None):
         """
         'aggressive' is True <=> models' inputs are considered 
-        as global variables usable in any bloc.
+        as global variables usable in any block.
         Which isn't conventional with classic torch.nn.Sequential, 
         where inputs are simply fed in the first layer.
         So if `aggressive` we consider consider inputs as global vars,
@@ -808,18 +808,18 @@ class SimplifiedGraph(base.Graph):
             self.nodes.remove(init_node)
             for user_sn in init_node.users:
                 user_sn.deps.remove(init_node)
-            # 4) cut self.nodes in blocs following cutting_points 
-            list_blocs = []
-            current_bloc = []
+            # 4) cut self.nodes in blocks following cutting_points 
+            list_blocks = []
+            current_block = []
             for sn in self.nodes:
-                current_bloc.append(sn)
+                current_block.append(sn)
                 if sn is cutting_points[0]:
                     cutting_points.pop(0)
-                    list_blocs.append(current_bloc)
-                    current_bloc = []
-            if current_bloc != []: list_blocs.append(current_bloc)
+                    list_blocks.append(current_block)
+                    current_block = []
+            if current_block != []: list_blocks.append(current_block)
             init_node.users = init_node_users_beside_this_context
-            self.sequentialized_list_of_bloc_of_nodes = list_blocs
+            self.sequentialized_list_of_blocks_of_nodes = list_blocks
             self.is_sequentialization_aggressive = aggressive
             self.init_node_users_in_sequentialization = init_node_users_in_this_context
 
@@ -891,69 +891,68 @@ class SimplifiedGraph(base.Graph):
             dot=None):
         name = self._get_render_name(name)
         dot = base.Graph._get_graphviz_dot(name,dot)
-        self.make_sequentialized_list_of_bloc_of_nodes(aggressive)
+        self.make_sequentialized_list_of_blocks_of_nodes(aggressive)
         # Auxiliary functions
-        def make_unique(target,bloc_id):
-            return str(bloc_id)+"_"+target
-        def node(bloc_id,target,label,**kwargs):
+        def make_unique(target,block_id):
+            return str(block_id)+"_"+target
+        def node(block_id,target,label,**kwargs):
             dot.node(
-                make_unique(target,bloc_id),
+                make_unique(target,block_id),
                 label,**kwargs)
-        def edge(bloc_id,sn1,sn2,style=None):
+        def edge(block_id,sn1,sn2,style=None):
             used_targets = self.dict_of_labels_on_edges[(sn1,sn2)]
             dot.edge(
-                make_unique(sn1.main_target,bloc_id),
-                make_unique(sn2.main_target,bloc_id),
+                make_unique(sn1.main_target,block_id),
+                make_unique(sn2.main_target,block_id),
                 label="\n".join(used_targets),
                 style=style)
-        # Build each bloc one by one
-        blocs = self.sequentialized_list_of_bloc_of_nodes
-        len_blocs = len(blocs)
+        # Build each block one by one
+        blocks = self.sequentialized_list_of_blocks_of_nodes
         wrapper_node = self.wrapper_output_node
-        for bloc_id,bloc_nodes in enumerate(blocs):
+        for block_id,block_nodes in enumerate(blocks):
             # 1) input
-            if bloc_id == 0:
-                node(bloc_id,
+            if block_id == 0:
+                node(block_id,
                     self.init_node.main_target,
                     "GLOBAL INPUT\n"+self.init_node.get_code(),
                     color=constants.render_color_special,
                     style="dashed")
             else:
-                node(bloc_id,
-                    blocs[bloc_id-1][-1].main_target,
-                    f"INPUT bloc {bloc_id+1}",
+                node(block_id,
+                    blocks[block_id-1][-1].main_target,
+                    f"INPUT block {block_id+1}",
                     color=constants.render_color_special,
                     style="dashed")
             # 2) nodes and edges
-            for sn in bloc_nodes:
-                node(bloc_id,sn.main_target,sn.get_code())
+            for sn in block_nodes:
+                node(block_id,sn.main_target,sn.get_code())
                 for req_sn in sn.deps:
-                    edge(bloc_id,req_sn,sn)
+                    edge(block_id,req_sn,sn)
                 for req_sn in sn.deps_through_artifacts:
                     edge(req_sn,sn,style="dashed")
             # 3) output
-            if (bloc_id == len_blocs-1
+            if (block_id == len(blocks)-1
             and wrapper_node is not None):
-                node(bloc_id,
+                node(block_id,
                     wrapper_node.main_target,
                     "OUTPUT\n"+wrapper_node.get_code(),
                     color=constants.render_color_special,
                     style="dashed")
                 for output_node in self.output_nodes:
-                    edge(bloc_id,wrapper_node,output_node,style="dashed")
+                    edge(block_id,wrapper_node,output_node,style="dashed")
             else:
-                node(bloc_id,
+                node(block_id,
                     "output","OUTPUT",
                     color=constants.render_color_special,
                     style="dashed")
                 dot.edge(
-                    make_unique(bloc_nodes[-1].main_target,bloc_id),
-                    make_unique("output",bloc_id),
+                    make_unique(block_nodes[-1].main_target,block_id),
+                    make_unique("output",block_id),
                     style="dashed")
             # 4) special case init_node:
-            if bloc_id == 0:
+            if block_id == 0:
                 for user_sn in self.init_node_users_in_sequentialization:
-                    edge(bloc_id,self.init_node,user_sn,style="dashed")
+                    edge(block_id,self.init_node,user_sn,style="dashed")
         if render:
             base.Graph._call_graphviz_to_render(
                 dot,view,directory,render_format
@@ -961,11 +960,11 @@ class SimplifiedGraph(base.Graph):
         
     def build_equivalent_torch_nn_sequential(
             self,model : torch.nn.Module,device,aggressive = None):
-        self.make_sequentialized_list_of_bloc_of_nodes(aggressive)
-        blocs_nodes = self.sequentialized_list_of_bloc_of_nodes
+        self.make_sequentialized_list_of_blocks_of_nodes(aggressive)
         init_node_users_here = self.init_node_users_in_sequentialization
         init_node = self.init_node
         simplified_graph = self
+
         class BlocModule(torch.nn.Module):
             def __init__(self,
                     input_targets,
@@ -998,7 +997,7 @@ class SimplifiedGraph(base.Graph):
                             f"self._dict_constants[{cst_name}]")
                     self.lines_of_code.append(code)
                 # Need to copy all original module's parameters inside
-                # each bloc e.g. to be compatible with `self.fc1.w`,
+                # each block e.g. to be compatible with `self.fc1.w`,
                 # which requires to copy all submodules too, it's a bit
                 # ugly, so I might change this in the future TO IMPROVE
                 for attr in dir(model):
@@ -1019,3 +1018,5 @@ class SimplifiedGraph(base.Graph):
                         dict_local[output_target] 
                         for output_target in self.output_targets)
 
+        # Main loop to instantiate all BlocModules
+        for block_of_nodes in self.sequentialized_list_of_blocks_of_nodes:
