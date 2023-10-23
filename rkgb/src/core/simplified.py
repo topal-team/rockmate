@@ -961,48 +961,56 @@ class SimplifiedGraph(base.Graph):
         
     def build_equivalent_torch_nn_sequential(
             self,model : torch.nn.Module,device,aggressive = None):
-        simplified_graph = self
         self.make_sequentialized_list_of_bloc_of_nodes(aggressive)
         blocs_nodes = self.sequentialized_list_of_bloc_of_nodes
         init_node_users_here = self.init_node_users_in_sequentialization
-        init_node = simplified_graph.init_node
+        init_node = self.init_node
+        simplified_graph = self
         class BlocModule(torch.nn.Module):
             def __init__(self,
                     input_targets,
                     nodes,
                     output_targets,
-                    dict_whole_model_inputs):
+                    dict_place_holder_for_global_inputs,
+                    ):
                 super().__init__()
                 self.input_targets = input_targets
-                codes = []
+                self.output_targets = output_targets
+                self._dict_constants = simplified_graph.dict_constants
+                self._dict_place_holder_for_global_inputs \
+                    = dict_place_holder_for_global_inputs
+                self.lines_of_code = []
                 for sn in nodes:
                     code = sn.get_code()
+                    # We need to change 2 things in the string code:
+                    # 1) When we want to use whole module's input
+                    # we need to use the appropriate shared dict
                     if sn in init_node_users_here:
-                        used_targets = simplified_graph\
+                        used_global_inputs = simplified_graph\
                             .dict_of_labels_on_edges[(init_node,sn)]
-                        for used_input in used_targets:
-                            code = code.replace(used_input,???)
-                            setattr(self,
-                                f"__whole_model_input_{used_input}",
-                                dict_whole_model_inputs[used_input])
-                            
-        """ PROBLEM WITH GLOBAL INPUTS => sizes over inputs,
-        are considered as inputs => computed in self.init_node => init_code;
-        should I do a first layer to the nn.Sequential to compute them,
-        then via a globally shared dict, transfer it to the others;
-        for instance, __dict_whole_model_inputs__ = dict(),
-        and everyone share the same __dict_whole_model_inputs__
-        """
-
-                            code = code.replace(input,f"")
-                self.code_strings = [rn.get_code() for rn in nodes]
-                self.output_targets = output_targets
+                        for used_input in used_global_inputs:
+                            code = code.replace(used_input,
+                                f"self._dict_place_holder"\
+                                f"_for_global_inputs[{used_input}]")
+                    # 2) Access to constants via _dict_constants
+                    for cst_name in simplified_graph.dict_constants:
+                        code = code.replace(cst_name,
+                            f"self._dict_constants[{cst_name}]")
+                    self.lines_of_code.append(code)
+                # Need to copy all original module's parameters inside
+                # each bloc e.g. to be compatible with `self.fc1.w`,
+                # which requires to copy all submodules too, it's a bit
+                # ugly, so I might change this in the future TO IMPROVE
+                for attr in dir(model):
+                    v = getattr(model,attr)
+                    if (isinstance(v,torch.nn.Parameter)
+                    or isinstance(v,torch.nn.Module)):
+                        setattr(self,attr,v)
             def forward(self,*args):
                 dict_local = locals()
-                dict_local.update(simplified_graph.dict_constants)
                 for input_target,input_value in zip(self.input_targets,args):
                     dict_local[input_target] = input_value
-                for line_of_code in self.code_strings:
+                for line_of_code in self.lines_of_code:
                     exec(line_of_code)
                 if len(self.output_targets)==1:
                     return dict_local[self.output_targets[0]]
