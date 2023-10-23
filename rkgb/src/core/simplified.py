@@ -965,12 +965,14 @@ class SimplifiedGraph(base.Graph):
         init_node = self.init_node
         simplified_graph = self
 
-        class BlocModule(torch.nn.Module):
+        class BlockModule(torch.nn.Module):
             def __init__(self,
                     input_targets,
                     nodes,
                     output_targets,
                     dict_place_holder_for_global_inputs,
+                    preliminary_code : str = None,
+                    post_process_code : str = None,
                     ):
                 super().__init__()
                 self.input_targets = input_targets
@@ -978,7 +980,13 @@ class SimplifiedGraph(base.Graph):
                 self._dict_constants = simplified_graph.dict_constants
                 self._dict_place_holder_for_global_inputs \
                     = dict_place_holder_for_global_inputs
+
                 self.lines_of_code = []
+                if preliminary_code is not None:
+                    # To take care in first block to feed 
+                    # dict_global_inputs and run init_code
+                    self.lines_of_code.append(preliminary_code)
+
                 for sn in nodes:
                     code = sn.get_code()
                     # We need to change 2 things in the string code:
@@ -996,6 +1004,11 @@ class SimplifiedGraph(base.Graph):
                         code = code.replace(cst_name,
                             f"self._dict_constants[{cst_name}]")
                     self.lines_of_code.append(code)
+
+                if post_process_code is not None:
+                    # To take care in last block to flush dict_global_inputs
+                    self.lines_of_code.append(post_process_code)
+
                 # Need to copy all original module's parameters inside
                 # each block e.g. to be compatible with `self.fc1.w`,
                 # which requires to copy all submodules too, it's a bit
@@ -1005,6 +1018,8 @@ class SimplifiedGraph(base.Graph):
                     if (isinstance(v,torch.nn.Parameter)
                     or isinstance(v,torch.nn.Module)):
                         setattr(self,attr,v)
+
+            # forward: name the inputs; run each line of code; get the outputs
             def forward(self,*args):
                 dict_local = locals()
                 for input_target,input_value in zip(self.input_targets,args):
@@ -1018,5 +1033,18 @@ class SimplifiedGraph(base.Graph):
                         dict_local[output_target] 
                         for output_target in self.output_targets)
 
-        # Main loop to instantiate all BlocModules
-        for block_of_nodes in self.sequentialized_list_of_blocks_of_nodes:
+        # Main loop to instantiate all BlockModules one by one
+        blocks = self.sequentialized_list_of_blocks_of_nodes
+        for block_id,block_nodes in enumerate(blocks):
+            if block_id == 0:
+                # Special case for first block: Preliminary code
+                preliminary_code = init_node.get_code()
+                if self.is_sequentialization_aggressive: 
+                    # otherwise no need for such weird thing
+                    for input_target in init_node.all_targets:
+                        preliminary_code += f"\n"\
+                            f"self._dict_place_holder_for_global_inputs"\
+                            f"[{input_target}] = {input_target}"
+                # Need to find module's inputs via signature
+                        
+
