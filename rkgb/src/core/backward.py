@@ -13,7 +13,7 @@ from src.core import base
 from src.core.simplified import SimplifiedNode,SimplifiedGraph
 
 
-class WholeComputationNode(base.Node):
+class ForwardBackwardComputationNode(base.Node):
     def __init__(self,
             main_target="/!\\ No target /!\\",
             all_targets       = None,
@@ -49,7 +49,7 @@ class WholeComputationNode(base.Node):
         self.body_code   = body_code if body_code else [] # (str*AST) list
 
         # ** deps/used_by **
-        self.deps_real  : set[WholeAllocationNode]  = deps_real if deps_real else set() # KDN set
+        self.deps_real  : set[ForwardBackwardAllocationNode]  = deps_real if deps_real else set() # KDN set
         self.deps_fake    = deps_fake if deps_fake else set() # KDN set
         self.deps_global  = set()
         self.users_global = set()
@@ -82,10 +82,10 @@ class WholeComputationNode(base.Node):
 
 
 # ************
-# * WholeAllocationNode *
+# * ForwardBackwardAllocationNode *
 # ************
 
-class WholeAllocationNode(base.Node):
+class ForwardBackwardAllocationNode(base.Node):
     def __init__(self,
             kdn_type = "/!\\ No kdn_type/!\\",
             main_target = "/!\\ No target /!\\",
@@ -139,10 +139,10 @@ class WholeAllocationNode(base.Node):
 
 
 # ***********
-# * WholeGraph *
+# * ForwardBackwardGraph *
 # ***********
 
-class WholeGraph(base.Graph):
+class ForwardBackwardGraph(base.Graph):
     has_fake_input_kdn_grad = False
     def __init__(self,sg : SimplifiedGraph):
         super().__init__()
@@ -159,9 +159,9 @@ class WholeGraph(base.Graph):
         self.loss_kcn              = None
         self.list_outputs_kdn_grad = None # e.g. KDN _116.grad
         self.input_kdn_grad        = None # e.g. KDN _13.grad
-        # /!\ A WholeGraph always has a single input_node
+        # /!\ A ForwardBackwardGraph always has a single input_node
         # /!\ BUT can have several outputs
-        # -> for a standalone WholeGraph, input_kdn_data/grad are fresh nodes
+        # -> for a standalone ForwardBackwardGraph, input_kdn_data/grad are fresh nodes
         # -> otherwise they are shared with the previous k_graph
         # -> output_kdn_data/grad are shared with the next one
 
@@ -205,7 +205,7 @@ class WholeGraph(base.Graph):
             self.has_fake_input_kdn_grad = False
         else:
             self.has_fake_input_kdn_grad = True
-            self.input_kdn_grad=input_kdn_grad = WholeAllocationNode(
+            self.input_kdn_grad=input_kdn_grad = ForwardBackwardAllocationNode(
                 kdn_type = "grad", main_target = constants.init_target_string,
                 all_targets = self.sg.inputs,
                 other_obj = self)
@@ -256,8 +256,8 @@ class WholeGraph(base.Graph):
         for kcn in self.list_kcn:
             if not kcn.is_fwd and len(kcn.users) == 0:
                 leaves_kcn.add(kcn)
-        root_kdn = WholeAllocationNode(deps = leaves_kcn,other_obj=self)
-        root_kcn = WholeComputationNode(deps_real=set([root_kdn]),other_obj=self)
+        root_kdn = ForwardBackwardAllocationNode(deps = leaves_kcn,other_obj=self)
+        root_kcn = ForwardBackwardComputationNode(deps_real=set([root_kdn]),other_obj=self)
         self.list_kcn = l = self.get_sorted_nodes_by_following_deps_relation()
         l.remove(root_kcn)
 
@@ -265,39 +265,6 @@ class WholeGraph(base.Graph):
         for i,kcn in enumerate(self.list_kcn):
             setattr(kcn,"_number",i)
 
-    """ # NOT MAINTAINED 
-    def __eq__(self,g2,force_order=False,raise_exception=False):
-        g1 = self
-        eq_node= lambda n1,n2 : n1.__eq__(n2,force_order,raise_exception)
-        b = (ast_add_on.ast_to_str(self.init_code) 
-            == ast_add_on.ast_to_str(g2.init_code))
-        if not b and raise_exception:
-            raise Exception("WholeGraphs diff init_code")
-        for attr in ["input_kdn_grad","list_outputs_kdn_grad",
-            "loss_kcn","input_kdn_data","list_outputs_kdn_data"]:
-            n1 = getattr(g1,attr)
-            n2 = getattr(g2,attr)
-            if (n1 is None) != (n2 is None):
-                b = False
-            else:
-                b *= eq_node(getattr(g1,attr),getattr(g2,attr))
-        for attr in ["list_kcn","list_kdn"]:
-            for kn1,kn2 in zip(getattr(g1,attr),getattr(g2,attr)):
-                b *= eq_node(kn1,kn2)
-        keys1 = list(g1.dict_kn)
-        keys2 = list(g2.dict_kn)
-        if force_order:
-            keys1 = base.Node.sort_names(keys1)
-            keys2 = base.Node.sort_names(keys2)
-        b *= (keys1 == keys2)
-        if not b and raise_exception:
-            raise Exception("WholeGraphs differ on dict_kn's keys (order?)")
-        #for k in keys1:
-        #    b *= eq_node(g1.dict_kn[k],g2.dict_kn[k])
-        b *= small_fcts.check_attr(g1,g2,
-            ["dict_info","dict_constants"],raise_exception)
-        return bool(b)
-    """
 # ==========================
 
 
@@ -311,7 +278,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
         model,
         device,
         do_inspection=True):
-    kg = WholeGraph(sg)
+    kg = ForwardBackwardGraph(sg)
     for p in model.parameters():
         if p.grad is None:
             p.grad = torch.zeros_like(p)
@@ -356,7 +323,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
             dict_KDN_data[mt] for mt in sn_deps_mt)
 
         # -> KCN(fwd)
-        kcn_fwd = WholeComputationNode(
+        kcn_fwd = ForwardBackwardComputationNode(
             main_target       = mt,
             all_targets       = sn.all_targets,
             tensor_targets    = sn.tensor_targets,
@@ -373,7 +340,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
         dict_KCN_fwd[mt] = kcn_fwd
 
         # -> KDN(data)
-        kdn_data = WholeAllocationNode(
+        kdn_data = ForwardBackwardAllocationNode(
             kdn_type    = "data",
             main_target       = mt,
             all_targets       = sn.all_targets,
@@ -414,7 +381,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
                 data_includes_phantoms = False
 
             # -> KCN(bwd)
-            kcn_bwd = WholeComputationNode(
+            kcn_bwd = ForwardBackwardComputationNode(
                 main_target       = mt,
                 all_targets       = sn.all_targets,
                 tensor_targets    = sn.tensor_targets,
@@ -452,7 +419,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
 
             # -> KDN(phantoms)
             if exist_phs and not data_includes_phantoms:
-                kdn_phantoms = WholeAllocationNode(
+                kdn_phantoms = ForwardBackwardAllocationNode(
                     kdn_type    = "phantoms",
                     main_target       = mt,
                     all_targets       = sn.all_targets,
@@ -468,7 +435,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
             else: kcn_fwd.has_phantoms = False
 
             # -> KDN(grad)
-            kdn_grad = WholeAllocationNode(
+            kdn_grad = ForwardBackwardAllocationNode(
                 kdn_type    = "grad",
                 info        = info,
                 main_target       = mt,
@@ -535,7 +502,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
         = [dict_KDN_data[out.mt] for out in sg.output_nodes]
     kg.list_outputs_kdn_grad = list_outputs_kdn_grad \
         = [dict_KDN_grad[out.mt] for out in sg.output_nodes]
-    kg.loss_kcn=loss_kcn = WholeComputationNode(
+    kg.loss_kcn=loss_kcn = ForwardBackwardComputationNode(
         main_target = "loss",
         is_fwd    = True,
         main_code = ("loss",ast_add_on.make_ast_constant("LOSS")),
@@ -570,7 +537,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
         nb_input_kdn = len(prev_kg.list_outputs_kdn_data)
         if nb_input_kdn != 1:
             raise Exception(
-                f"Except the last one, WholeGraph always has "\
+                f"Except the last one, ForwardBackwardGraph always has "\
                 f"exactly one output. Error here, prev_kg "\
                 f"has {nb_input_kdn} outputs"
             )
@@ -579,12 +546,12 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
     # -> or create fresh vars in case kg is a standalone graph
     else:
         is_sources = True
-        kg.input_kdn_data=input_kdn_data = WholeAllocationNode(
+        kg.input_kdn_data=input_kdn_data = ForwardBackwardAllocationNode(
             kdn_type = "data", main_target = constants.init_target_string,
             all_targets = sg.inputs,
             other_obj = kg)
         if sg.sources_req_grad or not is_really_first_graph:
-            kg.input_kdn_grad=input_kdn_grad = WholeAllocationNode(
+            kg.input_kdn_grad=input_kdn_grad = ForwardBackwardAllocationNode(
                 kdn_type = "grad", main_target = constants.init_target_string,
                 all_targets = sg.inputs,
                 other_obj = kg)
@@ -622,7 +589,7 @@ def S_to_K(sg : SimplifiedGraph,model,verbose=None,device=None):
     aux_init_S_to_K(model,verbose,device)
     return aux_build_S_to_K(sg,model,prev_kg = None,is_really_first_graph=True)
 
-class WholeGraph_list(list):
+class ForwardBackwardGraph_list(list):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
 
@@ -634,7 +601,7 @@ def S_list_to_K_list(list_sg,model,verbose=None,device=None):
         prev_kg = kg = aux_build_S_to_K(sg,model,prev_kg,
             is_really_first_graph=(prev_kg is None))
         list_kg.append(kg)
-    return WholeGraph_list(list_kg)
+    return ForwardBackwardGraph_list(list_kg)
 
 
 # ==========================
@@ -645,8 +612,8 @@ def S_list_to_K_list(list_sg,model,verbose=None,device=None):
 # === Copying functions ====
 # ==========================
 
-def copy_WholeComputationNode(kcn : WholeComputationNode):
-    new_kcn = WholeComputationNode()
+def copy_ForwardBackwardComputationNode(kcn : ForwardBackwardComputationNode):
+    new_kcn = ForwardBackwardComputationNode()
     new_kcn.main_target  = kcn.main_target
     new_kcn.all_targets       = list(kcn.all_targets)
     new_kcn.tensor_targets    = list(kcn.tensor_targets)
@@ -668,8 +635,8 @@ def copy_WholeComputationNode(kcn : WholeComputationNode):
         setattr(new_kcn,attr,set()) # /!\
     return new_kcn
 
-def copy_WholeAllocationNode(kdn : WholeAllocationNode):
-    new_kdn = WholeAllocationNode()
+def copy_ForwardBackwardAllocationNode(kdn : ForwardBackwardAllocationNode):
+    new_kdn = ForwardBackwardAllocationNode()
     new_kdn.kdn_type    = kdn.kdn_type
     new_kdn.main_target = kdn.main_target
     new_kdn.all_targets       = list(kdn.all_targets)
@@ -689,8 +656,8 @@ def copy_WholeAllocationNode(kdn : WholeAllocationNode):
     return new_kdn
 
 
-def copy_WholeGraph(kg : WholeGraph):
-    new_kg = WholeGraph(kg.sg)
+def copy_ForwardBackwardGraph(kg : ForwardBackwardGraph):
+    new_kg = ForwardBackwardGraph(kg.sg)
     new_kg.inherit_base_attributes(kg)
     new_kg.has_fake_input_kdn_grad = kg.has_fake_input_kdn_grad
     new_kg.init_code = kg.init_code
@@ -700,9 +667,9 @@ def copy_WholeGraph(kg : WholeGraph):
     # == NODES ==
     new_dict_kn = new_kg.dict_kn
     new_kg.list_kcn = new_list_kcn = (
-        [copy_WholeComputationNode(kcn) for kcn in kg.list_kcn])
+        [copy_ForwardBackwardComputationNode(kcn) for kcn in kg.list_kcn])
     new_kg.list_kdn = new_list_kdn = (
-        [copy_WholeAllocationNode(kdn) for kdn in kg.list_kdn])
+        [copy_ForwardBackwardAllocationNode(kdn) for kdn in kg.list_kdn])
     for kn in new_list_kcn+new_list_kdn:
         new_dict_kn[kn.name]=kn
 
@@ -711,7 +678,7 @@ def copy_WholeGraph(kg : WholeGraph):
             list(kg.dict_KDN_data.values())
         +   list(kg.dict_KDN_grad.values())):
         if kdn.name not in new_dict_kn:
-            new_dict_kn[kdn.name] = copy_WholeAllocationNode(kdn)
+            new_dict_kn[kdn.name] = copy_ForwardBackwardAllocationNode(kdn)
 
     new_kg.dict_KCN_fwd = dict(
         (kn.mt,new_dict_kn[kn.name]) for kn in kg.dict_KCN_fwd.values())
@@ -749,7 +716,7 @@ def copy_WholeGraph(kg : WholeGraph):
     new_kg.init_deps_and_users_global()
     old_inp_data = kg.input_kdn_data
     old_inp_grad = kg.input_kdn_grad
-    new_kg.input_kdn_data=new_inp_data = copy_WholeAllocationNode(old_inp_data)
+    new_kg.input_kdn_data=new_inp_data = copy_ForwardBackwardAllocationNode(old_inp_data)
     new_kg.dict_KDN_data[new_inp_data.mt] = new_inp_data
     new_kg.dict_kn[new_inp_data.name] = new_inp_data
     for old_fst_kcn in old_inp_data.users_only_global:
@@ -759,7 +726,7 @@ def copy_WholeGraph(kg : WholeGraph):
     if old_inp_grad is None:
         new_kg.input_kdn_grad = None
     else:
-        new_kg.input_kdn_grad=new_inp_grad = copy_WholeAllocationNode(old_inp_grad)
+        new_kg.input_kdn_grad=new_inp_grad = copy_ForwardBackwardAllocationNode(old_inp_grad)
         new_kg.dict_KDN_grad[new_inp_grad.mt] = new_inp_grad
         new_kg.dict_kn[new_inp_grad.name] = new_inp_grad
         for old_lst_kcn in old_inp_grad.deps_only_global:
@@ -784,10 +751,10 @@ def copy_WholeGraph(kg : WholeGraph):
 # -> 1) include kcn bwd nodes
 # -> 2) deps_real or fake
 # -> Recognize inputs in inspection when opening grad_fn
-def K_list_to_K(kl : WholeGraph_list,sg : SimplifiedGraph) -> WholeGraph:
-    kl = [copy_WholeGraph(block_kg) for block_kg in kl]
+def K_list_to_K(kl : ForwardBackwardGraph_list,sg : SimplifiedGraph) -> ForwardBackwardGraph:
+    kl = [copy_ForwardBackwardGraph(block_kg) for block_kg in kl]
     nb_block = len(kl)
-    whole_kg = WholeGraph(sg)
+    whole_kg = ForwardBackwardGraph(sg)
     whole_list_kdn \
         = whole_kg.list_kdn \
         = sum([kg.list_kdn for kg in kl],[])
@@ -802,11 +769,11 @@ def K_list_to_K(kl : WholeGraph_list,sg : SimplifiedGraph) -> WholeGraph:
 
     # == Merge output of one block with input of the next one ==
     for index in range(nb_block-1):
-        block_kg : WholeGraph = kl[index]
-        next_kg  : WholeGraph = kl[index+1]
+        block_kg : ForwardBackwardGraph = kl[index]
+        next_kg  : ForwardBackwardGraph = kl[index+1]
         # only one output since not last block
-        output_kdn_data : WholeAllocationNode = block_kg.output_kdn_data
-        output_kdn_grad : WholeAllocationNode = block_kg.output_kdn_grad
+        output_kdn_data : ForwardBackwardAllocationNode = block_kg.output_kdn_data
+        output_kdn_grad : ForwardBackwardAllocationNode = block_kg.output_kdn_grad
 
         # -> Unplug the loss_kcn
         loss_kcn = block_kg.loss_kcn
@@ -818,8 +785,8 @@ def K_list_to_K(kl : WholeGraph_list,sg : SimplifiedGraph) -> WholeGraph:
         output_kdn_grad.deps_global.discard(loss_kcn)
 
         # Unplug next_input_kdns
-        next_input_data : WholeAllocationNode = next_kg.input_kdn_data
-        next_input_grad : WholeAllocationNode = next_kg.input_kdn_grad
+        next_input_data : ForwardBackwardAllocationNode = next_kg.input_kdn_data
+        next_input_grad : ForwardBackwardAllocationNode = next_kg.input_kdn_grad
 
         # merge output with next_input
         for next_user_of_inp_data in next_input_data.users_global:
@@ -875,17 +842,17 @@ color_special  = "green"
 color_kdn      = "olive"
 
 def get_color(kn):
-    if isinstance(kn,WholeAllocationNode): return color_kdn
+    if isinstance(kn,ForwardBackwardAllocationNode): return color_kdn
     if kn.is_fwd: return color_kcn_fwd
     return color_kcn_bwd
 
-def aux_print_WholeGraph_message(kg : WholeGraph):
+def aux_print_ForwardBackwardGraph_message(kg : ForwardBackwardGraph):
     return (
-        f"WholeGraph - Forward + Backward graph, "\
-        f"{len(kg.list_kcn)} WholeComputationNodes; {len(kg.list_kdn)} WholeAllocationNodes"
+        f"ForwardBackwardGraph - Forward + Backward graph, "\
+        f"{len(kg.list_kcn)} ForwardBackwardComputationNodes; {len(kg.list_kdn)} ForwardBackwardAllocationNodes"
     )
 
-def aux_print_WholeGraph_list_message(lkg : WholeGraph_list):
+def aux_print_ForwardBackwardGraph_list_message(lkg : ForwardBackwardGraph_list):
     list_nb_kcn = [len(kg.list_kcn) for kg in lkg]
     list_nb_kdn = [len(kg.list_kdn) for kg in lkg]
     tot_nb_kcn = sum(list_nb_kcn)
@@ -893,20 +860,20 @@ def aux_print_WholeGraph_list_message(lkg : WholeGraph_list):
     str_list_nb_kcn = "+".join(str(i) for i in list_nb_kcn)
     str_list_nb_kdn = "+".join(str(i) for i in list_nb_kdn)
     return (
-        f"WholeGraph_list - Sequentialized Forward + Backward graphs, "\
+        f"ForwardBackwardGraph_list - Sequentialized Forward + Backward graphs, "\
         f"{len(lkg)} blocks, with :\n"\
         f"     -> {str_list_nb_kcn} = {tot_nb_kcn} Comp nodes\n"\
         f"     -> {str_list_nb_kdn} = {tot_nb_kdn} Data nodes\n"\
         f"     => total of {tot_nb_kcn + tot_nb_kdn} nodes"
     )
 
-def aux_print_WholeGraph_name(kg : WholeGraph,name=None):
+def aux_print_ForwardBackwardGraph_name(kg : ForwardBackwardGraph,name=None):
     if name is not None: return name
-    else: return "Forward_and_Backward_WholeGraph"
+    else: return "Forward_and_Backward_ForwardBackwardGraph"
 
-def aux_print_WholeGraph_list_name(lkg : WholeGraph_list,name=None):
+def aux_print_ForwardBackwardGraph_list_name(lkg : ForwardBackwardGraph_list,name=None):
     if name is not None: return name
-    else: return "Sequentialized_Forward_and_Backward_WholeGraph_list"
+    else: return "Sequentialized_Forward_and_Backward_ForwardBackwardGraph_list"
 
 def aux_print_graph(dot,kg,uniq_num):
     def uni(tar): return f"_{uniq_num}_{tar}"
@@ -957,10 +924,10 @@ def aux_print_graph(dot,kg,uniq_num):
             edge(req_inp_grad.name,inp_grad.name,**kwargs)
 
 
-def print_WholeGraph(kg : WholeGraph,name=None,open=True,render_format="svg",dot=None,uniq_num=0):
+def print_ForwardBackwardGraph(kg : ForwardBackwardGraph,name=None,open=True,render_format="svg",dot=None,uniq_num=0):
     if dot is None:
         render = True
-        name = aux_print_WholeGraph_name(kg,name)
+        name = aux_print_ForwardBackwardGraph_name(kg,name)
         dot = graphviz.Digraph(name,comment=name)
     else:
         render = False
@@ -969,8 +936,8 @@ def print_WholeGraph(kg : WholeGraph,name=None,open=True,render_format="svg",dot
         small_fcts.graph_render(dot,open,"K",render_format)
 
 
-def print_WholeGraph_list(lkg : WholeGraph_list,name=None,open=True,render_format="svg"):
-    name = aux_print_WholeGraph_list_name(lkg,name)
+def print_ForwardBackwardGraph_list(lkg : ForwardBackwardGraph_list,name=None,open=True,render_format="svg"):
+    name = aux_print_ForwardBackwardGraph_list_name(lkg,name)
     dot = graphviz.Digraph(name,comment=name)
     for i in range(len(lkg)):
         aux_print_graph(dot,lkg[i],i)
