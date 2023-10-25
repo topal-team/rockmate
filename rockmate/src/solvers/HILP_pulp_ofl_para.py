@@ -247,11 +247,11 @@ class ModelPULP:
                 lowBound = 0,
                 upBound=1
             )
-            self.weight_size = [1e7 for _ in range(W)]
+            self.weight_size = [3e7 for _ in range(W)]
             self.weight2hcn = {w: [w, T-w-1] for w in range(W)}
             self.hcn2weight = {k:w for w in self.weight2hcn for k in self.weight2hcn[w]}
-            self.bandwidthOfl = 12 * 1024**2  # byte/ms
-            self.bandwidthPrf = 12 * 1024**2  # byte/ms
+            self.bandwidthOfl = 8 * 1024**2  # byte/ms
+            self.bandwidthPrf = 8 * 1024**2  # byte/ms
 
         self.Time = LpVariable.dicts(
             "Time", [(t, i) for t in range(T) for i in range(T)], cat="Continuous"
@@ -487,7 +487,7 @@ class ModelPULP:
                 for t in range(T-1):
                     self.md += (
                         self.AliveW[t+1, 0, w]
-                        <= self.AliveW[t, T-1, w] + self.PrfW[T-1, T-1, w],
+                        <= self.AliveW[t, T-1, w] + self.PrfW[t, T-1, w],
                         ""
                     )
                 self.md += (
