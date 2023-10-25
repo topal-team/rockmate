@@ -50,6 +50,7 @@ class Node_unique_id_generator():
 # =============================
 
 class Node():
+    no_target_string = "__No_Target__"
     def __init__(
             self,
             main_target : str = None,
@@ -125,21 +126,8 @@ class Node():
         else:
             return Node.get_num_tar(self.main_target)
 
-    # -> For B
-    def get_num_name(self):
-        name = self.name
-        if (name.startswith("fwd_")
-        or  name.startswith("bwd_")):
-            return Node.get_num_tar(name[4:])
-        elif (name.endswith("data")
-        or    name.endswith("grad")):
-            return Node.get_num_tar(name[:-4])
-        elif name.endswith("phantoms"):
-            return Node.get_num_tar(name[:-8])
-        
     sort_nodes   = lambda s : sorted(s,key=Node.get_num)
     sort_targets = lambda s : sorted(s,key=Node.get_num_tar)
-    sort_names   = lambda s : sorted(s,key=Node.get_num_name)
     # ========================================
 
     # =============================

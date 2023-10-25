@@ -15,11 +15,8 @@ from src.core.simplified import SimplifiedNode,SimplifiedGraph
 
 class ForwardBackwardComputationNode(base.Node):
     def __init__(self,
-            main_target="/!\\ No target /!\\",
-            all_targets       = None,
-            tensor_targets    = None,
-            inplace_targets   = None,
-            container_targets = None,
+            main_target=base.Node.no_target_string,
+            simplified_node : SimplifiedNode = None,
             is_fwd  = True,
             is_rand = False,
             main_code    = None,
@@ -32,54 +29,44 @@ class ForwardBackwardComputationNode(base.Node):
         # ** informative **
         super().__init__(main_target,
             parent_structure_with_id_generator=backward_graph)
-        mt = main_target
-        atars = all_targets
-        ttars = tensor_targets
-        itars = inplace_targets
-        ctars = container_targets
-        self.all_targets       = atars if atars else [mt]
-        self.tensor_targets    = ttars if ttars else [mt]
-        self.inplace_targets   = itars if itars else []
-        self.container_targets = ctars if ctars else []
-        self.name        = f"fwd_{mt}" if is_fwd else f"bwd_{mt}"
-        self.is_fwd      = is_fwd
-        self.is_rand     = is_rand
-        self.main_code   = main_code # target * AST
-        self.inplace_code= inplace_code if inplace_code else []
-        self.body_code   = body_code if body_code else [] # (str*AST) list
-
-        # ** deps/used_by **
-        self.deps_real  : set[ForwardBackwardAllocationNode]  = deps_real if deps_real else set() # KDN set
-        self.deps_fake    = deps_fake if deps_fake else set() # KDN set
-        self.deps_global  = set()
-        self.users_global = set()
+        # - inherits from simplified_node:
+        if simplified_node:
+            for attr in [
+                    "all_targets","tensor_targets",
+                    "inplace_targets","container_targets"]:
+                setattr(self,attr,getattr(simplified_node,attr))
+        # - basic attributes:
+        self.name = f"FWD[{main_target}]" if is_fwd else f"BWD[{main_target}]"
+        self.is_fwd = is_fwd
+        self.is_rand = is_rand
+        self.main_code = main_code # tuple (target * AST)
+        self.inplace_code = inplace_code if inplace_code else []
+        self.body_code = body_code if body_code else [] # (str*AST) list
+        # - deps and users:
+        self.deps_real    = deps_real if deps_real else set() # AllocationNode set
+        self.deps_fake    = deps_fake if deps_fake else set() # AllocationNode set
         self.users        = set()
-        self.deps_impossible_to_restore = set() # (KDN * str) set
-        da = deps_through_artifacts
-        self.deps_through_artifacts = da if da else set() # KCN set
-        # -> just for the toposort, we don't need the reciprocal users_..
-
-        # ** inspection **
-        self.time         = None
-        self.overhead     = None
+        self.deps_impossible_to_restore = set() # TODO : REMOVE deps_impossible_to_restore
+        if deps_through_artifacts: # ComputationNode set
+            self.deps_through_artifacts = deps_through_artifacts
+        else:
+            self.deps_through_artifacts = set()
+            # -> just for the toposort, we don't need the reciprocal users_..
+        # - inspection:
+        self.time = None
+        self.overhead = None
         self.phantom_names = []
         self.alias_in_users_phantoms = []
 
     def get_all_standard_deps(self):
         return set().union(
-            *[req_bdn.deps for req_bdn in self.deps_real],
+            *[req_allocation_node.deps 
+              for req_allocation_node in self.deps_real],
             self.deps_through_artifacts)
     def get_all_standard_users(self):
         return set().union(
-            *[bdn.users_real for bdn in self.users])
-
-    @property
-    def deps_only_global(self):
-        return self.deps_global - self.deps_real.union(self.deps_fake)
-    @property
-    def users_only_global(self):
-        return self.users_global - self.users
-
+            *[req_allocation_node.users_real 
+              for req_allocation_node in self.users])
 
 # ************
 # * ForwardBackwardAllocationNode *
@@ -122,13 +109,6 @@ class ForwardBackwardAllocationNode(base.Node):
         self.users_impossible_to_restore = set() # (KCN * str) set
         self.alias_in_users_phantoms = []
     
-    @property
-    def deps_only_global(self):
-        return self.deps_global - self.deps
-    @property
-    def users_only_global(self):
-        return self.users_global - self.users_real.union(self.users_fake)
-
     def get_all_standard_deps(self):
         return set().union(
             *[bcn.deps_real for bcn in self.deps])
@@ -666,7 +646,7 @@ def aux_print_graph(dot,kg,uniq_num):
         for req_kcn in kdn.deps:
             edge(req_kcn.name,kdn.name,color=get_color(req_kcn))
 
-    # *** io - global relations ***
+    # *** io - global relations *** # TO REMOVE = il n'y a plus de list de backward
     kwargs = {"color":color_special , "style":"dashed"}
     inp_data = kg.input_kdn_data
     inp_users = list(inp_data.users_only_global)
