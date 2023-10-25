@@ -4,7 +4,7 @@ from typing import Dict, Any
 import numpy as np
 from copy import deepcopy
 from gurobipy import GRB, Model, quicksum
-from hrockmate.solvers.op_schedule import PrfOp, OflOp
+from rockmate.solvers.op_schedule import PrfOp, OflOp
 
 # import gurobipy.GRB.GREATER_EQUAL as GEQ
 # import gurobipy.GRB.LESS_EQUAL as LEQ
@@ -16,9 +16,9 @@ LEQ = GRB.LESS_EQUAL
 EQ = GRB.EQUAL
 
 
-# from hrockmate.def_op import RunOp, DelOp, OpSchedule
+# from rockmate.def_op import RunOp, DelOp, OpSchedule
 from .op_schedule import Op, OpSchedule
-from hrockmate.rkgb.Htools import *
+from rkgb.Htools import *
 
 
 class ModelGurobi:

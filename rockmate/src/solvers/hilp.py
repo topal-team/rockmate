@@ -12,7 +12,8 @@ from .main import (
 )
 import pulp
 from .HILP_gurobi import ModelGurobi
-from .HILP_pulp import ModelPULP
+# from .HILP_pulp import ModelPULP
+from .HILP_pulp_ofl_para import ModelPULP
 from .rotor_solver import seq_builder, solve_dp_functional
 from .op_schedule import OpSchedule
 from rkgb.utils.global_vars import solver_name
