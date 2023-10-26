@@ -12,7 +12,7 @@ from src.lowlevel import constants
 from src.lowlevel import preprocess_samples
 from src.lowlevel.variable_info import VariableInfo
 from src.core import base
-from src.core.raw import RawNode,RawVar,RawGraph
+from src.core.raw import RawNode,RawGraph
 
 # **********
 # * ForwardNode *

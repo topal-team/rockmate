@@ -67,101 +67,51 @@ class RawNode(base.Node):
 
 
 
-class RawVar:
-    def __init__(
-            self,
-            value_ast,
-            raw_parser,
-            node: RawNode = None,
-            is_attr_of_self=False,
-            real_value_as_an_attr_of_self=None,
-        ):
-        self.is_attr_of_self = is_attr_of_self
-        self.real_value_as_an_attr_of_self = real_value_as_an_attr_of_self
-        self.value_ast = value_ast
-        self.has_node = False  # by default
-        self.is_rand = False  # by default
-        if node: # compared to before, we don't automatically simplify when deps=empty
-            if node.is_rand and node.deps == set() and not node.is_input:
-                raw_parser.dict_rand[node.target] = node.code_ast
-                self.is_rand = True
-            else:
-                self.has_node = True
-                self.node = node
-
-    def use_value_ast(self, calling_node):
-        """ Instead of self.value_ast, you must use this
-        Take care of the "deps" relation
-        """
-        if self.has_node:
-            calling_node.deps.add(self.node)
-        elif self.is_rand:
-            calling_node.deps_rand.add(self.value_ast.id)
-        return self.value_ast
-
-    def inherits_self_attr(self, parent, list_attributes):  
-        # for a getattr AND is_attr_of_self
-        if parent.has_node:
-            self.has_node = True
-            self.node = parent.node
-        obj = parent.real_value_as_an_attr_of_self
-        for at in list_attributes:
-            obj = getattr(obj,at)
-        self.real_value_as_an_attr_of_self = obj
-
-
-
 class RawGraph(base.Graph):
-    """RawGraph
-    -> tldr: raw graph => very few attributes
-    -> The only important attribute is "output_raw_var"
-       which gives the source of the "deps" relation
-    """
+    """ Raw graph 
+    => very few attributes = just what we get from jit or Dynamo"""
     node_class = RawNode
     def __init__(self,
             model : torch.nn.Module,
             dict_inputs : preprocess_samples.DictInputs,
+            use_jit_instead_of_dynamo = False,
             impose_device=True
         ):
         super().__init__()
-        # - use jit -
-        samples_for_jit = dict_inputs.to_list_args(model)
-        with torch.no_grad():
-            jit_result = torch.jit.trace_module(
-                model, {"forward": samples_for_jit}, check_trace=False
+        if use_jit_instead_of_dynamo:
+            # - use jit -
+            samples_for_jit = dict_inputs.to_list_args(model)
+            with torch.no_grad():
+                jit_result = torch.jit.trace_module(
+                    model, {"forward": samples_for_jit}, check_trace=False
+                )
+            # - parse -
+            parser = RawJitParser(impose_device)
+            output_variable : RawJitParserVariable = parser.parse(
+                jit_result, "self", "forward", [], is_main=True
             )
-        # - parse -
-        parser = RawParser(impose_device)
-        self.output_raw_var = parser.parse(
-            jit_result, "self", "forward", [], is_main=True
-        )
-        self.nodes = parser.all_raw_nodes
-        self.dict_rand = parser.dict_rand
-        self.dict_constants = parser.dict_constants
-        self.set_output_attributes_and_check_if_constant()
-        self.toposort_and_keep_only_useful_nodes()
-        self.clear_redundancies_in_self_nodes()
-
-    def set_output_attributes_and_check_if_constant(self):
-        """
-        get the output_node: if not requires_grad => raise Exception
-        which is catch in Rockmate, since it implies no Backward
-        """
-        if not isinstance(self.output_raw_var.value_ast,ast.Name):
-            warnings.warn( # TO CHANGE COMMENTS 
-                f"The RawParser found that the output isn't an "\
-                f"ast.Name, we assume it's a constant. \nAST type "\
-                f"of the output: {type(self.output_raw_var.val)}")
-            raise constants.ExceptionModuleDoesNotReqGrad
-        if not self.output_raw_var.has_node:
-            warnings.warn(
-                f"RawParser hasn't attached any node to the output."\
-                f"Thus we assume it's a constant.")
-            raise constants.ExceptionModuleDoesNotReqGrad
-        else:
-            self.whole_module_output = self.output_raw_var.value_ast.id
+            self.nodes = parser.all_raw_nodes
+            self.dict_rand = parser.dict_rand
+            self.dict_constants = parser.dict_constants
+            self.set_output_attributes_and_check_if_constant()
+            output_target,output_node \
+                = RawJitParser.get_output_attributes(output_variable)
+            self.whole_module_output = output_target
             self.output_nodes = [self.output_raw_var.node]
             self.output_targets = [self.whole_module_output]
+            self.toposort_and_keep_only_useful_nodes()
+            self.clear_redundancies_in_self_nodes()
+            
+        else:
+            # - use dynamo -
+            dynamo_result = torch.export.export(
+                model,args=(),kwargs=dict_inputs.dict)
+
+    
+    def translate_from_dynamo(dynamo_result):
+        dynamo_graph = dynamo_result.graph
+
+        
 
 
     def toposort_and_keep_only_useful_nodes(self):
@@ -313,12 +263,55 @@ class RawGraph(base.Graph):
         print("DICT RANDOM OPERATIONS :\n",self.dict_rand)
 
 
+class RawJitParserVariable:
+    def __init__(
+            self,
+            value_ast,
+            raw_parser,
+            node: RawNode = None,
+            is_attr_of_self=False,
+            real_value_as_an_attr_of_self=None,
+        ):
+        self.is_attr_of_self = is_attr_of_self
+        self.real_value_as_an_attr_of_self = real_value_as_an_attr_of_self
+        self.value_ast = value_ast
+        self.has_node = False  # by default
+        self.is_rand = False  # by default
+        if node: # compared to before, we don't automatically simplify when deps=empty
+            if node.is_rand and node.deps == set() and not node.is_input:
+                raw_parser.dict_rand[node.target] = node.code_ast
+                self.is_rand = True
+            else:
+                self.has_node = True
+                self.node = node
+
+    def use_value_ast(self, calling_node):
+        """ Instead of self.value_ast, you must use this
+        Take care of the "deps" relation
+        """
+        if self.has_node:
+            calling_node.deps.add(self.node)
+        elif self.is_rand:
+            calling_node.deps_rand.add(self.value_ast.id)
+        return self.value_ast
+
+    def inherits_self_attr(self, parent, list_attributes):  
+        # for a getattr AND is_attr_of_self
+        if parent.has_node:
+            self.has_node = True
+            self.node = parent.node
+        obj = parent.real_value_as_an_attr_of_self
+        for at in list_attributes:
+            obj = getattr(obj,at)
+        self.real_value_as_an_attr_of_self = obj
+
+
 # Draft of the general comment about how the parser works:
 # if the expr is simple (e.g. constant or self's attr)
-# -> RawVar.has_node == False
+# -> RawJitParserVariable.has_node == False
 # otherwise, a node (= a piece of code) is created.
 # The optional parameter  "target" imposes the name of the var created
-class RawParser():
+class RawJitParser():
     def __init__(self,impose_device):
         self.impose_device = impose_device
         self.all_raw_nodes = []
@@ -363,7 +356,7 @@ class RawParser():
         if parent_raw_var.is_attr_of_self:
             parent_ast = parent_raw_var.value_ast
             new_ast = self.rebuild_ast_attribute(parent_ast,list_attributes)
-            new_raw_var = RawVar(new_ast,raw_parser=self,is_attr_of_self=True)
+            new_raw_var = RawJitParserVariable(new_ast,raw_parser=self,is_attr_of_self=True)
             new_raw_var.inherits_self_attr(parent_raw_var,list_attributes)
         else:
             new_id = self.get_unique_name(target)
@@ -371,11 +364,11 @@ class RawParser():
             parent_ast = parent_raw_var.use_value_ast(calling_node=new_node)
             new_ast = self.rebuild_ast_attribute(parent_ast,list_attributes)
             new_node.code_ast = new_ast
-            new_raw_var = RawVar(new_ast,raw_parser=self,node=new_node)
+            new_raw_var = RawJitParserVariable(new_ast,raw_parser=self,node=new_node)
         return new_raw_var
 
 
-    def handle_ast_attribute(self, target : str, expr : ast.Attribute) -> RawVar:
+    def handle_ast_attribute(self, target : str, expr : ast.Attribute) -> RawJitParserVariable:
         parent_expr,list_attributes = ast_add_on.open_all_nested_attributes(expr)
         parent_raw_var = self.handle_expr(None,parent_expr)
         return self.aux_for_attribute(target,parent_raw_var,list_attributes)
@@ -409,10 +402,10 @@ class RawParser():
         # Note: to parse sub_module, we give raw_vars of its inputs,
         # and it returns the raw_var which define its output
         # -> ie it creates the raw_var of the sub_module call result!
-        # Which is exactly the objective of `RawParser.handle_ast` functions
+        # Which is exactly the objective of `RawJitParser.handle_ast` functions
         return sub_module_output_raw_var
 
-    def handle_ast_call(self,target : str, expr : ast.Call) -> RawVar:
+    def handle_ast_call(self,target : str, expr : ast.Call) -> RawJitParserVariable:
         call_args = list(expr.args)
         ast_first_term,rest_of_func_name \
             = ast_add_on.open_all_nested_attributes(expr.func)
@@ -455,7 +448,7 @@ class RawParser():
         elif (self.impose_device 
         and first_term_of_func_name == "torch"
         and rest_of_func_name[0] == "device"):
-            return RawVar(value_ast=ast.Name("device"),raw_parser=self)
+            return RawJitParserVariable(value_ast=ast.Name("device"),raw_parser=self)
 
         else:
             call_arg_raw_vars = [self.handle_expr(None,arg) for arg in call_args]
@@ -520,11 +513,11 @@ class RawParser():
                 new_node.code_ast = ast.Call(
                     func=ast.Name(fct_name), args=args_ast, keywords=kwds_ast
                 )
-                return RawVar(ast.Name(target),raw_parser=self,node=new_node)
+                return RawJitParserVariable(ast.Name(target),raw_parser=self,node=new_node)
             
 
     def handle_ast_tuple_or_list(self,
-            target : str, expr : Union[ast.List,ast.Tuple]) -> RawVar:
+            target : str, expr : Union[ast.List,ast.Tuple]) -> RawJitParserVariable:
         # Not simplified / inserted here, might change TO CHANGE ?
         # -> because I need to precise the calling_node...
         target = self.get_unique_name(target)
@@ -538,12 +531,12 @@ class RawParser():
             new_node.code_ast = ast.List(args_ast)
         else:
             new_node.code_ast = ast.Tuple(args_ast)
-        return RawVar(ast.Name(target),raw_parser=self,node=new_node)
+        return RawJitParserVariable(ast.Name(target),raw_parser=self,node=new_node)
 
 
-    def handle_expr(self, target : str, expr) -> RawVar:
+    def handle_expr(self, target : str, expr) -> RawJitParserVariable:
         if ast_add_on.is_constant(expr):
-            return RawVar(expr,raw_parser=self)
+            return RawJitParserVariable(expr,raw_parser=self)
         elif isinstance(expr, ast.Name):
             if expr.id in self.current_dict_raw_vars:
                 return self.current_dict_raw_vars[expr.id]
@@ -558,7 +551,7 @@ class RawParser():
         ):
             cst_name = self.get_constant_name(expr.attr)
             self.dict_constants[cst_name] = self.current_jit_memory[expr.attr]
-            return RawVar(ast.Name(cst_name),raw_parser=self)
+            return RawJitParserVariable(ast.Name(cst_name),raw_parser=self)
         elif isinstance(expr, ast.Attribute):
             return self.handle_ast_attribute(target,expr)
         elif isinstance(expr, ast.Call):
@@ -568,7 +561,7 @@ class RawParser():
         elif isinstance(expr, ast.UnaryOp):
             assert isinstance(expr.op, ast.USub)  # quick fix
             assert ast_add_on.is_constant(expr.operand)
-            return RawVar(expr,raw_parser=self)
+            return RawJitParserVariable(expr,raw_parser=self)
         else:
             raise Exception(f"{type(expr)} unknown")
 
@@ -576,12 +569,12 @@ class RawParser():
     def parse(self,
             jit_result_of_this_module, 
             module_name, method_name, 
-            input_raw_vars, is_main=False) -> RawVar:
+            input_raw_vars, is_main=False) -> RawJitParserVariable:
         # jit_result : is the result for a specific module or sub module,
         # ex : module      = jit_tr_GPT2.wpe
         #      module_name = "self.wpe"
         #      method_name = "forward"
-        # inputs_vars : RawVars on which module's function is applied
+        # inputs_vars : RawJitParserVariables on which module's function is applied
 
         # 1) Get the code from jit
         if method_name == "forward":  # quick fix
@@ -597,7 +590,7 @@ class RawParser():
 
         # 2) Initiate the local env of raw vars with 1 var for "self"
         self.current_dict_raw_vars = dict()
-        self.current_dict_raw_vars["self"] = RawVar(
+        self.current_dict_raw_vars["self"] = RawJitParserVariable(
             value_ast=ast.Name(module_name), 
             raw_parser=self,
             is_attr_of_self=True, 
@@ -617,7 +610,7 @@ class RawParser():
                     is_input=True,
                 )
                 self.current_dict_raw_vars[input_name] \
-                    = RawVar(ast.Name(input_name),
+                    = RawJitParserVariable(ast.Name(input_name),
                              raw_parser=self,
                              node=input_node)
         else: # sub module => Called at higher level => inputs = the calling args
@@ -625,7 +618,7 @@ class RawParser():
             for input_name,input_raw_var in \
                     zip(input_names[1:],input_raw_vars):
                 self.current_dict_raw_vars[input_name] = input_raw_var
-                # Link local inputs' names with higher level RawVars
+                # Link local inputs' names with higher level RawJitParserVariables
 
         # 4) Parse each line 1 by 1
         for line_of_code_ast in method_code_ast.body:
@@ -667,7 +660,7 @@ class RawParser():
                                 calling_node=target_assigning_node),
                             ast_add_on.make_ast_constant(target_index)
                         )
-                        target_raw_var = RawVar(
+                        target_raw_var = RawJitParserVariable(
                             ast.Name(target_unique_name),
                             raw_parser=self,
                             node=target_assigning_node
@@ -682,3 +675,27 @@ class RawParser():
                     expr=line_of_code_ast.value)
 
         raise Exception("No ast.Return found at the end of jit.code ??!")
+    
+    @staticmethod
+    def get_output_attributes(output_raw_var : RawJitParserVariable):
+        """
+        get the output_node: if not requires_grad => raise Exception
+        which is catch in Rockmate, since it implies no Backward
+        """
+        if not isinstance(output_raw_var.value_ast,ast.Name):
+            warnings.warn( # TO CHANGE COMMENTS 
+                f"The RawJitParser found that the output isn't an "\
+                f"ast.Name, we assume it's a constant. \nAST type "\
+                f"of the output: {type(output_raw_var.val)}")
+            raise constants.ExceptionModuleDoesNotReqGrad
+        if not output_raw_var.has_node:
+            warnings.warn(
+                f"RawJitParser hasn't attached any node to the output."\
+                f"Thus we assume it's a constant.")
+            raise constants.ExceptionModuleDoesNotReqGrad
+        else:
+            return (
+                output_raw_var.value_ast.id,
+                output_raw_var.node
+            )
+        
