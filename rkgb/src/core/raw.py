@@ -93,7 +93,6 @@ class RawGraph(base.Graph):
             self.nodes = parser.all_raw_nodes
             self.dict_rand = parser.dict_rand
             self.dict_constants = parser.dict_constants
-            self.set_output_attributes_and_check_if_constant()
             output_target,output_node \
                 = RawJitParser.get_output_attributes(output_variable)
             self.whole_module_output = output_target
@@ -106,10 +105,44 @@ class RawGraph(base.Graph):
             # - use dynamo -
             dynamo_result = torch.export.export(
                 model,args=(),kwargs=dict_inputs.dict)
+            self.translate_from_dynamo(dynamo_result)
 
     
-    def translate_from_dynamo(dynamo_result):
+    def translate_from_dynamo(
+            dynamo_result : torch.export.ExportedProgram,
+            model : torch.nn.Module):
         dynamo_graph = dynamo_result.graph
+        dynamo_signature = dynamo_result.graph_signature
+        whole_code_str = dynamo_graph.python_code()
+        whole_code_ast : ast.FunctionDef = ast.parse(whole_code_str).body[0]
+
+        # I) Process the "args" = which consists of all the inputs, 
+        # parameters and "buffers". Buffers are variables stored in
+        # `self` that aren't parameters; e.g. BatchNorm's running_var
+        all_args = whole_code_ast.args.args
+        dict_dynamo_arg_name_to_correct_ast = dict()
+        # e.g: "arg15_1" to AST("input_ids"), 
+        # or "arg10_1" to AST("self.h[0]").
+        dict_param_value_to_name = dict(
+            (value,name) for (name,value) 
+            in model.named_parameters()) 
+        # useful to find back the "real" param names
+        for arg in whole_code_ast.args.args:
+            dynamo_arg_name = arg.arg # e.g. "arg15_1"
+            # 1) Parameters:
+            if dynamo_arg_name in dynamo_signature.inputs_to_parameters:
+                dynamo_param_name = dynamo_signature.inputs_to_parameters[dynamo_arg_name]
+                # e.g. L__self___embeddings_word_embeddings.weight
+                # It's not as simple as changing the "_" by ".",
+                # here we look for "self.embeddings.word_embeddings.weight"
+                param_value = dynamo_result._state_dict[dynamo_param_name]
+                param_real_name = dict_param_value_to_name[param_value]
+                
+
+
+
+
+                
 
         
 
@@ -338,16 +371,6 @@ class RawJitParser():
         return f"_cst_{self.get_unique_number()}_{s}"
 
 
-    def rebuild_ast_attribute(self,parent_ast,list_attributes):
-        new_ast = parent_ast
-        for attr in list_attributes:
-            if attr.isdigit():
-                new_ast = ast.Subscript(new_ast,
-                    slice=ast_add_on.make_ast_constant(int(attr)))
-            else:
-                new_ast = ast.Attribute(new_ast,attr)
-        return new_ast
-
     def aux_for_attribute(self, target, parent_raw_var, list_attributes):
         """ Used for:
          - `getattr(a,"b")` via an ast.Call
@@ -355,14 +378,16 @@ class RawJitParser():
         """
         if parent_raw_var.is_attr_of_self:
             parent_ast = parent_raw_var.value_ast
-            new_ast = self.rebuild_ast_attribute(parent_ast,list_attributes)
+            new_ast = ast_add_on.make_ast_attribute_from_list(
+                parent_ast,list_attributes)
             new_raw_var = RawJitParserVariable(new_ast,raw_parser=self,is_attr_of_self=True)
             new_raw_var.inherits_self_attr(parent_raw_var,list_attributes)
         else:
             new_id = self.get_unique_name(target)
             new_node = RawNode(target=new_id, fct="getattr",raw_parser=self)
             parent_ast = parent_raw_var.use_value_ast(calling_node=new_node)
-            new_ast = self.rebuild_ast_attribute(parent_ast,list_attributes)
+            new_ast = ast_add_on.make_ast_attribute_from_list(
+                parent_ast,list_attributes)
             new_node.code_ast = new_ast
             new_raw_var = RawJitParserVariable(new_ast,raw_parser=self,node=new_node)
         return new_raw_var

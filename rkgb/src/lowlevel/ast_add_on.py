@@ -19,14 +19,6 @@ def ast_to_str(code_ast):
     code = astunparse.unparse(code_ast)
     return utils.remove_prefix(utils.remove_suffix(code,"\n"),"\n")
 
-def open_all_nested_attributes(value):
-    list_attributes = []
-    while isinstance(value,ast.Attribute):
-        list_attributes.append(value.attr)
-        value = value.value
-    list_attributes.reverse()
-    return value,list_attributes
-
 def make_ast_constant(v):
     x = ast.Constant(v)
     setattr(x,"kind",None)
@@ -36,6 +28,25 @@ def make_ast_constant(v):
 def make_ast_module(l):
     try:    return ast.Module(l,[])
     except: return ast.Module(l)
+
+def open_all_nested_attributes(value):
+    list_attributes = []
+    while isinstance(value,ast.Attribute):
+        list_attributes.append(value.attr)
+        value = value.value
+    list_attributes.reverse()
+    return value,list_attributes
+
+def make_ast_attribute_from_list(parent_ast,list_attributes):
+    new_ast = parent_ast
+    for attr in list_attributes:
+        if attr.isdigit():
+            new_ast = ast.Subscript(new_ast,
+                slice=make_ast_constant(int(attr)))
+        else:
+            new_ast = ast.Attribute(new_ast,attr)
+    return new_ast
+
 
 
 # -- make_assign --
