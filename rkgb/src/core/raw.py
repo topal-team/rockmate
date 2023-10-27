@@ -123,10 +123,14 @@ class RawGraph(base.Graph):
         dict_dynamo_arg_name_to_correct_ast = dict()
         # e.g: "arg15_1" to AST("input_ids"), 
         # or "arg10_1" to AST("self.h[0]").
+
+        # Useful dict to find back the parameters and buffers:
         dict_param_value_to_name = dict(
             (value,name) for (name,value) 
             in model.named_parameters()) 
-        # useful to find back the "real" param names
+        dict_buffer_value_to_name = dict(
+            (value,name) for (name,value)
+            in model.named_buffers())
         for arg in whole_code_ast.args.args:
             dynamo_arg_name = arg.arg # e.g. "arg15_1"
             # 1) Parameters:
@@ -135,9 +139,24 @@ class RawGraph(base.Graph):
                 # e.g. L__self___embeddings_word_embeddings.weight
                 # It's not as simple as changing the "_" by ".",
                 # here we look for "self.embeddings.word_embeddings.weight"
-                param_value = dynamo_result._state_dict[dynamo_param_name]
+                param_value = dynamo_result.state_dict[dynamo_param_name]
                 param_real_name = dict_param_value_to_name[param_value]
-                
+                dict_dynamo_arg_name_to_correct_ast[dynamo_arg_name] \
+                    = ast_add_on.make_ast_attribute_from_list(
+                        ast.Name("self"),param_real_name.split(".")
+                    )
+            # 2) Buffers
+            if dynamo_arg_name in dynamo_signature.inputs_to_buffers:
+                dynamo_buffer_name = dynamo_signature.inputs_to_buffers[dynamo_arg_name]
+                buffer_value = dynamo_result.state_dict[dynamo_buffer_name]
+                buffer_real_name = dict_buffer_value_to_name[buffer_value]
+                dict_dynamo_arg_name_to_correct_ast[dynamo_arg_name] \
+                    = ast_add_on.make_ast_attribute_from_list(
+                        ast.Name("self"),buffer_real_name.split(".")
+                    )
+            # 3) inputs
+            if dynamo_arg_name in dynamo_signature.
+
 
 
 
