@@ -5,11 +5,12 @@ from src.lowlevel import preprocess_samples
 
 
 def check_all_cuda(
-        original_mod,dict_inputs : preprocess_samples.ExampleInputs
+        original_mod,
+        example_inputs : preprocess_samples.ExampleInputs
         ):
     all_on_cuda = True
     # - inputs -
-    for (key,val) in dict_inputs.dict.items():
+    for (key,val) in example_inputs.dict.items():
         if isinstance(val,Tensor) and not val.is_cuda:
             all_on_cuda = False
             warnings.warn(f"Module input `{key}` isn't on cuda")
@@ -38,12 +39,12 @@ def raise_different_devices(key1,device1,key2,device2):
 
 
 def get_device_and_check_all_same_device(
-        original_mod,dict_inputs : preprocess_samples.ExampleInputs
+        original_mod,example_inputs : preprocess_samples.ExampleInputs
         ):
     device = None
     key_on_device = None # name of tensor/param on 'device'
     # - inputs -
-    for key,val in dict_inputs.dict.items():
+    for key,val in example_inputs.dict.items():
         if isinstance(val,Tensor):
             if device is None:
                 device = val.device

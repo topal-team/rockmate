@@ -19,8 +19,8 @@ class ExampleInputs():
             and p[0] not in original_mod_kwargs)]
         # -- build positional inputs --
         if isinstance(original_mod_args,dict):
-            dict_inputs = original_mod_args.copy()
-            st_given = set(dict_inputs.keys())
+            dict_example_inputs = original_mod_args.copy()
+            st_given = set(dict_example_inputs.keys())
             st_asked = set(pos_params)
             st_missing = st_asked - st_given
             nb_missing = len(st_missing)
@@ -42,10 +42,10 @@ class ExampleInputs():
             if nb_given > nb_asked_tot: raise Exception(
                 f"To much values given for the original_mod inputs "\
                 f"({nb_given - nb_asked_tot} too many, including kwargs).")
-            dict_inputs = dict(zip(not_kw_params,inputs))
+            dict_example_inputs = dict(zip(not_kw_params,inputs))
 
-        dict_inputs.update(original_mod_kwargs)
-        self.dict = dict_inputs
+        dict_example_inputs.update(original_mod_kwargs)
+        self.dict = dict_example_inputs
 
     def to_list_args(self,original_mod):
         """
