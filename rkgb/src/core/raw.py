@@ -73,49 +73,61 @@ class RawGraph(base.Graph):
     node_class = RawNode
     def __init__(self,
             original_mod : torch.nn.Module,
-            dict_inputs : preprocess_samples.ExampleInputs,
+            example_inputs : preprocess_samples.ExampleInputs,
             use_jit_instead_of_dynamo = False,
             jit_impose_device=True
         ):
         super().__init__()
-        example_samples = 
+        ordered_example_inputs = example_inputs.to_list_args(original_mod)
         if use_jit_instead_of_dynamo:
-            # - use jit -
-            samples_for_jit = dict_inputs.to_list_args(original_mod)
-            with torch.no_grad():
-                jit_result = torch.jit.trace_module(
-                    original_mod, {"forward": samples_for_jit}, check_trace=False
-                )
-            # - parse -
-            parser = RawJitParser(jit_impose_device)
-            output_variable : RawJitParserVariable = parser.parse(
-                jit_result, "self", "forward", [], is_main=True
+            self._init_using_jit(
+                original_mod,
+                ordered_example_inputs,
+                jit_impose_device
             )
-            self.nodes = parser.all_raw_nodes
-            self.dict_rand = parser.dict_rand
-            self.dict_constants = parser.dict_constants
-            output_target,output_node \
-                = RawJitParser.get_output_attributes(output_variable)
-            self.whole_module_output = output_target
-            self.output_nodes = [self.output_raw_var.node]
-            self.output_targets = [self.whole_module_output]
-            self.toposort_and_keep_only_useful_nodes()
-            self.clear_redundancies_in_self_nodes()
-            
         else:
-            # - use dynamo -
-            dynamo_result = torch.export.export(
-                original_mod,args=(),kwargs=dict_inputs.dict)
-            self.translate_from_dynamo(dynamo_result)
+            self._init_using_dynamo(
+                original_mod,
+                ordered_example_inputs,
+            )
+        self.toposort_and_keep_only_useful_nodes()
+        self.clear_redundancies_in_self_nodes()
+            
 
-    def _init_using_jit(
+    def _init_using_jit(self,
             original_mod : torch.nn.Module,
-            dict_inputs : preprocess_samples.ExampleInputs,
+            ordered_example_inputs,
+            impose_device):
+        # Call TorchScript jit's tracer
+        with torch.no_grad():
+            jit_result = torch.jit.trace_module(
+                original_mod,
+                {"forward": ordered_example_inputs}, 
+                check_trace=False
+            )
+        # Parse
+        parser = RawJitParser(impose_device)
+        output_variable : RawJitParserVariable = parser.parse(
+            jit_result, "self", "forward", [], is_main=True
+        )
+        self.nodes = parser.all_raw_nodes
+        self.dict_rand = parser.dict_rand
+        self.dict_constants = parser.dict_constants
+        # Organize the output
+        # TODO BREAK THE OUTPUT NODE WRAPPER HERE
+        output_target,output_node \
+            = RawJitParser.get_output_attributes(output_variable)
+        self.whole_module_output = output_target
+        self.output_nodes = [output_node]
+        self.output_targets = [self.whole_module_output]
 
     
-    def translate_from_dynamo(
-            dynamo_result : torch.export.ExportedProgram,
-            original_mod : torch.nn.Module):
+    def _init_using_dynamo(self,
+            original_mod : torch.nn.Module,
+            ordered_example_inputs):
+        # Call Dynamo's export
+        dynamo_result = torch.export.export(
+            original_mod,args=ordered_example_inputs)
         dynamo_graph = dynamo_result.graph
         dynamo_signature = dynamo_result.graph_signature
         whole_code_str = dynamo_graph.python_code()
