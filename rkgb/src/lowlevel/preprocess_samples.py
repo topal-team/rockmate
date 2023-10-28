@@ -1,6 +1,6 @@
 import inspect
 
-class DictInputs():
+class ExampleInputs():
     def __init__(self,original_mod,original_mod_args,original_mod_kwargs=None):
         # -- load params list --
         sign = inspect.signature(original_mod.forward)

@@ -73,11 +73,12 @@ class RawGraph(base.Graph):
     node_class = RawNode
     def __init__(self,
             original_mod : torch.nn.Module,
-            dict_inputs : preprocess_samples.DictInputs,
+            dict_inputs : preprocess_samples.ExampleInputs,
             use_jit_instead_of_dynamo = False,
-            impose_device=True
+            jit_impose_device=True
         ):
         super().__init__()
+        example_samples = 
         if use_jit_instead_of_dynamo:
             # - use jit -
             samples_for_jit = dict_inputs.to_list_args(original_mod)
@@ -86,7 +87,7 @@ class RawGraph(base.Graph):
                     original_mod, {"forward": samples_for_jit}, check_trace=False
                 )
             # - parse -
-            parser = RawJitParser(impose_device)
+            parser = RawJitParser(jit_impose_device)
             output_variable : RawJitParserVariable = parser.parse(
                 jit_result, "self", "forward", [], is_main=True
             )
@@ -106,6 +107,10 @@ class RawGraph(base.Graph):
             dynamo_result = torch.export.export(
                 original_mod,args=(),kwargs=dict_inputs.dict)
             self.translate_from_dynamo(dynamo_result)
+
+    def _init_using_jit(
+            original_mod : torch.nn.Module,
+            dict_inputs : preprocess_samples.ExampleInputs,
 
     
     def translate_from_dynamo(

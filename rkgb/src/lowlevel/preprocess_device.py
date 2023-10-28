@@ -5,7 +5,7 @@ from src.lowlevel import preprocess_samples
 
 
 def check_all_cuda(
-        original_mod,dict_inputs : preprocess_samples.DictInputs
+        original_mod,dict_inputs : preprocess_samples.ExampleInputs
         ):
     all_on_cuda = True
     # - inputs -
@@ -38,7 +38,7 @@ def raise_different_devices(key1,device1,key2,device2):
 
 
 def get_device_and_check_all_same_device(
-        original_mod,dict_inputs : preprocess_samples.DictInputs
+        original_mod,dict_inputs : preprocess_samples.ExampleInputs
         ):
     device = None
     key_on_device = None # name of tensor/param on 'device'

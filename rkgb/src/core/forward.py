@@ -65,7 +65,7 @@ class ForwardGraph(base.Graph):
     def __init__(self,
         raw_graph : RawGraph,
         original_mod,
-        dict_inputs : preprocess_samples.DictInputs,
+        dict_inputs : preprocess_samples.ExampleInputs,
         device,
         build_variable_info=True,
     ):
@@ -401,7 +401,7 @@ class ForwardGraph(base.Graph):
             def forward(self,*args,**kwargs):
                 # 1) Prepare the environnement of exec
                 our_global = forward_graph.make_copy_of_globals(self,device)
-                dict_inputs = preprocess_samples.DictInputs(original_mod,args,kwargs)
+                dict_inputs = preprocess_samples.ExampleInputs(original_mod,args,kwargs)
                 tmp_local = dict_inputs.dict
                 # 2) exec each node one by one
                 fn : ForwardNode
