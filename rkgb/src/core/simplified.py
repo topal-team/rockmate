@@ -308,16 +308,16 @@ class SimplifiedGraph(base.Graph):
     init_node_users_in_sequentialization : list[SimplifiedNode] = None
     def __init__(self,
             forward_graph : ForwardGraph = None,
-            model=None,
+            original_mod=None,
             device=None
     ):
         # 2 constructors: if given a forward_graph, then move from F to S
         # otherwise return an empty simplified_graph
         super().__init__()
         if forward_graph is not None:
-            if model is None or device is None: 
+            if original_mod is None or device is None: 
                 raise Exception(
-                    "You need to pass model and device to "\
+                    "You need to pass original_mod and device to "\
                     "SimplifiedGraph.__init__ to move from F to S")
             self.inherit_base_attributes(forward_graph)
             self.whole_model_inputs = set(forward_graph.input_targets)
@@ -365,7 +365,7 @@ class SimplifiedGraph(base.Graph):
             self.optional_simplify_cheap_operations()
             self.simplify_sizes()
             self.simplify_view()
-            self.create_nodes_for_random_operations_from_dict_rand(model,device)
+            self.create_nodes_for_random_operations_from_dict_rand(original_mod,device)
             self.remove_artifacts_and_replace_them_by_soft_edges()
             self.check_edges_are_reciprocal()
             self.make_dict_of_labels_on_edges()
@@ -450,7 +450,7 @@ class SimplifiedGraph(base.Graph):
 
 
     # ===== BLOCK 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
-    def create_nodes_for_random_operations_from_dict_rand(self,model,device):
+    def create_nodes_for_random_operations_from_dict_rand(self,original_mod,device):
         dict_random_nodes = dict() # str -> SimplifiedNode
         dict_info = self.dict_info
         # 1) Generate all the random nodes, via self.dict_rand
@@ -465,7 +465,7 @@ class SimplifiedGraph(base.Graph):
                     simplified_graph=self)
             # -> We need to generate VariableInfo
             # to do so we generate the value by running the code
-            our_global = self.make_copy_of_globals(model,device)
+            our_global = self.make_copy_of_globals(original_mod,device)
             dict_info[random_variable_name] \
                 = random_variable_node.info \
                 = VariableInfo(eval(ast_add_on.ast_to_str(code_ast),our_global))
@@ -771,7 +771,7 @@ class SimplifiedGraph(base.Graph):
 
     def make_sequentialized_list_of_blocks_of_nodes(self,aggressive=None):
         """
-        'aggressive' is True <=> models' inputs are considered 
+        'aggressive' is True <=> original_mod' inputs are considered 
         as global variables usable in any block.
         Which isn't conventional with classic torch.nn.Sequential, 
         where inputs are simply fed in the first layer.
@@ -959,7 +959,7 @@ class SimplifiedGraph(base.Graph):
             )
         
     def build_equivalent_torch_nn_sequential(
-            self,model : torch.nn.Module,device,aggressive = None):
+            self,original_mod : torch.nn.Module,device,aggressive = None):
         self.make_sequentialized_list_of_blocks_of_nodes(aggressive)
         init_node_users_here = self.init_node_users_in_sequentialization
         init_node = self.init_node
@@ -1013,8 +1013,8 @@ class SimplifiedGraph(base.Graph):
                 # each block e.g. to be compatible with `self.fc1.w`,
                 # which requires to copy all submodules too, it's a bit
                 # ugly, so I might change this in the future TO IMPROVE
-                for attr in dir(model):
-                    v = getattr(model,attr)
+                for attr in dir(original_mod):
+                    v = getattr(original_mod,attr)
                     if (isinstance(v,torch.nn.Parameter)
                     or isinstance(v,torch.nn.Module)):
                         setattr(self,attr,v)

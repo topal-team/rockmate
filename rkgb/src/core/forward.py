@@ -64,7 +64,7 @@ class ForwardGraph(base.Graph):
     node_class = ForwardNode
     def __init__(self,
         raw_graph : RawGraph,
-        model,
+        original_mod,
         dict_inputs : preprocess_samples.DictInputs,
         device,
         build_variable_info=True,
@@ -74,8 +74,8 @@ class ForwardGraph(base.Graph):
         # => dict_rand / dict_constants / output_targets 
         self.sources_req_grad = False # by default
         dict_forward_nodes = dict()
-        our_global = self.make_copy_of_globals(model,device)
-        all_param_data_ptrs = VariableInfo.find_all_data_ptr_of_params(model)
+        our_global = self.make_copy_of_globals(original_mod,device)
+        all_param_data_ptrs = VariableInfo.find_all_data_ptr_of_params(original_mod)
         # to recognize a view over a parameter
 
         # Translate each node one by one following the topo-order
@@ -385,13 +385,13 @@ class ForwardGraph(base.Graph):
         print("DICT RANDOM OPERATIONS :\n",self.dict_rand)
 
     def build_equivalent_torch_nn_module(
-            self,model : torch.nn.Module,device):
+            self,original_mod : torch.nn.Module,device):
         forward_graph = self
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                # Inherits all attributes from model:
-                for k, v in model.__dict__.items():
+                # Inherits all attributes from original_mod:
+                for k, v in original_mod.__dict__.items():
                     if (
                         not "forward" in k
                         and not "backward" in k
@@ -401,7 +401,7 @@ class ForwardGraph(base.Graph):
             def forward(self,*args,**kwargs):
                 # 1) Prepare the environnement of exec
                 our_global = forward_graph.make_copy_of_globals(self,device)
-                dict_inputs = preprocess_samples.DictInputs(model,args,kwargs)
+                dict_inputs = preprocess_samples.DictInputs(original_mod,args,kwargs)
                 tmp_local = dict_inputs.dict
                 # 2) exec each node one by one
                 fn : ForwardNode

@@ -13,8 +13,8 @@ from src.core import base
 # = CREATE A FRESH ENVIRONNEMENT TO EXEC =
 # ========================================
 
-def generate_our_global(sg,model,device):
-    our_global = sg.make_copy_of_globals(model,device)
+def generate_our_global(sg,original_mod,device):
+    our_global = sg.make_copy_of_globals(original_mod,device)
     for inp in sg.whole_model_inputs.union(set(sg.inputs)):
         info = sg.dict_info[inp]
         x = info.generate_value(device)

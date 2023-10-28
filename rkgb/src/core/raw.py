@@ -72,7 +72,7 @@ class RawGraph(base.Graph):
     => very few attributes = just what we get from jit or Dynamo"""
     node_class = RawNode
     def __init__(self,
-            model : torch.nn.Module,
+            original_mod : torch.nn.Module,
             dict_inputs : preprocess_samples.DictInputs,
             use_jit_instead_of_dynamo = False,
             impose_device=True
@@ -80,10 +80,10 @@ class RawGraph(base.Graph):
         super().__init__()
         if use_jit_instead_of_dynamo:
             # - use jit -
-            samples_for_jit = dict_inputs.to_list_args(model)
+            samples_for_jit = dict_inputs.to_list_args(original_mod)
             with torch.no_grad():
                 jit_result = torch.jit.trace_module(
-                    model, {"forward": samples_for_jit}, check_trace=False
+                    original_mod, {"forward": samples_for_jit}, check_trace=False
                 )
             # - parse -
             parser = RawJitParser(impose_device)
@@ -104,13 +104,13 @@ class RawGraph(base.Graph):
         else:
             # - use dynamo -
             dynamo_result = torch.export.export(
-                model,args=(),kwargs=dict_inputs.dict)
+                original_mod,args=(),kwargs=dict_inputs.dict)
             self.translate_from_dynamo(dynamo_result)
 
     
     def translate_from_dynamo(
             dynamo_result : torch.export.ExportedProgram,
-            model : torch.nn.Module):
+            original_mod : torch.nn.Module):
         dynamo_graph = dynamo_result.graph
         dynamo_signature = dynamo_result.graph_signature
         whole_code_str = dynamo_graph.python_code()
@@ -127,10 +127,10 @@ class RawGraph(base.Graph):
         # Useful dict to find back the parameters and buffers:
         dict_param_value_to_name = dict(
             (value,name) for (name,value) 
-            in model.named_parameters()) 
+            in original_mod.named_parameters()) 
         dict_buffer_value_to_name = dict(
             (value,name) for (name,value)
-            in model.named_buffers())
+            in original_mod.named_buffers())
         for arg in whole_code_ast.args.args:
             dynamo_arg_name = arg.arg # e.g. "arg15_1"
             # 1) Parameters:

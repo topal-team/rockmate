@@ -255,11 +255,11 @@ class ForwardBackwardGraph(base.Graph):
 
 # the function that does it all
 def aux_build_S_to_K(sg : SimplifiedGraph,
-        model,
+        original_mod,
         device,
         do_inspection=True):
     kg = ForwardBackwardGraph(sg)
-    for p in model.parameters():
+    for p in original_mod.parameters():
         if p.grad is None:
             p.grad = torch.zeros_like(p)
     dict_KCN_fwd = kg.dict_KCN_fwd
@@ -271,7 +271,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
     # ============  
     def handle_node(sn : SimplifiedNode):
         mt = sn.main_target
-        our_global = inspection.generate_our_global(sg,model,device)
+        our_global = inspection.generate_our_global(sg,original_mod,device)
         info = sg.dict_info[mt]
 
         # For artifact nodes :

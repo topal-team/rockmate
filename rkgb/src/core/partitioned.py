@@ -25,7 +25,7 @@ class Ano_S_node_Info():
     dict_ano_param_to_basic_info : dict[str, def_info.VariableInfo] = None
 
     # =====================================================================
-    def __init__(self,sn : S_node, sg : S_graph, model : torch.nn.Module):
+    def __init__(self,sn : S_node, sg : S_graph, original_mod : torch.nn.Module):
         # DO: everything except self.ano_id and self.charac_string
         # -> Similar to Atools_for_S_and_K.Graph_translator.__init__
         # =============================
@@ -93,7 +93,7 @@ class Ano_S_node_Info():
         nb_param = 0
         for param_full_name in all_real_params: # strings
             # -> e.g. param_full_name = "self.layer1.weight"
-            param_value = eval(param_full_name,{"self":model},{})
+            param_value = eval(param_full_name,{"self":original_mod},{})
             nb_param += 1
             aparam = f"self.param_{nb_param}"
             dict_param_aparam[param_full_name] = aparam
@@ -723,7 +723,7 @@ class P_structure():
         self.min_size_to_trigger_partitioning = min_size_to_trigger_partitioning 
 
     # ==========================================================
-    def make_dict_mt_to_ano_info(self,model : torch.nn.Module):
+    def make_dict_mt_to_ano_info(self,original_mod : torch.nn.Module):
         # ATTRIBUTES NEEDED : sg
         # DO : dict_mt_to_ano_sn_info
         # -> generate ano_sn_info for all the s_nodes
@@ -732,7 +732,7 @@ class P_structure():
         dict_charac_info_to_ano_id = dict()
         nb_unique_sns = 0
         for sn in [self.sg.init_node] + self.sg.nodes:
-            ano_sn_info = Ano_S_node_Info(sn,self.sg,model)
+            ano_sn_info = Ano_S_node_Info(sn,self.sg,original_mod)
             sn_charac_string = ano_sn_info.make_charac_string()
             if sn_charac_string in dict_sn_charac_string_to_ano_id:
                 ano_sn_info.ano_id \
@@ -1754,7 +1754,7 @@ class Partitioner_seq(Partitioner):
 
 def S_to_P(
     sg : S_graph,
-    model : torch.nn.Module,
+    original_mod : torch.nn.Module,
     partitioners = [
         Partitioner(),
         Partitioner_OLD_bottom_to_top(),
@@ -1766,7 +1766,7 @@ def S_to_P(
     sg.discard_all_artifacts()
     p_structure = P_structure(sg,
         min_size_to_trigger_partitioning = min_size_to_trigger_partitioning)
-    p_structure.make_dict_mt_to_ano_info(model)
+    p_structure.make_dict_mt_to_ano_info(original_mod)
     p_structure.main_cluster = main_cluster \
         = P_cluster(list(sg.nodes),p_structure)
     for partitioner in partitioners:
