@@ -230,7 +230,7 @@ class Graph():
         # == base attribute ==
         self.input_targets = []
         self.output_targets = []
-        self.whole_module_output = None
+        self.original_mod_output_targets = []
         self.sources_req_grad = None
         self.dict_constants = dict()
         self.dict_info : dict[str,variable_info.VariableInfo] = dict()
@@ -275,7 +275,7 @@ class Graph():
         for attr in [
             "input_targets",
             "output_targets",
-            "whole_module_output",
+            "original_mod_output_targets",
             "sources_req_grad",
             "dict_constants",
             "dict_info",

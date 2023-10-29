@@ -279,9 +279,10 @@ class ForwardGraph(base.Graph):
 
 
     def check_if_output_requires_grad(self):
-        assert(len(self.output_nodes)==1)
-        output_node = self.output_nodes[0]
-        if not output_node.info.requires_grad:
+        if not any(
+            output_node.info.requires_grad
+            for output_node in self.output_nodes
+        ):
             warnings.warn(
                 "None of the outputs require grad. "\
                 "Thus there is nothing to do.")
@@ -294,24 +295,24 @@ class ForwardGraph(base.Graph):
         # direct edge from a to c, skipping b. We fix this.
         fn : ForwardNode
         for fn_index,fn in enumerate(self.nodes):
-            if (len(fn.users)==0 
-            and fn.main_target != self.whole_module_output):
+            if (len(fn.users)==0
+            and fn.main_target not in self.output_targets):
                 # no user and not output => inplace or view
                 assert(fn.info.is_view or fn.info.is_inplace)
 
-                # 1) In case fn is a view/inplace over self.whole_module_output
+                # 1) In case fn is inplace over an output
                 # we might have to change self.output_targets:
                 # example: a=f(x) ; b1=view(a) ; b2=inplace(b1) ; c1=inplace(a)
-                # then outputs=[a] => outputs=[b1,c1] => outputs=[b2,c1]
-                if fn.info.data_owner_name is self.whole_module_output:
-                    if fn.info.data_direct_parent_name in self.output_targets:
-                        self.output_targets.remove(
-                            fn.info.data_direct_parent_name)
+                # then outputs=[a] => outputs=[c1] => outputs=[b2,c1]
+                data_owner_name = fn.info.data_owner_name
+                if (fn.info.is_inplace 
+                and data_owner_name in self.original_mod_output_targets):
+                    if data_owner_name in self.output_targets:
+                        self.output_targets.remove(data_owner_name)
                     self.output_targets.append(fn.main_target)
                     # => in the example:
-                    # - "b1" replace "a"
-                    # - "c1" is added to the list, but "a" was already discarded
-                    # - "b2" replace "b1"
+                    # - "c1" replace "a"
+                    # - "b2" is added to the list, but "a" is already discarded
 
                 # 2) Add some edges, in the first example a->b->c instead of a->c
                 # for this we rely on the topo-order, since we respect the original

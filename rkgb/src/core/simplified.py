@@ -299,7 +299,6 @@ class SimplifiedNode(base.Node):
 class SimplifiedGraph(base.Graph):
     node_class = SimplifiedNode
     init_node : SimplifiedNode = None # NOT in self.nodes
-    wrapper_output_node : SimplifiedNode = None # NOT in self.nodes
     dict_output_viewing_code : dict[str,ast.Module] = None
     dict_of_labels_on_edges : dict[tuple[SimplifiedNode,SimplifiedNode],set[str]] = None
     edges_via_artifacts : list[tuple[SimplifiedNode,SimplifiedNode]] = None
@@ -867,7 +866,8 @@ class SimplifiedGraph(base.Graph):
                 color=constants.render_color_special,
                 style="dashed")
             dot.edge(output_node.main_target,"output",
-                self.whole_module_output,style="dashed")
+                "\n".join(self.original_mod_output_targets),
+                style="dashed")
         else:
             dot.node(
                 wrapper_node.main_target,

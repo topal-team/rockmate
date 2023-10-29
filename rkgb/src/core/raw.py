@@ -115,13 +115,23 @@ class RawGraph(base.Graph):
         self.nodes = parser.all_raw_nodes
         self.dict_rand = parser.dict_rand
         self.dict_constants = parser.dict_constants
-        # Organize the output
-        # TODO BREAK THE OUTPUT NODE WRAPPER HERE
+        # Organize the output: we open the wrapper
+        # in case 'output=[a,b]' => output_targets = [a,b]
         output_target,output_node \
             = RawJitParser.get_output_attributes(output_variable)
-        self.whole_module_output = output_target
-        self.output_nodes = [output_node]
-        self.output_targets = [self.whole_module_output]
+        if output_node.fct == constants.constructor_function_string:
+            self.output_nodes = list(output_node.deps)
+            self.output_targets = [out_node.target for out_node in self.output_nodes]
+            # To be sure to respect the original order in which outputs are returned:
+            self.original_mod_output_targets = []
+            for output_ast in output_node.code_ast.elts:
+                assert(isinstance(output_ast,ast.Name))
+                # fail => return a constant ? TO IMPROVE
+                self.original_mod_output_targets.append(output_ast.id)
+        else:
+            self.output_nodes = [output_node]
+            self.output_targets = [output_target]
+            self.original_mod_output_targets = [output_target]
 
     
     def _init_using_dynamo(self,
@@ -244,6 +254,7 @@ class RawGraph(base.Graph):
             output_raw_node = dict_dynamo_name_to_raw_node[output_dynamo_name]
             self.output_nodes.append(output_raw_node)
             self.output_targets.append(output_raw_node.target)
+        self.original_mod_output_targets = list(self.output_targets)
             
 
         
