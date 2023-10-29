@@ -359,7 +359,7 @@ class SimplifiedGraph(base.Graph):
                 dict_simplified_nodes[out] 
                 for out in forward_graph.output_targets]
             self.clear()
-            self.simplify_constructors()
+            self.simplify_lists_and_tuples()
             self.optional_simplify_cheap_operations()
             self.simplify_sizes()
             self.simplify_view()
@@ -596,14 +596,18 @@ class SimplifiedGraph(base.Graph):
 
 
     # ===== BLOCK 3 : SIMPLIFICATIONS =====
-    def simplify_constructors(self):
+    def simplify_lists_and_tuples(self):
         """
         Note: from root to leaves (init_node to output_nodes)
         """
         sn : SimplifiedNode
         for sn in self.nodes:
             if (sn not in self.output_nodes
-            and sn.main_fct == constants.constructor_function_string):
+            and (sn.main_fct == constants.constructor_function_string
+                or (
+                    not sn.info.is_view and not sn.info.is_inplace
+                    and sn.info.variable_type in [tuple,list]
+                    ))):
                 sn.substitute_self_by_its_code_in_its_users(self.dict_info)
         self.clear()
 
