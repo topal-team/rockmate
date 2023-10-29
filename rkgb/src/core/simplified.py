@@ -319,7 +319,6 @@ class SimplifiedGraph(base.Graph):
                     "You need to pass original_mod and device to "\
                     "SimplifiedGraph.__init__ to move from F to S")
             self.inherit_base_attributes(forward_graph)
-            self.whole_model_inputs = set(forward_graph.input_targets)
 
             self.init_node = init_node = SimplifiedNode(
                 main_target=constants.init_target_string,
@@ -371,7 +370,6 @@ class SimplifiedGraph(base.Graph):
             self.make_targets_attributes_and_fix_info_data_owner_name()
             self.make_inputs()
             self.unplug_init_node()
-            self.if_multiple_outputs_break_the_wrapper_in_multiple_nodes()
             self.make_dict_output_viewing_code()
             self.assert_ready()
 
@@ -572,24 +570,6 @@ class SimplifiedGraph(base.Graph):
                 if len(sn.deps)==0 ]
             first_sn = min(all_without_deps,key=base.Node.get_num)
             self.init_node.users.add(first_sn)
-
-    def if_multiple_outputs_break_the_wrapper_in_multiple_nodes(self):
-        """
-        example: a = f(x) ; b = g(y) ; return (a,b)
-        before this function, due to raw.py, we have only 
-        one output node, equal to the tuple: c = (a,b); return c
-        in this method, we unplug Node(c) from the graph, and set:
-        - self.output_nodes := [Node(a),Node(b)]
-        - self.wrapper_output_node := Node(c), 
-        """
-        assert(len(self.output_nodes)==1)
-        wrapper_output_node = self.output_nodes[0]
-        if wrapper_output_node.info.variable_type in [tuple,list]:
-            self.wrapper_output_node = wrapper_output_node
-            self.output_nodes = list(wrapper_output_node.deps)
-            for real_output_node in self.output_nodes:
-                real_output_node.users.discard(wrapper_output_node) # unplug
-            self.nodes.remove(wrapper_output_node)
 
     def make_dict_output_viewing_code(self):
         """
@@ -858,24 +838,15 @@ class SimplifiedGraph(base.Graph):
         for user_sn in self.init_node.users:
             edge(self.init_node,user_sn,style="dashed")
         # 3) output nodes
-        wrapper_node = self.wrapper_output_node
-        if wrapper_node is None:
-            assert(len(self.output_nodes)==1)
-            output_node = self.output_nodes[0]
-            dot.node("output","OUTPUT",
-                color=constants.render_color_special,
-                style="dashed")
+        output_node = self.output_nodes[0]
+        dot.node("output",
+            f"OUTPUT:\n{self.original_mod_output_targets}",
+            color=constants.render_color_special,
+            style="dashed")
+        for output_node in self.output_nodes:
             dot.edge(output_node.main_target,"output",
                 "\n".join(self.original_mod_output_targets),
                 style="dashed")
-        else:
-            dot.node(
-                wrapper_node.main_target,
-                "OUTPUT\n"+wrapper_node.get_code(),
-                color=constants.render_color_special,
-                style="dashed")
-            for output_node in self.output_nodes:
-                edge(wrapper_node,output_node,style="dashed")
         if render:
             base.Graph._call_graphviz_to_render(
                 dot,view,directory,render_format
@@ -908,7 +879,6 @@ class SimplifiedGraph(base.Graph):
                 style=style)
         # Build each block one by one
         blocks = self.sequentialized_list_of_blocks_of_nodes
-        wrapper_node = self.wrapper_output_node
         for block_id,block_nodes in enumerate(blocks):
             # 1) input
             if block_id == 0:
@@ -931,24 +901,18 @@ class SimplifiedGraph(base.Graph):
                 for req_sn in sn.deps_through_artifacts:
                     edge(req_sn,sn,style="dashed")
             # 3) output
-            if (block_id == len(blocks)-1
-            and wrapper_node is not None):
-                node(block_id,
-                    wrapper_node.main_target,
-                    "OUTPUT\n"+wrapper_node.get_code(),
-                    color=constants.render_color_special,
-                    style="dashed")
-                for output_node in self.output_nodes:
-                    edge(block_id,wrapper_node,output_node,style="dashed")
+            if block_id == len(blocks)-1:
+                output_code = f"OUTPUT:\n{self.original_mod_output_targets}"
             else:
-                node(block_id,
-                    "output","OUTPUT",
-                    color=constants.render_color_special,
-                    style="dashed")
-                dot.edge(
-                    make_unique(block_nodes[-1].main_target,block_id),
-                    make_unique("output",block_id),
-                    style="dashed")
+                output_code = "OUTPUT"
+            node(block_id,
+                "output",output_code,
+                color=constants.render_color_special,
+                style="dashed")
+            dot.edge(
+                make_unique(block_nodes[-1].main_target,block_id),
+                make_unique("output",block_id),
+                style="dashed")
             # 4) special case init_node:
             if block_id == 0:
                 for user_sn in self.init_node_users_in_sequentialization:
