@@ -23,6 +23,7 @@
 
 from typing import Union
 import warnings
+import inspect
 import ast
 import torch
 from torch import Tensor
@@ -126,12 +127,17 @@ class RawGraph(base.Graph):
             original_mod : torch.nn.Module,
             ordered_example_inputs):
         # Call Dynamo's export
-        dynamo_result = torch.export.export(
+        dynamo_result : torch.export.ExportedProgram = torch.export.export(
             original_mod,args=ordered_example_inputs)
         dynamo_graph = dynamo_result.graph
         dynamo_signature = dynamo_result.graph_signature
         whole_code_str = dynamo_graph.python_code()
         whole_code_ast : ast.FunctionDef = ast.parse(whole_code_str).body[0]
+
+        # I generate a parser only to make the target unique
+        # in the same sense as we are doing when parsing jit result,
+        # e.g. "x" => "__32_x"
+        parser = RawParser()
 
         # I) Process the "args" = which consists of all the inputs, 
         # parameters and "buffers". Buffers are variables stored in
@@ -163,7 +169,7 @@ class RawGraph(base.Graph):
                         ast.Name("self"),param_real_name.split(".")
                     )
             # 2) Buffers
-            if dynamo_arg_name in dynamo_signature.inputs_to_buffers:
+            elif dynamo_arg_name in dynamo_signature.inputs_to_buffers:
                 dynamo_buffer_name = dynamo_signature.inputs_to_buffers[dynamo_arg_name]
                 buffer_value = dynamo_result.state_dict[dynamo_buffer_name]
                 buffer_real_name = dict_buffer_value_to_name[buffer_value]
@@ -171,8 +177,18 @@ class RawGraph(base.Graph):
                     = ast_add_on.make_ast_attribute_from_list(
                         ast.Name("self"),buffer_real_name.split(".")
                     )
-            # 3) inputs
-            if dynamo_arg_name in dynamo_signature.
+        # 3) Inputs
+        self.input_targets = [
+            parser.make_name_unique(arg)
+            for arg in inspect.signature(original_mod.forward)
+        ]
+        for dynamo_input_name, input_real_name in zip(
+                dynamo_signature.user_inputs,
+                self.input_targets):
+            dict_dynamo_arg_name_to_correct_ast[dynamo_input_name] = ast.Name(input_real_name)
+
+
+
 
 
 
@@ -332,6 +348,24 @@ class RawGraph(base.Graph):
         print("DICT RANDOM OPERATIONS :\n",self.dict_rand)
 
 
+class RawParser():
+    counter_unique_number = 0
+    def get_unique_number(self):
+        self.counter_unique_number += 1
+        return self.counter_unique_number
+    def make_name_unique(self,name):
+        return f"__{self.get_unique_number()}_{name}"
+    def get_fresh_name(self):
+        return f"__{self.get_unique_number()}_fresh"
+    def get_unique_name(self,name = None):
+        if name is None:
+            return self.get_fresh_name()
+        else:
+            return self.make_name_unique(name)
+    def get_constant_name(self,s):
+        return f"_cst_{self.get_unique_number()}_{s}"
+    
+
 class RawJitParserVariable:
     def __init__(
             self,
@@ -380,7 +414,7 @@ class RawJitParserVariable:
 # -> RawJitParserVariable.has_node == False
 # otherwise, a node (= a piece of code) is created.
 # The optional parameter  "target" imposes the name of the var created
-class RawJitParser():
+class RawJitParser(RawParser):
     def __init__(self,impose_device):
         self.impose_device = impose_device
         self.all_raw_nodes = []
@@ -389,23 +423,6 @@ class RawJitParser():
         self.dict_constants = dict()
         self.current_jit_memory = dict()
         self.node_unique_id_generator = base.Node_unique_id_generator()
-        self.counter_unique_number = 0
-
-    def get_unique_number(self):
-        self.counter_unique_number += 1
-        return self.counter_unique_number
-    def make_name_unique(self,name):
-        return f"__{self.get_unique_number()}_{name}"
-    def get_fresh_name(self):
-        return f"__{self.get_unique_number()}_fresh"
-    def get_unique_name(self,name = None):
-        if name is None:
-            return self.get_fresh_name()
-        else:
-            return self.make_name_unique(name)
-    def get_constant_name(self,s):
-        return f"_cst_{self.get_unique_number()}_{s}"
-
 
     def aux_for_attribute(self, target, parent_raw_var, list_attributes):
         """ Used for:
