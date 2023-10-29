@@ -73,8 +73,10 @@ def make_ast_assign(
             if force_special_kwargs is True
             else force_special_kwargs)
         a = right_part
-        fct_name = a.func.id
-        if fct_name in dict_forced_kwargs:
+        if (isinstance(a,ast.Call) 
+        and isinstance(a.func,ast.Name)
+        and a.func.id in dict_forced_kwargs):
+            fct_name = a.func.id
             attrs_to_inforce = dict_forced_kwargs[fct_name]
             for arg_name,arg_pos,arg_value in attrs_to_inforce:
                 arg_value_ast = make_ast_constant(arg_value)
@@ -138,7 +140,7 @@ def is_constant(v):
     else:
         answer = type(v) in [
             ast.Num,ast.Str,ast.Bytes,
-            ast.NameConstant]
+            ast.NameConstant,ast.Constant]
         if answer:
             if isinstance(v,ast.Num):
                 setattr(v,"value",v.n)

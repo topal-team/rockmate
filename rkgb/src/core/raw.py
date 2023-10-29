@@ -218,12 +218,14 @@ class RawGraph(base.Graph):
             if node.op == "call_function"]
         assignment_codes = [
             code for code in whole_code_ast.body
-            if isinstance(code.value,ast.Call)
+            if (isinstance(code,ast.Assign)
+            and (not ast_add_on.is_constant(code.value)
+            or code.value.value is not None))
         ]
         assert(len(dynamo_assignment_nodes)==len(assignment_codes))
         for dynamo_node,node_code in zip(
                 dynamo_assignment_nodes,
-                whole_code_ast.body):
+                assignment_codes):
             target = parser.make_name_unique(dynamo_node.name)
             dict_dynamo_name_to_correct_ast[dynamo_node.name] = ast.Name(target)
             dependency_dynamo_names = [
@@ -246,6 +248,7 @@ class RawGraph(base.Graph):
             raw_node.deps = set(
                 dict_dynamo_name_to_raw_node[dep_id]
                 for dep_id in dependency_dynamo_names
+                if dep_id in dict_dynamo_name_to_raw_node
             )
         self.nodes = parser.all_raw_nodes
 
