@@ -148,7 +148,7 @@ class RawGraph(base.Graph):
         # parameters and "buffers". Buffers are variables stored in
         # `self` that aren't parameters; e.g. BatchNorm's running_var
         dynamo_all_args = whole_code_ast.args.args
-        dict_dynamo_arg_name_to_correct_ast = dict()
+        dict_dynamo_name_to_correct_ast = dict()
         # e.g: "arg15_1" to AST("input_ids"), 
         # or "arg10_1" to AST("self.h[0]").
 
@@ -170,7 +170,7 @@ class RawGraph(base.Graph):
                 # here we look for "self.embeddings.word_embeddings.weight"
                 param_value = dynamo_result.state_dict[dynamo_param_name]
                 param_real_name = dict_param_value_to_name[param_value]
-                dict_dynamo_arg_name_to_correct_ast[dynamo_arg_name] \
+                dict_dynamo_name_to_correct_ast[dynamo_arg_name] \
                     = ast_add_on.make_ast_attribute_from_list(
                         ast.Name("self"),param_real_name.split(".")
                     )
@@ -179,7 +179,7 @@ class RawGraph(base.Graph):
                 dynamo_buffer_name = dynamo_signature.inputs_to_buffers[dynamo_arg_name]
                 buffer_value = dynamo_result.state_dict[dynamo_buffer_name]
                 buffer_real_name = dict_buffer_value_to_name[buffer_value]
-                dict_dynamo_arg_name_to_correct_ast[dynamo_arg_name] \
+                dict_dynamo_name_to_correct_ast[dynamo_arg_name] \
                     = ast_add_on.make_ast_attribute_from_list(
                         ast.Name("self"),buffer_real_name.split(".")
                     )
@@ -190,7 +190,7 @@ class RawGraph(base.Graph):
         for dynamo_input_name, input_real_name in zip(
                 dynamo_signature.user_inputs,
                 self.input_targets):
-            dict_dynamo_arg_name_to_correct_ast[dynamo_input_name] \
+            dict_dynamo_name_to_correct_ast[dynamo_input_name] \
                 = ast.Name(input_real_name)
             dict_dynamo_name_to_raw_node[dynamo_input_name] \
                 = RawNode(
@@ -200,7 +200,6 @@ class RawGraph(base.Graph):
                     is_input=True,
                     raw_parser=parser
                 )
-
 
         # II) Process all the assignments
         dynamo_all_nodes = dynamo_graph.nodes
@@ -216,25 +215,38 @@ class RawGraph(base.Graph):
                 dynamo_assignment_nodes,
                 whole_code_ast.body):
             target = parser.make_name_unique(dynamo_node.name)
-            
+            dict_dynamo_name_to_correct_ast[dynamo_node.name] = ast.Name(target)
+            dependency_dynamo_names = [
+                req_dynamo_node.name
+                for req_dynamo_node in dynamo_node.all_input_nodes
+            ]
+            code_with_correct_names = ast_add_on.substitute_with_dict(
+                node_code.value,
+                {
+                    dep_id : dict_dynamo_name_to_correct_ast[dep_id]
+                    for dep_id in dependency_dynamo_names
+                }
+            ) # e.g. Substitute "arg2_0" by AST("__32_arg2_0) or AST("self.h[0]").
             raw_node = RawNode(
                 target=target,
-                code_ast=node_code.value,
+                code_ast=code_with_correct_names,
                 fct=dynamo_node.target,
                 raw_parser=parser)
+            dict_dynamo_name_to_raw_node[dynamo_node.name] = raw_node
+            raw_node.deps = set(
+                dict_dynamo_name_to_raw_node[dep_id]
+                for dep_id in dependency_dynamo_names
+            )
+        self.nodes = parser.all_raw_nodes
+
+        # outputs:
+        for output_dynamo_name in dynamo_signature.user_outputs:
+            output_raw_node = dict_dynamo_name_to_raw_node[output_dynamo_name]
+            self.output_nodes.append(output_raw_node)
+            self.output_targets.append(output_raw_node.target)
             
 
         
-
-
-
-
-
-
-
-
-                
-
         
 
 
@@ -390,6 +402,7 @@ class RawGraph(base.Graph):
 class RawParser():
     def __init__(self):
         self.counter_unique_number = 0
+        self.all_raw_nodes = []
         self.node_unique_id_generator = base.Node_unique_id_generator()
     def get_unique_number(self):
         self.counter_unique_number += 1
@@ -421,7 +434,9 @@ class RawJitParserVariable:
         self.value_ast = value_ast
         self.has_node = False  # by default
         self.is_rand = False  # by default
-        if node: # compared to before, we don't automatically simplify when deps=empty
+        if node: 
+            # compared to before, we don't automatically simplify 
+            # when deps=empty. We do it only in case it's a random op
             if node.is_rand and node.deps == set() and not node.is_input:
                 raw_parser.dict_rand[node.target] = node.code_ast
                 self.is_rand = True
@@ -459,7 +474,6 @@ class RawJitParser(RawParser):
     def __init__(self,impose_device):
         super().__init__()
         self.impose_device = impose_device
-        self.all_raw_nodes = []
         self.dict_rand = dict()
         self.current_dict_raw_vars = dict()
         self.dict_constants = dict()
