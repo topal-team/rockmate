@@ -87,7 +87,6 @@ class ForwardGraph(base.Graph):
                 forward_graph=self)
             # inputs:
             if rn.is_input:
-                self.input_targets.append(rn.target)
                 fn.is_input = True
                 input_info = VariableInfo(
                     example_inputs.dict[rn.target],

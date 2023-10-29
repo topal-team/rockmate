@@ -142,6 +142,7 @@ class RawGraph(base.Graph):
         # Moreover the parser give a unique id to each node
         # in a deterministic way.
         parser = RawParser()
+        dict_dynamo_name_to_raw_node = dict()
 
         # I) Process the "args" = which consists of all the inputs, 
         # parameters and "buffers". Buffers are variables stored in
@@ -183,14 +184,22 @@ class RawGraph(base.Graph):
                         ast.Name("self"),buffer_real_name.split(".")
                     )
         # 3) Inputs
-        self.input_targets = [
-            parser.make_name_unique(arg)
-            for arg in inspect.signature(original_mod.forward)
-        ]
+        self.input_targets = list(
+            inspect.signature(original_mod.forward).parameters
+        )
         for dynamo_input_name, input_real_name in zip(
                 dynamo_signature.user_inputs,
                 self.input_targets):
-            dict_dynamo_arg_name_to_correct_ast[dynamo_input_name] = ast.Name(input_real_name)
+            dict_dynamo_arg_name_to_correct_ast[dynamo_input_name] \
+                = ast.Name(input_real_name)
+            dict_dynamo_name_to_raw_node[dynamo_input_name] \
+                = RawNode(
+                    target=input_real_name,
+                    code_ast=ast_add_on.make_ast_constant("INPUT"),
+                    fct="INPUT",
+                    is_input=True,
+                    raw_parser=parser
+                )
 
 
         # II) Process all the assignments
@@ -203,15 +212,17 @@ class RawGraph(base.Graph):
             if isinstance(code.value,ast.Call)
         ]
         assert(len(dynamo_assignment_nodes)==len(assignment_codes))
-        self.nodes = raw_nodes = []
         for dynamo_node,node_code in zip(
                 dynamo_assignment_nodes,
                 whole_code_ast.body):
             target = parser.make_name_unique(dynamo_node.name)
+            
             raw_node = RawNode(
                 target=target,
                 code_ast=node_code.value,
-                fct=dynamo_node.target)
+                fct=dynamo_node.target,
+                raw_parser=parser)
+            
 
         
 

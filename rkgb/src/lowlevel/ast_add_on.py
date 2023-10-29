@@ -148,22 +148,30 @@ def is_constant(v):
 
 # ==========================
 
-def substitute(main_code,sub_id,sub_code):
-    r"""
-    Substitute ast.Name(sub_id) in main_code by sub_code
+def substitute_with_dict(code,dict_of_substitutions):
+    r""" dict: id (string) => ast.AST
+    Replace any string in 'code' by its correspondence in dict_of_substitutions
     """
-    if isinstance(main_code,ast.Name):
-        if main_code.id == sub_id: return sub_code
-        else: return main_code
-    elif isinstance(main_code,ast.AST):
-        for attr in main_code._fields:
+    if isinstance(code,ast.Name):
+        if code.id in dict_of_substitutions:
+            return dict_of_substitutions[code.id]
+        else: return code
+    elif isinstance(code,ast.AST):
+        for attr in code._fields:
             if attr != "ctx":
-                old_val = getattr(main_code,attr)
-                new_val = substitute(old_val,sub_id,sub_code)
+                old_val = getattr(code,attr)
+                new_val = substitute_with_dict(code,dict_of_substitutions)
+                # Hopefully the depth of nested ast.AST is small.
                 if not new_val is old_val:
-                    setattr(main_code,attr,new_val)
-    elif isinstance(main_code,list):
+                    setattr(code,attr,new_val)
+    elif isinstance(code,list):
         return [
-            substitute(old_val,sub_id,sub_code)
-            for old_val in main_code]
-    return main_code
+            substitute_with_dict(old_val,dict_of_substitutions)
+            for old_val in code]
+    return code
+
+def substitute(code,sub_id,sub_code : ast.AST):
+    r"""
+    Substitute ast.Name('sub_id') in 'code' by 'sub_code'
+    """
+    return substitute_with_dict(code,{sub_id:sub_code})
