@@ -336,6 +336,10 @@ class RawGraph(base.Graph):
         list_raw_nodes_without_redundancies = []
         node : RawNode
         for node in self.nodes:
+            # 0) Don't touch to inputs
+            if node.is_input:
+                list_raw_nodes_without_redundancies.append(node)
+                continue
             # 1) Correct code via aliases in deps
             new_deps = set()
             for req_node in node.deps:
@@ -755,9 +759,10 @@ class RawJitParser(RawParser):
                     is_input=True,
                 )
                 self.current_dict_raw_vars[input_name] \
-                    = RawJitParserVariable(ast.Name(input_name),
-                             raw_parser=self,
-                             node=input_node)
+                    = RawJitParserVariable(
+                        ast.Name(input_name),
+                        raw_parser=self,
+                        node=input_node)
         else: # sub module => Called at higher level => inputs = the calling args
             assert len(input_names) == len(input_raw_vars) + 1
             for input_name,input_raw_var in \

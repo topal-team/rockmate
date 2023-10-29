@@ -54,5 +54,5 @@ class ExampleInputs():
         """
         sign = inspect.signature(original_mod.forward)
         params = list(sign.parameters.keys())
-        return [self.dict[p] for p in params if p in self.dict]
+        return tuple(self.dict[p] for p in params if p in self.dict)
 

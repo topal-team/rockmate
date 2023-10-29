@@ -160,7 +160,7 @@ def substitute_with_dict(code,dict_of_substitutions):
         for attr in code._fields:
             if attr != "ctx":
                 old_val = getattr(code,attr)
-                new_val = substitute_with_dict(code,dict_of_substitutions)
+                new_val = substitute_with_dict(old_val,dict_of_substitutions)
                 # Hopefully the depth of nested ast.AST is small.
                 if not new_val is old_val:
                     setattr(code,attr,new_val)
