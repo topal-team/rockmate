@@ -232,8 +232,11 @@ class RawGraph(base.Graph):
                 req_dynamo_node.name
                 for req_dynamo_node in dynamo_node.all_input_nodes
             ]
+            code_with_correct_device = ast_add_on.substitute_device_call(
+                node_code.value
+            )
             code_with_correct_names = ast_add_on.substitute_with_dict(
-                node_code.value,
+                code_with_correct_device,
                 {
                     dep_id : dict_dynamo_name_to_correct_ast[dep_id]
                     for dep_id in dependency_dynamo_names

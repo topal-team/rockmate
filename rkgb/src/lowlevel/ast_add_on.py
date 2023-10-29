@@ -177,3 +177,25 @@ def substitute(code,sub_id,sub_code : ast.AST):
     Substitute ast.Name('sub_id') in 'code' by 'sub_code'
     """
     return substitute_with_dict(code,{sub_id:sub_code})
+
+def substitute_device_call(code : ast.AST):
+    r"""
+    Change `device = device(type="cpu")` by `device = device`
+    assuming a global variable
+    """
+    if (isinstance(code,ast.Call)
+    and isinstance(code.func,ast.Name)
+    and code.func.id == "device"):
+        return ast.Name("device")
+    elif isinstance(code,ast.AST):
+        for attr in code._fields:
+            if attr != "ctx":
+                old_val = getattr(code,attr)
+                new_val = substitute_device_call(old_val)
+                if not new_val is old_val:
+                    setattr(code,attr,new_val)
+    elif isinstance(code,list):
+        return [
+            substitute_device_call(old_val)
+            for old_val in code]
+    return code
