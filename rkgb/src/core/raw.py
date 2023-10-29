@@ -111,6 +111,7 @@ class RawGraph(base.Graph):
         output_variable : RawJitParserVariable = parser.parse(
             jit_result, "self", "forward", [], is_main=True
         )
+        self.input_targets = parser.input_targets
         self.nodes = parser.all_raw_nodes
         self.dict_rand = parser.dict_rand
         self.dict_constants = parser.dict_constants
@@ -131,18 +132,21 @@ class RawGraph(base.Graph):
             original_mod,args=ordered_example_inputs)
         dynamo_graph = dynamo_result.graph
         dynamo_signature = dynamo_result.graph_signature
-        whole_code_str = dynamo_graph.python_code()
+        whole_code_str = dynamo_graph.python_code("self").src
         whole_code_ast : ast.FunctionDef = ast.parse(whole_code_str).body[0]
 
-        # I generate a parser only to make the target unique
-        # in the same sense as we are doing when parsing jit result,
-        # e.g. "x" => "__32_x"
+        # I generate a parser to ensure the same naming system
+        # as we are doing when parsing jit result,
+        # e.g. "x" => "__32_x" (for jit)
+        # e.g. "arg0_1" => "__32_arg0_1" (for dynamo / here)
+        # Moreover the parser give a unique id to each node
+        # in a deterministic way.
         parser = RawParser()
 
         # I) Process the "args" = which consists of all the inputs, 
         # parameters and "buffers". Buffers are variables stored in
         # `self` that aren't parameters; e.g. BatchNorm's running_var
-        all_args = whole_code_ast.args.args
+        dynamo_all_args = whole_code_ast.args.args
         dict_dynamo_arg_name_to_correct_ast = dict()
         # e.g: "arg15_1" to AST("input_ids"), 
         # or "arg10_1" to AST("self.h[0]").
@@ -154,7 +158,8 @@ class RawGraph(base.Graph):
         dict_buffer_value_to_name = dict(
             (value,name) for (name,value)
             in original_mod.named_buffers())
-        for arg in whole_code_ast.args.args:
+
+        for arg in dynamo_all_args:
             dynamo_arg_name = arg.arg # e.g. "arg15_1"
             # 1) Parameters:
             if dynamo_arg_name in dynamo_signature.inputs_to_parameters:
@@ -186,6 +191,29 @@ class RawGraph(base.Graph):
                 dynamo_signature.user_inputs,
                 self.input_targets):
             dict_dynamo_arg_name_to_correct_ast[dynamo_input_name] = ast.Name(input_real_name)
+
+
+        # II) Process all the assignments
+        dynamo_all_nodes = dynamo_graph.nodes
+        dynamo_assignment_nodes = [
+            node for node in dynamo_all_nodes
+            if node.op == "call_function"]
+        assignment_codes = [
+            code for code in whole_code_ast.body
+            if isinstance(code.value,ast.Call)
+        ]
+        assert(len(dynamo_assignment_nodes)==len(assignment_codes))
+        self.nodes = raw_nodes = []
+        for dynamo_node,node_code in zip(
+                dynamo_assignment_nodes,
+                whole_code_ast.body):
+            target = parser.make_name_unique(dynamo_node.name)
+            raw_node = RawNode(
+                target=target,
+                code_ast=node_code.value,
+                fct=dynamo_node.target)
+
+        
 
 
 
@@ -349,7 +377,9 @@ class RawGraph(base.Graph):
 
 
 class RawParser():
-    counter_unique_number = 0
+    def __init__(self):
+        self.counter_unique_number = 0
+        self.node_unique_id_generator = base.Node_unique_id_generator()
     def get_unique_number(self):
         self.counter_unique_number += 1
         return self.counter_unique_number
@@ -416,13 +446,13 @@ class RawJitParserVariable:
 # The optional parameter  "target" imposes the name of the var created
 class RawJitParser(RawParser):
     def __init__(self,impose_device):
+        super().__init__()
         self.impose_device = impose_device
         self.all_raw_nodes = []
         self.dict_rand = dict()
         self.current_dict_raw_vars = dict()
         self.dict_constants = dict()
         self.current_jit_memory = dict()
-        self.node_unique_id_generator = base.Node_unique_id_generator()
 
     def aux_for_attribute(self, target, parent_raw_var, list_attributes):
         """ Used for:
@@ -679,7 +709,8 @@ class RawJitParser(RawParser):
         input_names = [inp.arg for inp in method_code_ast.args.args]
         # Note: input_names[0] = "self"
         if is_main: # = top level
-            for input_name in input_names[1:]:
+            self.input_targets = input_names[1:]
+            for input_name in self.input_targets:
                 input_node = RawNode(
                     target=input_name,
                     raw_parser=self,
