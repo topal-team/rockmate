@@ -26,7 +26,7 @@ class RngState:
         torch.cuda.set_rng_state(self.gpu_states[op_name])
 
 
-def make_global_dictionary(device, nn_mod, dict_constants):
+def make_gd(device, nn_mod, dict_constants):
     return {
         **globals(),
         **dict_constants,
@@ -36,6 +36,8 @@ def make_global_dictionary(device, nn_mod, dict_constants):
         "meta": torch.ones(1).to(device),
         "cmeta": torch.view_as_complex(torch.ones(2)).to(device),
         "main_stream": torch.cuda.current_stream(),
+        # "prefetch_stream": torch.cuda.current_stream(),
+        # "offload_stream": torch.cuda.current_stream(),
         "prefetch_stream": torch.cuda.Stream(device),
         "offload_stream": torch.cuda.Stream(device),
     }
@@ -339,8 +341,10 @@ class Compiler:
         self.prf_list = op_sched.prf_list
         self.ofl_list = op_sched.ofl_list
         self.op_sched = False
-        page_fct = {i: [] for i in range(len(op_sched.op_list))}
-        page_fct[None] = []
+        prf_fct = {i: [] for i in range(len(op_sched.op_list))}
+        prf_fct[None] = []
+        ofl_fct = {i: [] for i in range(len(op_sched.op_list))}
+        ofl_fct[None] = []
         wait_op = []
         for op in op_sched.prf_list:
             if op.disabled:
@@ -348,7 +352,7 @@ class Compiler:
             after_idx = None
             if op.after in self.op_list:
                 after_idx = self.op_list.index(op.after)
-            page_fct[after_idx].extend(self.get_prefetch(op.kn, after_idx=after_idx))
+            prf_fct[after_idx].extend(self.get_prefetch(op.kn, after_idx=after_idx))
             wait_op.append(op.before)
         for op in op_sched.ofl_list:
             if op.disabled:
@@ -356,21 +360,15 @@ class Compiler:
             after_idx = None
             if op.after in self.op_list:
                 after_idx = self.op_list.index(op.after)
-            page_fct[after_idx].extend(self.get_offload(op.kn, after_idx=after_idx))
-        wait_op.append(op.before)
+            ofl_fct[after_idx].extend(self.get_offload(op.kn, after_idx=after_idx))
+        if op_sched.ofl_list:
+            wait_op.append(op_sched.ofl_list[-1].before)
 
-        fct_list = [page_fct[None]]
+        fct_list = [prf_fct[None]+ofl_fct[None]]
 
         for i, op in enumerate(op_sched.op_list):
             kn = op.kn
-            if op in wait_op:
-                fct_list.append(
-                    [
-                        self.fct_wait_stream(
-                            self.gd["main_stream"], self.gd["prefetch_stream"]
-                        )
-                    ]
-                )
+            
             if op.disabled:
                 fct_list.append([])
                 continue
@@ -389,6 +387,31 @@ class Compiler:
                 fct_list.append(self.get_del_grad(kn, i))
             else:
                 fct_list.append([])
+            
+            if op in wait_op:
+                fct_list[-1].insert(0,
+                        self.fct_wait_stream(
+                            self.gd["main_stream"], self.gd["prefetch_stream"]
+                        )
+                )
+            
+            fct_list[-1].append(self.fct_record_cuda(i))
+            for op in prf_fct[i]:
+                stream = self.gd["prefetch_stream"]
+                # fct_list[-1].append(self.fct_wait_stream(stream,
+                #             self.gd["main_stream"]
+                #         ))
+                fct_list[-1].append(op)
+
+            for op in ofl_fct[i]:
+                stream = self.gd["offload_stream"]
+                # fct_list[-1].append(self.fct_wait_stream(stream,
+                #             self.gd["main_stream"]
+                #         ))
+                fct_list[-1].append(op)
+            # fct_list[-1].extend(page_fct[i])
+            # fct_list[-1].append(self.fct_record_cuda(i, stream=self.gd["prefetch_stream"]))
+            # fct_list[-1].append(self.fct_record_cuda(i, stream=self.gd["offload_stream"]))
 
         return fct_list
 
@@ -419,8 +442,8 @@ class Compiler:
         range = range or [None, None]
 
         def prefetch():
-            if after_idx:
-                stream.wait_event(self.storage.ld["events"][after_idx])
+            # if after_idx:
+            #     stream.wait_event(self.storage.ld["events"][after_idx])
             # stream.wait_stream(self.gd["main_stream"])
             with torch.cuda.stream(stream):
                 self.storage.ld[var_name].data = self.storage.ld[f"cpu_{var_name}"].to(
@@ -439,8 +462,8 @@ class Compiler:
 
         def offload():
             # stream.wait_stream(self.gd["main_stream"])
-            if after_idx:
-                stream.wait_event(self.storage.ld["events"][after_idx])
+            # if after_idx:
+            #     stream.wait_event(self.storage.ld["events"][after_idx])
             with torch.cuda.stream(stream):
                 self.storage.ld[f"cpu_{var_name}"].copy_(
                     self.storage.ld[var_name], non_blocking=True
@@ -513,8 +536,9 @@ class Compiler:
             self.storage.shapes[tensor_name] = self.storage.ld[tensor_name].shape
             self.storage.dtypes[tensor_name] = self.storage.ld[tensor_name].dtype
             self.storage.ld[f"cpu_{tensor_name}"] = torch.empty(
-                self.storage.ld[tensor_name].shape
+                self.storage.ld[tensor_name].shape, pin_memory=True
             )
+            # assert self.storage.ld[f"cpu_{tensor_name}"].shape == self.storage.ld[tensor_name].shape
 
         return fct
 
