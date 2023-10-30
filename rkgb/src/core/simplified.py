@@ -570,6 +570,9 @@ class SimplifiedGraph(base.Graph):
                 if len(sn.deps)==0 ]
             first_sn = min(all_without_deps,key=base.Node.get_num)
             self.init_node.users.add(first_sn)
+            if (self.init_node,first_sn) not in self.dict_of_labels_on_edges:
+                self.dict_of_labels_on_edges[(self.init_node,first_sn)] = set()
+                self.dict_of_labels_on_edges[(first_sn,self.init_node)] = set()
 
     def make_dict_output_viewing_code(self):
         """
