@@ -392,6 +392,16 @@ class RawGraph(base.Graph):
         self.nodes = list_raw_nodes_without_redundancies
 
 
+    # Overwrite base.Graph methods => used to sort nodes by following 'deps'
+    def make_temporary_global_root_node_to_deps_relation(self):
+        if len(self.output_nodes)==1:
+            return False,self.output_nodes[0]
+        else:
+            fresh_root = RawNode()
+            fresh_root.deps = set(self.output_nodes)
+            return True,fresh_root
+    def remove_temporary_global_root_node(self, fresh_root):
+        ()
 
     def __str__(self):
         return f"Raw Graph with {len(self.nodes)} nodes."

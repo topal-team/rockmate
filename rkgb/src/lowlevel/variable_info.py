@@ -73,7 +73,7 @@ class VariableInfo():
             return self.tensor_size
         elif self.variable_type==torch.Tensor:
             if self.dtype in constants.int_dtype:
-                return torch.randint(128,self.tensor_size,
+                return torch.randint(2,self.tensor_size,
                     dtype=self.dtype,
                     requires_grad=self.requires_grad,
                     device=device)

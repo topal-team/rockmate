@@ -375,35 +375,12 @@ class SimplifiedGraph(base.Graph):
 
     # ===== BLOCK 1 : CLEAR and CHECK =====
     def clear(self):
-        self.toposort_nodes()
+        # self.toposort_nodes()
+        self.nodes = self.get_sorted_nodes_by_following_deps_relation()
+        if self.init_node in self.nodes: self.nodes.remove(self.init_node)
         self.check_artifact() # TO REMOVE after all tests passed
         self.check_edges_are_reciprocal()
         
-    def toposort_nodes(self):
-        # As we're doing some merges, we will have to re-sort
-        # 1) Find (or build) the node at the root of the deps relation
-        if len(self.output_nodes)==1: # Simple case:
-            root_sn = self.output_nodes[0]
-            fake_tmp_root = False
-        else: 
-            # We need to generate a node, parent to all output_nodes
-            # in the deps relation (like a very last node to the graph)
-            fake_tmp_root = True
-            root_sn = SimplifiedNode("Tmp_root")
-            root_sn.deps = set(self.output_nodes)
-            for out_sn in self.output_nodes:
-                out_sn.users.add(root_sn)
-        # 2) sort
-        self.nodes = self.get_sorted_nodes_by_following_deps_relation()
-        # 3) remove the fake root (if created) and the init_node
-        # because we don't want the init_node in self.nodes
-        # but it was fetch by following deps will sorting
-        if self.init_node in self.nodes: self.nodes.remove(self.init_node)
-        if fake_tmp_root:
-            self.nodes.remove(root_sn)
-            for out_sn in root_sn.deps:
-                out_sn.users.discard()
-
     def check_artifact(self):
         sn : SimplifiedNode
         for sn in self.nodes:
