@@ -98,6 +98,7 @@ class RawGraph(base.Graph):
             original_mod : torch.nn.Module,
             example_inputs : preprocess_samples.ExampleInputs,
             impose_device):
+        self.tracer_used = "jit"
         # Call TorchScript jit's tracer
         ordered_example_inputs = example_inputs.to_list_args(original_mod)
         with torch.no_grad():
@@ -137,6 +138,7 @@ class RawGraph(base.Graph):
     def _init_using_dynamo(self,
             original_mod : torch.nn.Module,
             example_inputs : preprocess_samples.ExampleInputs):
+        self.tracer_used = "dynamo"
         # Call Dynamo's export
         ordered_example_inputs = example_inputs.to_list_args(original_mod)
         dynamo_result : torch.export.ExportedProgram = torch.export.export(

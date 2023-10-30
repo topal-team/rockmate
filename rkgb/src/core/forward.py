@@ -111,9 +111,15 @@ class ForwardGraph(base.Graph):
                 rn_code_str = rn.get_code(force_special_kwargs=True)
                 try: exec(rn_code_str,our_global,tmp_local)
                 except:
-                    jit_patch.try_to_fix_dtype_in_returned_ast_code(
-                        rn_code_str,our_global,tmp_local
-                    )
+                    if self.tracer_used == "jit":
+                        jit_patch.try_to_fix_dtype_in_returned_ast_code(
+                            rn_code_str,our_global,tmp_local
+                        )
+                    else:
+                        raise Exception(
+                            f"Sorry, we fail to execute the code we got from "\
+                            f"the tracer ({self.tracer_used}):\n{rn_code_str}."
+                        )
                 fn.info = self.dict_info[rn.target] \
                     = self.detect_inplace_or_view(
                     rn,fn,tmp_local,

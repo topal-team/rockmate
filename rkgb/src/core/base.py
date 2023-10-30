@@ -228,6 +228,7 @@ class Graph():
             other_object_with_id_generator = None,
             node_unique_id_generator : Node_unique_id_generator = None):
         # == base attribute ==
+        self.tracer_used = ""
         self.input_targets = []
         self.output_targets = []
         self.original_mod_output_targets = []
@@ -273,6 +274,7 @@ class Graph():
     # -> For any type of graph
     def inherit_base_attributes(self,other_graph):
         for attr in [
+            "tracer_used",
             "input_targets",
             "output_targets",
             "original_mod_output_targets",
