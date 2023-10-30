@@ -693,21 +693,18 @@ class SimplifiedGraph(base.Graph):
                     if sn.info.is_inplace:
                         raise Exception(
                             f"sorry we don't support inplace operations over "\
-                            f"parameters, or anything that look as such. \n"\
+                            f"parameters, inputs, or anything that look as such. \n"\
                             f"Here {sn.main_target} only depends on artifacts, "\
                             f"but sn.info.is_inplace=True.\nCode:\n {sn.get_code()}")
-                    if not sn.info.is_param:
-                        raise Exception(
-                            "view without any dependencies except artifacts "\
-                            "and it's not a parameter: I didn't thought this can exist")
-                    # => View over parameters, so mem=0 and no backward node
+                    # I assume it's a view over a parameter or an input
+                    # => so mem=0 and no backward node
                     # so I can insert sn's code in ALL its deps (which are all artifacts)
                     # but artifact nodes are temporary, so what is important is to 
                     # insert the code in the parent of the artifacts.
                     artifact_req_sn : SimplifiedNode
                     for artifact_req_sn in sn.deps:
                         # 1) duplicate the code in artifact's parent
-                        if sn is not self.init_node:
+                        if artifact_req_sn is not self.init_node:
                             artifact_req_sn \
                                 .parent_sn_as_an_artifact \
                                 .insert_code(sn,self)
@@ -720,7 +717,7 @@ class SimplifiedGraph(base.Graph):
                             user_sn.deps.add(artifact_req_sn)
                         artifact_req_sn.users.discard(sn)
                         # 4) clear artifact if possible # TO IMPROVE
-                        if sn is not self.init_node:
+                        if artifact_req_sn is not self.init_node:
                             artifact_req_sn \
                                 .parent_sn_as_an_artifact \
                                 .remove_obsolete_child_artifacts()
