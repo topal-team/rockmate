@@ -250,7 +250,7 @@ class RawGraph(base.Graph):
             raw_node = RawNode(
                 target=target,
                 code_ast=code_with_correct_names,
-                fct=dynamo_node.target,
+                fct=dynamo_node.target.__str__(),
                 raw_parser=parser)
             dict_dynamo_name_to_raw_node[dynamo_node.name] = raw_node
             raw_node.deps = set(
@@ -408,6 +408,7 @@ class RawGraph(base.Graph):
     def render(self,
             name=None,
             view=True,
+            only_function_name=False,
             directory=base.Graph.default_render_directory,
             render_format=base.Graph.default_render_format,
             render=True,
@@ -416,7 +417,9 @@ class RawGraph(base.Graph):
         name = self._get_render_name(name)
         dot = base.Graph._get_graphviz_dot(name,dot)
         for rn in self.nodes:
-            dot.node(rn.target,rn.get_code())
+            if only_function_name: label = rn.fct
+            else: label = rn.get_code()
+            dot.node(rn.target,label)
         for rn in self.nodes:
             for req_rn in rn.deps:
                 dot.edge(req_rn.target,rn.target)

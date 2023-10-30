@@ -43,32 +43,23 @@ class ExceptionModuleDoesNotReqGrad(Exception):
 # === LISTS OF FUNCTIONS ===
 # ==========================
 
-list_pytorch_packages = [
-    "torch",
-    "torch.nn.functional",
-    "torch.Tensor",
-    "torch._C._nn",
-    "torch._C._fft",
-    "torch.ops.aten",
-]
-
 list_rand_fct = [
-    "torch.randn",
-    "torch.dropout",
-    "torch.rand",
-    "torch.randint",
-    "torch.randperm",
-    "torch.empty",
-    "torch.rrelu",
+    "torch.ops.aten.randn",
+    "torch.ops.aten.dropout",
+    "torch.ops.aten.rand",
+    "torch.ops.aten.randint",
+    "torch.ops.aten.randperm",
+    "torch.ops.aten.empty",
+    "torch.ops.aten.rrelu",
 ]
 # -> ONLY used nodes without dependencies
 
 list_cheap_functions = [
-    "torch.add",
-    "torch.sub",
-    "torch.mul",
-    "torch.div",
-    "torch.floor_divide",
+    "torch.ops.aten.add",
+    "torch.ops.aten.sub",
+    "torch.ops.aten.mul",
+    "torch.ops.aten.div",
+    "torch.ops.aten.floor_divide",
 ]
 
 list_inplace_fct = [
@@ -76,8 +67,8 @@ list_inplace_fct = [
 list_view_fct = [
     "torch.ops.aten.slice",
     "torch.ops.aten.select",
-    "torch.adjoint",
-    "torch.Tensor.adjoint",
+    "torch.ops.aten.adjoint",
+    "torch.Tensor.adjoint", # TODO => change to aten
     "torch.as_strided",
     "torch.Tensor.as_strided",
     "torch.Tensor.detach",

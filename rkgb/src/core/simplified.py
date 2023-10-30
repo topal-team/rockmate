@@ -789,6 +789,7 @@ class SimplifiedGraph(base.Graph):
     def render(self,
             name=None,
             view=True,
+            only_function_name=False,
             directory=base.Graph.default_render_directory,
             render_format=base.Graph.default_render_format,
             render=True,
@@ -806,17 +807,23 @@ class SimplifiedGraph(base.Graph):
         # 1) nodes and edges
         sn : SimplifiedNode
         for sn in self.nodes:
-            dot.node(sn.main_target,sn.get_code())
+            if only_function_name: label = sn.main_fct
+            else: label = sn.get_code()
+            dot.node(sn.main_target,label)
             for req_sn in sn.deps:
                 edge(req_sn,sn)
             for req_sn in sn.deps_through_artifacts:
                 edge(req_sn,sn,style="dashed")
         # 2) init node
+        if only_function_name: label = "INPUT"
+        else: label = "INPUT\n"+self.init_node.get_code()
         dot.node(self.init_node.main_target,
-            "INPUT\n"+self.init_node.get_code(),
+            label,
             color=constants.render_color_special,
             style="dashed")
-        for user_sn in self.init_node.users:
+        for user_sn in (
+                self.init_node.users.union(
+                self.init_node.users_through_artifacts)):
             edge(self.init_node,user_sn,style="dashed")
         # 3) output nodes
         output_node = self.output_nodes[0]
@@ -834,9 +841,9 @@ class SimplifiedGraph(base.Graph):
             )
 
     def render_sequentialized(self,
-            aggressive=None,
             name=None,
             view=True,
+            aggressive=None,
             directory=base.Graph.default_render_directory,
             render_format=base.Graph.default_render_format,
             render=True,

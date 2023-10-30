@@ -349,6 +349,7 @@ class ForwardGraph(base.Graph):
     def render(self,
             name=None,
             view=True,
+            only_function_name=False,
             directory=base.Graph.default_render_directory,
             render_format=base.Graph.default_render_format,
             render=True,
@@ -360,7 +361,9 @@ class ForwardGraph(base.Graph):
             if fn.is_input: color = "blue"
             elif fn.target in self.output_targets: color = "red"
             else: color = None
-            dot.node(fn.target,fn.get_code(),color=color)
+            if only_function_name: label = fn.fct
+            else: label = fn.get_code()
+            dot.node(fn.target,label,color=color)
             for req_fn in fn.deps:
                 dot.edge(req_fn.target,fn.target)
         if render:
