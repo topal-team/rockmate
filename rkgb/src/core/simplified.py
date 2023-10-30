@@ -648,17 +648,18 @@ class SimplifiedGraph(base.Graph):
         """
         sn : SimplifiedNode
         for sn in self.nodes:
-            if (sn not in self.output_nodes
-            and sn.main_fct != constants.constructor_function_string
-            and sn.deps != set()
-            and (sn.info.is_view
+            is_view = (sn.info.is_view
                 or sn.info.is_inplace
                 or sn.info.is_param
-                or sn.main_fct == "getattr") # those not simplified via constructors
-                # or sn.main_fct in constants.list_view_fct)
-                # Normally, all fct in list_view_fct were already 
-                # detected and info.is_view/param/inplace
-            ):
+                or sn.main_fct == "getattr") 
+            if sn.deps == set() and is_view:
+                self.init_node.insert(sn,
+                    strong=True,simplified_graph=self)
+            elif (sn not in self.output_nodes
+            and sn.main_fct != constants.constructor_function_string
+            and sn.deps != set()
+            and is_view):
+                # Normally, all function in list_view_fct are 'is_view'
                 # 1) We look for one clear parent of sn
                 # ie a node sn depend on, in which we could insert sn code, 
                 # will being sure we don't create cycles in the graph

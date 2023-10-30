@@ -252,7 +252,7 @@ class RawGraph(base.Graph):
             raw_node = RawNode(
                 target=target,
                 code_ast=code_with_correct_names,
-                fct=dynamo_node.target.__str__(),
+                fct=dynamo_node.target.__name__,
                 raw_parser=parser)
             dict_dynamo_name_to_raw_node[dynamo_node.name] = raw_node
             raw_node.deps = set(
