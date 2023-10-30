@@ -79,17 +79,16 @@ class RawGraph(base.Graph):
             jit_impose_device=True
         ):
         super().__init__()
-        ordered_example_inputs = example_inputs.to_list_args(original_mod)
         if use_jit_instead_of_dynamo:
             self._init_using_jit(
                 original_mod,
-                ordered_example_inputs,
+                example_inputs,
                 jit_impose_device
             )
         else:
             self._init_using_dynamo(
                 original_mod,
-                ordered_example_inputs,
+                example_inputs,
             )
         self.toposort_and_keep_only_useful_nodes()
         self.clear_redundancies_in_self_nodes()
@@ -97,9 +96,10 @@ class RawGraph(base.Graph):
 
     def _init_using_jit(self,
             original_mod : torch.nn.Module,
-            ordered_example_inputs,
+            example_inputs : preprocess_samples.ExampleInputs,
             impose_device):
         # Call TorchScript jit's tracer
+        ordered_example_inputs = example_inputs.to_list_args(original_mod)
         with torch.no_grad():
             jit_result = torch.jit.trace_module(
                 original_mod,
@@ -136,8 +136,9 @@ class RawGraph(base.Graph):
     
     def _init_using_dynamo(self,
             original_mod : torch.nn.Module,
-            ordered_example_inputs):
+            example_inputs : preprocess_samples.ExampleInputs):
         # Call Dynamo's export
+        ordered_example_inputs = example_inputs.to_list_args(original_mod)
         dynamo_result : torch.export.ExportedProgram = torch.export.export(
             original_mod,args=ordered_example_inputs)
         dynamo_graph = dynamo_result.graph
@@ -194,9 +195,13 @@ class RawGraph(base.Graph):
                         ast.Name("self"),buffer_real_name.split(".")
                     )
         # 3) Inputs
+        dict_inputs = example_inputs.dict
         self.input_targets = list(
-            inspect.signature(original_mod.forward).parameters
+            arg for arg in inspect.signature(original_mod.forward).parameters
+            if (arg in dict_inputs 
+            and isinstance(dict_inputs[arg],torch.Tensor))
         )
+        assert(len(dynamo_signature.user_inputs)==len(self.input_targets))
         for dynamo_input_name, input_real_name in zip(
                 dynamo_signature.user_inputs,
                 self.input_targets):
