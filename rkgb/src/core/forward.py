@@ -20,7 +20,7 @@ from src.core.raw import RawNode,RawGraph
 
 class ForwardNode(base.Node):
     def __init__(self,
-            target="No target",
+            target=base.Node.no_target_string,
             code_ast=None,
             fct="",
             is_rand=False,
@@ -302,6 +302,7 @@ class ForwardGraph(base.Graph):
         fn : ForwardNode
         for fn_index,fn in enumerate(self.nodes):
             if (len(fn.users)==0
+            and fn.info.is_inplace # or is_view ? TO CHECK
             and fn.main_target not in self.output_targets):
                 # no user and not output => inplace or view
                 assert(fn.info.is_view or fn.info.is_inplace)

@@ -36,7 +36,7 @@ from src.core import base
 
 class RawNode(base.Node):
     def __init__(self, 
-            target="No target",
+            target=base.Node.no_target_string,
             code_ast=None, 
             fct="", 
             is_input=False,

@@ -18,7 +18,7 @@ from src.core.forward import ForwardNode,ForwardGraph
 
 class SimplifiedNode(base.Node):
     def __init__(self,
-            main_target="No target",
+            main_target=base.Node.no_target_string,
             code=None,
             fct="",
             info=None,
