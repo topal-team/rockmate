@@ -38,24 +38,32 @@ class Op:
                 setattr(result, k, deepcopy(v, memo))
 
         return result
-
-class PrfOp(Op):
-    def __init__(self, kn, fraction, before=None, after=None, disabled=False):
-        super().__init__(kn, fast_forward=False, disabled=disabled, detach=True)
-        self.kn = kn
+    
+class MapOp():
+    # The memory allocation of sources will be map to targets in buffer.
+    # the time of running this op is very short, but there is
+    # a memory overhead of size sources during this time.
+    def __init__(self, sources, targets, before=None, after=None, disabled=False):
+        self.sources = sources
+        self.targets = targets
+        self.before = before
+        self.after = after
         self.disabled = disabled
-        self.is_del = False
+
+
+class PrfOp():
+    def __init__(self, target, fraction=1., before=None, after=None, disabled=False):
+        self.target = target
         self.fraction = fraction
+        self.disabled = disabled
         self.before = before
         self.after = after
 
-class OflOp(Op):
-    def __init__(self, kn, fraction, before=None, after=None, disabled=False):
-        super().__init__(kn, fast_forward=False, disabled=disabled, detach=True)
-        self.kn = kn
-        self.disabled = disabled
-        self.is_del = False
+class OflOp():
+    def __init__(self, target, fraction=1., before=None, after=None, disabled=False):
+        self.target = target
         self.fraction = fraction
+        self.disabled = disabled
         self.before = before
         self.after = after
 
