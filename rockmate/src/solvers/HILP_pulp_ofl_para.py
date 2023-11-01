@@ -5,7 +5,7 @@ import numpy as np
 from copy import deepcopy
 from pulp import *
 
-from .op_schedule import Op, OpSchedule
+from .op_schedule import Op, OpSchedule, OflOp, PrfOp
 from rkgb.Htools import *
 from rkgb.utils.global_vars import solver_name
 
@@ -41,7 +41,7 @@ class ModelPULP:
         self.ilp_solver_params = ilp_solver_params
         self.feasible = None
         self.solve_time = None
-        self.enable_offload = offload
+        self.enable_offload = accurate_mem
 
         #############################
         self.hgraph = hgraph
@@ -247,7 +247,14 @@ class ModelPULP:
                 lowBound = 0,
                 upBound=1
             )
-            self.weight_size = [3e7 for _ in range(W)]
+            # self.weights_size = [3e7 for _ in range(W)]
+            self.weights_size = []
+            for i in range(W):
+                sub_cluster = self.hgraph.list_hcn[i].sub_cluster
+                if hasattr(sub_cluster, "list_kdn_parameters"):
+                    self.weights_size.append(sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters))
+                else:
+                    self.weights_size.append(0)
             self.weight2hcn = {w: [w, T-w-1] for w in range(W)}
             self.hcn2weight = {k:w for w in self.weight2hcn for k in self.weight2hcn[w]}
             self.bandwidthOfl = 8 * 1024**2  # byte/ms
@@ -277,13 +284,13 @@ class ModelPULP:
                 if self.enable_offload:
                     self.md += (
                         self.Time[t, i] >= 
-                        lpSum(self.weight_size[w] /self.bandwidthPrf
+                        lpSum(self.weights_size[w] /self.bandwidthPrf
                         * self.PrfW[t,i,w] for w in range(W)),
                         "",
                     )
                     self.md += (
                         self.Time[t, i] >= 
-                        lpSum(self.weight_size[w]/self.bandwidthOfl
+                        lpSum(self.weights_size[w]/self.bandwidthOfl
                         * self.OflW[t,i,w] for w in range(W)),
                         "",
                     )
@@ -647,7 +654,7 @@ class ModelPULP:
             for k in range(T):
                 if self.enable_offload:
                     # weight_mem = 0
-                    weight_mem = lpSum(self.AliveW[t,k,w]*self.weight_size[w]
+                    weight_mem = lpSum(self.AliveW[t,k,w]*self.weights_size[w]
                                        for w in range(W))
                 else:
                     weight_mem = 0
@@ -785,11 +792,15 @@ class ModelPULP:
         T = len(hgraph.list_hcn)
         I = len(hgraph.list_hdn)
         J = len(self.list_list_sched)
+        if self.enable_offload:
+            W = len(self.weights_size)
 
         def sol(value):
             return value > 0.9999  # inttol
 
         op_list = []
+        ofl_list = []
+        prf_list = []
         for t in range(T):
             for k in range(T):
                 if t == self.loss_idx and k == self.loss_idx:
@@ -875,6 +886,19 @@ class ModelPULP:
                     if k == k_ and sol(self.delete[t, eidx].value()):
                         hdn = hgraph.list_hdn[i]
                         op_list.append(Op(hdn.kdn))
+
+                if self.enable_offload:
+                    for w in range(W):
+                        weight = self.hgraph.list_hcn[self.weight2hcn[w][0]].sub_cluster
+                        if self.OflW[(t,k,w)].value()>1:
+                            ofl_list.append(OflOp(target=weight.name, 
+                                                  fraction=self.OflW[(t,k,w)].value(),
+                                                  after=op_list[-1]))
+                        if self.PrfW[(t,k,w)].value()>1:
+                            prf_list.append(PrfOp(target=weight.name, 
+                                                  fraction=self.PrfW[(t,k,w)].value(),
+                                                  after=op_list[-1]))
+
 
         # interfaces = dict()
         # interfaces["inputs_kdn_data"] = set(
