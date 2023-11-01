@@ -599,6 +599,7 @@ class SimplifiedGraph(base.Graph):
         for sn in self.nodes:
             if (sn not in self.output_nodes
             and sn.main_fct in constants.list_cheap_functions
+            and sn.info.inplace_targets == set()
             and len(sn.deps) <= 2
             and len(sn.users) == 1):
                 # with this new conditions, no need to protect against over simplification
@@ -659,7 +660,7 @@ class SimplifiedGraph(base.Graph):
             and sn.main_fct != constants.constructor_function_string
             and sn.deps != set()
             and is_view):
-                # Normally, all function in list_view_fct are 'is_view'
+                # Normally, all function in list_view_functions are 'is_view'
                 # 1) We look for one clear parent of sn
                 # ie a node sn depend on, in which we could insert sn code, 
                 # will being sure we don't create cycles in the graph

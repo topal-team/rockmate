@@ -218,15 +218,15 @@ class ForwardGraph(base.Graph):
         # === SECOND WAY TO RECOGNIZE A VIEW ===
         # -> main_fct is a view/inplace function
         if not (is_inplace or is_view):
-            if (current_raw_node.fct in constants.list_view_fct
-            or current_raw_node.fct in constants.list_inplace_fct):
+            if (current_raw_node.fct in constants.list_view_functions
+            or current_raw_node.fct in constants.list_inplace_functions):
                 data_parents = set()
                 for req_rn in current_raw_node.deps:
                     req_rn_info = self.dict_info[req_rn.target]
                     if req_rn_info.variable_type is torch.Tensor:
                         data_parents.add(req_rn.mt)
                 if data_parents != set():
-                    if current_raw_node.fct in constants.list_inplace_fct:
+                    if current_raw_node.fct in constants.list_inplace_functions:
                         is_inplace = True
                     else:
                         is_view = True

@@ -59,7 +59,7 @@ class RawNode(base.Node):
             self.code_ast = code_ast
         self.fct = fct
         self.is_input = is_input
-        self.is_rand = bool(fct in constants.list_rand_fct)
+        self.is_rand = bool(fct in constants.list_random_functions)
         self.deps_rand : set[str] = set()
         # TO REMOVE
         # self.deps : set[RawNode] = deps if deps is not None else set()
@@ -645,11 +645,14 @@ class RawJitParser(RawParser):
                 # Function name, fix jit error : `torch` -> `torch.ops.aten`
                 if (first_term_of_func_name == "torch" 
                     and len(rest_of_func_name) == 1):
-                    fct_name = "torch.ops.aten."+rest_of_func_name[0]
+                    short_fct_name = rest_of_func_name[0]
+                    fct_name = "torch.ops.aten."+short_fct_name
                 else:
-                    fct_name = ".".join([first_term_of_func_name]+rest_of_func_name)
+                    short_fct_name = fct_name \
+                        = ".".join([first_term_of_func_name]+rest_of_func_name)
                 target = self.get_unique_name(target)
-                new_node = RawNode(target=target,fct=fct_name,raw_parser=self)
+                new_node = RawNode(
+                    target=target,fct=short_fct_name,raw_parser=self)
                 args_ast = [
                     arg_raw_var.use_value_ast(calling_node=new_node) 
                     for arg_raw_var in call_arg_raw_vars

@@ -44,28 +44,25 @@ class ExceptionModuleDoesNotReqGrad(Exception):
 # === LISTS OF FUNCTIONS ===
 # ==========================
 
-list_rand_fct = [
-    "torch.ops.aten.randn",
-    "torch.ops.aten.dropout",
-    "torch.ops.aten.rand",
-    "torch.ops.aten.randint",
-    "torch.ops.aten.randperm",
-    "torch.ops.aten.empty",
-    "torch.ops.aten.rrelu",
+list_random_functions = [
+    "randn",
+    "dropout",
+    "rand",
+    "randint",
+    "randperm",
+    "empty",
+    "rrelu",
 ]
-# -> ONLY used nodes without dependencies
-
 list_cheap_functions = [
-    "torch.ops.aten.add",
-    "torch.ops.aten.sub",
-    "torch.ops.aten.mul",
-    "torch.ops.aten.div",
-    "torch.ops.aten.floor_divide",
+    "add",
+    "sub",
+    "mul",
+    "div",
+    "floor_divide",
 ]
-
-list_inplace_fct = [
+list_inplace_functions = [
 ]
-list_view_fct = [
+list_view_functions = [
     "slice",
     "select",
     "adjoint",
@@ -88,20 +85,29 @@ list_view_fct = [
     "view_as",
     "unbind",
     "split",
-    "split",
     "hsplit",
     "vsplit",
     "tensor_split",
     "split_with_sizes",
     "swapaxes",
     "swapdims",
-    "swapdims",
-    "chunk",
     "chunk",
     "values",
     "indices",
 ]
 #  list imported from https://pytorch.org/docs/stable/tensor_view.html
+# and then I tried to adapt it to 'torch.ops.aten'
+for list_of_functions in [
+    list_random_functions,
+    list_cheap_functions,
+    list_inplace_functions,
+    list_view_functions
+]:
+    original_list = list(list_of_functions)
+    for fct in original_list:
+        list_of_functions.append(fct+".default")
+        list_of_functions.append(fct+".Tensor")
+
 
 list_batch_fct = [
     torch.nn.BatchNorm1d,
