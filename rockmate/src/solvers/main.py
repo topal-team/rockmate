@@ -3,6 +3,7 @@ import numpy as np
 from copy import deepcopy
 from rkgb.Htools import H_C_node, H_D_node, H_graph, H_cluster
 from rkgb.Ktools import K_C_node, K_D_node
+from rkgb.utils.ast_add_on import ast_to_str
 from .op_schedule import Op, OpSchedule
 import time
 import psutil
@@ -328,6 +329,35 @@ def get_single_compute_op_list(
                     # alive_list.append(alive_status.copy())
 
     return op_list  # , loss_idx
+
+
+def add_parameter_node(h_cluster, original_mod):
+    if h_cluster is None:
+        return None
+    if not hasattr(h_cluster, "list_kcn"):
+        setattr(h_cluster, "list_kdn_parameters", [])
+        return None
+    list_kcn = h_cluster.list_kcn
+    list_kdn = h_cluster.list_kdn
+    list_kdn_parameters = []
+    code = "\n".join([kcn.get_code() for kcn in list_kcn]).strip()
+    parameters_id_to_name = {id(p):n for n,p in original_mod.named_parameters()}
+    for kcn in list_kcn:
+        if "loss" in kcn.name or not kcn.is_fwd:
+            continue
+        for arg in kcn.get_code_ast().body[0].value.args:
+            if "self" in ast_to_str(arg):
+                arg_id = id(eval(ast_to_str(arg).replace("self[", "original_mod[").replace("self.", "original_mod.")))
+                assert arg_id in parameters_id_to_name.keys()
+                n = parameters_id_to_name[arg_id]
+                kdn = K_D_node(main_target=n, kdn_type="parameter")
+                p = original_mod.get_parameter(n)
+                kdn.mem = p.shape.numel()*p.element_size()
+                list_kdn_parameters.append(kdn)
+    setattr(h_cluster, "list_kdn_parameters", list_kdn_parameters)
+    return list_kdn_parameters
+
+
 
 
 # def add_autograd_sched(cluster: H_cluster, protect_names=[]):
