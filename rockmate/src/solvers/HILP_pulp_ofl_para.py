@@ -252,9 +252,10 @@ class ModelPULP:
             for i in range(W):
                 sub_cluster = self.hgraph.list_hcn[i].sub_cluster
                 if hasattr(sub_cluster, "list_kdn_parameters"):
-                    self.weights_size.append(sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters))
+                    self.weights_size.append(sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters) / self.gcd)
                 else:
                     self.weights_size.append(0)
+            # print(self.weights_size)
             self.weight2hcn = {w: [w, T-w-1] for w in range(W)}
             self.hcn2weight = {k:w for w in self.weight2hcn for k in self.weight2hcn[w]}
             self.bandwidthOfl = 8 * 1024**2  # byte/ms
@@ -890,11 +891,11 @@ class ModelPULP:
                 if self.enable_offload:
                     for w in range(W):
                         weight = self.hgraph.list_hcn[self.weight2hcn[w][0]].sub_cluster
-                        if self.OflW[(t,k,w)].value()>1:
+                        if self.OflW[(t,k,w)].value()>0:
                             ofl_list.append(OflOp(target=weight.name, 
                                                   fraction=self.OflW[(t,k,w)].value(),
                                                   after=op_list[-1]))
-                        if self.PrfW[(t,k,w)].value()>1:
+                        if self.PrfW[(t,k,w)].value()>0:
                             prf_list.append(PrfOp(target=weight.name, 
                                                   fraction=self.PrfW[(t,k,w)].value(),
                                                   after=op_list[-1]))
@@ -921,7 +922,11 @@ class ModelPULP:
         #         no_bwd = False
         # if no_bwd:
         #     raise("wrong solution")
-        op_sched = OpSchedule(op_list, loss_idx=None, cluster=self.hgraph.cluster)
+        op_sched = OpSchedule(op_list, 
+                              ofl_list=ofl_list, 
+                              prf_list=prf_list,
+                              loss_idx=None, 
+                              cluster=self.hgraph.cluster)
         # check_valid = True
         if check_valid:
             for op, alive_status in zip(op_sched.op_list, op_sched.alive_list):
