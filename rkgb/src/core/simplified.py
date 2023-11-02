@@ -989,7 +989,10 @@ class SimplifiedGraph(base.Graph):
 
         # Main loop to instantiate all BlockModules one by one
         blocks = self.sequentialized_list_of_blocks_of_nodes
+        next_block_inputs = self.input_targets
+        # -> first block's input = should match original mod's inputs
         for block_id,block_nodes in enumerate(blocks):
+            # 1) preliminary_code
             if block_id == 0:
                 # Special case for first block: Preliminary code
                 preliminary_code = init_node.get_code()
@@ -999,6 +1002,14 @@ class SimplifiedGraph(base.Graph):
                         preliminary_code += f"\n"\
                             f"self._dict_place_holder_for_global_inputs"\
                             f"[{input_target}] = {input_target}"
-                # Need to find module's inputs via signature
+                # Need to match with original module's inputs
+            else:
+                preliminary_code = ""
+            # 2) inputs/outputs
+
+
+
+                blocks[block_id-1][-1].main_target
+                
                         
 
