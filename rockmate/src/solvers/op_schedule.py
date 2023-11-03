@@ -43,6 +43,7 @@ class Op:
         """
         self.name = name
         self.disabled = disabled
+        self.overhead = 0
 
     def __repr__(self):
         return self.name
@@ -55,6 +56,7 @@ class ComputeOp(Op):
         self.fast_forward = fast_forward
         self.detach = detach
         self.target = kcn
+        self.overhead = kcn.overhead
 
     def __copy__(self):
         cls = self.__class__
@@ -95,10 +97,11 @@ class MappingOp(Op):
         indices: list = None,
         disabled=False,
     ):
-        super().__init__(name, disabled, name)
+        super().__init__("Mapping_" + name, disabled, name)
         self.sources = sources
         self.targets = targets
         self.indices = indices
+        self.overhead = sum(alloc.size for alloc in sources)  # TODO: update when needed
 
 
 class AllocateOp(Op):
@@ -117,7 +120,7 @@ class OffloadOp(Op):
         disabled: bool = False,
     ):
         super().__init__("Offload_" + alloc.name, disabled)
-        self.alloc = alloc
+        self.target = None  # target is in CPU
         self.fraction = fraction
         self.disabled = disabled
         self.before = before
@@ -137,7 +140,7 @@ class PrefetchOp(Op):
         disabled: bool = False,
     ):
         super().__init__("Prefetch_" + alloc.name, disabled)
-        self.alloc = alloc
+        self.target = alloc
         self.fraction = fraction
         self.disabled = disabled
         self.before = before
@@ -161,6 +164,7 @@ class OpSchedule:
         refine=True,
         correct_overhead=True,
         keep_alive_list=False,
+        with_parameters=False,
     ):
         """
         Key role of OpSchedule: taking op_list, analyzing memory stats,
@@ -179,52 +183,17 @@ class OpSchedule:
                     break
         else:
             self.loss_idx = loss_idx
-
         if cluster is not None:
             self.interfaces = cluster.interfaces
             self.list_kdn = cluster.list_kdn
             self.dict_kn = cluster.dict_kn
-        else:  # if cluster is not given, get info from op_list
-            self.interfaces = interfaces or {
-                "inputs_kdn_data": set(),
-                "outputs_kdn_data": set(),
-                "inputs_kdn_grad": set(),
-                "outputs_kdn_grad": set(),
-            }
-            self.list_kdn = []
-            for op in self.op_list:
-                if op.is_del:
-                    self.list_kdn.append(op.kn)
-                else:
-                    self.list_kdn.extend(op.kn.users_global)
-                    self.list_kdn.extend(op.kn.deps_global)
-            self.dict_kn = {kdn.name: kdn for kdn in self.list_kdn}  # kcn not used
-        self.all_interfaces = [
-            kdn for inter in self.interfaces.values() for kdn in inter
-        ]  # all interface KDN's
-        self.interface_names = [kdn.name for kdn in self.all_interfaces]
-
-        self.op_name_list = [
-            (op.name if not op.disabled else "") for op in self.op_list
-        ]
+        else:
+            self.prepare_allocation_from_op_list(with_parameters, interfaces)
 
         if refine:
             self.refine()
 
-        alive_status = {
-            kdn.name: kdn in self.interfaces["inputs_kdn_data"] for kdn in self.list_kdn
-        }
-
-        alive_list = []
-        for op in self.op_list:
-            if op.is_del:
-                if not op.disabled:
-                    alive_status[op.kn.name] = False
-            else:  # compute op should not be disabled except loss which is useful for alive status
-                for kdn in op.kn.users:
-                    if not ("phantoms" in kdn.name and op.fast_forward):
-                        alive_status[kdn.name] = True
-            alive_list.append(alive_status.copy())
+        alive_list = self.create_alive_list()
 
         L = len(self.op_list)
         self.time = np.zeros(L)
@@ -246,7 +215,7 @@ class OpSchedule:
             self.save_mem[i] = _sum_mem(alive_status, self.interface_names)
             if (not op.is_del) and (not op.disabled):
                 self.time[i] = op.kn.time
-                self.overhead[i] = op.kn.overhead
+                self.overhead[i] = op.overhead
 
         self.mem = self.save_mem[self.loss_idx]
         self.fwd_time = np.sum(self.time[: self.loss_idx + 1])
@@ -288,6 +257,30 @@ class OpSchedule:
 
         if keep_alive_list:
             self.alive_list = alive_list
+
+    def prepare_allocation_from_op_list(self, interfaces, with_parameters=False):
+        self.interfaces = interfaces or {
+            "inputs_kdn_data": set(),
+            "outputs_kdn_data": set(),
+            "inputs_kdn_grad": set(),
+            "outputs_kdn_grad": set(),
+        }
+        self.list_kdn = []
+        for op in self.op_list:
+            if op.is_del:
+                self.list_kdn.append(op.kn)
+            else:
+                self.list_kdn.extend(op.kn.users_global)
+                self.list_kdn.extend(op.kn.deps_global)
+        self.dict_kn = {kdn.name: kdn for kdn in self.list_kdn}  # kcn not used
+        self.all_interfaces = [
+            kdn for inter in self.interfaces.values() for kdn in inter
+        ]  # all interface KDN's
+        self.interface_names = [kdn.name for kdn in self.all_interfaces]
+
+        self.op_name_list = [
+            (op.name if not op.disabled else "") for op in self.op_list
+        ]
 
     def create_alive_list(self):
         alive_status = {
