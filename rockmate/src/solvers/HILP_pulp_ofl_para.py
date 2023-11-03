@@ -5,7 +5,17 @@ import numpy as np
 from copy import deepcopy
 from pulp import *
 
-from .op_schedule import Op, OpSchedule, OflOp, PrfOp
+from .op_schedule import (
+    Activation,
+    Parameter,
+    Buffer,
+    ComputeOp,
+    DeleteOp,
+    MappingOp,
+    AllocateOp,
+    OffloadOp,
+    PrefetchOp,
+)
 from rkgb.Htools import *
 from rkgb.utils.global_vars import solver_name
 
@@ -104,7 +114,7 @@ class ModelPULP:
         ]
 
         T = len(self.hgraph.list_hcn)
-        W = len(self.hgraph.list_hcn)//2  # for now, one weight for each layer
+        W = len(self.hgraph.list_hcn) // 2  # for now, one weight for each layer
         I = len(self.hgraph.list_hdn)
         J = len(self.list_list_sched)
 
@@ -214,10 +224,10 @@ class ModelPULP:
         # to present whether one saved tensor can be inheritaged from the last stage
         self.AliveA = LpVariable.dicts(
             "AliveA", [(t, i) for t in range(T) for i in range(Cr)], cat="Binary"
-        )# activation
+        )  # activation
         self.AliveT = LpVariable.dicts(
             "AliveT", [(t, i) for t in range(T) for i in range(I)], cat="Binary"
-        )# tensor that can be shared by acts
+        )  # tensor that can be shared by acts
         self.create = LpVariable.dicts(
             "create", [(t, i) for t in range(T) for i in range(Cr)], cat="Binary"
         )
@@ -230,34 +240,39 @@ class ModelPULP:
                 "AliveW",
                 [(t, i, j) for t in range(T) for i in range(T) for j in range(W)],
                 cat="Continuous",
-                lowBound = 0,
-                upBound=1
+                lowBound=0,
+                upBound=1,
             )  # weight w is alive at the start of step j.
             self.OflW = LpVariable.dicts(
                 "OflW",
                 [(t, i, j) for t in range(T) for i in range(T) for j in range(W)],
                 cat="Continuous",
-                lowBound = 0,
-                upBound=1
+                lowBound=0,
+                upBound=1,
             )
             self.PrfW = LpVariable.dicts(
                 "PrfW",
                 [(t, i, j) for t in range(T) for i in range(T) for j in range(W)],
                 cat="Continuous",
-                lowBound = 0,
-                upBound=1
+                lowBound=0,
+                upBound=1,
             )
             # self.weights_size = [3e7 for _ in range(W)]
             self.weights_size = []
             for i in range(W):
                 sub_cluster = self.hgraph.list_hcn[i].sub_cluster
                 if hasattr(sub_cluster, "list_kdn_parameters"):
-                    self.weights_size.append(sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters) / self.gcd)
+                    self.weights_size.append(
+                        sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters)
+                        / self.gcd
+                    )
                 else:
                     self.weights_size.append(0)
             # print(self.weights_size)
-            self.weight2hcn = {w: [w, T-w-1] for w in range(W)}
-            self.hcn2weight = {k:w for w in self.weight2hcn for k in self.weight2hcn[w]}
+            self.weight2hcn = {w: [w, T - w - 1] for w in range(W)}
+            self.hcn2weight = {
+                k: w for w in self.weight2hcn for k in self.weight2hcn[w]
+            }
             self.bandwidthOfl = 8 * 1024**2  # byte/ms
             self.bandwidthPrf = 8 * 1024**2  # byte/ms
 
@@ -267,32 +282,37 @@ class ModelPULP:
 
         # define objective function
         self.md = LpProblem(f"rockmateMILP", LpMinimize)
-        self.md += lpSum(
-            self.Time[t, i]
-            for t in range(T)
-            for i in range(T)
-        )
+        self.md += lpSum(self.Time[t, i] for t in range(T) for i in range(T))
 
         ##### Time constraints
         for t in range(T):
             for i in range(T):
                 self.md += (
-                    self.Time[t, i] >= 
-                    lpSum(self.Comp[i][t,o] * self.time[i][o]
-                    for o in range(self.nR[i])),
+                    self.Time[t, i]
+                    >= lpSum(
+                        self.Comp[i][t, o] * self.time[i][o] for o in range(self.nR[i])
+                    ),
                     "",
                 )
                 if self.enable_offload:
                     self.md += (
-                        self.Time[t, i] >= 
-                        lpSum(self.weights_size[w] /self.bandwidthPrf
-                        * self.PrfW[t,i,w] for w in range(W)),
+                        self.Time[t, i]
+                        >= lpSum(
+                            self.weights_size[w]
+                            / self.bandwidthPrf
+                            * self.PrfW[t, i, w]
+                            for w in range(W)
+                        ),
                         "",
                     )
                     self.md += (
-                        self.Time[t, i] >= 
-                        lpSum(self.weights_size[w]/self.bandwidthOfl
-                        * self.OflW[t,i,w] for w in range(W)),
+                        self.Time[t, i]
+                        >= lpSum(
+                            self.weights_size[w]
+                            / self.bandwidthOfl
+                            * self.OflW[t, i, w]
+                            for w in range(W)
+                        ),
                         "",
                     )
 
@@ -364,8 +384,6 @@ class ModelPULP:
                 == 0,
                 "",
             )
-
-        
 
         # options don't conflict
         for i in range(T):
@@ -455,7 +473,6 @@ class ModelPULP:
                                     "",
                                 )
 
-
         #### Offload constraints
         if self.enable_offload:
             self.OflWProg = dict()
@@ -463,45 +480,59 @@ class ModelPULP:
                 for i in range(T):
                     for w in range(W):
                         bwd_i = max(self.weight2hcn[w])
-                        if bwd_i<t:#after bwd of w
-                            self.OflWProg[(t,i,w)] = (lpSum(self.OflW[t,ii,w] for ii in range(i)) +
-                                lpSum(self.OflW[tt,ii,w] for tt in range(bwd_i+1, t) for ii in range(T)))
+                        if bwd_i < t:  # after bwd of w
+                            self.OflWProg[(t, i, w)] = lpSum(
+                                self.OflW[t, ii, w] for ii in range(i)
+                            ) + lpSum(
+                                self.OflW[tt, ii, w]
+                                for tt in range(bwd_i + 1, t)
+                                for ii in range(T)
+                            )
                         else:
-                            self.OflWProg[(t,i,w)] = (lpSum(self.OflW[t,ii,w] for ii in range(i)) + 
-                                lpSum(self.OflW[tt,ii,w] for tt in range(t) for ii in range(T)) +
-                                lpSum(self.OflW[tt,ii,w] for tt in range(bwd_i+1, T) for ii in range(T)))
+                            self.OflWProg[(t, i, w)] = (
+                                lpSum(self.OflW[t, ii, w] for ii in range(i))
+                                + lpSum(
+                                    self.OflW[tt, ii, w]
+                                    for tt in range(t)
+                                    for ii in range(T)
+                                )
+                                + lpSum(
+                                    self.OflW[tt, ii, w]
+                                    for tt in range(bwd_i + 1, T)
+                                    for ii in range(T)
+                                )
+                            )
                         self.md += (
-                            self.AliveW[t, i, w] + self.OflWProg[(t,i,w)]
-                            >= 1,
+                            self.AliveW[t, i, w] + self.OflWProg[(t, i, w)] >= 1,
                             "",
                         )
                         if i < T - 1:
                             self.md += (
                                 self.AliveW[t, i + 1, w]
-                                <= self.AliveW[t, i, w] + self.sumComp[(i,t)],
+                                <= self.AliveW[t, i, w] + self.sumComp[(i, t)],
                                 "",
                             )
                             self.md += (
                                 self.AliveW[t, i + 1, w]
-                                >= self.AliveW[t, i, w] - self.sumComp[(i,t)],
+                                >= self.AliveW[t, i, w] - self.sumComp[(i, t)],
                                 "",
                             )
                             self.md += (
                                 self.AliveW[t, i + 1, w]
                                 <= self.AliveW[t, i, w] + self.PrfW[t, i, w],
-                                ""
+                                "",
                             )
             for w in range(W):
-                for t in range(T-1):
+                for t in range(T - 1):
                     self.md += (
-                        self.AliveW[t+1, 0, w]
-                        <= self.AliveW[t, T-1, w] + self.PrfW[t, T-1, w],
-                        ""
+                        self.AliveW[t + 1, 0, w]
+                        <= self.AliveW[t, T - 1, w] + self.PrfW[t, T - 1, w],
+                        "",
                     )
                 self.md += (
                     self.AliveW[0, 0, w]
-                    <= self.AliveW[T-1, T-1, w] + self.PrfW[T-1, T-1, w],
-                    ""
+                    <= self.AliveW[T - 1, T - 1, w] + self.PrfW[T - 1, T - 1, w],
+                    "",
                 )
 
         ##### Memory constraints
@@ -655,8 +686,9 @@ class ModelPULP:
             for k in range(T):
                 if self.enable_offload:
                     # weight_mem = 0
-                    weight_mem = lpSum(self.AliveW[t,k,w]*self.weights_size[w]
-                                       for w in range(W))
+                    weight_mem = lpSum(
+                        self.AliveW[t, k, w] * self.weights_size[w] for w in range(W)
+                    )
                 else:
                     weight_mem = 0
                 j = self.hcn2sub_c[k]
@@ -763,7 +795,7 @@ class ModelPULP:
             solver = get_solver(solver, msg=0)
         except:
             avail_solver = listSolvers(onlyAvailable=True)[0]
-        #     print(f"Cannot get {solver}, will use {avail_solver}")
+            #     print(f"Cannot get {solver}, will use {avail_solver}")
             solver = get_solver(avail_solver, msg=0)
 
         status = self.md.solve(solver)
@@ -799,6 +831,169 @@ class ModelPULP:
         def sol(value):
             return value > 0.9999  # inttol
 
+        if self.enable_offload:
+            op_list, ofl_list, prf_list = self.greedy_post_processing(hgraph)
+        else:
+            op_list = []
+            ofl_list = []
+            prf_list = []
+            for t in range(T):
+                for k in range(T):
+                    if t == self.loss_idx and k == self.loss_idx:
+                        # loss_idx = len(op_list)
+                        # loss_op = Op(K_C_node("loss"))
+
+                        op_list.append(ComputeOp(self.hgraph.cluster.loss_kcn))
+                    j = self.hcn2sub_c[k]
+                    # if self.sumComp[(k, t)].value() == 1:
+                    if sol(self.sumComp[(k, t)].value()):
+                        hcn = hgraph.list_hcn[k]
+                        opt = -1
+                        for o in range(self.nOpts[k]):
+                            if sol(self.Comp[k][t, o].value()):
+                                opt = o
+                                break
+                        if opt > -1:
+                            h_obj = self.list_list_sched[j][opt]
+                            if hcn.is_fwd:
+                                # sub_op_list = deepcopy(
+                                #     h_obj.op_list[: h_obj.loss_idx]
+                                # )
+                                sub_op_list = h_obj.op_list[: h_obj.loss_idx]
+                            else:
+                                sub_op_list = h_obj.op_list[h_obj.loss_idx + 1 :]
+
+                                # if self.sumAliveP[(j, t + 1)].value() == 0:
+                                # sub_op_list.append()
+                            sub_op_list = deepcopy(sub_op_list)
+
+                            if (
+                                not hcn.is_fwd
+                                # and self.sumAliveP[(j, t + 1)].value() > 0
+                                and sol(self.sumAliveP[(j, t + 1)].value())
+                            ):  # phantoms should be kept
+                                phantoms_to_keep = h_obj.phantoms
+                                for op in sub_op_list[::-1]:
+                                    if (
+                                        op.is_del
+                                        and not op.disabled
+                                        and op.kn in phantoms_to_keep
+                                    ):
+                                        # Only the last del should be disabled
+                                        op.disabled = True
+                                        phantoms_to_keep.remove(op.kn)
+
+                            # translating sub_op_list
+                            if (
+                                hcn.sub_cluster
+                                is not hcn.sub_cluster.representee_cluster
+                            ):
+                                sub_op_list = hcn.sub_cluster.translate_op_list(
+                                    sub_op_list
+                                )
+                                # translator_re = (
+                                #     hcn.sub_cluster.representee_cluster.translator
+                                # )
+                                # translator = hcn.sub_cluster.translator
+                                # for op in sub_op_list:
+                                #     if op.is_del:
+                                #         ana_kn = (
+                                #             translator_re.dict_name_to_ano_triplet[
+                                #                 op.kn.name
+                                #             ]
+                                #         )
+                                #         op.kn = translator.dict_ano_triplet_to_kdn[
+                                #             ana_kn
+                                #         ]
+                                #     else:
+                                #         ana_kn = (
+                                #             translator_re.dict_name_to_ano_triplet[
+                                #                 op.kn.name
+                                #             ]
+                                #         )
+                                #         op.kn = translator.dict_ano_triplet_to_kcn[
+                                #             ana_kn
+                                #         ]
+
+                        else:
+                            h_obj = hcn
+                            sub_op_list = deepcopy(h_obj.ff_op_list)
+
+                        op_list += sub_op_list
+
+                    for eidx, (k_, i) in enumerate(self.delete_list):
+                        # print(k_, i)
+                        # if k == k_ and self.delete[t, eidx].value()==1:
+                        if k == k_ and sol(self.delete[t, eidx].value()):
+                            hdn = hgraph.list_hdn[i]
+                            op_list.append(DeleteOp(Activation(hdn.kdn)))
+
+                # if self.enable_offload:
+                #     for w in range(W):
+                #         weight = self.hgraph.list_hcn[self.weight2hcn[w][0]].sub_cluster
+                #         if self.OflW[(t,k,w)].value()>0:
+                #             ofl_list.append(OflOp(target=weight.name,
+                #                                   fraction=self.OflW[(t,k,w)].value(),
+                #                                   after=op_list[-1]))
+                #         if self.PrfW[(t,k,w)].value()>0:
+                #             prf_list.append(PrfOp(target=weight.name,
+                #                                   fraction=self.PrfW[(t,k,w)].value(),
+                #                                   after=op_list[-1]))
+
+        # interfaces = dict()
+        # interfaces["inputs_kdn_data"] = set(
+        #     hdn.kdn for hdn in hgraph.inputs_hdn_data
+        # )
+        # interfaces["outputs_kdn_data"] = set(
+        #     hdn.kdn for hdn in hgraph.outputs_hdn_data
+        # )
+        # interfaces["inputs_kdn_grad"] = set(
+        #     hdn.kdn for hdn in hgraph.inputs_hdn_grad
+        # )
+        # interfaces["outputs_kdn_grad"] = set(
+        #     hdn.kdn for hdn in hgraph.outputs_hdn_grad
+        # )
+        # loss_idx =
+        ### debug
+        # no_bwd = True
+        # for op in op_list:
+        #     if "bwd" in op.name:
+        #         no_bwd = False
+        # if no_bwd:
+        #     raise("wrong solution")
+        op_sched = OpSchedule(
+            op_list,
+            ofl_list=ofl_list,
+            prf_list=prf_list,
+            loss_idx=None,
+            cluster=self.hgraph.cluster,
+        )
+        # check_valid = True
+        if check_valid:
+            for op, alive_status in zip(op_sched.op_list, op_sched.alive_list):
+                if op.is_del:
+                    continue
+                for kdn in op.kn.deps_real:
+                    if not alive_status[kdn.name]:
+                        print(f"Invalid sched found: try to run {op.kn} without {kdn}")
+                        raise ValueError
+        return op_sched
+
+    def greedy_post_processing(self, hgraph=None):
+        """
+        V1: merge every cluster, ofl/prf/del partially, high memory overhead
+        """
+        hgraph = hgraph if hgraph else self.hgraph
+        assert self.feasible, "Cannot schedule an infeasible model!"
+        T = len(hgraph.list_hcn)
+        I = len(hgraph.list_hdn)
+        J = len(self.list_list_sched)
+        if self.enable_offload:
+            W = len(self.weights_size)
+
+        def sol(value):
+            return value > 0.9999  # inttol
+
         op_list = []
         ofl_list = []
         prf_list = []
@@ -808,11 +1003,12 @@ class ModelPULP:
                     # loss_idx = len(op_list)
                     # loss_op = Op(K_C_node("loss"))
 
-                    op_list.append(Op(self.hgraph.cluster.loss_kcn))
+                    op_list.append(ComputeOp(self.hgraph.cluster.loss_kcn))
                 j = self.hcn2sub_c[k]
                 # if self.sumComp[(k, t)].value() == 1:
                 if sol(self.sumComp[(k, t)].value()):
                     hcn = hgraph.list_hcn[k]
+
                     opt = -1
                     for o in range(self.nOpts[k]):
                         if sol(self.Comp[k][t, o].value()):
@@ -851,89 +1047,57 @@ class ModelPULP:
                         # translating sub_op_list
                         if hcn.sub_cluster is not hcn.sub_cluster.representee_cluster:
                             sub_op_list = hcn.sub_cluster.translate_op_list(sub_op_list)
-                            # translator_re = (
-                            #     hcn.sub_cluster.representee_cluster.translator
-                            # )
-                            # translator = hcn.sub_cluster.translator
-                            # for op in sub_op_list:
-                            #     if op.is_del:
-                            #         ana_kn = (
-                            #             translator_re.dict_name_to_ano_triplet[
-                            #                 op.kn.name
-                            #             ]
-                            #         )
-                            #         op.kn = translator.dict_ano_triplet_to_kdn[
-                            #             ana_kn
-                            #         ]
-                            #     else:
-                            #         ana_kn = (
-                            #             translator_re.dict_name_to_ano_triplet[
-                            #                 op.kn.name
-                            #             ]
-                            #         )
-                            #         op.kn = translator.dict_ano_triplet_to_kcn[
-                            #             ana_kn
-                            #         ]
 
                     else:
                         h_obj = hcn
                         sub_op_list = deepcopy(h_obj.ff_op_list)
 
-                    op_list += sub_op_list
+                    if hcn.sub_cluster is None:
+                        continue
+                    parameters = [
+                        kdn.name for kdn in hcn.sub_cluster.list_kdn_parameters
+                    ]
+                    # op_list.append(
+                    #     MapOp(
+                    #         sources=hcn.sub_cluster.name,
+                    #         targets=parameters,
+                    #         before=sub_op_list[0],
+                    #     )
+                    # )
+                    # op_list += sub_op_list
+                    # op_list.append(
+                    #     MapOp(
+                    #         sources=parameters,
+                    #         targets=hcn.sub_cluster.name,
+                    #         after=op_list[-1],
+                    #     )
+                    # )
 
                 for eidx, (k_, i) in enumerate(self.delete_list):
                     # print(k_, i)
                     # if k == k_ and self.delete[t, eidx].value()==1:
                     if k == k_ and sol(self.delete[t, eidx].value()):
                         hdn = hgraph.list_hdn[i]
-                        op_list.append(Op(hdn.kdn))
+                        op_list.append(DeleteOp(Activation(hdn.kdn)))
 
-                if self.enable_offload:
-                    for w in range(W):
-                        weight = self.hgraph.list_hcn[self.weight2hcn[w][0]].sub_cluster
-                        if self.OflW[(t,k,w)].value()>0:
-                            ofl_list.append(OflOp(target=weight.name, 
-                                                  fraction=self.OflW[(t,k,w)].value(),
-                                                  after=op_list[-1]))
-                        if self.PrfW[(t,k,w)].value()>0:
-                            prf_list.append(PrfOp(target=weight.name, 
-                                                  fraction=self.PrfW[(t,k,w)].value(),
-                                                  after=op_list[-1]))
-
-
-        # interfaces = dict()
-        # interfaces["inputs_kdn_data"] = set(
-        #     hdn.kdn for hdn in hgraph.inputs_hdn_data
-        # )
-        # interfaces["outputs_kdn_data"] = set(
-        #     hdn.kdn for hdn in hgraph.outputs_hdn_data
-        # )
-        # interfaces["inputs_kdn_grad"] = set(
-        #     hdn.kdn for hdn in hgraph.inputs_hdn_grad
-        # )
-        # interfaces["outputs_kdn_grad"] = set(
-        #     hdn.kdn for hdn in hgraph.outputs_hdn_grad
-        # )
-        # loss_idx =
-        ### debug
-        # no_bwd = True
-        # for op in op_list:
-        #     if "bwd" in op.name:
-        #         no_bwd = False
-        # if no_bwd:
-        #     raise("wrong solution")
-        op_sched = OpSchedule(op_list, 
-                              ofl_list=ofl_list, 
-                              prf_list=prf_list,
-                              loss_idx=None, 
-                              cluster=self.hgraph.cluster)
-        # check_valid = True
-        if check_valid:
-            for op, alive_status in zip(op_sched.op_list, op_sched.alive_list):
-                if op.is_del:
-                    continue
-                for kdn in op.kn.deps_real:
-                    if not alive_status[kdn.name]:
-                        print(f"Invalid sched found: try to run {op.kn} without {kdn}")
-                        raise ValueError
-        return op_sched
+                for w in range(W):
+                    sub_cluster = self.hgraph.list_hcn[
+                        self.weight2hcn[w][0]
+                    ].sub_cluster
+                    # if self.OflW[(t, k, w)].value() > 0:
+                    #     ofl_list.append(
+                    #         OflOp(
+                    #             target=sub_cluster.name,
+                    #             fraction=self.OflW[(t, k, w)].value(),
+                    #             after=op_list[-1],
+                    #         )
+                    #     )
+                    # if self.PrfW[(t, k, w)].value() > 0:
+                    #     prf_list.append(
+                    #         PrfOp(
+                    #             target=sub_cluster.name,
+                    #             fraction=self.PrfW[(t, k, w)].value(),
+                    #             after=op_list[-1],
+                    #         )
+                    #     )
+        return op_list, ofl_list, prf_list

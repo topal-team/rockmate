@@ -4,7 +4,7 @@ from copy import deepcopy
 from rkgb.Htools import H_C_node, H_D_node, H_graph, H_cluster
 from rkgb.Ktools import K_C_node, K_D_node
 from rkgb.utils.ast_add_on import ast_to_str
-from .op_schedule import Op, OpSchedule
+from .op_schedule import OpSchedule, ComputeOp, DeleteOp, Activation
 import time
 import psutil
 
@@ -233,7 +233,7 @@ def preprocess(cluster: H_cluster, protect_names=[]):
                 if hcn.sub_cluster is None:  # fwd with no grad
                     if hcn.name in cluster.dict_kn:
                         kcn = cluster.dict_kn[hcn.name]
-                        ff_op_list = [Op(kcn, fast_forward=True)]
+                        ff_op_list = [ComputeOp(kcn, fast_forward=True)]
                         hcn.ff_time = kcn.time
                         hcn.ff_overhead = kcn.overhead
                     else:  # loss node
@@ -263,7 +263,7 @@ def preprocess(cluster: H_cluster, protect_names=[]):
                         ff=True,
                     )
                     ff_op_sched = OpSchedule(
-                        ff_op_list + [Op(K_C_node("loss"))],
+                        ff_op_list + [ComputeOp(K_C_node("loss"))],
                         cluster=cluster,
                         correct_overhead=False,
                     )  # not real sched, only for info
@@ -311,7 +311,7 @@ def get_single_compute_op_list(
                 continue
             alive_status[kdn.name] = 1
         op_list.append(
-            Op(
+            ComputeOp(
                 kcn,
                 detach=True,  # not with_bwd,
                 fast_forward=ff,
@@ -324,7 +324,8 @@ def get_single_compute_op_list(
             if alive:
                 kdn = cluster.dict_kn[kdn_name]
                 if _can_del(i, kdn):
-                    op_list.append(Op(kdn))
+                    op_list.append(DeleteOp(Activation(kdn)))
+
                     alive_status[kdn_name] = 0
                     # alive_list.append(alive_status.copy())
 
