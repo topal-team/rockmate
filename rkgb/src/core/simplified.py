@@ -921,8 +921,8 @@ class SimplifiedGraph(base.Graph):
 
         class BlockModule(torch.nn.Module):
             def __init__(self,
-                    input_targets,
                     nodes,
+                    input_targets,
                     output_targets,
                     dict_place_holder_for_global_inputs,
                     preliminary_code : str = None,
@@ -989,8 +989,11 @@ class SimplifiedGraph(base.Graph):
 
         # Main loop to instantiate all BlockModules one by one
         blocks = self.sequentialized_list_of_blocks_of_nodes
+        len_blocks = len(blocks)
         next_block_inputs = self.input_targets
         # -> first block's input = should match original mod's inputs
+        block_nn_modules = []
+        shared_dict_for_global_inputs = dict()
         for block_id,block_nodes in enumerate(blocks):
             # 1) preliminary_code
             if block_id == 0:
@@ -1005,11 +1008,43 @@ class SimplifiedGraph(base.Graph):
                 # Need to match with original module's inputs
             else:
                 preliminary_code = ""
-            # 2) inputs/outputs
-
-
-
-                blocks[block_id-1][-1].main_target
+            # 2) post_process_code
+            if block_id == len_blocks-1:
+                post_process_code \
+                    = "self._dict_place_holder_for_global_inputs.clear()"
+            else:
+                post_process_code = ""
+            # 3) inputs/outputs
+            input_targets = next_block_inputs
+            if block_id == len_blocks-1:
+                output_targets = self.original_mod_output_targets
+            else:
+                output_node = block_nodes[-1]
+                next_block_input_node = blocks[block_id+1][0]
+                output_targets = list(
+                    self.dict_of_labels_on_edges[
+                    (output_node,next_block_input_node)])
+            next_block_inputs = output_targets
+            # 4) create the block
+            block_nn_modules.append(
+                BlockModule(
+                    block_nodes,
+                    input_targets,
+                    output_targets,
+                    shared_dict_for_global_inputs,
+                    preliminary_code,
+                    post_process_code
+                )
+            )
+        final_sequential_module = torch.nn.Sequential(block_nn_modules)
+        # Just for easy access in case the user wants:
+        setattr(final_sequential_module,
+            "_dict_place_holder_for_global_inputs",
+            shared_dict_for_global_inputs)
+        setattr(final_sequential_module,
+            "_dict_constants",
+            self.dict_constants)
+        return final_sequential_module
                 
                         
 

@@ -9,6 +9,7 @@ __all__ = [
     "get_FNO3d",
     "get_UFNO",
     "get_UNO",
+    "get_Bert",
     "LossLayer",
     "get_iterator_over_all_examples",
     "sanity_check_forward_and_backward",
@@ -149,6 +150,17 @@ def get_UNO(device,batchsize=2):
     return model,sample
 def get_fst_param_UNO(model):
     return model.fc.weight
+
+# =========================================================
+
+def get_Bert(device):
+    from transformers import BertTokenizer, BertModel
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    model = BertModel.from_pretrained("bert-base-uncased")
+    model.to(device)
+    text = "Replace "*20
+    encoded_input = tokenizer(text, return_tensors='pt').to(device)
+    return model,dict(encoded_input)
 
 # =========================================================
 
