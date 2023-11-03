@@ -6,20 +6,55 @@ from collections import namedtuple
 from copy import deepcopy
 
 
-class Op:
-    def __init__(self, kn, fast_forward=False, disabled=False, detach=True):
-        self.kn = kn
-        self.fast_forward = fast_forward
-        self.disabled = disabled
-        self.detach = detach
-        self.is_del = isinstance(kn, K_D_node)
-
-    @property
-    def name(self):
-        return self.kn.name
+class Allocation:
+    def __init__(self, name, allo_type="", size=0, info=dict()):
+        """
+        Allocation type should be in activation/paramters/buffer
+        """
+        self.name = name
+        self.allo_type = allo_type
+        self.size = size
+        self.info = info
 
     def __repr__(self):
-        return "Disabled" * self.disabled + self.name
+        return self.name
+
+
+class Activation(Allocation):
+    def __init__(self, kdn):
+        super().__init__(kdn.name, "Activation", kdn.mem, kdn.info)
+
+
+class Parameter(Allocation):
+    def __init__(self, kdn):
+        super().__init__(kdn.name, "Parameter", kdn.mem, kdn.info)
+
+
+class Buffer(Allocation):
+    def __init__(self, name, size=0, info=dict()):
+        super().__init__(name, "Buffer", size, info)
+
+
+class Op:
+    def __init__(self, name, disabled=False):
+        """
+        Op type should be in Compute/Delete/Mapping/Allocate/Offload/Prefetch
+        Compute/Delete/Mapping/Allocate happens in the main stream
+        """
+        self.name = name
+        self.disabled = disabled
+
+    def __repr__(self):
+        return self.name
+
+
+class ComputeOp(Op):
+    def __init__(self, kcn, fast_forward=False, disabled=False, detach=True):
+        super().__init__("Compute_" + kcn.name, disabled)
+        self.kcn = kcn
+        self.fast_forward = fast_forward
+        self.detach = detach
+        self.target = kcn
 
     def __copy__(self):
         cls = self.__class__
@@ -32,62 +67,94 @@ class Op:
         result = cls.__new__(cls)
         memo[id(self)] = result
         for k, v in self.__dict__.items():
-            if k == "kn":  # do not deepcopy kn
+            if k == "kcn":  # do not deepcopy kn
                 setattr(result, k, v)
             else:
                 setattr(result, k, deepcopy(v, memo))
 
         return result
-    
-class MapOp():
-    # The memory allocation of sources will be map to targets in buffer.
-    # the time of running this op is very short, but there is
-    # a memory overhead of size sources during this time.
-    def __init__(self, sources, targets, indices=None, before=None, after=None, disabled=False):
+
+
+class DeleteOp(Op):
+    def __init__(self, alloc: Allocation, disabled=False):
+        super().__init__("Delete_" + alloc.name, disabled)
+        self.target = alloc
+
+
+class Mapping(Op):
+    """
+    The memory allocation of sources will be map to targets in buffer.
+    the time of running this op is very short, but there is memory overhead.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        sources: list,
+        targets: list,
+        indices: list = None,
+        disabled=False,
+    ):
+        super().__init__(name, disabled, name)
         self.sources = sources
         self.targets = targets
         self.indices = indices
-        self.before = before
-        self.after = after
-        self.disabled = disabled
-        self.is_del=False
-
-    @property
-    def name(self):
-        return f"{self.sources} to {self.targets}"
 
 
-class PrfOp():
-    def __init__(self, target, fraction=1., before=None, after=None, disabled=False):
-        self.target = target
+class AllocateOp(Op):
+    def __init__(self, alloc: Allocation, disabled=False):
+        super().__init__("Allocate_" + alloc.name, disabled)
+        self.target = alloc
+
+
+class OffloadOp(Op):
+    def __init__(
+        self,
+        alloc: Allocation,
+        fraction: float = 1.0,
+        before: Op = None,
+        after: Op = None,
+        disabled: bool = False,
+    ):
+        super().__init__("Offload_" + alloc.name, disabled)
+        self.alloc = alloc
         self.fraction = fraction
         self.disabled = disabled
         self.before = before
         self.after = after
 
     def __repr__(self):
-        return "Disabled" * self.disabled + f"{self.fraction//0.0001/100}% {self.target}"
+        return "Disabled" * self.disabled + f"{self.fraction*100:.2%} {self.alloc}"
 
 
-class OflOp():
-    def __init__(self, target, fraction=1., before=None, after=None, disabled=False):
-        self.target = target
+class PrefetchOp(Op):
+    def __init__(
+        self,
+        alloc: Allocation,
+        fraction: float = 1.0,
+        before: Op = None,
+        after: Op = None,
+        disabled: bool = False,
+    ):
+        super().__init__("Prefetch_" + alloc.name, disabled)
+        self.alloc = alloc
         self.fraction = fraction
         self.disabled = disabled
         self.before = before
         self.after = after
-    
+
     def __repr__(self):
-        return "Disabled" * self.disabled + f"{self.fraction//0.0001/100}% {self.target}"
-    
+        return "Disabled" * self.disabled + f"{self.fraction*100:.2%} {self.alloc}"
+
+
 class OpSchedule:
     solver = None
 
     def __init__(
         self,
         op_list,
-        prf_list = [],
-        ofl_list = [],
+        prf_list=[],
+        ofl_list=[],
         loss_idx=None,
         cluster=None,
         interfaces=None,
@@ -95,7 +162,7 @@ class OpSchedule:
         correct_overhead=True,
     ):
         # Key role of OpSchedule: taking op_list, analyzing memory stats,
-        # keeping info for further solving. 
+        # keeping info for further solving.
         # New role: greedy algorithm to rearrange the prefetch/offload ops
         self.op_list = op_list
         self.prf_list = prf_list
@@ -128,9 +195,7 @@ class OpSchedule:
                 else:
                     self.list_kdn.extend(op.kn.users_global)
                     self.list_kdn.extend(op.kn.deps_global)
-            self.dict_kn = {
-                kdn.name: kdn for kdn in self.list_kdn
-            }  # kcn not used
+            self.dict_kn = {kdn.name: kdn for kdn in self.list_kdn}  # kcn not used
         self.all_interfaces = [
             kdn for inter in self.interfaces.values() for kdn in inter
         ]  # all interface KDN's
@@ -148,8 +213,7 @@ class OpSchedule:
         ]
 
         alive_status = {
-            kdn.name: kdn in self.interfaces["inputs_kdn_data"]
-            for kdn in self.list_kdn
+            kdn.name: kdn in self.interfaces["inputs_kdn_data"] for kdn in self.list_kdn
         }
 
         self.alive_list = []
@@ -179,9 +243,7 @@ class OpSchedule:
         def get_overhead_(save, overhead):
             return max(save + overhead) - save[-1]
 
-        for i, (op, alive_status) in enumerate(
-            zip(self.op_list, self.alive_list)
-        ):
+        for i, (op, alive_status) in enumerate(zip(self.op_list, self.alive_list)):
             self.save_mem[i] = _sum_mem(alive_status, self.interface_names)
             if (not op.is_del) and (not op.disabled):
                 self.time[i] = op.kn.time
@@ -219,14 +281,9 @@ class OpSchedule:
                     if kdn in self.interfaces["outputs_kdn_data"]:
                         for kcn in kdn.deps:
                             if (
-                                kcn
-                                not in self.op_name_list[self.loss_idx + 1 :][
-                                    :i
-                                ]
+                                kcn not in self.op_name_list[self.loss_idx + 1 :][:i]
                             ):  # if not generated during bwd
-                                self.dep_interfaces_data.add(
-                                    self.list_kdn.index(kdn)
-                                )
+                                self.dep_interfaces_data.add(self.list_kdn.index(kdn))
 
         self.fwd_overhead_correction = []
         self.bwd_overhead_correction = []
@@ -240,28 +297,20 @@ class OpSchedule:
         for kdn in self.interfaces["inputs_kdn_data"]:  # Input of Fwd
             interfaces_status.append((kdn.name, self.loss_idx))  # After fwd
             if self.list_kdn.index(kdn) in self.dep_interfaces_data:
-                interfaces_status.append(
-                    (kdn.name, len(self.op_list))
-                )  # After Bwd
+                interfaces_status.append((kdn.name, len(self.op_list)))  # After Bwd
         for kdn in self.interfaces["outputs_kdn_data"]:  # Output of Fwd
             interfaces_status.append((kdn.name, 0))  # Before fwd?
             if self.list_kdn.index(kdn) in self.dep_interfaces_data:
-                interfaces_status.append(
-                    (kdn.name, len(self.op_list))
-                )  # After Bwd
+                interfaces_status.append((kdn.name, len(self.op_list)))  # After Bwd
             else:
                 interfaces_status.append((kdn.name, -1))  # After Bwd
 
         for kdn in self.interfaces["outputs_kdn_grad"]:
             interfaces_status.append((kdn.name, len(self.op_list)))  # After Bwd
         for kdn in self.interfaces["inputs_kdn_grad"]:
-            interfaces_status.append(
-                (kdn.name, self.loss_idx + 1)
-            )  # Before Bwd
+            interfaces_status.append((kdn.name, self.loss_idx + 1))  # Before Bwd
         self.interfaces_status = interfaces_status
-        for i, (op, alive_status) in enumerate(
-            zip(self.op_list, self.alive_list)
-        ):
+        for i, (op, alive_status) in enumerate(zip(self.op_list, self.alive_list)):
             if i == self.loss_idx:
                 continue
             correction_term = {
@@ -276,9 +325,7 @@ class OpSchedule:
                     # Otherwise, add kdn to memory
                     if i > self.loss_idx and alive_status[kdn_name] > 0:
                         correction_term["save"] += kdn.mem
-                        correction_term[
-                            (self.list_kdn.index(kdn), False)
-                        ] = -kdn.mem
+                        correction_term[(self.list_kdn.index(kdn), False)] = -kdn.mem
                     continue
 
                 if (
@@ -295,33 +342,20 @@ class OpSchedule:
                     if (  # and not deleted in between
                         kdn_name not in self.op_name_list[index : i + 1]
                     ):
-                        correction_term[
-                            (self.list_kdn.index(kdn), True)
-                        ] = -kdn.mem
+                        correction_term[(self.list_kdn.index(kdn), True)] = -kdn.mem
                     else:
-                        correction_term[
-                            (self.list_kdn.index(kdn), "always")
-                        ] = -kdn.mem
+                        correction_term[(self.list_kdn.index(kdn), "always")] = -kdn.mem
                 else:  # if exist afterwards
                     if not (kdn in self.interfaces["outputs_kdn_data"]) and (
                         kdn.deps
-                        and (
-                            list(kdn.deps)[0].name
-                            in self.op_name_list[i : index + 1]
-                        )
+                        and (list(kdn.deps)[0].name in self.op_name_list[i : index + 1])
                     ):  # and not generated in between
                         # check if output_data is created after i
-                        correction_term[
-                            (self.list_kdn.index(kdn), False)
-                        ] = -kdn.mem
+                        correction_term[(self.list_kdn.index(kdn), False)] = -kdn.mem
                     elif kdn in self.interfaces["inputs_kdn_data"]:
-                        correction_term[
-                            (self.list_kdn.index(kdn), False)
-                        ] = -kdn.mem
+                        correction_term[(self.list_kdn.index(kdn), False)] = -kdn.mem
                     else:
-                        correction_term[
-                            (self.list_kdn.index(kdn), "always")
-                        ] = -kdn.mem
+                        correction_term[(self.list_kdn.index(kdn), "always")] = -kdn.mem
 
             if (
                 i < self.loss_idx
@@ -385,7 +419,9 @@ class OpSchedule:
                     op.disabled = True
 
     def __repr__(self):
-        return f"OpSchedule takes {sum(self.time):.2f}ms and cost {self.mem//1024**2} MiB"
+        return (
+            f"OpSchedule takes {sum(self.time):.2f}ms and cost {self.mem//1024**2} MiB"
+        )
 
     @property
     def peak_mem(self):
@@ -398,9 +434,7 @@ class OpSchedule:
         )
         return (
             sum(
-                op.kn.time
-                for op in self.op_list
-                if (not op.disabled and not op.is_del)
+                op.kn.time for op in self.op_list if (not op.disabled and not op.is_del)
             )
             / sum(kcn.time for kcn in all_kcn)
             - 1
