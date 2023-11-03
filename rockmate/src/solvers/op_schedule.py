@@ -160,6 +160,7 @@ class OpSchedule:
         interfaces=None,
         refine=True,
         correct_overhead=True,
+        keep_alive_list=False,
     ):
         """
         Key role of OpSchedule: taking op_list, analyzing memory stats,
@@ -210,12 +211,11 @@ class OpSchedule:
         if refine:
             self.refine()
 
-
         alive_status = {
             kdn.name: kdn in self.interfaces["inputs_kdn_data"] for kdn in self.list_kdn
         }
 
-        self.alive_list = []
+        alive_list = []
         for op in self.op_list:
             if op.is_del:
                 if not op.disabled:
@@ -224,7 +224,7 @@ class OpSchedule:
                 for kdn in op.kn.users:
                     if not ("phantoms" in kdn.name and op.fast_forward):
                         alive_status[kdn.name] = True
-            self.alive_list.append(alive_status.copy())
+            alive_list.append(alive_status.copy())
 
         L = len(self.op_list)
         self.time = np.zeros(L)
@@ -242,7 +242,7 @@ class OpSchedule:
         def get_overhead_(save, overhead):
             return max(save + overhead) - save[-1]
 
-        for i, (op, alive_status) in enumerate(zip(self.op_list, self.alive_list)):
+        for i, (op, alive_status) in enumerate(zip(self.op_list, alive_list)):
             self.save_mem[i] = _sum_mem(alive_status, self.interface_names)
             if (not op.is_del) and (not op.disabled):
                 self.time[i] = op.kn.time
@@ -254,10 +254,7 @@ class OpSchedule:
 
         self.phantoms = set()
         for kdn in self.list_kdn:
-            if (
-                self.alive_list[self.loss_idx][kdn.name]
-                and not kdn in self.all_interfaces
-            ):
+            if alive_list[self.loss_idx][kdn.name] and not kdn in self.all_interfaces:
                 self.phantoms.add(kdn)
 
         self.fwd_overhead = get_overhead_(
@@ -287,9 +284,29 @@ class OpSchedule:
         self.fwd_overhead_correction = []
         self.bwd_overhead_correction = []
         if correct_overhead:
-            self.correct_overhead()
+            self.correct_overhead(alive_list)
 
-    def correct_overhead(self, refine=True):
+        if keep_alive_list:
+            self.alive_list = alive_list
+
+    def create_alive_list(self):
+        alive_status = {
+            kdn.name: kdn in self.interfaces["inputs_kdn_data"] for kdn in self.list_kdn
+        }
+
+        alive_list = []
+        for op in self.op_list:
+            if op.is_del:
+                if not op.disabled:
+                    alive_status[op.kn.name] = False
+            else:  # compute op should not be disabled except loss which is useful for alive status
+                for kdn in op.kn.users:
+                    if not ("phantoms" in kdn.name and op.fast_forward):
+                        alive_status[kdn.name] = True
+            alive_list.append(alive_status.copy())
+        return alive_list
+
+    def correct_overhead(self, alive_list, refine=True):
         # correction terms of overhead, each term represents one step in op_list
 
         interfaces_status = []
@@ -309,7 +326,7 @@ class OpSchedule:
         for kdn in self.interfaces["inputs_kdn_grad"]:
             interfaces_status.append((kdn.name, self.loss_idx + 1))  # Before Bwd
         self.interfaces_status = interfaces_status
-        for i, (op, alive_status) in enumerate(zip(self.op_list, self.alive_list)):
+        for i, (op, alive_status) in enumerate(zip(self.op_list, alive_list)):
             if i == self.loss_idx:
                 continue
             correction_term = {
@@ -416,7 +433,7 @@ class OpSchedule:
 
                 if max(src_i) > next_used_i:  # try to use before regenerate
                     op.disabled = True
-        
+
         self.op_name_list = [
             (op.name if not op.disabled else "") for op in self.op_list
         ]

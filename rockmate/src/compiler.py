@@ -317,7 +317,7 @@ class Compiler:
 
     def get_del_grad(self, kn, i):
         return [self.fct_del_tensor_grad(kn.main_target)]
-
+    
     def get_prefetch(self, kn, before_idx=None, after_idx=None):
         function_list = []
         # function_list.append(self.fct_mem_alloc(kn.main_target))
@@ -329,6 +329,26 @@ class Compiler:
         function_list.append(self.fct_offload(kn.main_target, after_idx=after_idx))
         return function_list
 
+    def compile(self, op_sched):
+        self.op_sched = op_sched
+        self.op_name_list = op_sched.op_name_list
+        self.alive_list = op_sched.alive_list
+
+        fct_list = []
+        for i, op in enumerate(op_sched.op_list):
+            if "fwd" in op.name:
+                setattr(op.kcn, "proxy", op.proxy)
+                fct_list.append(self.get_fwd(op.kcn, i))
+            elif "bwd" in op.name:
+                fct_list.append(self.get_bwd(op.kcn, i))
+            elif "data" in op.name:
+                fct_list.append(self.get_del_data(op.kdn, i))
+            elif "grad" in op.name:
+                fct_list.append(self.get_del_grad(op.kdn, i))
+            else:
+                fct_list.append([])
+        return fct_list
+
     # H-rockmate
     def compile_from_schedule(self, op_sched):
         fct_list = []
@@ -336,7 +356,8 @@ class Compiler:
         self.op_name_list = [
             (op.name if not op.disabled else "") for op in op_sched.op_list
         ]
-        self.op_list = op_sched.op_list
+        if op_sched.alive_list == []:
+            op_sched.alive_list = op_sched.create_alive_list()
         self.alive_list = op_sched.alive_list
         self.prf_list = op_sched.prf_list
         self.ofl_list = op_sched.ofl_list

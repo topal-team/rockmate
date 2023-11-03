@@ -201,9 +201,11 @@ def solve_recursive(h_cluster: H_cluster, list_solvers=[], skip_self=False):
                 # print(
                 #     f"Time to solve {h_cluster.name} of size {len(h_cluster.list_kcn)}: {time.time() - last_time}"
                 # )
+                # mem = psutil.virtual_memory()
                 # print(
-                #     f"The CPU usage when solving {h_cluster.name} is: ",
-                #     psutil.cpu_percent(4),
+                #     f"The CPU mem usage when solving {h_cluster.name} is: ",
+                #     # psutil.cpu_percent(4)
+                #     mem.used,
                 # )
 
 

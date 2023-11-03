@@ -17,6 +17,7 @@ from .HILP_pulp_ofl_para import ModelPULP
 from .rotor_solver import seq_builder, solve_dp_functional
 from .op_schedule import OpSchedule
 from rkgb.utils.global_vars import solver_name
+import psutil
 
 
 default_time_limit = [60 * 60]
@@ -30,6 +31,7 @@ class HILP(Solver):
             ilp_solver_params={
                 "LogToConsole": 0,
                 "IntegralityFocus": 1,
+                "NodeFileStart":0.5,
             },
             protected_names=["sources data", "sources grad"],
             nb_total_sched=100,
@@ -160,7 +162,12 @@ class HILP(Solver):
                 self.budgets = self.get_budget_list(hg)
             else:
                 self.budgets = budgets
-
+            # mem = psutil.virtual_memory()
+            # print(
+            #         f"The CPU mem usage before solving {cluster.name} is: ",
+            #         # psutil.cpu_percent(4)
+            #         mem.used,
+            #     )
             for budget in self.budgets:
                 if not hasattr(budget, "__iter__"):
                     budget = [budget]
@@ -183,6 +190,7 @@ class HILP(Solver):
         accurate_mem=False,
         print_result=False,
     ):
+        
         gc.collect()
         if not self.can_solve(hg):
             return []
@@ -198,58 +206,68 @@ class HILP(Solver):
         # start = time.time()
         ilp_solver_params = self.config.ilp_solver_params
         ilp_solver_params["TimeLimit"] = self.config.time_limit
-        self.md = self.model_ilp(
-            hg,
-            peak_budget=peak_budget,
-            save_budget=max(save_budget),
-            ilp_solver_params=ilp_solver_params,
-            accurate_mem=accurate_mem,
-            protected_names=self.config.protected_names,
-        )
-        # print(f"model building: {time.time()-start}")
-        sols = set()
-        for sv_budget in np.sort(save_budget)[::-1]:
-            self.md.add_abar_constraint(sv_budget)
-            self.md.solve(self.ilp_solver)
-            # if not self.md.feasible:
-            # if print_result:
-            # print("Not feasible solution")
-            # return []
-            if self.md.feasible == 1:
-                if print_result:
-                    # if True:
-                    # print(
-                    #     f"Solution with obj: {self.md.md.getObjective().getValue()}"
-                    # )
-                    print(
-                        f"Solve Hgraph {hg.name} with {len(hg.list_hcn)} nodes takes {self.md.solve_time:03f}s"
-                    )
-                loss_idx = self.md.loss_idx
-                if solver_name[0] == "gurobi":
-                    time_mem = (
-                        self.md.md.getObjective().getValue(),  # time
-                        self.md.U[(loss_idx, loss_idx)].getValue(),  # save_mem
-                    )
-                else:
-                    time_mem = (
-                        self.md.md.objective.value(),
-                        self.md.U[(loss_idx, loss_idx)].value(),  # save_mem
-                    )
-                if not time_mem in sols:
-                    # start = time.time()
 
-                    sols.add(time_mem)
-                    self.op_sched = self.md.schedule()
-                    # if self.md.md.status==2:
-                    #     status = "opt"
-                    # elif self.md.md.status==9:
-                    #     status = "early_stp"
-                    # else:
-                    #     status = self.md.md.status
+        def solve_md(ilp_solver_params=ilp_solver_params, 
+                     model_ilp = self.model_ilp,
+                     protected_names=self.config.protected_names,
+                     ilp_solver = self.ilp_solver):
+            
+            md = model_ilp(
+                hg,
+                peak_budget=peak_budget,
+                save_budget=max(save_budget),
+                ilp_solver_params=ilp_solver_params,
+                accurate_mem=accurate_mem,
+                protected_names=protected_names,
+            )
+            # print(f"model building: {time.time()-start}")
+            sols = set()
+            for sv_budget in np.sort(save_budget)[::-1]:
+                md.add_abar_constraint(sv_budget)
+                md.solve(ilp_solver)
+                # if not md.feasible:
+                # if print_result:
+                # print("Not feasible solution")
+                # return []
+                if md.feasible == 1:
+                    if print_result:
+                        # if True:
+                        # print(
+                        #     f"Solution with obj: {md.md.getObjective().getValue()}"
+                        # )
+                        print(
+                            f"Solve Hgraph {hg.name} with {len(hg.list_hcn)} nodes takes {md.solve_time:03f}s, used {psutil.virtual_memory().used}B memory"
+                        )
+                    loss_idx = md.loss_idx
+                    if solver_name[0] == "gurobi":
+                        time_mem = (
+                            md.md.getObjective().getValue(),  # time
+                            md.U[(loss_idx, loss_idx)].getValue(),  # save_mem
+                        )
+                    else:
+                        time_mem = (
+                            md.md.objective.value(),
+                            md.U[(loss_idx, loss_idx)].value(),  # save_mem
+                        )
+                    if not time_mem in sols:
+                        # start = time.time()
 
-                    self.op_sched.solver = f"HILP_{self.md.status}"
-                    list_op_sched.append(self.op_sched)
-                    # print(f"scheduling: {time.time()-start}")
-            else:  # if infeasible, no need to try smaller budget
-                return list_op_sched
-        return list_op_sched
+                        sols.add(time_mem)
+                        op_sched = md.schedule()
+                        # if md.md.status==2:
+                        #     status = "opt"
+                        # elif md.md.status==9:
+                        #     status = "early_stp"
+                        # else:
+                        #     status = md.md.status
+
+                        op_sched.solver = f"HILP_{md.status}"
+                        list_op_sched.append(op_sched)
+                        # print(f"scheduling: {time.time()-start}")
+                else:  # if infeasible, no need to try smaller budget
+                    return list_op_sched
+            return list_op_sched
+        return solve_md(ilp_solver_params=ilp_solver_params, 
+                     model_ilp = self.model_ilp,
+                     protected_names=self.config.protected_names,
+                     ilp_solver = self.ilp_solver)
