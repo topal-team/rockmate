@@ -81,7 +81,7 @@ class DeleteOp(Op):
         self.target = alloc
 
 
-class Mapping(Op):
+class MappingOp(Op):
     """
     The memory allocation of sources will be map to targets in buffer.
     the time of running this op is very short, but there is memory overhead.
@@ -161,9 +161,11 @@ class OpSchedule:
         refine=True,
         correct_overhead=True,
     ):
-        # Key role of OpSchedule: taking op_list, analyzing memory stats,
-        # keeping info for further solving.
-        # New role: greedy algorithm to rearrange the prefetch/offload ops
+        """
+        Key role of OpSchedule: taking op_list, analyzing memory stats,
+        keeping info for further solving.
+        New role: greedy algorithm to rearrange the prefetch/offload ops
+        """
         self.op_list = op_list
         self.prf_list = prf_list
         self.ofl_list = ofl_list
@@ -208,9 +210,6 @@ class OpSchedule:
         if refine:
             self.refine()
 
-        self.op_name_list = [
-            (op.name if not op.disabled else "") for op in self.op_list
-        ]
 
         alive_status = {
             kdn.name: kdn in self.interfaces["inputs_kdn_data"] for kdn in self.list_kdn
@@ -417,6 +416,10 @@ class OpSchedule:
 
                 if max(src_i) > next_used_i:  # try to use before regenerate
                     op.disabled = True
+        
+        self.op_name_list = [
+            (op.name if not op.disabled else "") for op in self.op_list
+        ]
 
     def __repr__(self):
         return (
