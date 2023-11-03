@@ -43,12 +43,18 @@ class MapOp():
     # The memory allocation of sources will be map to targets in buffer.
     # the time of running this op is very short, but there is
     # a memory overhead of size sources during this time.
-    def __init__(self, sources, targets, before=None, after=None, disabled=False):
+    def __init__(self, sources, targets, indices=None, before=None, after=None, disabled=False):
         self.sources = sources
         self.targets = targets
+        self.indices = indices
         self.before = before
         self.after = after
         self.disabled = disabled
+        self.is_del=False
+
+    @property
+    def name(self):
+        return f"{self.sources} to {self.targets}"
 
 
 class PrfOp():
@@ -59,6 +65,10 @@ class PrfOp():
         self.before = before
         self.after = after
 
+    def __repr__(self):
+        return "Disabled" * self.disabled + f"{self.fraction//0.0001/100}% {self.target}"
+
+
 class OflOp():
     def __init__(self, target, fraction=1., before=None, after=None, disabled=False):
         self.target = target
@@ -66,7 +76,10 @@ class OflOp():
         self.disabled = disabled
         self.before = before
         self.after = after
-
+    
+    def __repr__(self):
+        return "Disabled" * self.disabled + f"{self.fraction//0.0001/100}% {self.target}"
+    
 class OpSchedule:
     solver = None
 
