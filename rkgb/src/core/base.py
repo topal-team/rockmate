@@ -231,6 +231,7 @@ class Graph():
         self.tracer_used = ""
         self.input_targets = []
         self.output_targets = []
+        self.original_mod_input_targets = []
         self.original_mod_output_targets = []
         self.sources_req_grad = None
         self.dict_constants = dict()
@@ -277,6 +278,7 @@ class Graph():
             "tracer_used",
             "input_targets",
             "output_targets",
+            "original_mod_input_targets",
             "original_mod_output_targets",
             "sources_req_grad",
             "dict_constants",

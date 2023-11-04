@@ -921,6 +921,7 @@ class SimplifiedGraph(base.Graph):
 
         class BlockModule(torch.nn.Module):
             def __init__(self,
+                    i,
                     nodes,
                     input_targets,
                     output_targets,
@@ -929,6 +930,7 @@ class SimplifiedGraph(base.Graph):
                     post_process_code : str = None,
                     ):
                 super().__init__()
+                self.i = i
                 self.input_targets = input_targets
                 self.output_targets = output_targets
                 self._dict_constants = simplified_graph.dict_constants
@@ -976,10 +978,11 @@ class SimplifiedGraph(base.Graph):
             # forward: name the inputs; run each line of code; get the outputs
             def forward(self,*args):
                 dict_local = locals()
+                dict_local["device"] = device
                 for input_target,input_value in zip(self.input_targets,args):
                     dict_local[input_target] = input_value
                 for line_of_code in self.lines_of_code:
-                    exec(line_of_code)
+                    exec(line_of_code,globals(),dict_local)
                 if len(self.output_targets)==1:
                     return dict_local[self.output_targets[0]]
                 else:
@@ -990,7 +993,7 @@ class SimplifiedGraph(base.Graph):
         # Main loop to instantiate all BlockModules one by one
         blocks = self.sequentialized_list_of_blocks_of_nodes
         len_blocks = len(blocks)
-        next_block_inputs = self.input_targets
+        next_block_inputs = self.original_mod_input_targets
         # -> first block's input = should match original mod's inputs
         block_nn_modules = []
         shared_dict_for_global_inputs = dict()
@@ -1007,13 +1010,13 @@ class SimplifiedGraph(base.Graph):
                             f"[{input_target}] = {input_target}"
                 # Need to match with original module's inputs
             else:
-                preliminary_code = ""
+                preliminary_code = None
             # 2) post_process_code
             if block_id == len_blocks-1:
                 post_process_code \
                     = "self._dict_place_holder_for_global_inputs.clear()"
             else:
-                post_process_code = ""
+                post_process_code = None
             # 3) inputs/outputs
             input_targets = next_block_inputs
             if block_id == len_blocks-1:
@@ -1028,6 +1031,7 @@ class SimplifiedGraph(base.Graph):
             # 4) create the block
             block_nn_modules.append(
                 BlockModule(
+                    block_id,
                     block_nodes,
                     input_targets,
                     output_targets,
@@ -1036,7 +1040,7 @@ class SimplifiedGraph(base.Graph):
                     post_process_code
                 )
             )
-        final_sequential_module = torch.nn.Sequential(block_nn_modules)
+        final_sequential_module = torch.nn.Sequential(*block_nn_modules)
         # Just for easy access in case the user wants:
         setattr(final_sequential_module,
             "_dict_place_holder_for_global_inputs",

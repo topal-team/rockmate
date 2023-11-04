@@ -112,7 +112,7 @@ class RawGraph(base.Graph):
         output_variable : RawJitParserVariable = parser.parse(
             jit_result, "self", "forward", [], is_main=True
         )
-        self.input_targets = parser.input_targets
+        self.original_mod_input_targets = self.input_targets = parser.input_targets
         self.nodes = parser.all_raw_nodes
         self.dict_rand = parser.dict_rand
         self.dict_constants = parser.dict_constants
@@ -198,7 +198,7 @@ class RawGraph(base.Graph):
                     )
         # 3) Inputs
         dict_inputs = example_inputs.dict
-        self.input_targets = list(
+        self.original_mod_input_targets = self.input_targets = list(
             arg for arg in inspect.signature(original_mod.forward).parameters
             if (arg in dict_inputs 
             and isinstance(dict_inputs[arg],torch.Tensor))
