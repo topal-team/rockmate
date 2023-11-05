@@ -3,9 +3,12 @@
 # =====================
 
 import sys
+import numpy as np
 import gc
+import torch
 from src.lowlevel import ast_add_on
 from src.lowlevel import constants
+from src.lowlevel import measure
 from src.lowlevel.variable_info import VariableInfo
 from src.core import base
 
@@ -104,7 +107,6 @@ def trace_grad_fn(grad_fn,main_target="var",params=None,our_global=None):
 
 def get_useful_vars(sn,sg,our_global,device):
     params = dict(our_global['self'].named_parameters())
-    print_debug(f"Try to open {sn.main_target}'s grad_fn")
     # == INIT ==
     dict_info = sg.dict_info
     mt = sn.main_target
@@ -167,7 +169,6 @@ def get_useful_vars(sn,sg,our_global,device):
         if ph_name not in data_ptr_ph_deps:
             exist_phs = True
             original_phs.append(ph_name)
-            print_debug(f"{ph_name} is an original ph of {mt}")
 
     # == clean data_ptr_ph_deps ==
     for ph_name in valid_view_ph_deps:
@@ -211,8 +212,8 @@ class inspector():
         self.sg = sg
         self.mt = sn.main_target
         self.info = sg.dict_info[self.mt]
-        self.timer = irotor.make_timer(device)
-        self.memUsage = irotor.MeasureMemory(device)
+        self.timer = measure.make_timer(device)
+        self.memUsage = measure.MeasureMemory(device)
         self.our_global = our_global
         self.tmp_local = generate_tmp_local(sn,sg,our_global,device)
         self.ret = Inspection_result()
