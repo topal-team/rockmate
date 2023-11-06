@@ -128,7 +128,7 @@ class Compiler:
             kn.name.replace("fwd", "bwd") not in self.op_name_list[i:]
         ):  # not prepared for BWD
             last_before_bwd = False  # if the forward operation is the last one before backward operations
-
+            print(kn.name.replace("fwd", "bwd"))
         else:
             next_bwd_idx = i + self.op_name_list[i:].index(
                 kn.name.replace("fwd", "bwd")
@@ -330,15 +330,15 @@ class Compiler:
     def get_del_grad(self, kn, i):
         return [self.fct_del_tensor_grad(kn.main_target)]
     
-    def get_prefetch(self, kn, before_idx=None, after_idx=None):
+    def get_prefetch(self, alloc, before_idx=None, after_idx=None):
         function_list = []
         # function_list.append(self.fct_mem_alloc(kn.main_target))
-        function_list.append(self.fct_prefetch(kn.main_target, after_idx=after_idx))
+        function_list.append(self.fct_prefetch(alloc.name, after_idx=after_idx))
         return function_list
 
-    def get_offload(self, kn, before_idx=None, after_idx=None):
+    def get_offload(self, alloc, before_idx=None, after_idx=None):
         function_list = []
-        function_list.append(self.fct_offload(kn.main_target, after_idx=after_idx))
+        function_list.append(self.fct_offload(alloc.name, after_idx=after_idx))
         return function_list
 
     def compile(self, op_sched):
@@ -363,6 +363,23 @@ class Compiler:
 
     # H-rockmate
     def compile_from_schedule(self, op_sched):
+
+        for k, v in op_sched.dict_alloc.items():
+            if isinstance(v, Activation):
+                continue
+                # self.storage.ld[v.kdn.main_target] = torch.empty(
+                #     0,
+                #     device=self.gd["device"],
+                #     requires_grad=v.kdn.info.requires_grad,
+                # )
+            if isinstance(v, Parameter):
+                self.gd[k] = self.gd["original_mod"].get_parameter(k.split(" ")[0])
+            elif isinstance(v, Buffer):
+                self.gd[k] = torch.empty(0, device=self.gd["device"])
+                self.gd["cpu_"+k] = torch.empty(0, device=torch.device("cpu"))
+            else:
+                print(f"Unrecognized type {type(v)}")
+
         fct_list = []
         # self.op_name_list = op_sched.op_name_list
         self.op_name_list = [
@@ -383,17 +400,17 @@ class Compiler:
             if op.disabled:
                 continue
             after_idx = None
-            if op.after in self.op_list:
-                after_idx = self.op_list.index(op.after)
-            prf_fct[after_idx].extend(self.get_prefetch(op.kn, after_idx=after_idx))
+            if op.after in op_sched.op_list:
+                after_idx = op_sched.op_list.index(op.after)
+            prf_fct[after_idx].extend(self.get_prefetch(op.target, after_idx=after_idx))
             wait_op.append(op.before)
         for op in op_sched.ofl_list:
             if op.disabled:
                 continue
             after_idx = None
-            if op.after in self.op_list:
-                after_idx = self.op_list.index(op.after)
-            ofl_fct[after_idx].extend(self.get_offload(op.kn, after_idx=after_idx))
+            if op.after in op_sched.op_list:
+                after_idx = op_sched.op_list.index(op.after)
+            ofl_fct[after_idx].extend(self.get_offload(op.target, after_idx=after_idx))
         if op_sched.ofl_list:
             wait_op.append(op_sched.ofl_list[-1].before)
 
@@ -401,6 +418,7 @@ class Compiler:
         init_fct = prf_fct[None]+ofl_fct[None]
 
         for i, op in enumerate(op_sched.op_list):
+            # print(i, len(fct_list))
             if op.disabled:
                 fct_list.append([])
                 continue
@@ -415,12 +433,17 @@ class Compiler:
                     fct_list.append(self.get_fwd(op.kcn, i, detach=op.detach))
                 elif "bwd" in op.kcn.name:
                     fct_list.append(self.get_bwd(op.kcn, i, detach=op.detach))
+                else:
+                    fct_list.append([])
+
             elif isinstance(op, DeleteOp):
                 if isinstance(op.target, Activation):
                     if "data" in op.target.kdn.name:
                         fct_list.append(self.get_del_data(op.target.kdn, i))
                     elif "grad" in op.target.kdn.name:
                         fct_list.append(self.get_del_grad(op.target.kdn, i))
+                else:
+                    fct_list.append([])
             else:
                 fct_list.append([])
             
@@ -483,12 +506,12 @@ class Compiler:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
             # stream.wait_stream(self.gd["main_stream"])
             with torch.cuda.stream(stream):
-                self.storage.ld[var_name].data = self.storage.ld[f"cpu_{var_name}"].to(
+                self.gd[var_name].data = self.gd[f"cpu_{var_name}"].to(
                     device
                 )
-                self.storage.ld[f"_{var_name}"].data = self.storage.ld[
-                    f"{var_name}"
-                ].data
+                # self.storage.ld[f"_{var_name}"].data = self.storage.ld[
+                #     f"{var_name}"
+                # ].data
 
         return prefetch
 
@@ -502,8 +525,8 @@ class Compiler:
             # if after_idx:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
             with torch.cuda.stream(stream):
-                self.storage.ld[f"cpu_{var_name}"].copy_(
-                    self.storage.ld[var_name], non_blocking=True
+                self.gd[f"cpu_{var_name}"].copy_(
+                    self.gd[var_name], non_blocking=True
                 )
 
         return offload
