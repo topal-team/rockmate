@@ -117,7 +117,7 @@ class MappingOp(Op):
         indices: list = None,
         disabled=False,
     ):
-        super().__init__("Mapping_" + name, disabled, name)
+        super().__init__("Mapping_" + name, disabled)
         self.sources = sources
         self.targets = targets
         self.indices = indices
