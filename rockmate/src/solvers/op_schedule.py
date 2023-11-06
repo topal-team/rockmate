@@ -71,7 +71,7 @@ class Op:
 
 class ComputeOp(Op):
     def __init__(self, kcn, fast_forward=False, disabled=False, detach=True):
-        super().__init__("Compute_" + kcn.name, disabled)
+        super().__init__(kcn.name, disabled)
         self.kcn = kcn
         self.fast_forward = fast_forward
         self.detach = detach
@@ -299,6 +299,8 @@ class OpSchedule:
 
         if keep_alive_list:
             self.alive_list = alive_list
+        else:
+            self.alive_list = []
 
     def create_buffer_list(self):
         buffer_list = []
@@ -319,8 +321,8 @@ class OpSchedule:
             if isinstance(op, DeleteOp):
                 self.list_kdn.append(op.target)
             elif isinstance(op, ComputeOp):
-                self.list_kdn.extend([Allocation(kdn) for kdn in op.kcn.users_global])
-                self.list_kdn.extend([Allocation(kdn) for kdn in op.kcn.deps_global])
+                self.list_kdn.extend([kdn for kdn in op.kcn.users_global])
+                self.list_kdn.extend([kdn for kdn in op.kcn.deps_global])
         self.list_alloc = self.list_kdn
 
     def create_alive_list(self):
@@ -332,6 +334,7 @@ class OpSchedule:
         alive_list = []
         for op in self.op_list:
             if op.disabled:
+                alive_list.append(alive_status.copy())
                 continue
             if isinstance(op, DeleteOp):
                 alive_status[op.target.name] = False
@@ -373,7 +376,7 @@ class OpSchedule:
                 "overhead": self.overhead[i],
             }
             for kdn_name, index in interfaces_status:
-                kdn = self.dict_alloc[kdn_name]
+                kdn = self.dict_alloc[kdn_name].kdn
                 if index == -1:
                     # special case: output_data in BWD without dependency
                     # If outside is alive, no need to correct;

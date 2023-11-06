@@ -1,5 +1,17 @@
 from rkgb.utils.ast_add_on import make_str_assign, make_str_list_assign
 from rkgb.utils import np, torch
+from .solvers.op_schedule import (
+    Activation,
+    Parameter,
+    Buffer,
+    ComputeOp,
+    DeleteOp,
+    MappingOp,
+    AllocateOp,
+    OffloadOp,
+    PrefetchOp,
+    OpSchedule
+)
 
 # from .solvers.op_schedule import PrfOp, OflOp
 
@@ -385,27 +397,30 @@ class Compiler:
         if op_sched.ofl_list:
             wait_op.append(op_sched.ofl_list[-1].before)
 
-        fct_list = [prf_fct[None]+ofl_fct[None]]
+        fct_list = []
+        init_fct = prf_fct[None]+ofl_fct[None]
 
         for i, op in enumerate(op_sched.op_list):
-            kn = op.kn
-            
             if op.disabled:
                 fct_list.append([])
                 continue
 
-            elif "fwd" in op.kn.name:
-                for kdn in op.kn.users:
-                    if kdn.kdn_type != "data":
-                        continue
-                    setattr(kn, "proxy", kdn.info.requires_grad)
-                fct_list.append(self.get_fwd(kn, i, detach=op.detach))
-            elif "bwd" in kn.name:
-                fct_list.append(self.get_bwd(kn, i, detach=op.detach))
-            elif "data" in kn.name:
-                fct_list.append(self.get_del_data(kn, i))
-            elif "grad" in kn.name:
-                fct_list.append(self.get_del_grad(kn, i))
+            if isinstance(op, ComputeOp):
+                if "fwd" in op.kcn.name:
+                    for kdn in op.kcn.users:
+                        if kdn.kdn_type != "data":
+                            continue
+                        setattr(op.kcn, "proxy", kdn.info.requires_grad)
+                    
+                    fct_list.append(self.get_fwd(op.kcn, i, detach=op.detach))
+                elif "bwd" in op.kcn.name:
+                    fct_list.append(self.get_bwd(op.kcn, i, detach=op.detach))
+            elif isinstance(op, DeleteOp):
+                if isinstance(op.target, Activation):
+                    if "data" in op.target.kdn.name:
+                        fct_list.append(self.get_del_data(op.target.kdn, i))
+                    elif "grad" in op.target.kdn.name:
+                        fct_list.append(self.get_del_grad(op.target.kdn, i))
             else:
                 fct_list.append([])
             
@@ -434,6 +449,7 @@ class Compiler:
             # fct_list[-1].append(self.fct_record_cuda(i, stream=self.gd["prefetch_stream"]))
             # fct_list[-1].append(self.fct_record_cuda(i, stream=self.gd["offload_stream"]))
 
+        fct_list[0] = init_fct+fct_list[0]
         return fct_list
 
     def fct_snychronize(self):

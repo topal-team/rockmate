@@ -15,6 +15,7 @@ from .op_schedule import (
     AllocateOp,
     OffloadOp,
     PrefetchOp,
+    OpSchedule
 )
 from rkgb.Htools import *
 from rkgb.utils.global_vars import solver_name
@@ -833,7 +834,7 @@ class ModelPULP:
 
         if self.enable_offload:
             op_list, ofl_list, prf_list = self.greedy_post_processing(hgraph)
-        else:
+        else :
             op_list = []
             ofl_list = []
             prf_list = []
@@ -1007,6 +1008,7 @@ class ModelPULP:
                 j = self.hcn2sub_c[k]
                 # if self.sumComp[(k, t)].value() == 1:
                 if sol(self.sumComp[(k, t)].value()):
+                    # print(t,k)
                     hcn = hgraph.list_hcn[k]
 
                     opt = -1
@@ -1015,6 +1017,7 @@ class ModelPULP:
                             opt = o
                             break
                     if opt > -1:
+                        # print(k, t, opt)
                         h_obj = self.list_list_sched[j][opt]
                         if hcn.is_fwd:
                             # sub_op_list = deepcopy(
@@ -1064,7 +1067,7 @@ class ModelPULP:
                     #         before=sub_op_list[0],
                     #     )
                     # )
-                    # op_list += sub_op_list
+                    op_list += sub_op_list
                     # op_list.append(
                     #     MapOp(
                     #         sources=parameters,
