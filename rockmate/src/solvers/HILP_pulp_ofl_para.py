@@ -833,7 +833,7 @@ class ModelPULP:
             return value > 0.9999  # inttol
 
         if self.enable_offload:
-            op_list, ofl_list, prf_list = self.greedy_post_processing(hgraph)
+            op_list, ofl_list, prf_list, init_alive_status = self.greedy_post_processing(hgraph)
         else :
             op_list = []
             ofl_list = []
@@ -1104,30 +1104,30 @@ class ModelPULP:
                                                  sources=list_alloc_para,
                                                  targets=[all_buffer]))
                         # op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
-                        del_buffer = Buffer(sub_cluster.name+"_del", 
+                        offload_buffer = Buffer(sub_cluster.name+"_offload", 
                                         mem = parameter_size*self.OflW[(t, k, w)].value())
                         keep_buffer = Buffer(sub_cluster.name+"_keep", 
                                         mem = 1-parameter_size*self.OflW[(t, k, w)].value())
                         op_list.append(AllocateOp(keep_buffer))
-                        op_list.append(AllocateOp(del_buffer))
+                        op_list.append(AllocateOp(offload_buffer))
                         op_list.append(MappingOp(name=sub_cluster.name+"_divide", 
                                                  sources=[all_buffer],
-                                                 targets=[keep_buffer, del_buffer]))
+                                                 targets=[keep_buffer, offload_buffer]))
                         op_list.append(DeleteOp(all_buffer))
                         
                         ofl_list.append(
                             OffloadOp(
-                                alloc=del_buffer,
+                                alloc=offload_buffer,
                                 fraction=1,
                                 after=op_list[-1],
                             )
                         )
-                        op_list.append(DeleteOp(del_buffer))
+                        op_list.append(DeleteOp(offload_buffer))
 
                     if self.PrfW[(t, k, w)].value() > 0:
                         keep_buffer = Buffer(sub_cluster.name+"_keep", 
                                         mem = parameter_size*self.AliveW[(t, k, w)].value())
-                        add_buffer = Buffer(sub_cluster.name+"_del", 
+                        add_buffer = Buffer(sub_cluster.name+"_offload", 
                                         mem = parameter_size*self.PrfW[(t, k, w)].value())
                         op_list.append(AllocateOp(add_buffer))
                         
@@ -1146,4 +1146,10 @@ class ModelPULP:
                             op_list.append(MappingOp(name=sub_cluster.name+"_split", 
                                                      sources=[keep_buffer], 
                                                      targets=[list_alloc_para]))
-        return op_list, ofl_list, prf_list
+        init_alive_status = dict()
+        for hcn in self.hgraph.list_hcn:
+            if hasattr(hcn.sub_cluster, "list_kdn_parameters"):
+                for kdn in hcn.sub_cluster.list_kdn_parameters:
+                    init_alive_status[kdn.name] = True
+
+        return op_list, ofl_list, prf_list, init_alive_status

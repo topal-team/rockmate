@@ -140,7 +140,7 @@ class OffloadOp(Op):
         disabled: bool = False,
     ):
         super().__init__("Offload_" + alloc.name, disabled)
-        self.target = None  # target is in CPU
+        self.target = alloc
         self.fraction = fraction
         self.disabled = disabled
         self.before = before
@@ -185,6 +185,7 @@ class OpSchedule:
         correct_overhead=True,
         keep_alive_list=False,
         with_parameters=False,
+        init_alive_status :dict = {}
     ):
         """
         Key role of OpSchedule: taking op_list, analyzing memory stats,
@@ -231,7 +232,7 @@ class OpSchedule:
         if refine:
             self.refine()
 
-        alive_list = self.create_alive_list()
+        alive_list = self.create_alive_list(init_status=init_alive_status)
 
         L = len(self.op_list)
         self.time = np.zeros(L)
@@ -325,8 +326,10 @@ class OpSchedule:
                 self.list_kdn.extend([kdn for kdn in op.kcn.deps_global])
         self.list_alloc = self.list_kdn
 
-    def create_alive_list(self):
+    def create_alive_list(self, init_status={}):
         alive_status = {alloc.name: False for alloc in self.list_alloc}
+        for k, v in init_status.items():
+            alive_status[k] = v
         for kdn in self.interfaces["inputs_kdn_data"]:
             alive_status[kdn.name] = True  # kdn share the name as alloc
         # TODO: add init alive for parameters
