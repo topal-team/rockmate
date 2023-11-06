@@ -4,16 +4,17 @@ from rkgb.Ktools import K_graph, K_C_node, K_D_node
 from rkgb.Htools import *
 from collections import namedtuple
 from copy import deepcopy
+import warnings
 
 
 class Allocation:
-    def __init__(self, name, allo_type="", size=0, info=dict()):
+    def __init__(self, name, allo_type="", mem=0, info=dict()):
         """
         Allocation type should be in activation/paramters/buffer
         """
         self.name = name
         self.allo_type = allo_type
-        self.size = size
+        self.mem = mem
         self.info = info
 
     def __repr__(self):
@@ -23,6 +24,25 @@ class Allocation:
 class Activation(Allocation):
     def __init__(self, kdn):
         super().__init__(kdn.name, "Activation", kdn.mem, kdn.info)
+        self.kdn = kdn
+
+    def __copy__(self):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        result.__dict__.update(self.__dict__)
+        return result
+
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            if k == "kdn":  # do not deepcopy kn
+                setattr(result, k, v)
+            else:
+                setattr(result, k, deepcopy(v, memo))
+
+        return result
 
 
 class Parameter(Allocation):
@@ -31,8 +51,8 @@ class Parameter(Allocation):
 
 
 class Buffer(Allocation):
-    def __init__(self, name, size=0, info=dict()):
-        super().__init__(name, "Buffer", size, info)
+    def __init__(self, name, mem=0, info=dict()):
+        super().__init__(name, "Buffer", mem, info)
 
 
 class Op:
@@ -101,7 +121,7 @@ class MappingOp(Op):
         self.sources = sources
         self.targets = targets
         self.indices = indices
-        self.overhead = sum(alloc.size for alloc in sources)  # TODO: update when needed
+        self.overhead = sum(alloc.mem for alloc in sources)  # TODO: update when needed
 
 
 class AllocateOp(Op):
@@ -170,10 +190,12 @@ class OpSchedule:
         Key role of OpSchedule: taking op_list, analyzing memory stats,
         keeping info for further solving.
         New role: greedy algorithm to rearrange the prefetch/offload ops
+        Parameters are read from the cluster
         """
         self.op_list = op_list
         self.prf_list = prf_list
         self.ofl_list = ofl_list
+        self.with_parameters = with_parameters
         if loss_idx is None:
             # Find the last loss op before the first bwd
             for i, op in enumerate(self.op_list):
@@ -183,12 +205,28 @@ class OpSchedule:
                     break
         else:
             self.loss_idx = loss_idx
-        if cluster is not None:
-            self.interfaces = cluster.interfaces
-            self.list_kdn = cluster.list_kdn
-            self.dict_kn = cluster.dict_kn
+
+        if cluster is None:
+            warnings.warn("Cluster should be provided to create op_sched")
+            self.prepare_allocation_from_op_list(interfaces)
         else:
-            self.prepare_allocation_from_op_list(with_parameters, interfaces)
+            self.interfaces = cluster.interfaces
+            self.list_alloc = [Activation(kdn) for kdn in cluster.list_kdn]
+            self.list_kdn = cluster.list_kdn
+            if with_parameters:
+                self.list_alloc.extend(
+                    [Activation(kdn) for kdn in cluster.list_kdn_parameters]
+                )
+                self.list_alloc.extend(self.create_buffer_list())
+        self.dict_alloc = {alloc.name: alloc for alloc in self.list_alloc}
+        self.all_interfaces = [
+            kdn for inter in self.interfaces.values() for kdn in inter
+        ]  # all interface KDN's
+        self.interface_names = [kdn.name for kdn in self.all_interfaces]
+
+        self.op_name_list = [
+            (op.name if not op.disabled else "") for op in self.op_list
+        ]
 
         if refine:
             self.refine()
@@ -204,7 +242,7 @@ class OpSchedule:
             mem = 0
             for k, v in alive_status_.items():
                 if k not in ignore_list and v:
-                    d = self.dict_kn[k]
+                    d = self.dict_alloc[k]
                     mem += d.mem
             return mem
 
@@ -213,8 +251,10 @@ class OpSchedule:
 
         for i, (op, alive_status) in enumerate(zip(self.op_list, alive_list)):
             self.save_mem[i] = _sum_mem(alive_status, self.interface_names)
-            if (not op.is_del) and (not op.disabled):
-                self.time[i] = op.kn.time
+            if op.disabled:
+                continue
+            if isinstance(op, ComputeOp):
+                self.time[i] = op.kcn.time
                 self.overhead[i] = op.overhead
 
         self.mem = self.save_mem[self.loss_idx]
@@ -239,8 +279,10 @@ class OpSchedule:
         # names of additional HDNs that are required by BWD
         self.dep_interfaces_data = set()
         for i, op in enumerate(self.op_list[self.loss_idx + 1 :]):
-            if (not op.is_del) and (not op.disabled):
-                for kdn in op.kn.deps_real:
+            if op.disabled:
+                continue
+            if isinstance(op, ComputeOp):
+                for kdn in op.kcn.deps_real:
                     if kdn in self.interfaces["inputs_kdn_data"]:
                         self.dep_interfaces_data.add(self.list_kdn.index(kdn))
                     if kdn in self.interfaces["outputs_kdn_data"]:
@@ -258,7 +300,14 @@ class OpSchedule:
         if keep_alive_list:
             self.alive_list = alive_list
 
-    def prepare_allocation_from_op_list(self, interfaces, with_parameters=False):
+    def create_buffer_list(self):
+        buffer_list = []
+        for op in self.op_list:
+            if isinstance(op, AllocateOp):
+                buffer_list.append(op.target)
+        return buffer_list
+
+    def prepare_allocation_from_op_list(self, interfaces):
         self.interfaces = interfaces or {
             "inputs_kdn_data": set(),
             "outputs_kdn_data": set(),
@@ -267,35 +316,32 @@ class OpSchedule:
         }
         self.list_kdn = []
         for op in self.op_list:
-            if op.is_del:
-                self.list_kdn.append(op.kn)
-            else:
-                self.list_kdn.extend(op.kn.users_global)
-                self.list_kdn.extend(op.kn.deps_global)
-        self.dict_kn = {kdn.name: kdn for kdn in self.list_kdn}  # kcn not used
-        self.all_interfaces = [
-            kdn for inter in self.interfaces.values() for kdn in inter
-        ]  # all interface KDN's
-        self.interface_names = [kdn.name for kdn in self.all_interfaces]
-
-        self.op_name_list = [
-            (op.name if not op.disabled else "") for op in self.op_list
-        ]
+            if isinstance(op, DeleteOp):
+                self.list_kdn.append(op.target)
+            elif isinstance(op, ComputeOp):
+                self.list_kdn.extend([Allocation(kdn) for kdn in op.kcn.users_global])
+                self.list_kdn.extend([Allocation(kdn) for kdn in op.kcn.deps_global])
+        self.list_alloc = self.list_kdn
 
     def create_alive_list(self):
-        alive_status = {
-            kdn.name: kdn in self.interfaces["inputs_kdn_data"] for kdn in self.list_kdn
-        }
+        alive_status = {alloc.name: False for alloc in self.list_alloc}
+        for kdn in self.interfaces["inputs_kdn_data"]:
+            alive_status[kdn.name] = True  # kdn share the name as alloc
+        # TODO: add init alive for parameters
 
         alive_list = []
         for op in self.op_list:
-            if op.is_del:
-                if not op.disabled:
-                    alive_status[op.kn.name] = False
-            else:  # compute op should not be disabled except loss which is useful for alive status
-                for kdn in op.kn.users:
+            if op.disabled:
+                continue
+            if isinstance(op, DeleteOp):
+                alive_status[op.target.name] = False
+            elif isinstance(op, ComputeOp):
+                # compute op should not be disabled except loss which is useful for alive status
+                for kdn in op.kcn.users:
                     if not ("phantoms" in kdn.name and op.fast_forward):
                         alive_status[kdn.name] = True
+            elif isinstance(op, AllocateOp):
+                alive_status[op.target.name] = True
             alive_list.append(alive_status.copy())
         return alive_list
 
@@ -327,7 +373,7 @@ class OpSchedule:
                 "overhead": self.overhead[i],
             }
             for kdn_name, index in interfaces_status:
-                kdn = self.dict_kn[kdn_name]
+                kdn = self.dict_alloc[kdn_name]
                 if index == -1:
                     # special case: output_data in BWD without dependency
                     # If outside is alive, no need to correct;
@@ -406,26 +452,31 @@ class OpSchedule:
         for i, op in enumerate(self.op_list):
             if "loss" in op.name:
                 op.disabled = True
-            if op.is_del:
-                # try to delete KDN
-                src_i = []  # indices of source KCN's after i
-                for kcn in op.kn.deps:
-                    if kcn.name in self.op_name_list[i:]:
-                        src_i.append(self.op_name_list[i:].index(kcn.name) + i)
-                    else:
-                        src_i.append(len(self.op_list))
-                src_i = src_i or [len(self.op_list)]
+            if isinstance(op, DeleteOp):
+                if isinstance(op.target, Activation):
+                    # try to delete KDN
+                    src_i = []  # indices of source KCN's after i
+                    for kcn in op.target.kdn.deps:
+                        if kcn.name in self.op_name_list[i:]:
+                            src_i.append(self.op_name_list[i:].index(kcn.name) + i)
+                        else:
+                            src_i.append(len(self.op_list))
+                    src_i = src_i or [len(self.op_list)]
 
-                next_used_i = len(self.op_list)  # the next index to use KDN
-                for kcn in op.kn.users_real:
-                    if kcn.name in self.op_name_list[i:]:
-                        next_used_i = min(
-                            self.op_name_list[i:].index(kcn.name) + i,
-                            next_used_i,
-                        )
+                    next_used_i = len(self.op_list)  # the next index to use KDN
+                    for kcn in op.target.kdn.users_real:
+                        if kcn.name in self.op_name_list[i:]:
+                            next_used_i = min(
+                                self.op_name_list[i:].index(kcn.name) + i,
+                                next_used_i,
+                            )
 
-                if max(src_i) > next_used_i:  # try to use before regenerate
-                    op.disabled = True
+                    if max(src_i) > next_used_i:  # try to use before regenerate
+                        op.disabled = True
+
+                elif isinstance(op.target, Parameter):
+                    # TODO: disabled wrong deletion of parameter
+                    pass
 
         self.op_name_list = [
             (op.name if not op.disabled else "") for op in self.op_list
@@ -442,14 +493,12 @@ class OpSchedule:
 
     @property
     def simulation_overhead(self):
-        all_kcn = set(
-            op.kn for op in self.op_list if (not op.disabled and not op.is_del)
+        all_compute = set(
+            op for op in self.op_list if (not op.disabled and isinstance(op, ComputeOp))
         )
         return (
-            sum(
-                op.kn.time for op in self.op_list if (not op.disabled and not op.is_del)
-            )
-            / sum(kcn.time for kcn in all_kcn)
+            sum(op.kcn.time for op in all_compute)
+            / sum(op.kcn.time for op in all_compute)
             - 1
         )
 
