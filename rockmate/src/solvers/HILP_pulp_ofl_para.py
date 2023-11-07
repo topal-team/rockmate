@@ -1073,22 +1073,25 @@ class ModelPULP:
 
                     list_alloc_para = [Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters]
                     w = self.hcn2weight[k]
-                    current_buffers[w] = Buffer(hcn.sub_cluster.name, 
+                    if current_buffers[w] is not None:#first time
+                        current_buffers[w] = Buffer(hcn.sub_cluster.name, 
                                                 mem = sum(alloc.mem for alloc in list_alloc_para))
-                    
-                    # Map buffer to parameter tensors
-                    op_list.extend([AllocateOp(alloc) for alloc in list_alloc_para])
-                    op_list.append(MappingOp(name=hcn.sub_cluster.name+"_split", sources=[current_buffers[w]],
-                                                targets=list_alloc_para))
-                    op_list.append(DeleteOp(current_buffers[w]))
+                        # Map buffer to parameter tensors
+                        # op_list.extend([AllocateOp(alloc) for alloc in list_alloc_para])
+                        op_list.append(MappingOp(name=hcn.sub_cluster.name+"_split", sources=[current_buffers[w]],
+                                                    targets=list_alloc_para))
+                        op_list.append(DeleteOp(current_buffers[w]))
 
                     op_list += sub_op_list
 
                     # Map parameter tensors to buffer
-                    op_list.append(AllocateOp(current_buffers[w]))
+                    if current_buffers[w] is None:
+                        current_buffers[w] = Buffer(hcn.sub_cluster.name, 
+                                                mem = sum(alloc.mem for alloc in list_alloc_para))
+                        # op_list.append(AllocateOp(current_buffers[w]))
                     op_list.append(MappingOp(name=hcn.sub_cluster.name+"_merge", 
-                                             sources=list_alloc_para,
-                                             targets=[current_buffers[w]]))
+                                            sources=list_alloc_para,
+                                            targets=[current_buffers[w]]))
                     op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
 
                 for eidx, (k_, i) in enumerate(self.delete_list):

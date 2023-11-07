@@ -4,6 +4,7 @@ from copy import deepcopy
 from rkgb.Htools import H_C_node, H_D_node, H_graph, H_cluster
 from rkgb.Ktools import K_C_node, K_D_node
 from rkgb.utils.ast_add_on import ast_to_str
+from rkgb.utils.def_info import Var_info
 from .op_schedule import OpSchedule, ComputeOp, DeleteOp, Activation
 import time
 import psutil
@@ -353,8 +354,9 @@ def add_parameter_node(h_cluster, original_mod):
                 arg_id = id(eval(ast_to_str(arg).replace("self[", "original_mod[").replace("self.", "original_mod.")))
                 assert arg_id in parameters_id_to_name.keys()
                 n = parameters_id_to_name[arg_id]
-                kdn = K_D_node(main_target=n, kdn_type="parameter")
                 p = original_mod.get_parameter(n)
+                info = Var_info(p)
+                kdn = K_D_node(main_target=n, kdn_type="parameter", info=info)
                 kdn.mem = p.shape.numel()*p.element_size()
                 list_kdn_parameters.append(kdn)
     setattr(h_cluster, "list_kdn_parameters", list_kdn_parameters)

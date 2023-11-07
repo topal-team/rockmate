@@ -10,7 +10,7 @@ from .solvers.op_schedule import (
     AllocateOp,
     OffloadOp,
     PrefetchOp,
-    OpSchedule
+    OpSchedule,
 )
 
 # from .solvers.op_schedule import PrfOp, OflOp
@@ -329,19 +329,36 @@ class Compiler:
 
     def get_del_grad(self, kn, i):
         return [self.fct_del_tensor_grad(kn.main_target)]
-    
+
     def get_del_parameter(self, alloc, i):
-        return [self.fct_del_tensor_gd(alloc.name)]
-    
+        return [self.fct_del_tensor_data(alloc.name)]
+
     def get_del_buffer(self, alloc, i):
-        return [self.fct_del_tensor_gd(alloc.name)]
+        return [self.fct_del_tensor_data(alloc.name)]
     
+    def get_mapping(self, sources, targets, i):
+        return [self.fct_mapping(sources=sources, targets=targets)]
+
     def get_allocation(self, alloc):
         function_list = []
         if isinstance(alloc, Parameter) or isinstance(alloc, Buffer):
-            function_list.append(self.fct_mem_alloc(alloc.name, gd=True))
+            function_list.append(
+                self.fct_mem_alloc(
+                    alloc.name,
+                    shape=alloc.mem // alloc.dtype.itemsize,
+                    dtype=alloc.dtype,
+                    gd=False,
+                )
+            )
         else:
-            function_list.append(self.fct_mem_alloc(alloc.name, gd=False))
+            function_list.append(
+                self.fct_mem_alloc(
+                    alloc.name,
+                    shape=alloc.mem // alloc.dtype.itemsize,
+                    dtype=alloc.dtype,
+                    gd=False,
+                )
+            )
         return function_list
 
     def get_prefetch(self, alloc, before_idx=None, after_idx=None):
@@ -377,24 +394,23 @@ class Compiler:
 
     # H-rockmate
     def compile_from_schedule(self, op_sched):
-
-        for k, v in op_sched.dict_alloc.items():
-            if isinstance(v, Activation):
-                continue
-                # self.storage.ld[v.kdn.main_target] = torch.empty(
-                #     0,
-                #     device=self.gd["device"],
-                #     requires_grad=v.kdn.info.requires_grad,
-                # )
-            if isinstance(v, Parameter):
-                self.gd[k] = self.gd["original_mod"].get_parameter(k.split(" ")[0])
-                # self.storage.shapes[v.kdn.main_target] = self.gd[k].shape
-                # self.storage.dtypes[v.kdn.main_target] = self.gd[k].dtypes
-            elif isinstance(v, Buffer):
-                self.gd[k] = torch.empty(0, device=self.gd["device"])
-                self.gd["cpu_"+k] = torch.empty(0, device=torch.device("cpu"))
-            else:
-                print(f"Unrecognized type {type(v)}")
+        # for k, v in op_sched.dict_alloc.items():
+        #     if isinstance(v, Activation):
+        #         continue
+        #         # self.storage.ld[v.kdn.main_target] = torch.empty(
+        #         #     0,
+        #         #     device=self.gd["device"],
+        #         #     requires_grad=v.kdn.info.requires_grad,
+        #         # )
+        #     if isinstance(v, Parameter):
+        #         self.storage.ld[k] = self.gd["original_mod"].get_parameter(k.split(" ")[0])
+        #         # self.storage.shapes[v.kdn.main_target] = self.gd[k].shape
+        #         # self.storage.dtypes[v.kdn.main_target] = self.gd[k].dtypes
+        #     elif isinstance(v, Buffer):
+        #         self.storage.ld[k] = torch.empty(0, device=self.gd["device"])
+        #         self.storage.ld["cpu_" + k] = torch.empty(0, device=torch.device("cpu"))
+        #     else:
+        #         print(f"Unrecognized type {type(v)}")
 
         fct_list = []
         # self.op_name_list = op_sched.op_name_list
@@ -431,7 +447,7 @@ class Compiler:
             wait_op.append(op_sched.ofl_list[-1].before)
 
         fct_list = []
-        init_fct = prf_fct[None]+ofl_fct[None]
+        init_fct = prf_fct[None] + ofl_fct[None]
 
         for i, op in enumerate(op_sched.op_list):
             # print(i, len(fct_list))
@@ -445,7 +461,7 @@ class Compiler:
                         if kdn.kdn_type != "data":
                             continue
                         setattr(op.kcn, "proxy", kdn.info.requires_grad)
-                    
+
                     fct_list.append(self.get_fwd(op.kcn, i, detach=op.detach))
                 elif "bwd" in op.kcn.name:
                     fct_list.append(self.get_bwd(op.kcn, i, detach=op.detach))
@@ -458,6 +474,8 @@ class Compiler:
                         fct_list.append(self.get_del_data(op.target.kdn, i))
                     elif "grad" in op.target.kdn.name:
                         fct_list.append(self.get_del_grad(op.target.kdn, i))
+                    else:#phantom
+                        fct_list.append([])    
                 elif isinstance(op.target, Parameter):
                     fct_list.append(self.get_del_parameter(op.target.kdn, i))
                 elif isinstance(op.target, Buffer):
@@ -465,19 +483,20 @@ class Compiler:
                 else:
                     fct_list.append([])
             elif isinstance(op, MappingOp):
-                fct_list.append([])#TODO
+                fct_list.append(self.get_mapping(op.sources, op.targets, i))  # TODO
             elif isinstance(op, AllocateOp):
                 fct_list.append(self.get_allocation(op.target))
             else:
                 fct_list.append([])
-            
+
             if op in wait_op:
-                fct_list[-1].insert(0,
-                        self.fct_wait_stream(
-                            self.gd["main_stream"], self.gd["prefetch_stream"]
-                        )
+                fct_list[-1].insert(
+                    0,
+                    self.fct_wait_stream(
+                        self.gd["main_stream"], self.gd["prefetch_stream"]
+                    ),
                 )
-            
+
             fct_list[-1].append(self.fct_record_cuda(i))
             for op in prf_fct[i]:
                 stream = self.gd["prefetch_stream"]
@@ -496,7 +515,7 @@ class Compiler:
             # fct_list[-1].append(self.fct_record_cuda(i, stream=self.gd["prefetch_stream"]))
             # fct_list[-1].append(self.fct_record_cuda(i, stream=self.gd["offload_stream"]))
 
-        fct_list[0] = init_fct+fct_list[0]
+        fct_list[0] = init_fct + fct_list[0]
         return fct_list
 
     def fct_snychronize(self):
@@ -530,9 +549,7 @@ class Compiler:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
             # stream.wait_stream(self.gd["main_stream"])
             with torch.cuda.stream(stream):
-                self.gd[var_name].data = self.gd[f"cpu_{var_name}"].to(
-                    device
-                )
+                self.storage.ld[var_name].data = self.storage.ld[f"cpu_{var_name}"].to(device)
                 # self.storage.ld[f"_{var_name}"].data = self.storage.ld[
                 #     f"{var_name}"
                 # ].data
@@ -549,28 +566,24 @@ class Compiler:
             # if after_idx:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
             with torch.cuda.stream(stream):
-                self.gd[f"cpu_{var_name}"].copy_(
-                    self.gd[var_name], non_blocking=True
-                )
+                self.storage.ld[f"cpu_{var_name}"].copy_(self.storage.ld[var_name], non_blocking=True)
 
         return offload
 
-    def fct_mem_alloc(self, var_name, stream=None, gd=False):
-
+    def fct_mem_alloc(self, var_name, shape, dtype, stream=None, gd=False):
         stream = stream or self.gd["main_stream"]
         if gd:
             def mem_alloc():
                 with torch.cuda.stream(stream):
                     self.gd[var_name].data = torch.empty(
-                        self.storage.shapes[var_name], device=self.gd["device"]
+                        shape, dtype=dtype, device=self.gd["device"]
                     )
-            return mem_alloc    
-
-        def mem_alloc():
-            with torch.cuda.stream(stream):
-                self.storage.ld[var_name].data = torch.empty(
-                    self.storage.shapes[var_name], device=self.gd["device"]
-                )
+        else:
+            def mem_alloc():
+                with torch.cuda.stream(stream):
+                    self.storage.ld[var_name].data = torch.empty(
+                        shape, dtype=dtype, device=self.gd["device"]
+                    )
 
         return mem_alloc
 
@@ -582,6 +595,32 @@ class Compiler:
                 self.storage.ld[var_name] = torch.empty(0)
 
         return mem_dealloc
+
+    def fct_mapping(self, sources, targets, stream=None, gd=True):
+        stream = stream or self.gd["main_stream"]
+        
+        if len(targets) == 1:
+
+            def mapping():
+                with torch.cuda.stream(stream):
+                    self.storage.ld[targets[0].name] = torch.cat(
+                        tuple(self.storage.ld[s.name].flatten() for s in sources), 0
+                    )
+        elif len(sources) == 1:
+            targets_name = {}
+            start = 0
+            for target in targets:
+                shape = target.info.tsize if isinstance(target, Parameter) else -1
+                targets_name[target.name] = (start, start+target.mem//target.dtype.itemsize, shape)
+                start += target.mem//target.dtype.itemsize
+            def mapping():
+                with torch.cuda.stream(stream):
+                    for k,v in targets_name.items():
+                        # print(k, v)
+                        self.storage.ld[k].data = self.storage.ld[sources[0].name][v[0]:v[1]].view(v[2])
+
+        return mapping
+    
 
     #  ==================================
     #  = ELEMENTARY COMPILING FUNCTIONS =
@@ -732,7 +771,7 @@ class Compiler:
             self.storage.ld[tensor_name].data = x
 
         return fct
-    
+
     def fct_del_tensor_data(self, tensor_name):
         def fct():
             self.storage.ld[tensor_name].data = torch.empty(0, device=self.gd["device"])
@@ -758,7 +797,7 @@ class Compiler:
             self.storage.ld[var_name] = None
 
         return fct
-    
+
     def fct_del_tensor_gd(self, tensor_name):
         def fct():
             self.gd[tensor_name].data = torch.empty(0, device=self.gd["device"])

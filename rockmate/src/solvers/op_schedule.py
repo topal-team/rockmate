@@ -8,22 +8,29 @@ import warnings
 
 
 class Allocation:
-    def __init__(self, name, allo_type="", mem=0, info=dict()):
+    def __init__(self, name, alloc_type="", mem=0, info=dict(), dtype=torch.float32):
         """
         Allocation type should be in activation/paramters/buffer
         """
         self.name = name
-        self.allo_type = allo_type
+        self.allo_type = alloc_type
         self.mem = mem
         self.info = info
+        self.dtype = dtype
 
     def __repr__(self):
         return self.name
 
 
 class Activation(Allocation):
-    def __init__(self, kdn):
-        super().__init__(kdn.name, "Activation", kdn.mem, kdn.info)
+    def __init__(self, kdn, dtype=torch.float32):
+        super().__init__(
+            name=kdn.name,
+            alloc_type="Activation",
+            mem=kdn.mem,
+            info=kdn.info,
+            dtype=dtype,
+        )
         self.kdn = kdn
 
     def __copy__(self):
@@ -46,14 +53,23 @@ class Activation(Allocation):
 
 
 class Parameter(Allocation):
-    def __init__(self, kdn):
-        super().__init__(kdn.name, "Parameter", kdn.mem, kdn.info)
+    def __init__(self, kdn, dtype=torch.float32):
+        super().__init__(
+            name=kdn.name,
+            alloc_type="Parameter",
+            mem=kdn.mem,
+            info=kdn.info,
+            dtype=dtype,
+        )
         self.kdn = kdn
 
 
 class Buffer(Allocation):
-    def __init__(self, name, mem=0, info=dict()):
-        super().__init__(name, "Buffer", mem, info)
+    def __init__(self, name, mem=0, info=dict(), dtype=torch.float32):
+        super().__init__(
+            name=name, alloc_type="Buffer", mem=mem, info=info, dtype=dtype
+        )
+        self.dtype = dtype
 
 
 class Op:
@@ -186,7 +202,7 @@ class OpSchedule:
         correct_overhead=True,
         keep_alive_list=False,
         with_parameters=False,
-        init_alive_status :dict = {}
+        init_alive_status: dict = {},
     ):
         """
         Key role of OpSchedule: taking op_list, analyzing memory stats,
@@ -217,7 +233,7 @@ class OpSchedule:
             self.list_kdn = cluster.list_kdn
             if with_parameters:
                 self.list_alloc.extend(
-                    [Activation(kdn) for kdn in cluster.list_kdn_parameters]
+                    [Parameter(kdn) for kdn in cluster.list_kdn_parameters]
                 )
                 self.list_alloc.extend(self.create_buffer_list())
         self.dict_alloc = {alloc.name: alloc for alloc in self.list_alloc}

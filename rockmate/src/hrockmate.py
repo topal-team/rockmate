@@ -359,6 +359,24 @@ class HRockmate(torch.nn.Module):
                         requires_grad=kdn.info.requires_grad,
                     )
 
+                for k, v in self.op_sched.dict_alloc.items():
+                    if isinstance(v, Activation):
+                        continue
+                        # self.storage.ld[v.kdn.main_target] = torch.empty(
+                        #     0,
+                        #     device=self.gd["device"],
+                        #     requires_grad=v.kdn.info.requires_grad,
+                        # )
+                    if isinstance(v, Parameter):
+                        storage.ld[k] = self.gd["original_mod"].get_parameter(k.split(" ")[0])
+                        # self.storage.shapes[v.kdn.main_target] = self.gd[k].shape
+                        # self.storage.dtypes[v.kdn.main_target] = self.gd[k].dtypes
+                    elif isinstance(v, Buffer):
+                        storage.ld[k] = torch.empty(0, device=self.gd["device"])
+                        storage.ld["cpu_" + k] = torch.empty(0, device=torch.device("cpu"))
+                    else:
+                        print(f"Unrecognized type {type(v)}")
+
                 #  *** EXECUTION PART ***
                 # -> Autograd turns off itself before giving use the control.
                 # -> But we need it to forward/backward each node.
