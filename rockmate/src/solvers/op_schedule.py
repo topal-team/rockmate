@@ -164,7 +164,7 @@ class OffloadOp(Op):
         self.after = after
 
     def __repr__(self):
-        return "Disabled" * self.disabled + f"{self.fraction*100:.2%} {self.alloc}"
+        return "Disabled" * self.disabled + f"{self.fraction*100:.2%} {self.target}"
 
 
 class PrefetchOp(Op):
@@ -184,7 +184,7 @@ class PrefetchOp(Op):
         self.after = after
 
     def __repr__(self):
-        return "Disabled" * self.disabled + f"{self.fraction*100:.2%} {self.alloc}"
+        return "Disabled" * self.disabled + f"{self.fraction*100:.2%} {self.target}"
 
 
 class OpSchedule:
