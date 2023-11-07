@@ -48,6 +48,7 @@ class Activation(Allocation):
 class Parameter(Allocation):
     def __init__(self, kdn):
         super().__init__(kdn.name, "Parameter", kdn.mem, kdn.info)
+        self.kdn = kdn
 
 
 class Buffer(Allocation):

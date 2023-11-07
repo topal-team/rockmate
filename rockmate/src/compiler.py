@@ -330,6 +330,20 @@ class Compiler:
     def get_del_grad(self, kn, i):
         return [self.fct_del_tensor_grad(kn.main_target)]
     
+    def get_del_parameter(self, alloc, i):
+        return [self.fct_del_tensor_gd(alloc.name)]
+    
+    def get_del_buffer(self, alloc, i):
+        return [self.fct_del_tensor_gd(alloc.name)]
+    
+    def get_allocation(self, alloc):
+        function_list = []
+        if isinstance(alloc, Parameter) or isinstance(alloc, Buffer):
+            function_list.append(self.fct_mem_alloc(alloc.name, gd=True))
+        else:
+            function_list.append(self.fct_mem_alloc(alloc.name, gd=False))
+        return function_list
+
     def get_prefetch(self, alloc, before_idx=None, after_idx=None):
         function_list = []
         # function_list.append(self.fct_mem_alloc(kn.main_target))
@@ -374,6 +388,8 @@ class Compiler:
                 # )
             if isinstance(v, Parameter):
                 self.gd[k] = self.gd["original_mod"].get_parameter(k.split(" ")[0])
+                # self.storage.shapes[v.kdn.main_target] = self.gd[k].shape
+                # self.storage.dtypes[v.kdn.main_target] = self.gd[k].dtypes
             elif isinstance(v, Buffer):
                 self.gd[k] = torch.empty(0, device=self.gd["device"])
                 self.gd["cpu_"+k] = torch.empty(0, device=torch.device("cpu"))
@@ -442,8 +458,16 @@ class Compiler:
                         fct_list.append(self.get_del_data(op.target.kdn, i))
                     elif "grad" in op.target.kdn.name:
                         fct_list.append(self.get_del_grad(op.target.kdn, i))
+                elif isinstance(op.target, Parameter):
+                    fct_list.append(self.get_del_parameter(op.target.kdn, i))
+                elif isinstance(op.target, Buffer):
+                    fct_list.append(self.get_del_buffer(op.target, i))
                 else:
                     fct_list.append([])
+            elif isinstance(op, MappingOp):
+                fct_list.append([])#TODO
+            elif isinstance(op, AllocateOp):
+                fct_list.append(self.get_allocation(op.target))
             else:
                 fct_list.append([])
             
@@ -531,13 +555,21 @@ class Compiler:
 
         return offload
 
-    def fct_mem_alloc(self, var_name, stream=None):
+    def fct_mem_alloc(self, var_name, stream=None, gd=False):
+
         stream = stream or self.gd["main_stream"]
+        if gd:
+            def mem_alloc():
+                with torch.cuda.stream(stream):
+                    self.gd[var_name].data = torch.empty(
+                        self.storage.shapes[var_name], device=self.gd["device"]
+                    )
+            return mem_alloc    
 
         def mem_alloc():
             with torch.cuda.stream(stream):
                 self.storage.ld[var_name].data = torch.empty(
-                    self.storage.shapes[var_name]
+                    self.storage.shapes[var_name], device=self.gd["device"]
                 )
 
         return mem_alloc
@@ -595,9 +627,9 @@ class Compiler:
         def fct():
             self.storage.shapes[tensor_name] = self.storage.ld[tensor_name].shape
             self.storage.dtypes[tensor_name] = self.storage.ld[tensor_name].dtype
-            self.storage.ld[f"cpu_{tensor_name}"] = torch.empty(
-                self.storage.ld[tensor_name].shape, pin_memory=True
-            )
+            # self.storage.gd[f"cpu_{tensor_name}"] = torch.empty(
+            #     self.storage.ld[tensor_name].shape, pin_memory=True
+            # )
             # assert self.storage.ld[f"cpu_{tensor_name}"].shape == self.storage.ld[tensor_name].shape
 
         return fct
@@ -700,7 +732,7 @@ class Compiler:
             self.storage.ld[tensor_name].data = x
 
         return fct
-
+    
     def fct_del_tensor_data(self, tensor_name):
         def fct():
             self.storage.ld[tensor_name].data = torch.empty(0, device=self.gd["device"])
@@ -724,6 +756,12 @@ class Compiler:
     def fct_del_var(self, var_name):
         def fct():
             self.storage.ld[var_name] = None
+
+        return fct
+    
+    def fct_del_tensor_gd(self, tensor_name):
+        def fct():
+            self.gd[tensor_name].data = torch.empty(0, device=self.gd["device"])
 
         return fct
 
