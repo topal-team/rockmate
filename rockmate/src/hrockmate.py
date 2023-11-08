@@ -373,7 +373,11 @@ class HRockmate(torch.nn.Module):
                         # self.storage.dtypes[v.kdn.main_target] = self.gd[k].dtypes
                     elif isinstance(v, Buffer):
                         storage.ld[k] = torch.empty(0, device=self.gd["device"])
-                        storage.ld["cpu_" + k] = torch.empty(0, device=torch.device("cpu"))
+                        shape = int(v.mem // v.dtype.itemsize)
+                        storage.ld["cpu_" + k] = torch.empty(shape, 
+                                                             dtype=v.dtype, 
+                                                             device=torch.device("cpu"),
+                                                             pin_memory=True)
                     else:
                         print(f"Unrecognized type {type(v)}")
 
@@ -424,10 +428,12 @@ class HRockmate(torch.nn.Module):
                 storage = ctx.RK_Storage
                 RkMod.compiler.storage = storage
                 # -> Put grad_out in out.grad (Rem 4)
+                # print(grad_outs)
                 for out_mt, out_grad in zip(RkMod.rkgb_res.S_graph.outputs, grad_outs):
                     out = RkMod.compiler.get_val(out_mt)
                     out.grad = out_grad.view(out_grad.shape)
                     out_grad.data = torch.empty(0)
+                    # print(out.grad.mean())
 
                 #  * record_mem stuff *
                 if RkMod.exec_with_record_mem:

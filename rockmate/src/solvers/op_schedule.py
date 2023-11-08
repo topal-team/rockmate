@@ -164,7 +164,7 @@ class OffloadOp(Op):
         self.after = after
 
     def __repr__(self):
-        return "Disabled" * self.disabled + f"{self.fraction*100:.2%} {self.target}"
+        return "Disabled" * self.disabled + f"{self.fraction:.2%} {self.target}"
 
 
 class PrefetchOp(Op):
@@ -184,7 +184,7 @@ class PrefetchOp(Op):
         self.after = after
 
     def __repr__(self):
-        return "Disabled" * self.disabled + f"{self.fraction*100:.2%} {self.target}"
+        return "Disabled" * self.disabled + f"{self.fraction:.2%} {self.target}"
 
 
 class OpSchedule:
@@ -321,11 +321,15 @@ class OpSchedule:
             self.alive_list = []
 
     def create_buffer_list(self):
-        buffer_list = []
+        buffer_set = set()
         for op in self.op_list:
-            if isinstance(op, AllocateOp):
-                buffer_list.append(op.target)
-        return buffer_list
+            if isinstance(op, MappingOp) and len(op.targets)==1:# merge mapping
+                for target in op.targets:
+                    buffer_set.add(target)
+            elif isinstance(op, AllocateOp):
+                buffer_set.add(op.target)
+
+        return list(buffer_set)
 
     def prepare_allocation_from_op_list(self, interfaces):
         self.interfaces = interfaces or {

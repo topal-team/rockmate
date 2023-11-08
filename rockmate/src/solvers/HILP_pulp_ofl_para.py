@@ -15,7 +15,7 @@ from .op_schedule import (
     AllocateOp,
     OffloadOp,
     PrefetchOp,
-    OpSchedule
+    OpSchedule,
 )
 from rkgb.Htools import *
 from rkgb.utils.global_vars import solver_name
@@ -504,8 +504,7 @@ class ModelPULP:
                                 )
                             )
                         self.md += (
-                            #TODO: delete right after offload for now
-                            self.AliveW[t, i, w] + self.OflWProg[(t, i, w)] == 1,
+                            self.AliveW[t, i, w] + self.OflWProg[(t, i, w)] >= 1,
                             "",
                         )
                         if i < T - 1:
@@ -521,14 +520,14 @@ class ModelPULP:
                             )
                             self.md += (
                                 self.AliveW[t, i + 1, w]
-                                <= self.AliveW[t, i, w] + self.PrfW[t, i, w],
+                                <= self.AliveW[t, i, w] + self.PrfW[t, i, w] - self.OflW[t, i, w],
                                 "",
                             )
             for w in range(W):
                 for t in range(T - 1):
                     self.md += (
                         self.AliveW[t + 1, 0, w]
-                        <= self.AliveW[t, T - 1, w] + self.PrfW[t, T - 1, w],
+                        <= self.AliveW[t, T - 1, w] + self.PrfW[t, T - 1, w] - self.OflW[t, T - 1, w],
                         "",
                     )
                 self.md += (
@@ -536,6 +535,7 @@ class ModelPULP:
                     <= self.AliveW[T - 1, T - 1, w] + self.PrfW[T - 1, T - 1, w],
                     "",
                 )
+                self.md += (self.AliveW[0, 0, w] == 1, "")  # Full house initial status
 
         ##### Memory constraints
         # we don't keep eyes on the alive status all the time
@@ -834,8 +834,13 @@ class ModelPULP:
             return value > 0.9999  # inttol
 
         if self.enable_offload:
-            op_list, ofl_list, prf_list, init_alive_status = self.greedy_post_processing(hgraph)
-        else :
+            (
+                op_list,
+                ofl_list,
+                prf_list,
+                init_alive_status,
+            ) = self.greedy_post_processing(hgraph)
+        else:
             op_list = []
             ofl_list = []
             prf_list = []
@@ -969,7 +974,7 @@ class ModelPULP:
             prf_list=prf_list,
             loss_idx=None,
             cluster=self.hgraph.cluster,
-            with_parameters=self.enable_offload
+            with_parameters=self.enable_offload,
         )
         # check_valid = True
         if check_valid:
@@ -999,7 +1004,22 @@ class ModelPULP:
         op_list = []
         ofl_list = []
         prf_list = []
-        current_buffers = {w:None for w in range(W)}
+        current_buffers = {w: None for w in range(W)}
+        for w in range(W):
+            hcn = self.hgraph.list_hcn[self.weight2hcn[w][0]]
+            list_alloc_para = [
+                Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
+            ]
+            current_buffers[w] = Buffer(
+                hcn.sub_cluster.name, mem=sum(alloc.mem for alloc in list_alloc_para)
+            )
+            op_list.append(
+                MappingOp(
+                    name=hcn.sub_cluster.name + "_merge",
+                    sources=list_alloc_para,
+                    targets=[current_buffers[w]],
+                )
+            )
         # offload_buffers = {w:[] for w in range(W)}
         init_alive_status = dict()
         for kdn in self.hgraph.cluster.list_kdn_parameters:
@@ -1071,27 +1091,42 @@ class ModelPULP:
                         kdn.name for kdn in hcn.sub_cluster.list_kdn_parameters
                     ]
 
-                    list_alloc_para = [Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters]
+                    list_alloc_para = [
+                        Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
+                    ]
                     w = self.hcn2weight[k]
-                    if current_buffers[w] is not None:#first time
-                        current_buffers[w] = Buffer(hcn.sub_cluster.name, 
-                                                mem = sum(alloc.mem for alloc in list_alloc_para))
+                    if current_buffers[w] is not None:  # first time
+                        current_buffers[w] = Buffer(
+                            hcn.sub_cluster.name,
+                            mem=sum(alloc.mem for alloc in list_alloc_para),
+                        )
                         # Map buffer to parameter tensors
                         # op_list.extend([AllocateOp(alloc) for alloc in list_alloc_para])
-                        op_list.append(MappingOp(name=hcn.sub_cluster.name+"_split", sources=[current_buffers[w]],
-                                                    targets=list_alloc_para))
+                        op_list.append(
+                            MappingOp(
+                                name=hcn.sub_cluster.name + "_split",
+                                sources=[current_buffers[w]],
+                                targets=list_alloc_para,
+                            )
+                        )
                         op_list.append(DeleteOp(current_buffers[w]))
 
                     op_list += sub_op_list
 
                     # Map parameter tensors to buffer
                     if current_buffers[w] is None:
-                        current_buffers[w] = Buffer(hcn.sub_cluster.name, 
-                                                mem = sum(alloc.mem for alloc in list_alloc_para))
+                        current_buffers[w] = Buffer(
+                            hcn.sub_cluster.name,
+                            mem=sum(alloc.mem for alloc in list_alloc_para),
+                        )
                         # op_list.append(AllocateOp(current_buffers[w]))
-                    op_list.append(MappingOp(name=hcn.sub_cluster.name+"_merge", 
-                                            sources=list_alloc_para,
-                                            targets=[current_buffers[w]]))
+                    op_list.append(
+                        MappingOp(
+                            name=hcn.sub_cluster.name + "_merge",
+                            sources=list_alloc_para,
+                            targets=[current_buffers[w]],
+                        )
+                    )
                     op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
 
                 for eidx, (k_, i) in enumerate(self.delete_list):
@@ -1105,29 +1140,44 @@ class ModelPULP:
                     sub_cluster = self.hgraph.list_hcn[
                         self.weight2hcn[w][0]
                     ].sub_cluster
-                    parameter_size = sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters)
+                    parameter_size = sum(
+                        kdn.mem for kdn in sub_cluster.list_kdn_parameters
+                    )
                     if self.OflW[(t, k, w)].value() > 0:
                         # list_alloc_para = [Parameter(kdn) for kdn in sub_cluster.list_kdn_parameters]
-                        
-                        # current_buffer = Buffer(sub_cluster.name, 
+
+                        # current_buffer = Buffer(sub_cluster.name,
                         #                 mem = parameter_size*self.AliveW[(t, k, w)].value())
                         # op_list.append(AllocateOp(all_buffer))
-                        
-                        # op_list.append(MappingOp(name=sub_cluster.name+"_merge", 
+
+                        # op_list.append(MappingOp(name=sub_cluster.name+"_merge",
                         #                          sources=list_alloc_para,
                         #                          targets=[current_buffers[w]]))
                         # op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
-                        offload_buffer = Buffer(sub_cluster.name+"_offload", 
-                                        mem = parameter_size*self.OflW[(t, k, w)].value())
-                        next_buffer = Buffer(sub_cluster.name, 
-                                        mem = (current_buffers[w].mem-
-                                        parameter_size*self.OflW[(t, k, w)].value()))
+                        offload_buffer = Buffer(
+                            sub_cluster.name + "_offload",
+                            mem=parameter_size * self.OflW[(t, k, w)].value(),
+                        )
+                        next_buffer = Buffer(
+                            sub_cluster.name,
+                            mem=(self.AliveW[(t, k, w)] - self.OflW[(t, k, w)]).value()
+                            * parameter_size,
+                        )
+                        # if (
+                        #     current_buffers[w].mem
+                        #     - parameter_size * self.OflW[(t, k, w)].value()
+                        # ) < 0:
+                        #     raise TypeError("negative mem")
                         # op_list.append(AllocateOp(next_buffer))# mapping doesn't need allocation
                         op_list.append(AllocateOp(offload_buffer))
-                        op_list.append(MappingOp(name=sub_cluster.name+"_divide", 
-                                                 sources=[current_buffers[w]],
-                                                 targets=[offload_buffer, next_buffer]))
-                        op_list.append(DeleteOp(current_buffers[w]))
+                        op_list.append(
+                            MappingOp(
+                                name=sub_cluster.name + "_divide",
+                                sources=[current_buffers[w]],
+                                targets=[offload_buffer, next_buffer],
+                            )
+                        )
+                        # op_list.append(DeleteOp(current_buffers[w]))
                         current_buffers[w] = next_buffer
 
                         ofl_list.append(
@@ -1137,18 +1187,24 @@ class ModelPULP:
                                 after=op_list[-1],
                             )
                         )
-                        op_list.append(DeleteOp(offload_buffer))
+                        # op_list.append(DeleteOp(offload_buffer))
 
                     if self.PrfW[(t, k, w)].value() > 0:
-                        # current_buffer = Buffer(sub_cluster.name+"_keep", 
+                        # current_buffer = Buffer(sub_cluster.name+"_keep",
                         #                 mem = parameter_size*self.AliveW[(t, k, w)].value())
-                        prefetch_buffer = Buffer(sub_cluster.name+"_prefetch", 
-                                        mem = parameter_size*self.PrfW[(t, k, w)].value())
+                        prefetch_buffer = Buffer(
+                            sub_cluster.name + "_prefetch",
+                            mem=parameter_size * self.PrfW[(t, k, w)].value(),
+                        )
                         op_list.append(AllocateOp(prefetch_buffer))
-                        next_buffer = Buffer(sub_cluster.name, 
-                                        mem = (current_buffers[w].mem+
-                                        parameter_size*self.PrfW[(t, k, w)].value()))
-                        
+                        next_buffer = Buffer(
+                            sub_cluster.name,
+                            mem=(
+                                current_buffers[w].mem
+                                + parameter_size * self.PrfW[(t, k, w)].value()
+                            ),
+                        )
+
                         prf_list.append(
                             PrefetchOp(
                                 alloc=prefetch_buffer,
@@ -1156,16 +1212,35 @@ class ModelPULP:
                                 after=op_list[-1],
                             )
                         )
-                        
+
                         # op_list.append(AllocateOp(next_buffer))
-                        op_list.append(MappingOp(name=sub_cluster.name+"_add", 
-                                                 sources=[prefetch_buffer, current_buffers[w]],
-                                                 targets=[next_buffer]))
+                        op_list.append(
+                            MappingOp(
+                                name=sub_cluster.name + "_add",
+                                sources=[prefetch_buffer, current_buffers[w]],
+                                targets=[next_buffer],
+                            )
+                        )
                         current_buffers[w] = next_buffer
                         # if sol(self.AliveW[(t, k, w)].value()+self.PrfW[(t, k, w)].value()):
-                        #     op_list.append(MappingOp(name=sub_cluster.name+"_split", 
-                        #                              sources=[current_buffers[w]], 
+                        #     op_list.append(MappingOp(name=sub_cluster.name+"_split",
+                        #                              sources=[current_buffers[w]],
                         #                              targets=[list_alloc_para]))
-        
 
+        # After iteration, restore the init status
+        for w in range(W):
+            hcn = self.hgraph.list_hcn[self.weight2hcn[w][0]]
+            list_alloc_para = [
+                Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
+            ]
+            current_buffers[w] = Buffer(
+                hcn.sub_cluster.name, mem=sum(alloc.mem for alloc in list_alloc_para)
+            )
+            op_list.append(
+                MappingOp(
+                    name=hcn.sub_cluster.name + "_split",
+                    sources=[current_buffers[w]],
+                    targets=list_alloc_para,
+                )
+            )
         return op_list, ofl_list, prf_list, init_alive_status

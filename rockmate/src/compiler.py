@@ -128,7 +128,7 @@ class Compiler:
             kn.name.replace("fwd", "bwd") not in self.op_name_list[i:]
         ):  # not prepared for BWD
             last_before_bwd = False  # if the forward operation is the last one before backward operations
-            print(kn.name.replace("fwd", "bwd"))
+            # print(kn.name.replace("fwd", "bwd"))
         else:
             next_bwd_idx = i + self.op_name_list[i:].index(
                 kn.name.replace("fwd", "bwd")
@@ -345,7 +345,7 @@ class Compiler:
             function_list.append(
                 self.fct_mem_alloc(
                     alloc.name,
-                    shape=alloc.mem // alloc.dtype.itemsize,
+                    shape=int(alloc.mem // alloc.dtype.itemsize),
                     dtype=alloc.dtype,
                     gd=False,
                 )
@@ -354,7 +354,7 @@ class Compiler:
             function_list.append(
                 self.fct_mem_alloc(
                     alloc.name,
-                    shape=alloc.mem // alloc.dtype.itemsize,
+                    shape=int(alloc.mem // alloc.dtype.itemsize),
                     dtype=alloc.dtype,
                     gd=False,
                 )
@@ -567,6 +567,7 @@ class Compiler:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
             with torch.cuda.stream(stream):
                 self.storage.ld[f"cpu_{var_name}"].copy_(self.storage.ld[var_name], non_blocking=True)
+                # print(self.storage.ld[var_name].mean())
 
         return offload
 
@@ -606,19 +607,21 @@ class Compiler:
                     self.storage.ld[targets[0].name] = torch.cat(
                         tuple(self.storage.ld[s.name].flatten() for s in sources), 0
                     )
+                    print("merge", sources[0].name, self.storage.ld[sources[0].name].data.mean())
+
         elif len(sources) == 1:
             targets_name = {}
             start = 0
             for target in targets:
                 shape = target.info.tsize if isinstance(target, Parameter) else -1
-                targets_name[target.name] = (start, start+target.mem//target.dtype.itemsize, shape)
-                start += target.mem//target.dtype.itemsize
+                size = int(target.mem//target.dtype.itemsize)
+                targets_name[target.name] = (start, start+size, shape)
+                start += size
             def mapping():
                 with torch.cuda.stream(stream):
                     for k,v in targets_name.items():
-                        # print(k, v)
                         self.storage.ld[k].data = self.storage.ld[sources[0].name][v[0]:v[1]].view(v[2])
-
+                        print("split", k, self.storage.ld[k].data.mean())
         return mapping
     
 
