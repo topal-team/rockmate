@@ -329,57 +329,63 @@ class HRockmate(torch.nn.Module):
             # === OUR FORWARD FUNCTION ===
             @staticmethod
             def forward(ctx, dummy_input, *args):
-                # *** INITIALIZATION PART ***
-                #  -> Get the inputs using the buffer (Rem 1)
-                dict_inputs = RkMod.dict_inputs_buffer
-                RkMod.dict_inputs_buffer = None
-                #  -> Create the RK_Storage for this run, and store it in ctx
-                ctx.RK_Storage = storage = RK_Storage()
-                RkMod.compiler.storage = storage
-                #  -> Store what we need to return inputs' grad (Rem 1)
-                ctx.name_of_inputs_which_req_grad = (
-                    RkMod.name_of_inputs_which_req_grad_buffer
-                )
-                RkMod.name_of_inputs_which_req_grad_buffer = None
-                #  -> Detach input tensors (Rem 3) and store all the inputs
-                dict_input_tensors_detach = dict()  #  dict : input -> detached input
-                for k, v in dict_inputs.items():
-                    if isinstance(v, torch.Tensor):
-                        v_d = v.detach().requires_grad_(v.requires_grad)
-                        dict_input_tensors_detach[v] = v_d
-                        storage.ld[k] = v_d
-                    #  TODO elif iterables of Tensors ?
-                    else:
-                        storage.ld[k] = v
-                #  -> Initialize the storage
-                for kdn in RkMod.rkgb_res.K_graph.list_kdn:
-                    storage.ld[kdn.main_target] = torch.empty(
-                        0,
-                        device=RkMod.device,
-                        requires_grad=kdn.info.requires_grad,
+                if RkMod.compiler.storage is not None:
+                    ctx.RK_Storage = storage = RkMod.compiler.storage
+                    ctx.name_of_inputs_which_req_grad = (
+                        RkMod.name_of_inputs_which_req_grad_buffer
                     )
+                else:
+                    # *** INITIALIZATION PART ***
+                    #  -> Get the inputs using the buffer (Rem 1)
+                    dict_inputs = RkMod.dict_inputs_buffer
+                    RkMod.dict_inputs_buffer = None
+                    #  -> Create the RK_Storage for this run, and store it in ctx
+                    ctx.RK_Storage = storage = RK_Storage()
+                    RkMod.compiler.storage = storage
+                    #  -> Store what we need to return inputs' grad (Rem 1)
+                    ctx.name_of_inputs_which_req_grad = (
+                        RkMod.name_of_inputs_which_req_grad_buffer
+                    )
+                    # RkMod.name_of_inputs_which_req_grad_buffer = None
+                    #  -> Detach input tensors (Rem 3) and store all the inputs
+                    dict_input_tensors_detach = dict()  #  dict : input -> detached input
+                    for k, v in dict_inputs.items():
+                        if isinstance(v, torch.Tensor):
+                            v_d = v.detach().requires_grad_(v.requires_grad)
+                            dict_input_tensors_detach[v] = v_d
+                            storage.ld[k] = v_d
+                        #  TODO elif iterables of Tensors ?
+                        else:
+                            storage.ld[k] = v
+                    #  -> Initialize the storage
+                    for kdn in RkMod.rkgb_res.K_graph.list_kdn:
+                        storage.ld[kdn.main_target] = torch.empty(
+                            0,
+                            device=RkMod.device,
+                            requires_grad=kdn.info.requires_grad,
+                        )
 
-                for k, v in self.op_sched.dict_alloc.items():
-                    if isinstance(v, Activation):
-                        continue
-                        # self.storage.ld[v.kdn.main_target] = torch.empty(
-                        #     0,
-                        #     device=self.gd["device"],
-                        #     requires_grad=v.kdn.info.requires_grad,
-                        # )
-                    if isinstance(v, Parameter):
-                        storage.ld[k] = self.gd["original_mod"].get_parameter(k.split(" ")[0])
-                        # self.storage.shapes[v.kdn.main_target] = self.gd[k].shape
-                        # self.storage.dtypes[v.kdn.main_target] = self.gd[k].dtypes
-                    elif isinstance(v, Buffer):
-                        storage.ld[k] = torch.empty(0, device=self.gd["device"])
-                        shape = int(v.mem // v.dtype.itemsize)
-                        storage.ld["cpu_" + k] = torch.empty(shape, 
-                                                             dtype=v.dtype, 
-                                                             device=torch.device("cpu"),
-                                                             pin_memory=True)
-                    else:
-                        print(f"Unrecognized type {type(v)}")
+                    for k, v in self.op_sched.dict_alloc.items():
+                        if isinstance(v, Activation):
+                            continue
+                            # self.storage.ld[v.kdn.main_target] = torch.empty(
+                            #     0,
+                            #     device=self.gd["device"],
+                            #     requires_grad=v.kdn.info.requires_grad,
+                            # )
+                        if isinstance(v, Parameter):
+                            storage.ld[k] = self.gd["original_mod"].get_parameter(k.split(" ")[0])
+                            # self.storage.shapes[v.kdn.main_target] = self.gd[k].shape
+                            # self.storage.dtypes[v.kdn.main_target] = self.gd[k].dtypes
+                        elif isinstance(v, Buffer):
+                            storage.ld[k] = torch.empty(0, device=self.gd["device"])
+                            shape = int(v.mem // v.dtype.itemsize)
+                            storage.ld["cpu_" + k] = torch.empty(shape, 
+                                                                dtype=v.dtype, 
+                                                                device=torch.device("cpu"),
+                                                                pin_memory=True)
+                        else:
+                            print(f"Unrecognized type {type(v)}")
 
                 #  *** EXECUTION PART ***
                 # -> Autograd turns off itself before giving use the control.
@@ -433,7 +439,7 @@ class HRockmate(torch.nn.Module):
                     out = RkMod.compiler.get_val(out_mt)
                     out.grad = out_grad.view(out_grad.shape)
                     out_grad.data = torch.empty(0)
-                    # print(out.grad.mean())
+                    print(out.mean())
 
                 #  * record_mem stuff *
                 if RkMod.exec_with_record_mem:
@@ -463,7 +469,7 @@ class HRockmate(torch.nn.Module):
                     )
                     grads = (torch.ones(1),) + grad_inputs
                     #  -> Clear the compiler (and Autograd clears ctx)
-                    RkMod.compiler.storage = None
+                    # RkMod.compiler.storage = None
                     return grads
 
             # === END OF BACKWARD FUNCTION ===

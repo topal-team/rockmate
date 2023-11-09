@@ -528,7 +528,7 @@ class Compiler:
         stream = stream or self.gd["main_stream"]
 
         def fct():
-            assert i not in self.storage.ld["events"]
+            # assert i not in self.storage.ld["events"]
             self.storage.ld["events"][i] = stream.record_event()
 
         return fct
@@ -797,7 +797,7 @@ class Compiler:
 
     def fct_del_var(self, var_name):
         def fct():
-            self.storage.ld[var_name] = None
+            self.storage.ld[var_name] = torch.empty(0, device=self.gd["device"])
 
         return fct
 
