@@ -361,15 +361,15 @@ class Compiler:
             )
         return function_list
 
-    def get_prefetch(self, alloc, before_idx=None, after_idx=None):
+    def get_prefetch(self, op, before_idx=None, after_idx=None):
         function_list = []
         # function_list.append(self.fct_mem_alloc(kn.main_target))
-        function_list.append(self.fct_prefetch(alloc.name, after_idx=after_idx))
+        function_list.append(self.fct_prefetch(op, after_idx=after_idx))
         return function_list
 
-    def get_offload(self, alloc, before_idx=None, after_idx=None):
+    def get_offload(self, op, before_idx=None, after_idx=None):
         function_list = []
-        function_list.append(self.fct_offload(alloc.name, after_idx=after_idx))
+        function_list.append(self.fct_offload(op, after_idx=after_idx))
         return function_list
 
     def compile(self, op_sched):
@@ -434,7 +434,7 @@ class Compiler:
             after_idx = None
             if op.after in op_sched.op_list:
                 after_idx = op_sched.op_list.index(op.after)
-            prf_fct[after_idx].extend(self.get_prefetch(op.target, after_idx=after_idx))
+            prf_fct[after_idx].extend(self.get_prefetch(op, after_idx=after_idx))
             wait_op.append(op.before)
         for op in op_sched.ofl_list:
             if op.disabled:
@@ -442,7 +442,7 @@ class Compiler:
             after_idx = None
             if op.after in op_sched.op_list:
                 after_idx = op_sched.op_list.index(op.after)
-            ofl_fct[after_idx].extend(self.get_offload(op.target, after_idx=after_idx))
+            ofl_fct[after_idx].extend(self.get_offload(op, after_idx=after_idx))
         if op_sched.ofl_list:
             wait_op.append(op_sched.ofl_list[-1].before)
 
@@ -539,7 +539,9 @@ class Compiler:
 
         return fct
 
-    def fct_prefetch(self, var_name, after_idx=None, stream=None, range=[]):
+    def fct_prefetch(self, op, after_idx=None, stream=None, range=[]):
+        var_name = op.target.name
+        indices = op.indices
         device = self.gd["device"]
         stream = stream or self.gd["prefetch_stream"]
         range = range or [None, None]
@@ -549,14 +551,16 @@ class Compiler:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
             # stream.wait_stream(self.gd["main_stream"])
             with torch.cuda.stream(stream):
-                self.storage.ld[var_name].data = self.storage.ld[f"cpu_{var_name}"].to(device)
+                self.storage.ld[var_name][indices[0]: indices[1]].data = self.storage.ld[f"cpu_{var_name}"].to(device)
                 # self.storage.ld[f"_{var_name}"].data = self.storage.ld[
                 #     f"{var_name}"
                 # ].data
 
         return prefetch
 
-    def fct_offload(self, var_name, after_idx=None, stream=None, range=[]):
+    def fct_offload(self, op, after_idx=None, stream=None, range=[]):
+        var_name = op.target.name
+        indices = op.indices
         device = self.gd["device"]
         stream = stream or self.gd["offload_stream"]
         range = range or [None, None]
@@ -566,7 +570,7 @@ class Compiler:
             # if after_idx:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
             with torch.cuda.stream(stream):
-                self.storage.ld[f"cpu_{var_name}"].copy_(self.storage.ld[var_name], non_blocking=True)
+                self.storage.ld[f"cpu_{var_name}"][indices[0]: indices[1]].copy_(self.storage.ld[var_name], non_blocking=True)
                 # print(self.storage.ld[var_name].mean())
 
         return offload

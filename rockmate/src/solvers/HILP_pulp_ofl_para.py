@@ -520,14 +520,18 @@ class ModelPULP:
                             )
                             self.md += (
                                 self.AliveW[t, i + 1, w]
-                                <= self.AliveW[t, i, w] + self.PrfW[t, i, w] - self.OflW[t, i, w],
+                                <= self.AliveW[t, i, w]
+                                + self.PrfW[t, i, w]
+                                - self.OflW[t, i, w],
                                 "",
                             )
             for w in range(W):
                 for t in range(T - 1):
                     self.md += (
                         self.AliveW[t + 1, 0, w]
-                        <= self.AliveW[t, T - 1, w] + self.PrfW[t, T - 1, w] - self.OflW[t, T - 1, w],
+                        <= self.AliveW[t, T - 1, w]
+                        + self.PrfW[t, T - 1, w]
+                        - self.OflW[t, T - 1, w],
                         "",
                     )
                 self.md += (
@@ -1155,7 +1159,7 @@ class ModelPULP:
                         #                          targets=[current_buffers[w]]))
                         # op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
                         offload_buffer = Buffer(
-                            sub_cluster.name + "_offload",
+                            sub_cluster.name,# + "_offload",
                             mem=parameter_size * self.OflW[(t, k, w)].value(),
                         )
                         next_buffer = Buffer(
@@ -1173,17 +1177,26 @@ class ModelPULP:
                         op_list.append(
                             MappingOp(
                                 name=sub_cluster.name + "_divide",
+                                targets=[next_buffer, offload_buffer],
                                 sources=[current_buffers[w]],
-                                targets=[offload_buffer, next_buffer],
                             )
                         )
                         # op_list.append(DeleteOp(current_buffers[w]))
                         current_buffers[w] = next_buffer
 
+                        # Assuming that the total buffer is divided into [(already_ofl), ofl_buffer, next]
+                        progress_size = int(
+                            self.OflW[(t, k, w)].value() // next_buffer.dtype.itemsize
+                        )
+                        offload_size = int(
+                            offload_buffer.mem // next_buffer.dtype.itemsize
+                        )
+
                         ofl_list.append(
                             OffloadOp(
                                 alloc=offload_buffer,
-                                fraction=self.OflW[(t, k, w)].value(),
+                                indices=(progress_size, progress_size + offload_size),
+                                # fraction=self.OflW[(t, k, w)].value(),
                                 after=op_list[-1],
                             )
                         )
@@ -1193,7 +1206,7 @@ class ModelPULP:
                         # current_buffer = Buffer(sub_cluster.name+"_keep",
                         #                 mem = parameter_size*self.AliveW[(t, k, w)].value())
                         prefetch_buffer = Buffer(
-                            sub_cluster.name + "_prefetch",
+                            sub_cluster.name,# + "_prefetch",
                             mem=parameter_size * self.PrfW[(t, k, w)].value(),
                         )
                         op_list.append(AllocateOp(prefetch_buffer))
@@ -1205,10 +1218,23 @@ class ModelPULP:
                             ),
                         )
 
+                        prefetch_size = int(
+                            prefetch_buffer.mem // next_buffer.dtype.itemsize
+                        )
+                        remaining_fraction = (
+                            1 - (self.PrfW[(t, k, w)] + self.AliveW[(t, k, w)]).value()
+                        )
+                        remaining_size = int(
+                            parameter_size
+                            // next_buffer.dtype.itemsize
+                            * (remaining_fraction)
+                        )
+
                         prf_list.append(
                             PrefetchOp(
                                 alloc=prefetch_buffer,
-                                fraction=self.PrfW[(t, k, w)].value(),
+                                indices=(remaining_size, remaining_size + offload_size),
+                                # fraction=self.PrfW[(t, k, w)].value(),
                                 after=op_list[-1],
                             )
                         )
@@ -1228,19 +1254,28 @@ class ModelPULP:
                         #                              targets=[list_alloc_para]))
 
         # After iteration, restore the init status
-        for w in range(W):
-            hcn = self.hgraph.list_hcn[self.weight2hcn[w][0]]
-            list_alloc_para = [
-                Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
-            ]
-            current_buffers[w] = Buffer(
-                hcn.sub_cluster.name, mem=sum(alloc.mem for alloc in list_alloc_para)
-            )
-            op_list.append(
-                MappingOp(
-                    name=hcn.sub_cluster.name + "_split",
-                    sources=[current_buffers[w]],
-                    targets=list_alloc_para,
-                )
-            )
+        # for w in range(W):
+        #     hcn = self.hgraph.list_hcn[self.weight2hcn[w][0]]
+        #     list_alloc_para = [
+        #         Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
+        #     ]
+        #     current_buffers[w] = Buffer(
+        #         hcn.sub_cluster.name, mem=sum(alloc.mem for alloc in list_alloc_para)
+        #     )
+        #     op_list.append(
+        #         MappingOp(
+        #             name=hcn.sub_cluster.name + "_split",
+        #             sources=[current_buffers[w]],
+        #             targets=list_alloc_para,
+        #         )
+        #     )
         return op_list, ofl_list, prf_list, init_alive_status
+
+    def schedule_init_op_list(
+        self,
+    ):
+        init_op_list = []
+        init_alive_status = dict()
+        for kdn in self.hgraph.cluster.list_kdn_parameters:
+            init_alive_status[kdn.name] = True
+        return init_op_list, init_alive_status

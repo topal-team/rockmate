@@ -151,40 +151,40 @@ class OffloadOp(Op):
     def __init__(
         self,
         alloc: Allocation,
-        fraction: float = 1.0,
+        indices: tuple = (0,-1),
         before: Op = None,
         after: Op = None,
         disabled: bool = False,
     ):
         super().__init__("Offload_" + alloc.name, disabled)
         self.target = alloc
-        self.fraction = fraction
+        self.indices = indices
         self.disabled = disabled
         self.before = before
         self.after = after
 
     def __repr__(self):
-        return "Disabled" * self.disabled + f"{self.fraction:.2%} {self.target}"
+        return "Disabled" * self.disabled + f"{self.target}"
 
 
 class PrefetchOp(Op):
     def __init__(
         self,
         alloc: Allocation,
-        fraction: float = 1.0,
+        indices: tuple = (0,-1),
         before: Op = None,
         after: Op = None,
         disabled: bool = False,
     ):
         super().__init__("Prefetch_" + alloc.name, disabled)
         self.target = alloc
-        self.fraction = fraction
+        self.indices = indices
         self.disabled = disabled
         self.before = before
         self.after = after
 
     def __repr__(self):
-        return "Disabled" * self.disabled + f"{self.fraction:.2%} {self.target}"
+        return "Disabled" * self.disabled + f"{self.target}"
 
 
 class OpSchedule:
