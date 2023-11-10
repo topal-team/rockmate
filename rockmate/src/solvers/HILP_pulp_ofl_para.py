@@ -845,8 +845,7 @@ class ModelPULP:
             ) = self.greedy_post_processing(hgraph)
         else:
             op_list = []
-            ofl_list = []
-            prf_list = []
+            init_op_list = []
             for t in range(T):
                 for k in range(T):
                     if t == self.loss_idx and k == self.loss_idx:

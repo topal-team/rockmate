@@ -420,6 +420,8 @@ class Compiler:
         if op_sched.alive_list == []:
             op_sched.alive_list = op_sched.create_alive_list()
         self.alive_list = op_sched.alive_list
+        self.parameters = [k for k in self.alive_list[0].keys() if "parameter" in k]
+        print(self.parameters)
         # self.prf_list = op_sched.prf_list
         # self.ofl_list = op_sched.ofl_list
         self.op_sched = False
@@ -652,10 +654,12 @@ class Compiler:
     #  ==================================
     # region Define Register Hooks
     def fct_get_pack(self, no_save_list, sanity_check=False):
+        # for i in range(6):no_save_list.append(f"{i}.weight parameter")
         # no_save_list contains a list of names
         def pack(x):
             for i, c in enumerate(no_save_list):
                 if self.storage.ld[c].data_ptr() == x.data_ptr():
+                    # print(c)
                     if sanity_check:
                         assert torch.equal(
                             self.storage.ld[c].data.as_strided_(
@@ -718,6 +722,7 @@ class Compiler:
         return fct
 
     def fct_run_forward_with_grad(self, code, no_save_list=[]):
+        no_save_list.extend(self.parameters)
         def fct():
             # with torch.enable_grad():
             with torch.autograd.graph.saved_tensors_hooks(
