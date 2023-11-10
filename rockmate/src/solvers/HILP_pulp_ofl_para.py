@@ -1253,6 +1253,8 @@ class ModelPULP:
                             )
                         )
                         current_buffers[w] = next_buffer
+                        op_list.append(DeleteOp(prefetch_buffer))
+
                         # if sol(self.AliveW[(t, k, w)].value()+self.PrfW[(t, k, w)].value()):
                         #     op_list.append(MappingOp(name=sub_cluster.name+"_split",
                         #                              sources=[current_buffers[w]],

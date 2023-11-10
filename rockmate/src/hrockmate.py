@@ -533,7 +533,7 @@ class HRockmate(torch.nn.Module):
                 self.rkgb_res.D_graph.whole_module_output
             )
             #  -> Clear the compiler
-            self.compiler.storage = None
+            # self.compiler.storage = None
             return final_output
 
     # === end of forward ===
