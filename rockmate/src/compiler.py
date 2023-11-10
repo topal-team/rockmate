@@ -411,8 +411,8 @@ class Compiler:
         #         self.storage.ld["cpu_" + k] = torch.empty(0, device=torch.device("cpu"))
         #     else:
         #         print(f"Unrecognized type {type(v)}")
+        
 
-        fct_list = []
         # self.op_name_list = op_sched.op_name_list
         self.op_name_list = [
             (op.name if not op.disabled else "") for op in op_sched.op_list
@@ -420,107 +420,108 @@ class Compiler:
         if op_sched.alive_list == []:
             op_sched.alive_list = op_sched.create_alive_list()
         self.alive_list = op_sched.alive_list
-        self.prf_list = op_sched.prf_list
-        self.ofl_list = op_sched.ofl_list
+        # self.prf_list = op_sched.prf_list
+        # self.ofl_list = op_sched.ofl_list
         self.op_sched = False
-        prf_fct = {i: [] for i in range(len(op_sched.op_list))}
-        prf_fct[None] = []
-        ofl_fct = {i: [] for i in range(len(op_sched.op_list))}
-        ofl_fct[None] = []
-        wait_op = []
-        for op in op_sched.prf_list:
-            if op.disabled:
-                continue
-            after_idx = None
-            if op.after in op_sched.op_list:
-                after_idx = op_sched.op_list.index(op.after)
-            prf_fct[after_idx].extend(self.get_prefetch(op, after_idx=after_idx))
-            wait_op.append(op.before)
-        for op in op_sched.ofl_list:
-            if op.disabled:
-                continue
-            after_idx = None
-            if op.after in op_sched.op_list:
-                after_idx = op_sched.op_list.index(op.after)
-            ofl_fct[after_idx].extend(self.get_offload(op, after_idx=after_idx))
-        if op_sched.ofl_list:
-            wait_op.append(op_sched.ofl_list[-1].before)
+        # prf_fct = {i: [] for i in range(len(op_sched.op_list))}
+        # prf_fct[None] = []
+        # ofl_fct = {i: [] for i in range(len(op_sched.op_list))}
+        # ofl_fct[None] = []
+        # wait_op = []
+        # for op in op_sched.prf_list:
+        #     if op.disabled:
+        #         continue
+        #     after_idx = None
+        #     if op.after in op_sched.op_list:
+        #         after_idx = op_sched.op_list.index(op.after)
+        #     prf_fct[after_idx].extend(self.get_prefetch(op, after_idx=after_idx))
+        #     wait_op.append(op.before)
+        # for op in op_sched.ofl_list:
+        #     if op.disabled:
+        #         continue
+        #     after_idx = None
+        #     if op.after in op_sched.op_list:
+        #         after_idx = op_sched.op_list.index(op.after)
+        #     ofl_fct[after_idx].extend(self.get_offload(op, after_idx=after_idx))
+        # if op_sched.ofl_list:
+        #     wait_op.append(op_sched.ofl_list[-1].before)
 
-        fct_list = []
-        init_fct = prf_fct[None] + ofl_fct[None]
+        # init_fct = prf_fct[None] + ofl_fct[None]
+        def op_to_fct(op_list):
+            fct_list = []
+            for i, op in enumerate(op_list):
+                # print(i, len(fct_list))
+                if op.disabled:
+                    fct_list.append([])
+                    continue
 
-        for i, op in enumerate(op_sched.op_list):
-            # print(i, len(fct_list))
-            if op.disabled:
-                fct_list.append([])
-                continue
+                if isinstance(op, ComputeOp):
+                    if "fwd" in op.kcn.name:
+                        for kdn in op.kcn.users:
+                            if kdn.kdn_type != "data":
+                                continue
+                            setattr(op.kcn, "proxy", kdn.info.requires_grad)
 
-            if isinstance(op, ComputeOp):
-                if "fwd" in op.kcn.name:
-                    for kdn in op.kcn.users:
-                        if kdn.kdn_type != "data":
-                            continue
-                        setattr(op.kcn, "proxy", kdn.info.requires_grad)
+                        fct_list.append(self.get_fwd(op.kcn, i, detach=op.detach))
+                    elif "bwd" in op.kcn.name:
+                        fct_list.append(self.get_bwd(op.kcn, i, detach=op.detach))
+                    else:
+                        fct_list.append([])
 
-                    fct_list.append(self.get_fwd(op.kcn, i, detach=op.detach))
-                elif "bwd" in op.kcn.name:
-                    fct_list.append(self.get_bwd(op.kcn, i, detach=op.detach))
+                elif isinstance(op, DeleteOp):
+                    if isinstance(op.target, Activation):
+                        if "data" in op.target.kdn.name:
+                            fct_list.append(self.get_del_data(op.target.kdn, i))
+                        elif "grad" in op.target.kdn.name:
+                            fct_list.append(self.get_del_grad(op.target.kdn, i))
+                        else:#phantom
+                            fct_list.append([])    
+                    elif isinstance(op.target, Parameter):
+                        fct_list.append(self.get_del_parameter(op.target.kdn, i))
+                    elif isinstance(op.target, Buffer):
+                        fct_list.append(self.get_del_buffer(op.target, i))
+                    else:
+                        fct_list.append([])
+                elif isinstance(op, MappingOp):
+                    fct_list.append(self.get_mapping(op.sources, op.targets, i))  # TODO
+                elif isinstance(op, AllocateOp):
+                    fct_list.append(self.get_allocation(op.target))
+                elif isinstance(op, PrefetchOp):
+                    fct_list.append(self.get_prefetch(op))
+                elif isinstance(op, OffloadOp):
+                    fct_list.append(self.get_offload(op))
                 else:
                     fct_list.append([])
+            return fct_list
+        init_fct_list = op_to_fct(op_sched.init_op_list)
+        fct_list = op_to_fct(op_sched.op_list)
+            # if op in wait_op:
+            #     fct_list[-1].insert(
+            #         0,
+            #         self.fct_wait_stream(
+            #             self.gd["main_stream"], self.gd["prefetch_stream"]
+            #         ),
+            #     )
 
-            elif isinstance(op, DeleteOp):
-                if isinstance(op.target, Activation):
-                    if "data" in op.target.kdn.name:
-                        fct_list.append(self.get_del_data(op.target.kdn, i))
-                    elif "grad" in op.target.kdn.name:
-                        fct_list.append(self.get_del_grad(op.target.kdn, i))
-                    else:#phantom
-                        fct_list.append([])    
-                elif isinstance(op.target, Parameter):
-                    fct_list.append(self.get_del_parameter(op.target.kdn, i))
-                elif isinstance(op.target, Buffer):
-                    fct_list.append(self.get_del_buffer(op.target, i))
-                else:
-                    fct_list.append([])
-            elif isinstance(op, MappingOp):
-                fct_list.append(self.get_mapping(op.sources, op.targets, i))  # TODO
-            elif isinstance(op, AllocateOp):
-                fct_list.append(self.get_allocation(op.target))
-            elif isinstance(op, PrefetchOp):
-                fct_list.append(self.get_prefetch(op))
-            elif isinstance(op, OffloadOp):
-                fct_list.append(self.get_offload(op))
-            else:
-                fct_list.append([])
+            # fct_list[-1].append(self.fct_record_cuda(i))
+            # for op in prf_fct[i]:
+            #     stream = self.gd["prefetch_stream"]
+            #     fct_list[-1].append(self.fct_wait_stream(stream,
+            #                 self.gd["main_stream"]
+            #             ))
+            #     fct_list[-1].append(op)
 
-            if op in wait_op:
-                fct_list[-1].insert(
-                    0,
-                    self.fct_wait_stream(
-                        self.gd["main_stream"], self.gd["prefetch_stream"]
-                    ),
-                )
-
-            fct_list[-1].append(self.fct_record_cuda(i))
-            for op in prf_fct[i]:
-                stream = self.gd["prefetch_stream"]
-                fct_list[-1].append(self.fct_wait_stream(stream,
-                            self.gd["main_stream"]
-                        ))
-                fct_list[-1].append(op)
-
-            for op in ofl_fct[i]:
-                stream = self.gd["offload_stream"]
-                fct_list[-1].append(self.fct_wait_stream(stream,
-                            self.gd["main_stream"]
-                        ))
-                fct_list[-1].append(op)
+            # for op in ofl_fct[i]:
+            #     stream = self.gd["offload_stream"]
+            #     fct_list[-1].append(self.fct_wait_stream(stream,
+            #                 self.gd["main_stream"]
+            #             ))
+            #     fct_list[-1].append(op)
             # fct_list[-1].extend(page_fct[i])
             # fct_list[-1].append(self.fct_record_cuda(i, stream=self.gd["prefetch_stream"]))
             # fct_list[-1].append(self.fct_record_cuda(i, stream=self.gd["offload_stream"]))
 
-        fct_list[0] = init_fct + fct_list[0]
-        return fct_list
+        return fct_list, init_fct_list
 
     def fct_snychronize(self):
         def fct():

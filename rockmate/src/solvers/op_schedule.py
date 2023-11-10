@@ -203,6 +203,7 @@ class OpSchedule:
         keep_alive_list=False,
         with_parameters=False,
         init_alive_status: dict = {},
+        init_op_list: list = []
     ):
         """
         Key role of OpSchedule: taking op_list, analyzing memory stats,
@@ -211,6 +212,7 @@ class OpSchedule:
         Parameters are read from the cluster
         """
         self.op_list = op_list
+        self.init_op_list = init_op_list
         self.prf_list = prf_list
         self.ofl_list = ofl_list
         self.with_parameters = with_parameters

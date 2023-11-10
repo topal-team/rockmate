@@ -841,6 +841,7 @@ class ModelPULP:
             (
                 op_list,
                 init_alive_status,
+                init_op_list
             ) = self.greedy_post_processing(hgraph)
         else:
             op_list = []
@@ -977,6 +978,7 @@ class ModelPULP:
             loss_idx=None,
             cluster=self.hgraph.cluster,
             # init_alive_status=init_alive_status,
+            init_op_list = init_op_list,
             with_parameters=self.enable_offload,
         )
         # check_valid = True
@@ -1026,7 +1028,8 @@ class ModelPULP:
         #     op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
 
         # offload_buffers = {w:[] for w in range(W)}
-        op_list, current_buffers = self.schedule_init_op_list()
+        op_list = []
+        init_op_list, current_buffers = self.schedule_init_op_list()
         init_alive_status = dict()
         # for kdn in self.hgraph.cluster.list_kdn_parameters:
         #     init_alive_status[kdn.name] = True
@@ -1271,7 +1274,7 @@ class ModelPULP:
         #             targets=list_alloc_para,
         #         )
         #     )
-        return op_list, init_alive_status
+        return op_list, init_alive_status, init_op_list
 
     def schedule_init_op_list(
         self,

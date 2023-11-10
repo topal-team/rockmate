@@ -237,7 +237,7 @@ class HRockmate(torch.nn.Module):
 
     def get_compiled_fct(self):
         self.compiler = Compiler(self.gd)
-        self.fct_list = self.compiler.compile_from_schedule(self.op_sched)
+        self.fct_list, self.init_fct_list = self.compiler.compile_from_schedule(self.op_sched)
         loss_idx = self.op_sched.loss_idx
 
         self.fwd_fct_list = self.fct_list[:loss_idx]
@@ -389,6 +389,10 @@ class HRockmate(torch.nn.Module):
                                                                 pin_memory=True)
                         else:
                             print(f"Unrecognized type {type(v)}")
+                    with torch.enable_grad():
+                        # exec(RkMod.init_code, RkMod.gd, storage.ld)  # is compiler.gd
+                        for l in RkMod.init_fct_list:
+                            RkMod._exec(l)
 
                 #  *** EXECUTION PART ***
                 # -> Autograd turns off itself before giving use the control.
