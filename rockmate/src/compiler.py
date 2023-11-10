@@ -48,10 +48,10 @@ def make_gd(device, nn_mod, dict_constants):
         "meta": torch.ones(1).to(device),
         "cmeta": torch.view_as_complex(torch.ones(2)).to(device),
         "main_stream": torch.cuda.current_stream(),
-        # "prefetch_stream": torch.cuda.current_stream(),
-        # "offload_stream": torch.cuda.current_stream(),
-        "prefetch_stream": torch.cuda.Stream(device),
-        "offload_stream": torch.cuda.Stream(device),
+        "prefetch_stream": torch.cuda.current_stream(),
+        "offload_stream": torch.cuda.current_stream(),
+        # "prefetch_stream": torch.cuda.Stream(device),
+        # "offload_stream": torch.cuda.Stream(device),
     }
 
 
@@ -486,6 +486,10 @@ class Compiler:
                 fct_list.append(self.get_mapping(op.sources, op.targets, i))  # TODO
             elif isinstance(op, AllocateOp):
                 fct_list.append(self.get_allocation(op.target))
+            elif isinstance(op, PrefetchOp):
+                fct_list.append(self.get_prefetch(op))
+            elif isinstance(op, OffloadOp):
+                fct_list.append(self.get_offload(op))
             else:
                 fct_list.append([])
 
@@ -500,16 +504,16 @@ class Compiler:
             fct_list[-1].append(self.fct_record_cuda(i))
             for op in prf_fct[i]:
                 stream = self.gd["prefetch_stream"]
-                # fct_list[-1].append(self.fct_wait_stream(stream,
-                #             self.gd["main_stream"]
-                #         ))
+                fct_list[-1].append(self.fct_wait_stream(stream,
+                            self.gd["main_stream"]
+                        ))
                 fct_list[-1].append(op)
 
             for op in ofl_fct[i]:
                 stream = self.gd["offload_stream"]
-                # fct_list[-1].append(self.fct_wait_stream(stream,
-                #             self.gd["main_stream"]
-                #         ))
+                fct_list[-1].append(self.fct_wait_stream(stream,
+                            self.gd["main_stream"]
+                        ))
                 fct_list[-1].append(op)
             # fct_list[-1].extend(page_fct[i])
             # fct_list[-1].append(self.fct_record_cuda(i, stream=self.gd["prefetch_stream"]))
@@ -549,18 +553,24 @@ class Compiler:
         def prefetch():
             # if after_idx:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
-            # stream.wait_stream(self.gd["main_stream"])
+            stream.wait_stream(self.gd["offload_stream"])
             with torch.cuda.stream(stream):
-                self.storage.ld[var_name][indices[0]: indices[1]].data = self.storage.ld[f"cpu_{var_name}"].to(device)
+                # self.storage.ld[var_name][indices[0]: indices[1]].data = self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"].to(device)
+                self.storage.ld[var_name].copy_(self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"][indices[0]: indices[1]])
                 # self.storage.ld[f"_{var_name}"].data = self.storage.ld[
                 #     f"{var_name}"
                 # ].data
+                # if self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"].mean()<1e-7:
+                # assert torch.allclose(self.storage.ld[var_name][indices[0]: indices[1]].data, self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"].to(device))
+                # print(f"cpu_{var_name.removesuffix('_prefetch')}", self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"].mean()
+                # ,self.storage.ld[var_name][indices[0]: indices[1]].data.mean())
 
         return prefetch
 
     def fct_offload(self, op, after_idx=None, stream=None, range=[]):
         var_name = op.target.name
         indices = op.indices
+        indices_ = [0, None] if 'offload' in var_name else op.indices
         device = self.gd["device"]
         stream = stream or self.gd["offload_stream"]
         range = range or [None, None]
@@ -570,8 +580,10 @@ class Compiler:
             # if after_idx:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
             with torch.cuda.stream(stream):
-                self.storage.ld[f"cpu_{var_name}"][indices[0]: indices[1]].copy_(self.storage.ld[var_name], non_blocking=True)
+                self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"][indices[0]: indices[1]].copy_(self.storage.ld[var_name][indices_[0]:indices_[1]], non_blocking=True)
                 # print(self.storage.ld[var_name].mean())
+                # if self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"].mean()<1e-7:
+                # print(f"cpu_{var_name.removesuffix('_offload')}", self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"].mean())
 
         return offload
 
@@ -611,7 +623,8 @@ class Compiler:
                     self.storage.ld[targets[0].name] = torch.cat(
                         tuple(self.storage.ld[s.name].flatten() for s in sources), 0
                     )
-                    print("merge", sources[0].name, self.storage.ld[sources[0].name].data.mean())
+                    # print("merge", targets[0].name, self.storage.ld[targets[0].name].data.shape)
+                    # print("merge", targets[0].name, self.storage.ld[sources[1].name].data.mean())
 
         elif len(sources) == 1:
             targets_name = {}
@@ -623,9 +636,13 @@ class Compiler:
                 start += size
             def mapping():
                 with torch.cuda.stream(stream):
+                    tmp = self.storage.ld[sources[0].name].clone()
                     for k,v in targets_name.items():
-                        self.storage.ld[k].data = self.storage.ld[sources[0].name][v[0]:v[1]].view(v[2])
-                        print("split", k, self.storage.ld[k].data.mean())
+                        self.storage.ld[k].data = tmp[v[0]:v[1]].view(v[2])
+                        # print("split", k, self.storage.ld[k].data.shape, v)
+                        # print("split", k, self.storage.ld[k].data.mean())
+                    tmp.data = torch.empty(0)
+                    del tmp
         return mapping
     
 

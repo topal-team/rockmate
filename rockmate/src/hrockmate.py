@@ -380,6 +380,9 @@ class HRockmate(torch.nn.Module):
                         elif isinstance(v, Buffer):
                             storage.ld[k] = torch.empty(0, device=self.gd["device"])
                             shape = int(v.mem // v.dtype.itemsize)
+                            # print(k, v.mem)
+                            if "offload" in k or "prefetch" in k:
+                                continue
                             storage.ld["cpu_" + k] = torch.empty(shape, 
                                                                 dtype=v.dtype, 
                                                                 device=torch.device("cpu"),
