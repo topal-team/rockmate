@@ -114,10 +114,29 @@ class ModelPULP:
             for list_sched in self.list_list_sched
         ]
 
-        T = len(self.hgraph.list_hcn)
-        W = len(self.hgraph.list_hcn) // 2  # for now, one weight for each layer
-        I = len(self.hgraph.list_hdn)
-        J = len(self.list_list_sched)
+        self.T = T = len(self.hgraph.list_hcn)
+        self.W = W = len(self.hgraph.list_hcn) // 2  # for now, one weight for each layer
+        self.I = I = len(self.hgraph.list_hdn)
+        self.J = J = len(self.list_list_sched)
+
+        def next_index(self,t,i,upper_triangle=True):
+            # if upper_triangle, consider the case when i>t
+            if t==self.T-1:
+                if i<t:
+                    t_ = t
+                    i_ = i+1
+                else:
+                    t_ = 0
+                    i_ = 0
+            else:
+                end = T-1 if upper_triangle else t+1
+                if i<end:
+                    t_ = t
+                    i_ = i+1
+                else:
+                    i_ = 0
+                    t_ = t+1
+            return (t_, i_)
 
         self.protected_indices = [
             i
