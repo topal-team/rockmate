@@ -345,7 +345,7 @@ class Compiler:
             function_list.append(
                 self.fct_mem_alloc(
                     alloc.name,
-                    shape=int(alloc.mem // alloc.dtype.itemsize),
+                    shape=int(alloc.mem // alloc.itemsize),
                     dtype=alloc.dtype,
                     gd=False,
                 )
@@ -354,7 +354,7 @@ class Compiler:
             function_list.append(
                 self.fct_mem_alloc(
                     alloc.name,
-                    shape=int(alloc.mem // alloc.dtype.itemsize),
+                    shape=int(alloc.mem // alloc.itemsize),
                     dtype=alloc.dtype,
                     gd=False,
                 )
@@ -634,7 +634,7 @@ class Compiler:
             start = 0
             for target in targets:
                 shape = target.info.tsize if isinstance(target, Parameter) else -1
-                size = int(target.mem//target.dtype.itemsize)
+                size = int(target.mem//target.itemsize)
                 targets_name[target.name] = (start, start+size, shape)
                 start += size
             def mapping():

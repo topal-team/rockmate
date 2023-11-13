@@ -17,6 +17,7 @@ class Allocation:
         self.mem = mem
         self.info = info
         self.dtype = dtype
+        self.itemsize = dtype.itemsize if hasattr(dtype, "itemsize") else 4
 
     def __repr__(self):
         return self.name
