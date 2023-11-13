@@ -345,7 +345,7 @@ class Compiler:
             function_list.append(
                 self.fct_mem_alloc(
                     alloc.name,
-                    shape=int(alloc.mem // alloc.itemsize),
+                    shape=round(alloc.mem / alloc.itemsize),
                     dtype=alloc.dtype,
                     gd=False,
                 )
@@ -354,7 +354,7 @@ class Compiler:
             function_list.append(
                 self.fct_mem_alloc(
                     alloc.name,
-                    shape=int(alloc.mem // alloc.itemsize),
+                    shape=round(alloc.mem / alloc.itemsize),
                     dtype=alloc.dtype,
                     gd=False,
                 )
@@ -490,10 +490,26 @@ class Compiler:
                     fct_list.append(self.get_allocation(op.target))
                 elif isinstance(op, PrefetchOp):
                     fct_list.append(self.get_prefetch(op))
+                    
                 elif isinstance(op, OffloadOp):
+                    # fct_list[-1].append(self.fct_wait_stream(self.gd["offload_stream"],
+                    #         self.gd["main_stream"]
+                    #     ))
                     fct_list.append(self.get_offload(op))
+                    # fct_list[-1].append(self.fct_wait_stream(self.gd["prefetch_stream"],
+                    #                                      self.gd["offload_stream"]
+                    #     ))
                 else:
                     fct_list.append([])
+                fct_list[-1].append(self.fct_wait_stream(self.gd["main_stream"],
+                                                         self.gd["prefetch_stream"],
+                        ))
+                fct_list[-1].append(self.fct_wait_stream(self.gd["offload_stream"],
+                                                        self.gd["main_stream"]
+                        ))
+                fct_list[-1].append(self.fct_wait_stream(self.gd["prefetch_stream"],
+                                                         self.gd["offload_stream"]
+                        ))
             return fct_list
         init_fct_list = op_to_fct(op_sched.init_op_list)
         fct_list = op_to_fct(op_sched.op_list)
@@ -556,8 +572,8 @@ class Compiler:
         def prefetch():
             # if after_idx:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
-            stream.wait_stream(self.gd["offload_stream"])
             with torch.cuda.stream(stream):
+                stream.wait_stream(self.gd["offload_stream"])
                 # self.storage.ld[var_name][indices[0]: indices[1]].data = self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"].to(device)
                 self.storage.ld[var_name].copy_(self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"][indices[0]: indices[1]])
                 # self.storage.ld[f"_{var_name}"].data = self.storage.ld[
@@ -567,7 +583,7 @@ class Compiler:
                 # assert torch.allclose(self.storage.ld[var_name][indices[0]: indices[1]].data, self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"].to(device))
                 # print(f"cpu_{var_name.removesuffix('_prefetch')}", self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"].mean()
                 # ,self.storage.ld[var_name][indices[0]: indices[1]].data.mean())
-
+            # self.gd["main_stream"].wait_stream(stream)
         return prefetch
 
     def fct_offload(self, op, after_idx=None, stream=None, range=[]):
@@ -579,15 +595,15 @@ class Compiler:
         range = range or [None, None]
 
         def offload():
-            # stream.wait_stream(self.gd["main_stream"])
             # if after_idx:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
             with torch.cuda.stream(stream):
+                stream.wait_stream(self.gd["main_stream"])
                 self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"][indices[0]: indices[1]].copy_(self.storage.ld[var_name][indices_[0]:indices_[1]], non_blocking=True)
                 # print(self.storage.ld[var_name].mean())
                 # if self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"].mean()<1e-7:
                 # print(f"cpu_{var_name.removesuffix('_offload')}", self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"].mean())
-
+                torch.cuda.synchronize()
         return offload
 
     def fct_mem_alloc(self, var_name, shape, dtype, stream=None, gd=False):
@@ -634,9 +650,10 @@ class Compiler:
             start = 0
             for target in targets:
                 shape = target.info.tsize if isinstance(target, Parameter) else -1
-                size = int(target.mem//target.itemsize)
+                size = round(target.mem/target.itemsize)
                 targets_name[target.name] = (start, start+size, shape)
                 start += size
+            assert start == round(sources[0].mem/4)
             def mapping():
                 with torch.cuda.stream(stream):
                     tmp = self.storage.ld[sources[0].name].clone()

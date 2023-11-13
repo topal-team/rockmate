@@ -276,8 +276,8 @@ class ModelPULP:
             self.hcn2weight = {
                 k: w for w in self.weight2hcn for k in self.weight2hcn[w]
             }
-            self.bandwidthOfl = 8 * 1024**2  # byte/ms
-            self.bandwidthPrf = 8 * 1024**2  # byte/ms
+            self.bandwidthOfl = 6 * 1024**2  # byte/ms
+            self.bandwidthPrf = 6 * 1024**2  # byte/ms
 
         self.Time = LpVariable.dicts(
             "Time", [(t, i) for t in range(T) for i in range(T)], cat="Continuous"
@@ -506,7 +506,15 @@ class ModelPULP:
                                 )
                             )
                         self.md += (
+                            self.OflWProg[(t, i, w)] <= 1,
+                            "",
+                        )
+                        self.md += (
                             self.AliveW[t, i, w] + self.OflWProg[(t, i, w)] >= 1,
+                            "",
+                        )
+                        self.md += (
+                            self.AliveW[t, i, w] + self.PrfW[(t, i, w)] <= 1,
                             "",
                         )
                         if i < T - 1:
@@ -520,6 +528,17 @@ class ModelPULP:
                                 >= self.AliveW[t, i, w] - self.sumComp[(i, t)],
                                 "",
                             )
+
+                            self.md += (
+                                self.OflW[t, i, w]
+                                <= self.sumComp[(i, t)],
+                                "",
+                            )
+                            self.md += (
+                                self.PrfW[t, i, w]
+                                <= self.sumComp[(i, t)],
+                                "",
+                            )
                             self.md += (
                                 self.AliveW[t, i + 1, w]
                                 <= self.AliveW[t, i, w]
@@ -531,8 +550,8 @@ class ModelPULP:
                 for t in range(T - 1):
                     self.md += (
                         self.AliveW[t + 1, 0, w]
-                        <= self.AliveW[t, T - 1, w]
-                        + self.PrfW[t, T - 1, w],
+                        == self.AliveW[t, T - 1, w],
+                        # + self.PrfW[t, T - 1, w],
                         # - self.OflW[t, T - 1, w],
                         "",
                     )
@@ -1171,7 +1190,7 @@ class ModelPULP:
                     alive_current = self.AliveW[(t, k, w)].value()
                     alive_next = self.AliveW[(t_, k_, w)].value()
                     # if alive_current != alive_next:
-                    #     print(f"alive status of {w} from {alive_current} to {alive_next} at {[t,k]}")
+                    #     print(f"alive status of {w} from {alive_current} to {alive_next} at {[t,k]} with progress {self.OflWProg[(t_,k_,w)].value()}")
                     sub_cluster = self.hgraph.list_hcn[
                         self.weight2hcn[w][0]
                     ].sub_cluster
@@ -1217,11 +1236,11 @@ class ModelPULP:
 
                         # Assuming that the total buffer is divided into [(already_ofl), ofl_buffer, next]
                         itemsize = current_buffers[w].itemsize
-                        progress_size = int(
-                            self.OflWProg[(t, k, w)].value() // itemsize
+                        progress_size = round(
+                            self.OflWProg[(t, k, w)].value() / itemsize
                         )
-                        offload_size = int(
-                            self.OflW[(t, k, w)].value() // itemsize
+                        offload_size = round(
+                            self.OflW[(t, k, w)].value() / itemsize
                         )
 
                         op_list.append(
@@ -1272,15 +1291,15 @@ class ModelPULP:
                             ),
                         )
 
-                        prefetch_size = int(
-                            prefetch_buffer.mem // next_buffer.itemsize
+                        prefetch_size = round(
+                            prefetch_buffer.mem / next_buffer.itemsize
                         )
                         remaining_fraction = (
                             1 - (self.PrfW[(t, k, w)] + self.AliveW[(t, k, w)]).value()
                         )
-                        remaining_size = int(
+                        remaining_size = round(
                             parameter_size
-                            // next_buffer.itemsize
+                            / next_buffer.itemsize
                             * (remaining_fraction)
                         )
 
@@ -1354,8 +1373,8 @@ class ModelPULP:
             )
             init_op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
 
-            offload_size = int(
-                parameter_size * self.OflWProg[(0, 0, w)].value() // current_buffers[w].itemsize
+            offload_size = round(
+                parameter_size * self.OflWProg[(0, 0, w)].value() / current_buffers[w].itemsize
             )
             init_op_list.append(
                 OffloadOp(
