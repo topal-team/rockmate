@@ -290,11 +290,24 @@ class ModelPULP:
         ##### Time constraints
         for t in range(T):
             for i in range(T):
+                # if i==self.loss_idx:continue
+                w = self.hcn2weight[i] if i!=self.loss_idx else None
                 self.md += (
                     self.Time[t, i]
                     >= lpSum(
                         self.Comp[i][t, o] * self.time[i][o] for o in range(self.nR[i])
-                    ),
+                    )  
+                    +((# I/O of the current layer cannot be overlapped with computation
+                            # self.weights_size[w]
+                            # / self.bandwidthPrf
+                            # * self.PrfW[t, i, w]
+                            # for w in range(W)
+                        # + 
+                        self.weights_size[w]
+                            / self.bandwidthOfl
+                            * self.OflW[t, i, w]
+                            for w in range(W)) if i!=self.loss_idx else 0)
+                    ,
                     "",
                 )
                 if self.enable_offload:
@@ -488,7 +501,7 @@ class ModelPULP:
                                 self.OflW[t, ii, w] for ii in range(i)
                             ) + lpSum(
                                 self.OflW[tt, ii, w]
-                                for tt in range(bwd_i + 1, t)
+                                for tt in range(bwd_i, t)#offload right after bwd_i
                                 for ii in range(T)
                             )
                         else:
@@ -501,7 +514,7 @@ class ModelPULP:
                                 )
                                 + lpSum(
                                     self.OflW[tt, ii, w]
-                                    for tt in range(bwd_i + 1, T)
+                                    for tt in range(bwd_i, T)
                                     for ii in range(T)
                                 )
                             )
@@ -517,6 +530,16 @@ class ModelPULP:
                             self.AliveW[t, i, w] + self.PrfW[(t, i, w)] <= 1,
                             "",
                         )
+                        self.md += (
+                            self.OflW[t, i, w]
+                            <= self.sumComp[(i, t)],
+                            "",
+                        )
+                        self.md += (
+                            self.PrfW[t, i, w]
+                            <= self.sumComp[(i, t)],
+                            "",
+                        )
                         if i < T - 1:
                             self.md += (
                                 self.AliveW[t, i + 1, w]
@@ -529,16 +552,7 @@ class ModelPULP:
                                 "",
                             )
 
-                            self.md += (
-                                self.OflW[t, i, w]
-                                <= self.sumComp[(i, t)],
-                                "",
-                            )
-                            self.md += (
-                                self.PrfW[t, i, w]
-                                <= self.sumComp[(i, t)],
-                                "",
-                            )
+                            
                             self.md += (
                                 self.AliveW[t, i + 1, w]
                                 <= self.AliveW[t, i, w]
@@ -922,15 +936,15 @@ class ModelPULP:
                                 and sol(self.sumAliveP[(j, t + 1)].value())
                             ):  # phantoms should be kept
                                 phantoms_to_keep = h_obj.phantoms
-                                for op in sub_op_list[::-1]:
-                                    if (
-                                        op.is_del
-                                        and not op.disabled
-                                        and op.kn in phantoms_to_keep
-                                    ):
-                                        # Only the last del should be disabled
-                                        op.disabled = True
-                                        phantoms_to_keep.remove(op.kn)
+                                # for op in sub_op_list[::-1]:
+                                #     if (
+                                #         op.is_del
+                                #         and not op.disabled
+                                #         and op.kn in phantoms_to_keep
+                                #     ):
+                                #         # Only the last del should be disabled
+                                #         op.disabled = True
+                                #         phantoms_to_keep.remove(op.kn)
 
                             # translating sub_op_list
                             if (
@@ -1116,15 +1130,15 @@ class ModelPULP:
                             and sol(self.sumAliveP[(j, t + 1)].value())
                         ):  # phantoms should be kept
                             phantoms_to_keep = h_obj.phantoms
-                            for op in sub_op_list[::-1]:
-                                if (
-                                    op.is_del
-                                    and not op.disabled
-                                    and op.kn in phantoms_to_keep
-                                ):
-                                    # Only the last del should be disabled
-                                    op.disabled = True
-                                    phantoms_to_keep.remove(op.kn)
+                            # for op in sub_op_list[::-1]:
+                            #     if (
+                            #         op.is_del
+                            #         and not op.disabled
+                            #         and op.kn in phantoms_to_keep
+                            #     ):
+                            #         # Only the last del should be disabled
+                            #         op.disabled = True
+                            #         phantoms_to_keep.remove(op.kn)
 
                         # translating sub_op_list
                         if hcn.sub_cluster is not hcn.sub_cluster.representee_cluster:
@@ -1267,7 +1281,7 @@ class ModelPULP:
                         op_list.append(
                             MappingOp(
                                 name=sub_cluster.name + "_divide",
-                                targets=[next_buffer, delete_buffer],
+                                targets=[delete_buffer, next_buffer],
                                 sources=[current_buffers[w]],
                             )
                         )
@@ -1396,7 +1410,7 @@ class ModelPULP:
             init_op_list.append(
                 MappingOp(
                     name=hcn.sub_cluster.name + "_divide",
-                    targets=[next_buffer, offload_buffer],
+                    targets=[offload_buffer, next_buffer],
                     sources=[current_buffers[w]],
                 )
             )

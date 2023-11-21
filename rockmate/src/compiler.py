@@ -48,10 +48,10 @@ def make_gd(device, nn_mod, dict_constants):
         "meta": torch.ones(1).to(device),
         "cmeta": torch.view_as_complex(torch.ones(2)).to(device),
         "main_stream": torch.cuda.current_stream(),
-        "prefetch_stream": torch.cuda.current_stream(),
-        "offload_stream": torch.cuda.current_stream(),
-        # "prefetch_stream": torch.cuda.Stream(device),
-        # "offload_stream": torch.cuda.Stream(device),
+        # "prefetch_stream": torch.cuda.current_stream(),
+        # "offload_stream": torch.cuda.current_stream(),
+        "prefetch_stream": torch.cuda.Stream(device),
+        "offload_stream": torch.cuda.Stream(device),
     }
 
 
@@ -599,7 +599,8 @@ class Compiler:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
             with torch.cuda.stream(stream):
                 stream.wait_stream(self.gd["main_stream"])
-                self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"][indices[0]: indices[1]].copy_(self.storage.ld[var_name][indices_[0]:indices_[1]], non_blocking=True)
+                self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"][indices[0]: indices[1]].copy_(
+                    self.storage.ld[var_name][indices_[0]:indices_[1]], non_blocking=True)
                 # print(self.storage.ld[var_name].mean())
                 # if self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"].mean()<1e-7:
                 # print(f"cpu_{var_name.removesuffix('_offload')}", self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"].mean())
