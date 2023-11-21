@@ -266,8 +266,11 @@ class HILP(Solver):
                         # print(f"scheduling: {time.time()-start}")
                 else:  # if infeasible, no need to try smaller budget
                     return list_op_sched
-            return list_op_sched
-        return solve_md(ilp_solver_params=ilp_solver_params, 
+            return list_op_sched, md if accurate_mem else None
+        
+        list_op_sched, md = solve_md(ilp_solver_params=ilp_solver_params, 
                      model_ilp = self.model_ilp,
                      protected_names=self.config.protected_names,
                      ilp_solver = self.ilp_solver)
+        self.md = md
+        return list_op_sched
