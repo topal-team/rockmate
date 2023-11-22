@@ -1259,19 +1259,20 @@ class ModelPULP:
                             self.OflW[(t, k, w)].value() *parameter_mem/ itemsize
                         )
                         full_size = round(parameter_mem/itemsize)
-                        start = -(full_size-progress_size)#assumming progress cannot be full
-                        end = start+offload_size if start<-offload_size else None
+                        if full_size>progress_size:
+                            start = -(full_size-progress_size)#assumming progress cannot be full
+                            end = start+offload_size if start<-offload_size else None
 
-                        op_list.append(
-                            OffloadOp(
-                                alloc=current_buffers[w],
-                                # indices=(progress_size, progress_size + offload_size),
-                                indices=(start, end),
-                                # fraction=self.OflW[(t, k, w)].value(),
-                                after=op_list[-1],
+                            op_list.append(
+                                OffloadOp(
+                                    alloc=current_buffers[w],
+                                    # indices=(progress_size, progress_size + offload_size),
+                                    indices=(start, end),
+                                    # fraction=self.OflW[(t, k, w)].value(),
+                                    after=op_list[-1],
+                                )
                             )
-                        )
-                        # op_list.append(DeleteOp(offload_buffer))
+                            # op_list.append(DeleteOp(offload_buffer))
 
                     if alive_next < alive_current:
                         next_buffer = Buffer(
