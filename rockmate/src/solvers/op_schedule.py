@@ -8,7 +8,7 @@ import warnings
 
 
 class Allocation:
-    def __init__(self, name, alloc_type="", mem=0, info=dict(), dtype=torch.float32):
+    def __init__(self, name, alloc_type="", mem=0, info=dict(), dtype=torch.float32, size=None):
         """
         Allocation type should be in activation/paramters/buffer
         """
@@ -18,6 +18,11 @@ class Allocation:
         self.info = info
         self.dtype = dtype
         self.itemsize = dtype.itemsize if hasattr(dtype, "itemsize") else 4
+        if size:
+            self.size = round(size)
+            self.mem = size*self.itemsize
+        else:
+            self.size = round(self.mem/self.itemsize)#element size
 
     def __repr__(self):
         return self.name
@@ -66,9 +71,9 @@ class Parameter(Allocation):
 
 
 class Buffer(Allocation):
-    def __init__(self, name, mem=0, info=dict(), dtype=torch.float32):
+    def __init__(self, name, mem=0, info=dict(), dtype=torch.float32, size=None):
         super().__init__(
-            name=name, alloc_type="Buffer", mem=mem, info=info, dtype=dtype
+            name=name, alloc_type="Buffer", mem=mem, info=info, dtype=dtype, size=size
         )
         self.dtype = dtype
 

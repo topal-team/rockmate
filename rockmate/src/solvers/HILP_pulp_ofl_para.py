@@ -1211,6 +1211,7 @@ class ModelPULP:
                     parameter_mem = sum(
                         kdn.mem for kdn in sub_cluster.list_kdn_parameters
                     )
+                    parameter_size = round(parameter_mem/current_buffers[w].itemsize)
                     if self.OflW[(t, k, w)].value() > 0:
                         # list_alloc_para = [Parameter(kdn) for kdn in sub_cluster.list_kdn_parameters]
 
@@ -1277,12 +1278,14 @@ class ModelPULP:
                     if alive_next < alive_current:
                         next_buffer = Buffer(
                             sub_cluster.name,
-                            mem=alive_next
-                            * parameter_mem,
+                            # mem=alive_next
+                            # * parameter_mem,
+                            size = round(parameter_size*alive_next)
                         )
                         delete_buffer = Buffer(
                             sub_cluster.name+"_offload",
-                            mem = (alive_current-alive_next)*parameter_mem
+                            # mem = (alive_current-alive_next)*parameter_mem
+                            size = (alive_current-alive_next)*parameter_size
                         )
                         op_list.append(AllocateOp(delete_buffer))
                         op_list.append(
@@ -1297,37 +1300,41 @@ class ModelPULP:
 
 
                     if self.PrfW[(t, k, w)].value() > 0:
+                        assert parameter_size> current_buffers[w].size, print(self.PrfW[(t, k, w)].value())
                         # current_buffer = Buffer(sub_cluster.name+"_keep",
                         #                 mem = parameter_mem*self.AliveW[(t, k, w)].value())
                         prefetch_buffer = Buffer(
                             sub_cluster.name + "_prefetch",
-                            mem=parameter_mem * self.PrfW[(t, k, w)].value(),
+                            # mem=parameter_mem * self.PrfW[(t, k, w)].value(),
+                            size=round(parameter_size * self.PrfW[(t, k, w)].value()),
                         )
                         op_list.append(AllocateOp(prefetch_buffer))
                         next_buffer = Buffer(
                             sub_cluster.name,
-                            mem=(
-                                current_buffers[w].mem
-                                + parameter_mem * self.PrfW[(t, k, w)].value()
-                            ),
+                            # mem=(
+                            #     current_buffers[w].mem
+                            #     + parameter_mem * self.PrfW[(t, k, w)].value()
+                            # ),
+                            size=current_buffers[w].size+prefetch_buffer.size
                         )
 
-                        prefetch_size = round(
-                            prefetch_buffer.mem / next_buffer.itemsize
-                        )
-                        remaining_fraction = (
-                            1 - (self.PrfW[(t, k, w)] + self.AliveW[(t, k, w)]).value()
-                        )
-                        remaining_size = round(
-                            parameter_mem
-                            / next_buffer.itemsize
-                            * (remaining_fraction)
-                        )
+                        # prefetch_size = round(
+                        #     prefetch_buffer.mem / next_buffer.itemsize
+                        # )
+                        # remaining_fraction = (
+                        #     1 - (self.PrfW[(t, k, w)] + self.AliveW[(t, k, w)]).value()
+                        # )
+                        # remaining_size = round(
+                        #     parameter_mem
+                        #     / next_buffer.itemsize
+                        #     * (remaining_fraction)
+                        # )
+                        remaining_size = parameter_size - current_buffers[w].size - prefetch_buffer.size
 
                         op_list.append(
                             PrefetchOp(
                                 alloc=prefetch_buffer,
-                                indices=(remaining_size, remaining_size + prefetch_size),
+                                indices=(remaining_size, remaining_size + prefetch_buffer.size),
                                 # fraction=self.PrfW[(t, k, w)].value(),
                                 after=op_list[-1],
                             )
@@ -1384,7 +1391,7 @@ class ModelPULP:
             parameter_mem = sum(alloc.mem for alloc in list_alloc_para)
             
             current_buffers[w] = Buffer(
-                hcn.sub_cluster.name, mem=sum(alloc.mem for alloc in list_alloc_para)
+                hcn.sub_cluster.name, mem=parameter_mem
             )
             target_buffer = Buffer(
                 "cpu_"+hcn.sub_cluster.name, mem=parameter_mem
@@ -1397,21 +1404,20 @@ class ModelPULP:
                 )
             )
             init_op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
+            parameter_size = round(parameter_mem/current_buffers[w].itemsize)
 
             if from_cpu:
                 if self.AliveW[(0, 0, w)].value()>0:
                     
+                    prefetch_size = round(parameter_size*self.AliveW[(0, 0, w)].value())
                     prefetch_buffer = Buffer(
                             hcn.sub_cluster.name,
-                            mem=parameter_mem * self.AliveW[(0, 0, w)].value(),
+                            # mem=parameter_mem * self.AliveW[(0, 0, w)].value(),
+                            size = prefetch_size
                         )
                     init_op_list.append(AllocateOp(prefetch_buffer))
-                    prefetch_size = round(
-                        prefetch_buffer.mem / current_buffers[w].itemsize
-                    )
-                    remaining_size = round(
-                        parameter_mem / current_buffers[w].itemsize
-                    ) - prefetch_size
+                    
+                    remaining_size = parameter_size - prefetch_size
 
                     init_op_list.append(
                         PrefetchOp(
@@ -1421,8 +1427,7 @@ class ModelPULP:
                             after=init_op_list[-1],
                         )
                     )
-                    # current_buffers[w] = prefetch_buffer
-                    current_buffers[w].mem = self.AliveW[(0, 0, w)].value()*parameter_mem
+                    current_buffers[w] = prefetch_buffer
             else:
                 if self.OflWProg[(0, 0, w)].value()>0:
 

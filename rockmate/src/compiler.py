@@ -345,7 +345,7 @@ class Compiler:
             function_list.append(
                 self.fct_mem_alloc(
                     alloc.name,
-                    shape=round(alloc.mem / alloc.itemsize),
+                    shape=alloc.size,
                     dtype=alloc.dtype,
                     gd=False,
                 )
@@ -354,7 +354,7 @@ class Compiler:
             function_list.append(
                 self.fct_mem_alloc(
                     alloc.name,
-                    shape=round(alloc.mem / alloc.itemsize),
+                    shape=alloc.size,
                     dtype=alloc.dtype,
                     gd=False,
                 )
@@ -573,7 +573,7 @@ class Compiler:
             # if after_idx:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
             with torch.cuda.stream(stream):
-                stream.wait_stream(self.gd["offload_stream"])
+                # stream.wait_stream(self.gd["offload_stream"])
                 # self.storage.ld[var_name][indices[0]: indices[1]].data = self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"].to(device)
                 self.storage.ld[var_name].copy_(self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"][indices[0]: indices[1]])
                 # self.storage.ld[f"_{var_name}"].data = self.storage.ld[
@@ -598,7 +598,7 @@ class Compiler:
             # if after_idx:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
             with torch.cuda.stream(stream):
-                stream.wait_stream(self.gd["main_stream"])
+                # stream.wait_stream(self.gd["main_stream"])
                 self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"][indices[0]: indices[1]].copy_(
                     self.storage.ld[var_name][indices_[0]:indices_[1]], non_blocking=True)
                 # print(self.storage.ld[var_name].mean())
@@ -651,10 +651,10 @@ class Compiler:
             start = 0
             for target in targets:
                 shape = target.info.tsize if isinstance(target, Parameter) else -1
-                size = round(target.mem/target.itemsize)
+                size = target.size
                 targets_name[target.name] = (start, start+size, shape)
                 start += size
-            assert start == round(sources[0].mem/4)
+            # assert start == round(sources[0].mem/4)
             def mapping():
                 with torch.cuda.stream(stream):
                     tmp = self.storage.ld[sources[0].name].clone()
