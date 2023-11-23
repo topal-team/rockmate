@@ -659,7 +659,7 @@ class Compiler:
                 with torch.cuda.stream(stream):
                     tmp = self.storage.ld[sources[0].name].clone()
                     for k,v in targets_name.items():
-                        self.storage.ld[k].data = tmp[v[0]:v[1]].view(v[2])
+                        self.storage.ld[k].data = tmp[v[0]:v[1]].view(v[2]).clone()
                         # print("split", k, self.storage.ld[k].data.shape, v)
                         # print("split", k, self.storage.ld[k].data.mean())
                     tmp.data = torch.empty(0)
@@ -822,6 +822,7 @@ class Compiler:
 
     def fct_del_tensor_data(self, tensor_name):
         def fct():
+            # assert self.storage.ld[tensor_name].data.numel()>0
             self.storage.ld[tensor_name].data = torch.empty(0, device=self.gd["device"])
 
         return fct

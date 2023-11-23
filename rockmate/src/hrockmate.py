@@ -369,8 +369,7 @@ class HRockmate(torch.nn.Module):
                         if isinstance(op, MappingOp) and len(op.targets)==1:
                             # to create the full size buffer
                             target = op.targets[0]
-                            shape = round(target.mem / target.itemsize)
-                            storage.ld["cpu_"+target.name] = torch.empty(shape, 
+                            storage.ld["cpu_"+target.name.strip("cpu_")] = torch.empty(target.size, 
                                                                 dtype=target.dtype, 
                                                                 device=torch.device("cpu"),
                                                                 pin_memory=True)
@@ -406,6 +405,7 @@ class HRockmate(torch.nn.Module):
                         for l in RkMod.init_fct_list:
                             RkMod._exec(l)
                     torch.cuda.synchronize()
+                    # 1/0
                     # with torch.cuda.stream(self.gd["offload_stream"]):
                     #     # RkMod.compiler.storage.ld[f"cpu_H_Cluster_bottom___12_fv"].copy_(RkMod.compiler.storage.ld[f"H_Cluster_bottom___12_fv"])
 

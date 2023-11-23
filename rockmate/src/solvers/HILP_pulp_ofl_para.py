@@ -1247,7 +1247,7 @@ class ModelPULP:
                             size = next_size
                         )
                         delete_buffer = Buffer(
-                            sub_cluster.name+"_offload",
+                            sub_cluster.name+"_delete",
                             # mem = (alive_current-alive_next)*parameter_mem
                             size = current_size - next_size
                         )
