@@ -1200,9 +1200,7 @@ class ModelPULP:
                         op_list.append(DeleteOp(Activation(hdn.kdn)))
 
                 for w in range(W):
-                    t_, k_ = self.next_index(t,k)
-                    alive_current = self.AliveW[(t, k, w)].value()
-                    alive_next = self.AliveW[(t_, k_, w)].value()
+                    
                     # if alive_current != alive_next:
                     #     print(f"alive status of {w} from {alive_current} to {alive_next} at {[t,k]} with progress {self.OflWProg[(t_,k_,w)].value()}")
                     sub_cluster = self.hgraph.list_hcn[
@@ -1213,55 +1211,18 @@ class ModelPULP:
                     )
                     parameter_size = round(parameter_mem/current_buffers[w].itemsize)
                     if self.OflW[(t, k, w)].value() > 0:
-                        # list_alloc_para = [Parameter(kdn) for kdn in sub_cluster.list_kdn_parameters]
-
-                        # current_buffer = Buffer(sub_cluster.name,
-                        #                 mem = parameter_mem*self.AliveW[(t, k, w)].value())
-                        # op_list.append(AllocateOp(all_buffer))
-
-                        # op_list.append(MappingOp(name=sub_cluster.name+"_merge",
-                        #                          sources=list_alloc_para,
-                        #                          targets=[current_buffers[w]]))
-                        # op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
-                        # offload_buffer = Buffer(
-                        #     sub_cluster.name + "_offload",
-                        #     mem=parameter_mem * self.OflW[(t, k, w)].value(),
-                        # )
-                        # next_buffer = Buffer(
-                        #     sub_cluster.name,
-                        #     mem=(self.AliveW[(t, k, w)] - self.OflW[(t, k, w)]).value()
-                        #     * parameter_mem,
-                        # )
-                        # if (
-                        #     current_buffers[w].mem
-                        #     - parameter_mem * self.OflW[(t, k, w)].value()
-                        # ) < 0:
-                        #     raise TypeError("negative mem")
-                        # op_list.append(AllocateOp(next_buffer))# mapping doesn't need allocation
-                        # op_list.append(AllocateOp(offload_buffer))
-                        # op_list.append(
-                        #     MappingOp(
-                        #         name=sub_cluster.name + "_divide",
-                        #         targets=[next_buffer, offload_buffer],
-                        #         sources=[current_buffers[w]],
-                        #     )
-                        # )
-                        # # op_list.append(DeleteOp(current_buffers[w]))
-                        # current_buffers[w] = next_buffer
-
                         # Assuming that the total buffer is divided into [(already_ofl), ofl_buffer, next]
                         itemsize = current_buffers[w].itemsize
                         progress_size = round(
-                            self.OflWProg[(t, k, w)].value() *parameter_mem/ itemsize
+                            self.OflWProg[(t, k, w)].value() *parameter_size
                         )
                         if max(self.weight2hcn[w]) == t and t==k:#bwd step
                             progress_size = 0
                         offload_size = round(
-                            self.OflW[(t, k, w)].value() *parameter_mem/ itemsize
-                        )
-                        full_size = round(parameter_mem/itemsize)
-                        if full_size>progress_size:
-                            start = -(full_size-progress_size)#assumming progress cannot be full
+                            self.OflWProg[(t, k, w)].value()+self.OflW[(t, k, w)].value() *parameter_size
+                        ) - progress_size
+                        if offload_size>0:
+                            start = -(parameter_size-progress_size)#assumming progress cannot be full
                             end = start+offload_size if start<-offload_size else None
 
                             op_list.append(
@@ -1274,18 +1235,21 @@ class ModelPULP:
                                 )
                             )
                             # op_list.append(DeleteOp(offload_buffer))
-
-                    if alive_next < alive_current:
+                    t_, k_ = self.next_index(t,k)
+                    current_size = round(self.AliveW[(t, k, w)].value()*parameter_size)
+                    next_size = round(self.AliveW[(t_, k_, w)].value()*parameter_size)
+                    if next_size<current_size:
+                        # to delete some parameters
                         next_buffer = Buffer(
                             sub_cluster.name,
                             # mem=alive_next
                             # * parameter_mem,
-                            size = round(parameter_size*alive_next)
+                            size = next_size
                         )
                         delete_buffer = Buffer(
                             sub_cluster.name+"_offload",
                             # mem = (alive_current-alive_next)*parameter_mem
-                            size = (alive_current-alive_next)*parameter_size
+                            size = current_size - next_size
                         )
                         op_list.append(AllocateOp(delete_buffer))
                         op_list.append(
@@ -1298,44 +1262,23 @@ class ModelPULP:
                         op_list.append(DeleteOp(delete_buffer))
                         current_buffers[w] = next_buffer
 
-
-                    if self.PrfW[(t, k, w)].value() > 0:
-                        assert parameter_size> current_buffers[w].size, print(self.PrfW[(t, k, w)].value())
-                        # current_buffer = Buffer(sub_cluster.name+"_keep",
-                        #                 mem = parameter_mem*self.AliveW[(t, k, w)].value())
+                    if next_size>current_size:
+                    # if self.PrfW[(t, k, w)].value() > 0:
+                        # assert parameter_size> current_buffers[w].size, print(self.PrfW[(t, k, w)].value())
                         prefetch_buffer = Buffer(
                             sub_cluster.name + "_prefetch",
-                            # mem=parameter_mem * self.PrfW[(t, k, w)].value(),
-                            size=round(parameter_size * self.PrfW[(t, k, w)].value()),
+                            size=next_size-current_size,
                         )
                         op_list.append(AllocateOp(prefetch_buffer))
                         next_buffer = Buffer(
                             sub_cluster.name,
-                            # mem=(
-                            #     current_buffers[w].mem
-                            #     + parameter_mem * self.PrfW[(t, k, w)].value()
-                            # ),
-                            size=current_buffers[w].size+prefetch_buffer.size
+                            size=next_size
                         )
-
-                        # prefetch_size = round(
-                        #     prefetch_buffer.mem / next_buffer.itemsize
-                        # )
-                        # remaining_fraction = (
-                        #     1 - (self.PrfW[(t, k, w)] + self.AliveW[(t, k, w)]).value()
-                        # )
-                        # remaining_size = round(
-                        #     parameter_mem
-                        #     / next_buffer.itemsize
-                        #     * (remaining_fraction)
-                        # )
-                        remaining_size = parameter_size - current_buffers[w].size - prefetch_buffer.size
 
                         op_list.append(
                             PrefetchOp(
                                 alloc=prefetch_buffer,
-                                indices=(remaining_size, remaining_size + prefetch_buffer.size),
-                                # fraction=self.PrfW[(t, k, w)].value(),
+                                indices=(parameter_size-next_size, parameter_size-current_size),
                                 after=op_list[-1],
                             )
                         )
@@ -1412,7 +1355,6 @@ class ModelPULP:
                     prefetch_size = round(parameter_size*self.AliveW[(0, 0, w)].value())
                     prefetch_buffer = Buffer(
                             hcn.sub_cluster.name,
-                            # mem=parameter_mem * self.AliveW[(0, 0, w)].value(),
                             size = prefetch_size
                         )
                     init_op_list.append(AllocateOp(prefetch_buffer))
@@ -1423,7 +1365,6 @@ class ModelPULP:
                         PrefetchOp(
                             alloc=prefetch_buffer,
                             indices=(remaining_size,None),
-                            # fraction=self.PrfW[(t, k, w)].value(),
                             after=init_op_list[-1],
                         )
                     )
