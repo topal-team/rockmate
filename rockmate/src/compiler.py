@@ -336,8 +336,8 @@ class Compiler:
     def get_del_buffer(self, alloc, i):
         return [self.fct_del_tensor_data(alloc.name)]
     
-    def get_mapping(self, sources, targets, i):
-        return [self.fct_mapping(sources=sources, targets=targets)]
+    def get_mapping(self, sources, targets, i, copy=False):
+        return [self.fct_mapping(sources=sources, targets=targets, copy=copy)]
 
     def get_allocation(self, alloc):
         function_list = []
@@ -421,7 +421,7 @@ class Compiler:
             op_sched.alive_list = op_sched.create_alive_list()
         self.alive_list = op_sched.alive_list
         self.parameters = [k for k in self.alive_list[0].keys() if "parameter" in k]
-        print(self.parameters)
+        # print(self.parameters)
         # self.prf_list = op_sched.prf_list
         # self.ofl_list = op_sched.ofl_list
         self.op_sched = False
@@ -485,7 +485,7 @@ class Compiler:
                     else:
                         fct_list.append([])
                 elif isinstance(op, MappingOp):
-                    fct_list.append(self.get_mapping(op.sources, op.targets, i))  # TODO
+                    fct_list.append(self.get_mapping(op.sources, op.targets, i, op.copy))  # TODO
                 elif isinstance(op, AllocateOp):
                     fct_list.append(self.get_allocation(op.target))
                 elif isinstance(op, PrefetchOp):
@@ -633,16 +633,22 @@ class Compiler:
 
         return mem_dealloc
 
-    def fct_mapping(self, sources, targets, stream=None, gd=True):
+    def fct_mapping(self, sources, targets, stream=None, gd=True, copy=False):
         stream = stream or self.gd["main_stream"]
         
         if len(targets) == 1:
-
-            def mapping():
-                with torch.cuda.stream(stream):
-                    self.storage.ld[targets[0].name] = torch.cat(
-                        tuple(self.storage.ld[s.name].flatten() for s in sources), 0
-                    )
+            if copy:#assume same size
+                def mapping():
+                    with torch.cuda.stream(stream):
+                        self.storage.ld[targets[0].name].copy_(torch.cat(
+                            tuple(self.storage.ld[s.name].flatten() for s in sources), 0
+                        ).data)
+            else:
+                def mapping():
+                    with torch.cuda.stream(stream):
+                        self.storage.ld[targets[0].name] = torch.cat(
+                            tuple(self.storage.ld[s.name].flatten() for s in sources), 0
+                        )
                     # print("merge", targets[0].name, self.storage.ld[targets[0].name].data.shape)
                     # print("merge", targets[0].name, self.storage.ld[sources[1].name].data.mean())
 

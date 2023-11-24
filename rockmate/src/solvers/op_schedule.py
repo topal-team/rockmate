@@ -139,11 +139,13 @@ class MappingOp(Op):
         targets: list,
         indices: list = None,
         disabled=False,
+        copy=False
     ):
         super().__init__("Mapping_" + name, disabled)
         self.sources = sources
         self.targets = targets
         self.indices = indices
+        self.copy = copy
         self.overhead = sum(alloc.mem for alloc in sources)  # TODO: update when needed
 
 

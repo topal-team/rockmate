@@ -1344,6 +1344,7 @@ class ModelPULP:
                     name=hcn.sub_cluster.name + "_merge",
                     sources=list_alloc_para,
                     targets=[target_buffer],
+                    copy=True
                 )
             )
             init_op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
