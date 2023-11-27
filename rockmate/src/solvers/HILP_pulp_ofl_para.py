@@ -292,6 +292,7 @@ class ModelPULP:
             for i in range(T):
                 # if i==self.loss_idx:continue
                 w = self.hcn2weight[i] if i!=self.loss_idx else None
+
                 self.md += (
                     self.Time[t, i]
                     >= lpSum(
@@ -305,8 +306,9 @@ class ModelPULP:
                         # + 
                         self.weights_size[w]
                             / self.bandwidthOfl
-                            * self.OflW[t, i, w]
-                            for w in range(W)) if i!=self.loss_idx else 0)
+                            * self.OflW[t, i, w])
+                            if i!=self.loss_idx else 0
+                            )
                     ,
                     "",
                 )
@@ -1099,8 +1101,14 @@ class ModelPULP:
                     op_list.append(ComputeOp(self.hgraph.cluster.loss_kcn))
                 j = self.hcn2sub_c[k]
                 # if self.sumComp[(k, t)].value() == 1:
+                prefetch_list = []
                 for w in range(W):
-                    op_list.extend(self.create_prefetch_ops(t,k,w))
+                    prefetch_ops = self.create_prefetch_ops(t,k,w)
+                    if len(prefetch_ops) == 4:
+                        op_list.extend(prefetch_ops[:2])
+                        prefetch_list.extend(prefetch_ops[2:])
+                    if not k in self.weight2hcn[w]:
+                        op_list.extend(self.create_offload_ops(t,k,w))
                 if sol(self.sumComp[(k, t)].value()):
                     # print(t,k)
                     hcn = hgraph.list_hcn[k]
@@ -1202,8 +1210,11 @@ class ModelPULP:
                         op_list.append(DeleteOp(Activation(hdn.kdn)))
 
                 for w in range(W):
-                    op_list.extend(self.create_offload_ops(t,k,w))
+                    # op_list.extend(self.create_prefetch_ops(t,k,w))
+                    if k in self.weight2hcn[w]:
+                        op_list.extend(self.create_offload_ops(t,k,w))
                     op_list.extend(self.create_delete_ops(t,k,w))
+                op_list.extend(prefetch_list)
                 #     # if alive_current != alive_next:
                 #     #     print(f"alive status of {w} from {alive_current} to {alive_next} at {[t,k]} with progress {self.OflWProg[(t_,k_,w)].value()}")
                 #     sub_cluster = self.hgraph.list_hcn[
