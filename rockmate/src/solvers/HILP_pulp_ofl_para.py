@@ -3,7 +3,7 @@
 from typing import Dict, Any
 import numpy as np
 from copy import deepcopy
-from pulp import *
+from pulp import LpVariable, LpProblem, LpMinimize, lpSum, get_solver, listSolvers, LpStatus
 
 from .op_schedule import (
     Activation,
@@ -118,9 +118,7 @@ class ModelPULP:
         self.W = W = len(self.hgraph.list_hcn) // 2  # for now, one weight for each layer
         self.I = I = len(self.hgraph.list_hdn)
         self.J = J = len(self.list_list_sched)
-
         
-
         self.protected_indices = [
             i
             for i, hdn in enumerate(self.hgraph.list_hdn)
@@ -293,7 +291,7 @@ class ModelPULP:
                 # if i==self.loss_idx:continue
                 if self.enable_offload and i != self.loss_idx:
                     w = self.hcn2weight[i] if i!=self.loss_idx else None
-                    ofl_time = self.weights_size[w]/ self.bandwidthOfl
+                    ofl_time = self.weights_size[w]/ self.bandwidthOfl*self.OflW[t,i,w]
                 else:
                     ofl_time = 0
 
@@ -302,41 +300,9 @@ class ModelPULP:
                     >= lpSum(
                         self.Comp[i][t, o] * self.time[i][o] for o in range(self.nR[i])
                     )  + ofl_time
-                    # +((# I/O of the current layer cannot be overlapped with computation
-                    #         # self.weights_size[w]
-                    #         # / self.bandwidthPrf
-                    #         # * self.PrfW[t, i, w]
-                    #         # for w in range(W)
-                    #     # + 
-                    #     self.weights_size[w]
-                    #         / self.bandwidthOfl
-                    #         * self.OflW[t, i, w])
-                    #         if i!=self.loss_idx else 0
-                    #         )
                     ,
                     "",
                 )
-                if self.enable_offload:
-                    self.md += (
-                        self.Time[t, i]
-                        >= lpSum(
-                            self.weights_size[w]
-                            / self.bandwidthPrf
-                            * self.PrfW[t, i, w]
-                            for w in range(W)
-                        ),
-                        "",
-                    )
-                    self.md += (
-                        self.Time[t, i]
-                        >= lpSum(
-                            self.weights_size[w]
-                            / self.bandwidthOfl
-                            * self.OflW[t, i, w]
-                            for w in range(W)
-                        ),
-                        "",
-                    )
 
         ##### Boundary constraints
         self.md += (
@@ -450,10 +416,6 @@ class ModelPULP:
                         <= self.sumComp[(k, t)] + self.AliveA[t, j],
                         "",
                     )
-            if self.enable_offload:
-                for w in self.weight2hcn:
-                    for k in self.weight2hcn[w]:
-                        self.md += (self.sumComp[(k, t)] <= self.AliveW[t, k, w], "")
 
         #### Options-related constraints
         for j in range(J):
@@ -497,90 +459,7 @@ class ModelPULP:
 
         #### Offload constraints
         if self.enable_offload:
-            self.OflWProg = dict()
-            for t in range(T):
-                for i in range(T):
-                    for w in range(W):
-                        bwd_i = max(self.weight2hcn[w])
-                        if bwd_i < t:  # after bwd of w
-                            self.OflWProg[(t, i, w)] = lpSum(
-                                self.OflW[t, ii, w] for ii in range(i)
-                            ) + lpSum(
-                                self.OflW[tt, ii, w]
-                                for tt in range(bwd_i, t)#offload right after bwd_i
-                                for ii in range(T)
-                            )
-                        else:
-                            self.OflWProg[(t, i, w)] = (
-                                lpSum(self.OflW[t, ii, w] for ii in range(i))
-                                + lpSum(
-                                    self.OflW[tt, ii, w]
-                                    for tt in range(t)
-                                    for ii in range(T)
-                                )
-                                + lpSum(
-                                    self.OflW[tt, ii, w]
-                                    for tt in range(bwd_i, T)
-                                    for ii in range(T)
-                                )
-                            )
-                        self.md += (
-                            self.OflWProg[(t, i, w)] <= 1,
-                            "",
-                        )
-                        self.md += (
-                            self.AliveW[t, i, w] + self.OflWProg[(t, i, w)] >= 1,
-                            "",
-                        )
-                        self.md += (
-                            self.AliveW[t, i, w] + self.PrfW[(t, i, w)] <= 1,
-                            "",
-                        )
-                        self.md += (
-                            self.OflW[t, i, w]
-                            <= self.sumComp[(i, t)],
-                            "",
-                        )
-                        self.md += (
-                            self.PrfW[t, i, w]
-                            <= self.sumComp[(i, t)],
-                            "",
-                        )
-                        if i < T - 1:
-                            self.md += (
-                                self.AliveW[t, i + 1, w]
-                                <= self.AliveW[t, i, w] + self.sumComp[(i, t)],
-                                "",
-                            )
-                            self.md += (
-                                self.AliveW[t, i + 1, w]
-                                >= self.AliveW[t, i, w] - self.sumComp[(i, t)],
-                                "",
-                            )
-
-                            
-                            self.md += (
-                                self.AliveW[t, i + 1, w]
-                                <= self.AliveW[t, i, w]
-                                + self.PrfW[t, i, w],
-                                # - self.OflW[t, i, w],
-                                "",
-                            )
-            for w in range(W):
-                for t in range(T - 1):
-                    self.md += (
-                        self.AliveW[t + 1, 0, w]
-                        == self.AliveW[t, T - 1, w],
-                        # + self.PrfW[t, T - 1, w],
-                        # - self.OflW[t, T - 1, w],
-                        "",
-                    )
-                self.md += (
-                    self.AliveW[0, 0, w]
-                    <= self.AliveW[T - 1, T - 1, w] + self.PrfW[T - 1, T - 1, w],
-                    "",
-                )
-                # self.md += (self.AliveW[0, 0, w] == 1, "")  # Full house initial status
+            self.add_parameter_constraints()
 
         ##### Memory constraints
         # we don't keep eyes on the alive status all the time
@@ -853,10 +732,76 @@ class ModelPULP:
         for k in range(T):
             self.md += (self.U[(self.loss_idx, k)] <= self.save_budget, "")
 
+    def add_parameter_constraints(self):
+        self.OflWProg = dict()
+        for t in range(self.T):
+            for w in self.weight2hcn:
+                for k in self.weight2hcn[w]:
+                    self.md += (self.sumComp[(k, t)] <= self.AliveW[t, k, w], "")
+            for i in range(self.T):
+                self.md += (
+                    self.Time[t, i]
+                    >= lpSum(
+                        self.weights_size[w]
+                        / self.bandwidthPrf
+                        * self.PrfW[t, i, w]
+                        for w in range(self.W)
+                    ),
+                    "",
+                )
+                self.md += (
+                    self.Time[t, i]
+                    >= lpSum(
+                        self.weights_size[w]
+                        / self.bandwidthOfl
+                        * self.OflW[t, i, w]
+                        for w in range(self.W)
+                    ),
+                    "",
+                )
+                for w in range(self.W):
+                    bwd_i = max(self.weight2hcn[w])
+                    if bwd_i < t:  # after bwd of w
+                        self.OflWProg[(t, i, w)] = lpSum(
+                            self.OflW[t, ii, w] for ii in range(i)
+                        ) + lpSum(
+                            self.OflW[tt, ii, w]
+                            for tt in range(bwd_i, t)#offload right after bwd_i
+                            for ii in range(self.T)
+                        )
+                    else:
+                        self.OflWProg[(t, i, w)] = (
+                            lpSum(self.OflW[t, ii, w] for ii in range(i))
+                            + lpSum(
+                                self.OflW[tt, ii, w]
+                                for tt in range(t)
+                                for ii in range(self.T)
+                            )
+                            + lpSum(
+                                self.OflW[tt, ii, w]
+                                for tt in range(bwd_i, self.T)
+                                for ii in range(self.T)
+                            )
+                        )
+                    self.md += (self.OflWProg[(t, i, w)] <= 1, "",)
+                    self.md += (
+                        self.AliveW[t, i, w] + self.OflWProg[(t, i, w)] >= 1,
+                        "",
+                    )
+                    self.md += (
+                        self.AliveW[t, i, w] + self.PrfW[(t, i, w)] <= 1,
+                        "",
+                    )
+                    self.md += (self.OflW[t, i, w] <= self.sumComp[(i, t)], "",)
+                    self.md += (self.PrfW[t, i, w] <= self.sumComp[(i, t)], "",)
+
+                    t_, i_ = self.next_index(t,i)
+                    diff = self.AliveW[t, i, w] - self.AliveW[t_, i_, w]
+                    self.md += (diff <= self.sumComp[(i, t)], "",)
+                    self.md += (-diff <= self.sumComp[(i, t)], "",)
+
+
     def solve(self, solver=""):
-        # self.md.message("\n\nRestarting solve\n\n")
-        # solver = get_solver(solver, msg=0)
-        # solver = solver or solver_name[0]
         try:
             solver = get_solver(solver, msg=0)
         except:
@@ -868,16 +813,6 @@ class ModelPULP:
         self.status = LpStatus[status]  # readable status
         self.feasible = status == 1
 
-        # if self.md.status == 9:
-        #     print(
-        #         f"GUROBI stopped early for reaching time limit with gap {self.md.MIPGap}"
-        #     )
-        # # infeasible = self.md.status == GRB.INFEASIBLE
-        # if self.md.solCount < 1:
-        #     self.feasible = False
-        # else:
-        #     self.solve_time = self.md.Runtime
-        #     self.feasible = True
         if self.feasible:
             self.solve_time = self.md.solutionTime
 
@@ -888,16 +823,16 @@ class ModelPULP:
         """
         hgraph = hgraph if hgraph else self.hgraph
         assert self.feasible, "Cannot schedule an infeasible model!"
-        T = len(hgraph.list_hcn)
-        I = len(hgraph.list_hdn)
-        J = len(self.list_list_sched)
-        if self.enable_offload:
-            W = len(self.weights_size)
 
         def sol(value):
             return value > 0.9999  # inttol
+        
+        T = len(hgraph.list_hcn)
+        I = len(hgraph.list_hdn)
+        J = len(self.list_list_sched)
 
         if self.enable_offload:
+            W = len(self.weights_size)
             (
                 op_list,
                 init_alive_status,
@@ -909,9 +844,6 @@ class ModelPULP:
             for t in range(T):
                 for k in range(T):
                     if t == self.loss_idx and k == self.loss_idx:
-                        # loss_idx = len(op_list)
-                        # loss_op = Op(K_C_node("loss"))
-
                         op_list.append(ComputeOp(self.hgraph.cluster.loss_kcn))
                     j = self.hcn2sub_c[k]
                     # if self.sumComp[(k, t)].value() == 1:
@@ -960,30 +892,6 @@ class ModelPULP:
                                 sub_op_list = hcn.sub_cluster.translate_op_list(
                                     sub_op_list
                                 )
-                                # translator_re = (
-                                #     hcn.sub_cluster.representee_cluster.translator
-                                # )
-                                # translator = hcn.sub_cluster.translator
-                                # for op in sub_op_list:
-                                #     if op.is_del:
-                                #         ana_kn = (
-                                #             translator_re.dict_name_to_ano_triplet[
-                                #                 op.kn.name
-                                #             ]
-                                #         )
-                                #         op.kn = translator.dict_ano_triplet_to_kdn[
-                                #             ana_kn
-                                #         ]
-                                #     else:
-                                #         ana_kn = (
-                                #             translator_re.dict_name_to_ano_triplet[
-                                #                 op.kn.name
-                                #             ]
-                                #         )
-                                #         op.kn = translator.dict_ano_triplet_to_kcn[
-                                #             ana_kn
-                                #         ]
-
                         else:
                             h_obj = hcn
                             sub_op_list = deepcopy(h_obj.ff_op_list)
@@ -997,32 +905,6 @@ class ModelPULP:
                             hdn = hgraph.list_hdn[i]
                             op_list.append(DeleteOp(Activation(hdn.kdn)))
 
-                # if self.enable_offload:
-                #     for w in range(W):
-                #         weight = self.hgraph.list_hcn[self.weight2hcn[w][0]].sub_cluster
-                #         if self.OflW[(t,k,w)].value()>0:
-                #             ofl_list.append(OflOp(target=weight.name,
-                #                                   fraction=self.OflW[(t,k,w)].value(),
-                #                                   after=op_list[-1]))
-                #         if self.PrfW[(t,k,w)].value()>0:
-                #             prf_list.append(PrfOp(target=weight.name,
-                #                                   fraction=self.PrfW[(t,k,w)].value(),
-                #                                   after=op_list[-1]))
-
-        # interfaces = dict()
-        # interfaces["inputs_kdn_data"] = set(
-        #     hdn.kdn for hdn in hgraph.inputs_hdn_data
-        # )
-        # interfaces["outputs_kdn_data"] = set(
-        #     hdn.kdn for hdn in hgraph.outputs_hdn_data
-        # )
-        # interfaces["inputs_kdn_grad"] = set(
-        #     hdn.kdn for hdn in hgraph.inputs_hdn_grad
-        # )
-        # interfaces["outputs_kdn_grad"] = set(
-        #     hdn.kdn for hdn in hgraph.outputs_hdn_grad
-        # )
-        # loss_idx =
         ### debug
         # no_bwd = True
         # for op in op_list:
@@ -1064,27 +946,6 @@ class ModelPULP:
 
         def sol(value):
             return value > 0.9999  # inttol
-
-        # op_list = []
-        # ofl_list = []
-        # prf_list = []
-        # self.current_buffers = {w: None for w in range(W)}
-        # for w in range(W):
-        #     hcn = self.hgraph.list_hcn[self.weight2hcn[w][0]]
-        #     list_alloc_para = [
-        #         Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
-        #     ]
-        #     self.current_buffers[w] = Buffer(
-        #         hcn.sub_cluster.name, mem=sum(alloc.mem for alloc in list_alloc_para)
-        #     )
-        #     op_list.append(
-        #         MappingOp(
-        #             name=hcn.sub_cluster.name + "_merge",
-        #             sources=list_alloc_para,
-        #             targets=[self.current_buffers[w]],
-        #         )
-        #     )
-        #     op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
 
         # offload_buffers = {w:[] for w in range(W)}
         op_list = []
@@ -1219,120 +1080,6 @@ class ModelPULP:
                         op_list.extend(self.create_offload_ops(t,k,w))
                     op_list.extend(self.create_delete_ops(t,k,w))
                 op_list.extend(prefetch_list)
-                #     # if alive_current != alive_next:
-                #     #     print(f"alive status of {w} from {alive_current} to {alive_next} at {[t,k]} with progress {self.OflWProg[(t_,k_,w)].value()}")
-                #     sub_cluster = self.hgraph.list_hcn[
-                #         self.weight2hcn[w][0]
-                #     ].sub_cluster
-                #     parameter_mem = sum(
-                #         kdn.mem for kdn in sub_cluster.list_kdn_parameters
-                #     )
-                #     parameter_size = round(parameter_mem/self.current_buffers[w].itemsize)
-                #     if self.OflW[(t, k, w)].value() > 0:
-                #         # Assuming that the total buffer is divided into [(already_ofl), ofl_buffer, next]
-                #         itemsize = self.current_buffers[w].itemsize
-                #         progress_size = round(
-                #             self.OflWProg[(t, k, w)].value() *parameter_size
-                #         )
-                #         if max(self.weight2hcn[w]) == t and t==k:#bwd step
-                #             progress_size = 0
-                #         offload_size = round(
-                #             self.OflWProg[(t, k, w)].value()+self.OflW[(t, k, w)].value() *parameter_size
-                #         ) - progress_size
-                #         if offload_size>0:
-                #             start = -(parameter_size-progress_size)#assumming progress cannot be full
-                #             end = start+offload_size if start<-offload_size else None
-
-                #             op_list.append(
-                #                 OffloadOp(
-                #                     alloc=self.current_buffers[w],
-                #                     # indices=(progress_size, progress_size + offload_size),
-                #                     indices=(start, end),
-                #                     # fraction=self.OflW[(t, k, w)].value(),
-                #                     after=op_list[-1],
-                #                 )
-                #             )
-                #             # op_list.append(DeleteOp(offload_buffer))
-                #     t_, k_ = self.next_index(t,k)
-                #     current_size = round(self.AliveW[(t, k, w)].value()*parameter_size)
-                #     next_size = round(self.AliveW[(t_, k_, w)].value()*parameter_size)
-                    # if next_size<current_size:
-                    #     # to delete some parameters
-                    #     next_buffer = Buffer(
-                    #         sub_cluster.name,
-                    #         # mem=alive_next
-                    #         # * parameter_mem,
-                    #         size = next_size
-                    #     )
-                    #     delete_buffer = Buffer(
-                    #         sub_cluster.name+"_delete",
-                    #         # mem = (alive_current-alive_next)*parameter_mem
-                    #         size = current_size - next_size
-                    #     )
-                    #     op_list.append(AllocateOp(delete_buffer))
-                    #     op_list.append(
-                    #         MappingOp(
-                    #             name=sub_cluster.name + "_divide",
-                    #             targets=[delete_buffer, next_buffer],
-                    #             sources=[self.current_buffers[w]],
-                    #         )
-                    #     )
-                    #     op_list.append(DeleteOp(delete_buffer))
-                    #     self.current_buffers[w] = next_buffer
-
-                    # if next_size>current_size:
-                    # if self.PrfW[(t, k, w)].value() > 0:
-                    #     assert parameter_size> self.current_buffers[w].size, print(self.PrfW[(t, k, w)].value())
-                    #     prefetch_buffer = Buffer(
-                    #         sub_cluster.name + "_prefetch",
-                    #         size=next_size-current_size,
-                    #     )
-                    #     op_list.append(AllocateOp(prefetch_buffer))
-                    #     next_buffer = Buffer(
-                    #         sub_cluster.name,
-                    #         size=next_size
-                    #     )
-
-                    #     op_list.append(
-                    #         PrefetchOp(
-                    #             alloc=prefetch_buffer,
-                    #             indices=(parameter_size-next_size, parameter_size-current_size),
-                    #             after=op_list[-1],
-                    #         )
-                    #     )
-
-                    #     # op_list.append(AllocateOp(next_buffer))
-                    #     op_list.append(
-                    #         MappingOp(
-                    #             name=sub_cluster.name + "_add",
-                    #             sources=[prefetch_buffer, self.current_buffers[w]],
-                    #             targets=[next_buffer],
-                    #         )
-                    #     )
-                    #     self.current_buffers[w] = next_buffer
-                    #     op_list.append(DeleteOp(prefetch_buffer))
-
-                        # if sol(self.AliveW[(t, k, w)].value()+self.PrfW[(t, k, w)].value()):
-                        #     op_list.append(MappingOp(name=sub_cluster.name+"_split",
-                        #                              sources=[self.current_buffers[w]],
-                        #                              targets=[list_alloc_para]))
-
-        # After iteration, restore the init status
-        # for w in range(W):
-        #     hcn = self.hgraph.list_hcn[self.weight2hcn[w][0]]
-        #     list_alloc_para = [
-        #         Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
-        #     ]
-        #     self.current_buffers[w] = Buffer(
-        #         hcn.sub_cluster.name, mem=sum(alloc.mem for alloc in list_alloc_para)
-        #     )
-        #     op_list.append(
-        #         MappingOp(
-        #             name=hcn.sub_cluster.name + "_split",
-        #             sources=[self.current_buffers[w]],
-        #             targets=list_alloc_para,
-        #         )
-        #     )
         return op_list, init_alive_status, init_op_list
 
     def create_delete_ops(self, t,k,w, itemsize=4):
