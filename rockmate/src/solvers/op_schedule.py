@@ -112,7 +112,7 @@ class ComputeOp(Op):
         result = cls.__new__(cls)
         memo[id(self)] = result
         for k, v in self.__dict__.items():
-            if k == "kcn":  # do not deepcopy kn
+            if k == "kcn" or k=="target":  # do not deepcopy kn
                 setattr(result, k, v)
             else:
                 setattr(result, k, deepcopy(v, memo))

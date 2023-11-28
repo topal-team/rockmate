@@ -55,12 +55,12 @@ def H_cluster_method_translate_op_list(self, op_list):
     translator = self.translator
     translated_op_list = deepcopy(op_list)
     for op in translated_op_list:
-        if op.is_del:
-            ana_kn = translator_re.dict_name_to_ano_triplet[op.kn.name]
-            op.kn = translator.dict_ano_triplet_to_kdn[ana_kn]
+        if isinstance(op, DeleteOp):
+            ana_kn = translator_re.dict_name_to_ano_triplet[op.target.name]
+            op.target = Activation(translator.dict_ano_triplet_to_kdn[ana_kn])
         else:
-            ana_kn = translator_re.dict_name_to_ano_triplet[op.kn.name]
-            op.kn = translator.dict_ano_triplet_to_kcn[ana_kn]
+            ana_kn = translator_re.dict_name_to_ano_triplet[op.kcn.name]
+            op.kcn = translator.dict_ano_triplet_to_kcn[ana_kn]
     return translated_op_list
 
 

@@ -291,24 +291,28 @@ class ModelPULP:
         for t in range(T):
             for i in range(T):
                 # if i==self.loss_idx:continue
-                w = self.hcn2weight[i] if i!=self.loss_idx else None
+                if self.enable_offload and i != self.loss_idx:
+                    w = self.hcn2weight[i] if i!=self.loss_idx else None
+                    ofl_time = self.weights_size[w]/ self.bandwidthOfl
+                else:
+                    ofl_time = 0
 
                 self.md += (
                     self.Time[t, i]
                     >= lpSum(
                         self.Comp[i][t, o] * self.time[i][o] for o in range(self.nR[i])
-                    )  
-                    +((# I/O of the current layer cannot be overlapped with computation
-                            # self.weights_size[w]
-                            # / self.bandwidthPrf
-                            # * self.PrfW[t, i, w]
-                            # for w in range(W)
-                        # + 
-                        self.weights_size[w]
-                            / self.bandwidthOfl
-                            * self.OflW[t, i, w])
-                            if i!=self.loss_idx else 0
-                            )
+                    )  + ofl_time
+                    # +((# I/O of the current layer cannot be overlapped with computation
+                    #         # self.weights_size[w]
+                    #         # / self.bandwidthPrf
+                    #         # * self.PrfW[t, i, w]
+                    #         # for w in range(W)
+                    #     # + 
+                    #     self.weights_size[w]
+                    #         / self.bandwidthOfl
+                    #         * self.OflW[t, i, w])
+                    #         if i!=self.loss_idx else 0
+                    #         )
                     ,
                     "",
                 )
@@ -1467,6 +1471,7 @@ class ModelPULP:
                 if self.AliveW[(0, 0, w)].value()>0:
                     
                     prefetch_size = round(parameter_size*self.AliveW[(0, 0, w)].value())
+                    # prefetch_size = round(parameter_size)
                     prefetch_buffer = Buffer(
                             hcn.sub_cluster.name,
                             size = prefetch_size
