@@ -21,6 +21,35 @@ from rkgb.Htools import *
 from rkgb.utils.global_vars import solver_name
 
 
+class RkLpVariable(LpVariable):
+    def __init__(self, name, lowBound=None, upBound=None, cat='Continuous', e=None):
+        super().__init__(
+            name=name,
+            lowBound=lowBound,
+            upBound=upBound,
+            cat=cat,
+            e=e
+        )
+        self.solution = None
+
+    @property    
+    def sol(self):
+        return self.solution or self.value()
+    
+    @classmethod
+    def dicts(cls, 
+              name, 
+              indices=None, 
+              lowBound=None,
+              upBound=None,
+              cat="Continuous",
+              indexStart=[]):
+        d = {}
+        for index in indices:
+            var_name = name+"_"+"_".join([str(i) for i in index])
+            d[index] = RkLpVariable(var_name, lowBound=lowBound, upBound=upBound,cat=cat)
+        return d
+
 class ModelPULP:
     """
     Build the ILP model by given Hgraph and budget.
@@ -191,7 +220,7 @@ class ModelPULP:
         # ======build variables======
         # For every HCN[i], R[i] is of size T*nR[i]
         self.Comp = [
-            LpVariable.dicts(
+            RkLpVariable.dicts(
                 f"Comp{i}",
                 [(t, k) for t in range(T) for k in range(self.nR[i])],
                 cat="Binary",
@@ -208,7 +237,7 @@ class ModelPULP:
 
         # Sp for saved Phantoms, option-related
         self.AliveP = [
-            LpVariable.dicts(
+            RkLpVariable.dicts(
                 f"Alivep{j}",
                 [(t, k) for t in range(T + 1) for k in range(len(list_sched))],
                 cat="Binary",
@@ -223,35 +252,35 @@ class ModelPULP:
                 )
 
         # to present whether one saved tensor can be inheritaged from the last stage
-        self.AliveA = LpVariable.dicts(
+        self.AliveA = RkLpVariable.dicts(
             "AliveA", [(t, i) for t in range(T) for i in range(Cr)], cat="Binary"
         )  # activation
-        self.AliveT = LpVariable.dicts(
+        self.AliveT = RkLpVariable.dicts(
             "AliveT", [(t, i) for t in range(T) for i in range(I)], cat="Binary"
         )  # tensor that can be shared by acts
-        self.create = LpVariable.dicts(
+        self.create = RkLpVariable.dicts(
             "create", [(t, i) for t in range(T) for i in range(Cr)], cat="Binary"
         )
-        self.delete = LpVariable.dicts(
+        self.delete = RkLpVariable.dicts(
             "delete", [(t, i) for t in range(T) for i in range(De)], cat="Binary"
         )
 
         if self.enable_offload:
-            self.AliveW = LpVariable.dicts(
+            self.AliveW = RkLpVariable.dicts(
                 "AliveW",
                 [(t, i, j) for t in range(T) for i in range(T) for j in range(W)],
                 cat="Continuous",
                 lowBound=0,
                 upBound=1,
             )  # weight w is alive at the start of step j.
-            self.OflW = LpVariable.dicts(
+            self.OflW = RkLpVariable.dicts(
                 "OflW",
                 [(t, i, j) for t in range(T) for i in range(T) for j in range(W)],
                 cat="Continuous",
                 lowBound=0,
                 upBound=1,
             )
-            self.PrfW = LpVariable.dicts(
+            self.PrfW = RkLpVariable.dicts(
                 "PrfW",
                 [(t, i, j) for t in range(T) for i in range(T) for j in range(W)],
                 cat="Continuous",
@@ -277,7 +306,7 @@ class ModelPULP:
             self.bandwidthOfl = 6 * 1024**2  # byte/ms
             self.bandwidthPrf = 6 * 1024**2  # byte/ms
 
-        self.Time = LpVariable.dicts(
+        self.Time = RkLpVariable.dicts(
             "Time", [(t, i) for t in range(T) for i in range(T)], cat="Continuous"
         )
 
