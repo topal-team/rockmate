@@ -34,9 +34,8 @@ class RkLpVariable(LpVariable):
         super().__init__(name=name, lowBound=lowBound, upBound=upBound, cat=cat, e=e)
         self.solution = None
 
-    @property
-    def sol(self):
-        return self.solution or self.value()
+    def value(self):
+        return self.solution or self.varValue
 
     @classmethod
     def dicts(
@@ -245,7 +244,7 @@ class ModelPULP:
         self.sumComp = {}
         for t in range(T):
             for i in range(T):
-                self.sumComp[i, t] = lpSum(
+                self.sumComp[t, i] = lpSum(
                     self.Comp[t, i, o] for o in range(self.nR[i])
                 )
 
@@ -362,7 +361,7 @@ class ModelPULP:
 
         ##### Boundary constraints
         self.md += (
-            lpSum(self.sumComp[i, t] for t in range(T) for i in range(t + 1, T)) == 0
+            lpSum(self.sumComp[t, i] for t in range(T) for i in range(t + 1, T)) == 0
         )
         self.md += (
             lpSum(
@@ -423,7 +422,7 @@ class ModelPULP:
         # options don't conflict
         for i in range(T):
             for t in range(T):
-                self.md += self.sumComp[i, t] <= 1
+                self.md += self.sumComp[t, i] <= 1
         for j in range(J):
             for t in range(T + 1):
                 self.md += (
@@ -454,7 +453,7 @@ class ModelPULP:
             for j, (k, i) in enumerate(self.create_list):
                 for k_ in _users_d[i]:
                     self.md += (
-                        self.sumComp[k_, t] <= self.sumComp[k, t] + self.AliveA[t, j]
+                        self.sumComp[t, k_] <= self.sumComp[t, k] + self.AliveA[t, j]
                     )
 
         #### Options-related constraints
@@ -490,7 +489,7 @@ class ModelPULP:
                             if i_ == req_i:
                                 self.md += (
                                     self.Comp[t, bwd_i, o]
-                                    <= self.sumComp[k_, t] + self.AliveA[t, j_]
+                                    <= self.sumComp[t, k_] + self.AliveA[t, j_]
                                 )
 
         #### Offload constraints
@@ -520,11 +519,11 @@ class ModelPULP:
                     didx = self.delete_list.index((k, i))
                     self.md += (
                         self.alive[(t, k, i)] + self.delete[t, didx]
-                        >= self.sumComp[k, t]
+                        >= self.sumComp[t, k]
                     )
 
             for eidx, (k, i) in enumerate(self.create_list):
-                self.md += self.create[t, eidx] <= self.sumComp[k, t]
+                self.md += self.create[t, eidx] <= self.sumComp[t, k]
             for i in range(I):
                 if t + 1 < T:
                     self.md += (
@@ -541,14 +540,14 @@ class ModelPULP:
             if t + 1 < T:
                 return (
                     1
-                    - self.sumComp[k, t]
+                    - self.sumComp[t, k]
                     + self.AliveT[t + 1, i]
-                    + lpSum(self.sumComp[j, t] for j in _users_d[i] if j > k)
+                    + lpSum(self.sumComp[t, j] for j in _users_d[i] if j > k)
                 )
             return (
                 1
-                - self.sumComp[k, t]
-                + lpSum(self.sumComp[j, t] for j in _users_d[i] if j > k)
+                - self.sumComp[t, k]
+                + lpSum(self.sumComp[t, j] for j in _users_d[i] if j > k)
             )
 
         def _max_num_hazards(t, i, k):
@@ -756,14 +755,22 @@ class ModelPULP:
         T = len(self.hgraph.list_hcn)
         self.save_budget = save_budget / self.gcd
         for k in range(T):
-            self.md += self.U[(self.loss_idx, k)] <= self.save_budget
+            self.md += (self.U[(self.loss_idx, k)] <= self.save_budget)
+
+    def add_single_bwd_constraints(self):
+        for i in range(self.loss_idx, self.T):#only bwd after loss
+            self.md += (lpSum(self.sumComp[t,i] for t in range(self.T))==1)
+
+    def add_single_fwd_constraints(self):
+        for i in range(self.loss_idx):#only fwd before loss
+            self.md += (lpSum(self.sumComp[t,i] for t in range(self.T))==1)
 
     def add_parameter_constraints(self):
         self.OflWProg = dict()
         for t in range(self.T):
             for w in self.weight2hcn:
                 for k in self.weight2hcn[w]:
-                    self.md += self.sumComp[k, t] <= self.AliveW[t, k, w]
+                    self.md += self.sumComp[t, k] <= self.AliveW[t, k, w]
             for i in range(self.T):
                 self.md += self.Time[t, i] >= lpSum(
                     self.weights_size[w] / self.bandwidthPrf * self.PrfW[t, i, w]
@@ -800,15 +807,17 @@ class ModelPULP:
                     self.md += self.OflWProg[(t, i, w)] <= 1
                     self.md += self.AliveW[t, i, w] + self.OflWProg[(t, i, w)] >= 1
                     self.md += self.AliveW[t, i, w] + self.PrfW[(t, i, w)] <= 1
-                    self.md += self.OflW[t, i, w] <= self.sumComp[i, t]
-                    self.md += self.PrfW[t, i, w] <= self.sumComp[i, t]
+                    self.md += self.OflW[t, i, w] <= self.sumComp[t, i]
+                    self.md += self.PrfW[t, i, w] <= self.sumComp[t, i]
 
                     t_, i_ = self.next_index(t, i)
                     diff = self.AliveW[t, i, w] - self.AliveW[t_, i_, w]
-                    self.md += diff <= self.sumComp[i, t]
-                    self.md += -diff <= self.sumComp[i, t]
+                    self.md += diff <= self.sumComp[t, i]
+                    self.md += -diff <= self.sumComp[t, i]
 
     def solve(self, solver=""):
+        self.add_single_bwd_constraints()
+        # self.add_single_fwd_constraints()
         try:
             solver = get_solver(solver, msg=0)
         except:
@@ -822,6 +831,54 @@ class ModelPULP:
 
         if self.feasible:
             self.solve_time = self.md.solutionTime
+
+    def _refine_solution(self):
+        # greedily group offload/prefetch values by updating .sol
+        assert self.feasible, "Cannot refine an infeasible model!"
+
+        def sol(value):
+            return value > 0.9999  # inttol
+
+        # preparation for the greedy algo
+        active_steps = []
+        offload_size = dict()
+        prefetch_size = dict()
+        offload_progs = {w:0 for w in range(self.W)}
+        prefetch_progs = {w:0 for w in range(self.W)}
+        offload_pieces = {w:[] for w in range(self.W)}
+        prefetch_pieces = {w:[] for w in range(self.W)}
+
+        for t in list(range(self.loss_id + 1, self.T)) + list(range(self.loss_idx + 1)):
+            for i in range(t + 1):
+                if not sol(self.sumComp[t, i]):
+                    continue
+                active_steps.append((t, i))
+                offload_size[(t,i)] = 0
+                prefetch_size[(t,i)] = 0
+                for w in range(self.W):
+                    if i in self.weight2hcn[w]:
+                        if offload_progs[w]>0:
+                            offload_pieces[w].append((t,i,offload_progs[w]))
+                            offload_progs[w] = 0
+                        if prefetch_progs[w]>0:
+                            prefetch_pieces[w].append((t,i,prefetch_progs[w]))
+                            prefetch_progs[w] = 0
+                    if self.OflW[t,i,w].value()>0:
+                        offload_progs[w] += self.OflW[t,i,w].value()
+                        offload_size[(t,i)] += self.OflW[t,i,w].value()*self.weights_size[w]
+                    if self.PrfW[t,i,w].value()>0:
+                        prefetch_progs[w] += self.PrfW[t,i,w].value()
+                        prefetch_size[(t,i)] += self.PrfW[t,i,w].value()*self.weights_size[w]
+                
+        # start to re-organize the offload/prefetch operations
+        for w in range(self.W-1,-1,-1):
+            avail_size = ...
+            offload_pieces[w]
+        
+    def group(self):
+        # Group the parameters of each block for the task
+        pass
+
 
     def schedule(self, hgraph=None, check_valid=False):
         """
@@ -851,8 +908,8 @@ class ModelPULP:
                     if t == self.loss_idx and k == self.loss_idx:
                         op_list.append(ComputeOp(self.hgraph.cluster.loss_kcn))
                     j = self.hcn2sub_c[k]
-                    # if self.sumComp[k, t].value() == 1:
-                    if sol(self.sumComp[k, t].value()):
+                    # if self.sumComp[t, k].value() == 1:
+                    if sol(self.sumComp[t, k].value()):
                         hcn = hgraph.list_hcn[k]
                         opt = -1
                         for o in range(self.nOpts[k]):
@@ -970,7 +1027,7 @@ class ModelPULP:
 
                     op_list.append(ComputeOp(self.hgraph.cluster.loss_kcn))
                 j = self.hcn2sub_c[k]
-                # if self.sumComp[k, t].value() == 1:
+                # if self.sumComp[t, k].value() == 1:
                 prefetch_list = []
                 for w in range(W):
                     prefetch_ops = self.create_prefetch_ops(t, k, w)
@@ -979,7 +1036,7 @@ class ModelPULP:
                         prefetch_list.extend(prefetch_ops[2:])
                     if not k in self.weight2hcn[w]:
                         op_list.extend(self.create_offload_ops(t, k, w))
-                if sol(self.sumComp[k, t].value()):
+                if sol(self.sumComp[t, k].value()):
                     # print(t,k)
                     hcn = hgraph.list_hcn[k]
 
