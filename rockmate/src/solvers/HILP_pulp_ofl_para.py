@@ -392,7 +392,7 @@ class ModelPULP:
         for i in self.input_grad_indices:
             for j_, (k_, i_) in enumerate(self.create_list):
                 if i_ == i:
-                    self.md += self.AliveA[T - 1, j_] + self.sumComp[(k_, T - 1)] == 1
+                    self.md += self.AliveA[T - 1, j_] + self.sumComp[T - 1, k_] == 1
 
         # # In the first stage, assume input data is alive
         # for i in self.input_data_indices:
@@ -434,7 +434,7 @@ class ModelPULP:
             lpSum(self.sumComp[t, t] for t in range(T)) == T
         )  # diagonal should be executed
         self.md += (
-            lpSum(self.sumComp[(self.loss_idx, t)] for t in range(T)) == 1
+            lpSum(self.sumComp[t, self.loss_idx] for t in range(T)) == 1
         )  # loss should be executed exactly once
 
         for t in range(T):
@@ -447,7 +447,7 @@ class ModelPULP:
                 src_i = self.create_list[j][0]
                 self.md += (
                     self.AliveA[t + 1, j]
-                    <= self.AliveA[t, j] + self.sumComp[(src_i, t)]
+                    <= self.AliveA[t, j] + self.sumComp[t, src_i]
                 )
         for t in range(T):
             for j, (k, i) in enumerate(self.create_list):
@@ -811,12 +811,14 @@ class ModelPULP:
                     self.md += self.PrfW[t, i, w] <= self.sumComp[t, i]
 
                     t_, i_ = self.next_index(t, i)
-                    diff = self.AliveW[t, i, w] - self.AliveW[t_, i_, w]
+                    diff = self.AliveW[t_, i_, w] - self.AliveW[t, i, w]
                     self.md += diff <= self.sumComp[t, i]
                     self.md += -diff <= self.sumComp[t, i]
+                    self.md += diff <= self.PrfW[t, i, w]
+
 
     def solve(self, solver=""):
-        self.add_single_bwd_constraints()
+        # self.add_single_bwd_constraints()
         # self.add_single_fwd_constraints()
         try:
             solver = get_solver(solver, msg=0)
