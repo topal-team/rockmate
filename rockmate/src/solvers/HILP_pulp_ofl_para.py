@@ -104,6 +104,7 @@ class ModelPULP:
         accurate_mem=False,
         offload=False,
         protected_names=[],
+        grouping = True
     ):
         self.gcd = gcd if gcd else 1
         self.peak_budget = peak_budget / self.gcd
@@ -116,6 +117,7 @@ class ModelPULP:
         self.feasible = None
         self.solve_time = None
         self.enable_offload = accurate_mem
+        self.grouping = True
 
         #############################
         self.hgraph = hgraph
@@ -923,9 +925,9 @@ class ModelPULP:
         fwd_i, bwd_i = self.weight2hcn[w]
         hcn = self.hgraph.list_hcn[fwd_i]
         parameters = {
-            kdn.name: kdn.mem for kdn in hcn.sub_cluster.list_kdn_parameters
+            kdn.name: kdn for kdn in hcn.sub_cluster.list_kdn_parameters
         }
-        parameter_size = sum(parameters.values())
+        parameter_size = sum(kdn.mem for kdn in parameters.values())
 
         Alive = {p:1 for p in parameters.keys()}
         Offloaded = {p:False for p in parameters.keys()}
@@ -933,6 +935,7 @@ class ModelPULP:
         ofl_ops = []
         prf_ops = []
         del_ops = []
+        init_ops = []
 
         assert (bwd_i, bwd_i) in self.active_steps
         idx = self.active_steps.index((bwd_i, bwd_i))
@@ -942,30 +945,33 @@ class ModelPULP:
             next_size = round(self.AliveW[(t_, k_, w)].value() * parameter_size)
             ofl_size = self.OflW[t,k,w].value()
             if ofl_size>0:
-                candidates = {p: parameters[p]*(1-o) for p,o in Offloaded.items() if o<1}
+                candidates = {p: parameters[p].mem*(1-o) for p,o in Offloaded.items() if o<1}
                 selector = knapsack(list(candidates.items()))
                 select_paras = selector.select(ofl_size)
                 if sum(candidates[p] for p in select_paras)/sum(candidates.values())-ofl_size>tol:
                     pass
                 for p in select_paras:
-                    ofl_ops.append((t,k,p,1-Offloaded[p]))
+                    # start = parameters[p].info.tsize.numel()
+                    op = OffloadOp(alloc=Parameter(parameters[p]),
+                                   indices=(0,None))
+                    ofl_ops.append((t,k,op))
                     Offloaded[p] = 1
 
             if current_size > next_size:
                 del_size = current_size - next_size
-                candidates = {p: parameters[p]*o for p,o in Offloaded.items() if o>0}
+                candidates = {p: parameters[p].mem*o for p,o in Offloaded.items() if o>0}
                 selector = knapsack(list(candidates.items()))
                 select_paras = selector.select(del_size)
                 if sum(candidates[p] for p in select_paras)/sum(candidates.values())-del_size>tol:
                     pass
                 for p in select_paras:
-                    del_ops.append((t,k,p,Alive[p]))
+                    del_ops.append((t,k,DeleteOp(Parameter(parameters[p]))))
                     Alive[p] = 0
 
             if current_size < next_size:
                 # prefetch should be smaller than solution
                 prf_size = next_size - current_size
-                candidates = {p: parameters[p]*(1-a) for p,a in Alive.items() if a<1}
+                candidates = {p: parameters[p].mem*(1-a) for p,a in Alive.items() if a<1}
                 if self.sol(next_size):
                     select_paras = list(candidates.keys())
                 else:
@@ -975,10 +981,23 @@ class ModelPULP:
                 if sum(candidates[p] for p in select_paras)/sum(candidates.values())-prf_size>tol:
                     pass
                 for p in select_paras:
-                    prf_ops.append((t,k,p,1-Alive[p]))
+                    prf_ops.append((t,k,AllocateOp(Parameter(parameters[p]))))
+                    op = PrefetchOp(alloc=Parameter(parameters[p]),
+                                   indices=(0,None))
+                    prf_ops.append((t,k,op))
                     Alive[p] = 1
 
-        return ofl_ops, prf_ops, del_ops
+            if (t,k) == (0,0):#init
+                for p,a in Alive.items():
+                    if a:
+                        init_ops.append((t,k,AllocateOp(Parameter(parameters[p]))))
+                        op = PrefetchOp(alloc=Parameter(parameters[p]),
+                                   indices=(0,None))
+                        init_ops.append((t,k,op))
+                
+
+
+        return ofl_ops, prf_ops, del_ops, init_ops
 
 
     def schedule(self, hgraph=None, check_valid=False):
@@ -1095,9 +1114,10 @@ class ModelPULP:
                         raise ValueError
         return op_sched
 
-    def greedy_post_processing(self, hgraph=None, group=True):
+    def greedy_post_processing(self, hgraph=None):
         """
-        V1: merge every cluster, ofl/prf/del partially, high memory overhead
+        V1: self.grouping = False: 
+        merge every cluster, ofl/prf/del partially, high memory overhead
         """
         hgraph = hgraph if hgraph else self.hgraph
         assert self.feasible, "Cannot schedule an infeasible model!"
@@ -1106,10 +1126,23 @@ class ModelPULP:
         J = len(self.list_list_sched)
         W = len(self.weights_size)
 
+        self.ofl_ops = []
+        self.prf_ops = []
+        self.del_ops = []
+        init_op_list = []
+        if self.grouping:
+            for w in range(self.W):
+                o_l, p_l, d_l, i_l = self.group(w)
+                self.ofl_ops.extend(o_l)
+                self.prf_ops.extend(p_l)
+                self.del_ops.extend(d_l)
+                init_op_list.extend([ops[2] for ops in i_l])
+        else:
+            init_op_list = self.schedule_init_op_list()
+
         sol = self.sol
         # offload_buffers = {w:[] for w in range(W)}
         op_list = []
-        init_op_list = self.schedule_init_op_list()
         init_alive_status = dict()
         # for kdn in self.hgraph.cluster.list_kdn_parameters:
         #     init_alive_status[kdn.name] = True
@@ -1129,9 +1162,8 @@ class ModelPULP:
                 prefetch_list = []
                 for w in range(W):
                     prefetch_ops = self.create_prefetch_ops(t, k, w)
-                    if len(prefetch_ops) == 4:
-                        op_list.extend(prefetch_ops[:2])
-                        prefetch_list.extend(prefetch_ops[2:])
+                    op_list.extend(prefetch_ops[0])
+                    prefetch_list.extend(prefetch_ops[1])
                     if not k in self.weight2hcn[w]:
                         op_list.extend(self.create_offload_ops(t, k, w))
                 if sol(self.sumComp[t, k].value()):
@@ -1193,7 +1225,7 @@ class ModelPULP:
                     ]
                     w = self.hcn2weight[k]
 
-                    if self.current_buffers[w] is not None:  # first time
+                    if not self.grouping and self.current_buffers[w] is not None:  # first time
                         self.current_buffers[w] = Buffer(
                             hcn.sub_cluster.name,
                             mem=sum(alloc.mem for alloc in list_alloc_para),
@@ -1212,20 +1244,21 @@ class ModelPULP:
                     op_list += sub_op_list
 
                     # Map parameter tensors to buffer
-                    if self.current_buffers[w] is None:
-                        self.current_buffers[w] = Buffer(
-                            hcn.sub_cluster.name,
-                            mem=sum(alloc.mem for alloc in list_alloc_para),
+                    if not self.grouping:
+                        if self.current_buffers[w] is None:
+                            self.current_buffers[w] = Buffer(
+                                hcn.sub_cluster.name,
+                                mem=sum(alloc.mem for alloc in list_alloc_para),
+                            )
+                            # op_list.append(AllocateOp(self.current_buffers[w]))
+                        op_list.append(
+                            MappingOp(
+                                name=hcn.sub_cluster.name + "_merge",
+                                sources=list_alloc_para,
+                                targets=[self.current_buffers[w]],
+                            )
                         )
-                        # op_list.append(AllocateOp(self.current_buffers[w]))
-                    op_list.append(
-                        MappingOp(
-                            name=hcn.sub_cluster.name + "_merge",
-                            sources=list_alloc_para,
-                            targets=[self.current_buffers[w]],
-                        )
-                    )
-                    op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
+                        op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
 
                 for eidx, (k_, i) in enumerate(self.delete_list):
                     # print(k_, i)
@@ -1243,14 +1276,20 @@ class ModelPULP:
         return op_list, init_alive_status, init_op_list
 
     def create_delete_ops(self, t, k, w, itemsize=4):
+        op_list = []
         sub_cluster = self.hgraph.list_hcn[self.weight2hcn[w][0]].sub_cluster
+        if self.grouping:
+            for (t_,k_,op) in self.del_ops:
+                if t_==t and k_==k and op.target.kdn in sub_cluster.list_kdn_parameters:
+                    op_list.append(op)
+            return op_list
+
         parameter_mem = sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters)
         parameter_size = round(parameter_mem / itemsize)
         t_, k_ = self.next_index(t, k)
         current_size = round(self.AliveW[(t, k, w)].value() * parameter_size)
         next_size = round(self.AliveW[(t_, k_, w)].value() * parameter_size)
 
-        op_list = []
         if current_size <= next_size:  # assume no prefetch then delete
             return op_list
 
@@ -1271,24 +1310,33 @@ class ModelPULP:
         return op_list
 
     def create_prefetch_ops(self, t, k, w, itemsize=4):
+        pre_op_list = []
+        post_op_list = []
         sub_cluster = self.hgraph.list_hcn[self.weight2hcn[w][0]].sub_cluster
+
+        if self.grouping:
+            for (t_,k_,op) in self.prf_ops:
+                if t_==t and k_==k and op.target.kdn in sub_cluster.list_kdn_parameters:
+                    pre_op_list.append(op)
+
+            return pre_op_list, post_op_list
+
         parameter_mem = sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters)
         parameter_size = round(parameter_mem / itemsize)
         t_, k_ = self.next_index(t, k)
         current_size = round(self.AliveW[(t, k, w)].value() * parameter_size)
         next_size = round(self.AliveW[(t_, k_, w)].value() * parameter_size)
-        op_list = []
         if current_size >= next_size:  # assume no prefetch then delete
-            return op_list
+            return pre_op_list, post_op_list
 
         prefetch_buffer = Buffer(
             sub_cluster.name + "_prefetch",
             size=next_size - current_size,
         )
-        op_list.append(AllocateOp(prefetch_buffer))
+        pre_op_list.append(AllocateOp(prefetch_buffer))
         next_buffer = Buffer(sub_cluster.name, size=next_size)
 
-        op_list.append(
+        pre_op_list.append(
             PrefetchOp(
                 alloc=prefetch_buffer,
                 indices=(parameter_size - next_size, parameter_size - current_size),
@@ -1296,7 +1344,7 @@ class ModelPULP:
             )
         )
 
-        op_list.append(
+        post_op_list.append(
             MappingOp(
                 name=sub_cluster.name + "_add",
                 sources=[prefetch_buffer, self.current_buffers[w]],
@@ -1304,11 +1352,18 @@ class ModelPULP:
             )
         )
         self.current_buffers[w] = next_buffer
-        op_list.append(DeleteOp(prefetch_buffer))
-        return op_list
+        post_op_list.append(DeleteOp(prefetch_buffer))
+        return pre_op_list, post_op_list
 
     def create_offload_ops(self, t, k, w, itemsize=4):
+        op_list = []
         sub_cluster = self.hgraph.list_hcn[self.weight2hcn[w][0]].sub_cluster
+        if self.grouping:
+            for (t_,k_,op) in self.ofl_ops:
+                if t_==t and k_==k and op.target.kdn in sub_cluster.list_kdn_parameters:
+                    op_list.append(op)
+            return op_list
+
         parameter_mem = sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters)
         parameter_size = round(parameter_mem / itemsize)
         progress_size = round(self.OflWProg[(t, k, w)].value() * parameter_size)
@@ -1319,7 +1374,6 @@ class ModelPULP:
             * parameter_size
         )
 
-        op_list = []
         if offload_size == 0:
             return op_list
 

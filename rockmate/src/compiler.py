@@ -345,7 +345,7 @@ class Compiler:
             function_list.append(
                 self.fct_mem_alloc(
                     alloc.name,
-                    shape=alloc.size,
+                    shape=alloc.info.tsize if isinstance(alloc, Parameter) else alloc.size,
                     dtype=alloc.dtype,
                     gd=False,
                 )
@@ -487,6 +487,8 @@ class Compiler:
                         fct_list.append([])
                 elif isinstance(op, MappingOp):
                     fct_list.append(self.get_mapping(op.sources, op.targets, i, op.copy))  # TODO
+                    # if "merge" in op.name:
+                    #     fct_list[-1].append(self.fct_snychronize())
                 elif isinstance(op, AllocateOp):
                     fct_list.append(self.get_allocation(op.target))
                 elif isinstance(op, PrefetchOp):
@@ -603,7 +605,7 @@ class Compiler:
             with torch.cuda.stream(stream):
                 # stream.wait_stream(self.gd["offload_stream"])
                 # self.storage.ld[var_name][indices[0]: indices[1]].data = self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"].to(device)
-                self.storage.ld[var_name].copy_(self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"][indices[0]: indices[1]], non_blocking=True)
+                self.storage.ld[var_name].data.copy_(self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"][indices[0]: indices[1]], non_blocking=True)
                 # self.storage.ld[f"_{var_name}"].data = self.storage.ld[
                 #     f"{var_name}"
                 # ].data
@@ -627,7 +629,7 @@ class Compiler:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
             with torch.cuda.stream(stream):
                 # stream.wait_stream(self.gd["main_stream"])
-                self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"][indices[0]: indices[1]].copy_(
+                self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"][indices[0]: indices[1]].data.copy_(
                     self.storage.ld[var_name][indices_[0]:indices_[1]], non_blocking=True)
                 # print(self.storage.ld[var_name].mean())
                 # if self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"].mean()<1e-7:
