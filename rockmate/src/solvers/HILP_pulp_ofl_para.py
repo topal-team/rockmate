@@ -860,8 +860,7 @@ class ModelPULP:
         if self.feasible:
             self.solve_time = self.md.solutionTime
 
-        def sol(value):
-            return value > 0.9999  # inttol
+        sol = self.sol
         
         self.active_steps = []
         for t in list(range(self.loss_idx + 1, self.T)) + list(range(self.loss_idx + 1)):
@@ -869,14 +868,15 @@ class ModelPULP:
                 if not sol(self.sumComp[t, i].value()):
                     continue
                 self.active_steps.append((t, i))
-
+    
+    def sol(self, value):
+            return value > 0.9999
 
     def _refine_solution(self):
         # greedily group offload/prefetch values by updating .sol
         assert self.feasible, "Cannot refine an infeasible model!"
 
-        def sol(value):
-            return value > 0.9999  # inttol
+        sol = self.sol
 
         # preparation for the greedy algo
         active_steps = []
@@ -963,11 +963,15 @@ class ModelPULP:
                     Alive[p] = 0
 
             if current_size < next_size:
-                # TODO: prefetch should be smaller than solution
+                # prefetch should be smaller than solution
                 prf_size = next_size - current_size
                 candidates = {p: parameters[p]*(1-a) for p,a in Alive.items() if a<1}
-                selector = knapsack(list(candidates.items()))
-                select_paras = selector.select(prf_size)
+                if self.sol(next_size):
+                    select_paras = list(candidates.keys())
+                else:
+                    selector = knapsack(list(candidates.items()))
+                    unselect_paras = selector.select(1-prf_size)
+                    select_paras = [p for p in candidates.keys() if p not in unselect_paras]
                 if sum(candidates[p] for p in select_paras)/sum(candidates.values())-prf_size>tol:
                     pass
                 for p in select_paras:
@@ -985,8 +989,7 @@ class ModelPULP:
         hgraph = hgraph if hgraph else self.hgraph
         assert self.feasible, "Cannot schedule an infeasible model!"
 
-        def sol(value):
-            return value > 0.9999  # inttol
+        sol = self.sol
 
         T = len(hgraph.list_hcn)
         I = len(hgraph.list_hdn)
@@ -1092,7 +1095,7 @@ class ModelPULP:
                         raise ValueError
         return op_sched
 
-    def greedy_post_processing(self, hgraph=None):
+    def greedy_post_processing(self, hgraph=None, group=True):
         """
         V1: merge every cluster, ofl/prf/del partially, high memory overhead
         """
@@ -1103,9 +1106,7 @@ class ModelPULP:
         J = len(self.list_list_sched)
         W = len(self.weights_size)
 
-        def sol(value):
-            return value > 0.9999  # inttol
-
+        sol = self.sol
         # offload_buffers = {w:[] for w in range(W)}
         op_list = []
         init_op_list = self.schedule_init_op_list()
