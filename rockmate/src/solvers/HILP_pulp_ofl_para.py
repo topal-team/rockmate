@@ -446,8 +446,7 @@ class ModelPULP:
             for j in range(Cr):
                 src_i = self.create_list[j][0]
                 self.md += (
-                    self.AliveA[t + 1, j]
-                    <= self.AliveA[t, j] + self.sumComp[t, src_i]
+                    self.AliveA[t + 1, j] <= self.AliveA[t, j] + self.sumComp[t, src_i]
                 )
         for t in range(T):
             for j, (k, i) in enumerate(self.create_list):
@@ -755,15 +754,15 @@ class ModelPULP:
         T = len(self.hgraph.list_hcn)
         self.save_budget = save_budget / self.gcd
         for k in range(T):
-            self.md += (self.U[(self.loss_idx, k)] <= self.save_budget)
+            self.md += self.U[(self.loss_idx, k)] <= self.save_budget
 
     def add_single_bwd_constraints(self):
-        for i in range(self.loss_idx, self.T):#only bwd after loss
-            self.md += (lpSum(self.sumComp[t,i] for t in range(self.T))==1)
+        for i in range(self.loss_idx, self.T):  # only bwd after loss
+            self.md += lpSum(self.sumComp[t, i] for t in range(self.T)) == 1
 
     def add_single_fwd_constraints(self):
-        for i in range(self.loss_idx):#only fwd before loss
-            self.md += (lpSum(self.sumComp[t,i] for t in range(self.T))==1)
+        for i in range(self.loss_idx):  # only fwd before loss
+            self.md += lpSum(self.sumComp[t, i] for t in range(self.T)) == 1
 
     def add_parameter_constraints(self):
         self.OflWProg = dict()
@@ -816,7 +815,6 @@ class ModelPULP:
                     self.md += -diff <= self.sumComp[t, i]
                     self.md += diff <= self.PrfW[t, i, w]
 
-
     def solve(self, solver=""):
         # self.add_single_bwd_constraints()
         # self.add_single_fwd_constraints()
@@ -845,42 +843,48 @@ class ModelPULP:
         active_steps = []
         offload_size = dict()
         prefetch_size = dict()
-        offload_progs = {w:0 for w in range(self.W)}
-        prefetch_progs = {w:0 for w in range(self.W)}
-        offload_pieces = {w:[] for w in range(self.W)}
-        prefetch_pieces = {w:[] for w in range(self.W)}
+        offload_progs = {w: 0 for w in range(self.W)}
+        prefetch_progs = {w: 0 for w in range(self.W)}
+        offload_pieces = {w: [] for w in range(self.W)}
+        prefetch_pieces = {w: [] for w in range(self.W)}
 
         for t in list(range(self.loss_id + 1, self.T)) + list(range(self.loss_idx + 1)):
             for i in range(t + 1):
                 if not sol(self.sumComp[t, i]):
                     continue
                 active_steps.append((t, i))
-                offload_size[(t,i)] = 0
-                prefetch_size[(t,i)] = 0
+                offload_size[(t, i)] = 0
+                prefetch_size[(t, i)] = 0
                 for w in range(self.W):
                     if i in self.weight2hcn[w]:
-                        if offload_progs[w]>0:
-                            offload_pieces[w].append((t,i,offload_progs[w]))
+                        if offload_progs[w] > 0:
+                            offload_pieces[w].append((t, i, offload_progs[w]))
                             offload_progs[w] = 0
-                        if prefetch_progs[w]>0:
-                            prefetch_pieces[w].append((t,i,prefetch_progs[w]))
+                        if prefetch_progs[w] > 0:
+                            prefetch_pieces[w].append((t, i, prefetch_progs[w]))
                             prefetch_progs[w] = 0
-                    if self.OflW[t,i,w].value()>0:
-                        offload_progs[w] += self.OflW[t,i,w].value()
-                        offload_size[(t,i)] += self.OflW[t,i,w].value()*self.weights_size[w]
-                    if self.PrfW[t,i,w].value()>0:
-                        prefetch_progs[w] += self.PrfW[t,i,w].value()
-                        prefetch_size[(t,i)] += self.PrfW[t,i,w].value()*self.weights_size[w]
-                
+                    if self.OflW[t, i, w].value() > 0:
+                        offload_progs[w] += self.OflW[t, i, w].value()
+                        offload_size[(t, i)] += (
+                            self.OflW[t, i, w].value() * self.weights_size[w]
+                        )
+                    if self.PrfW[t, i, w].value() > 0:
+                        prefetch_progs[w] += self.PrfW[t, i, w].value()
+                        prefetch_size[(t, i)] += (
+                            self.PrfW[t, i, w].value() * self.weights_size[w]
+                        )
+
         # start to re-organize the offload/prefetch operations
-        for w in range(self.W-1,-1,-1):
+        for w in range(self.W - 1, -1, -1):
             avail_size = ...
             offload_pieces[w]
-        
+
     def group(self):
         # Group the parameters of each block for the task
-        pass
+        self.parameters = [kdn.name for kdn in self.hgraph.cluster.list_kdn_parameters]
+        self.alive_status = {p: np.ones([self.T, self.T]) for p in self.parameters}
 
+        pass
 
     def schedule(self, hgraph=None, check_valid=False):
         """

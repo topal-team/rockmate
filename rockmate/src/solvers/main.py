@@ -335,7 +335,7 @@ def get_single_compute_op_list(
     return op_list  # , loss_idx
 
 
-def add_parameter_node(h_cluster, original_mod):
+def add_parameter_node(h_cluster, original_mod, minor_size=10*1024):
     if h_cluster is None:
         return None
     if not hasattr(h_cluster, "list_kcn"):
@@ -355,6 +355,8 @@ def add_parameter_node(h_cluster, original_mod):
                 assert arg_id in parameters_id_to_name.keys()
                 n = parameters_id_to_name[arg_id]
                 p = original_mod.get_parameter(n)
+                if p.numel()<minor_size:
+                    continue
                 info = Var_info(p)
                 kdn = K_D_node(main_target=n, kdn_type="parameter", info=info)
                 kdn.mem = p.shape.numel()*p.element_size()
