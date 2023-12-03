@@ -29,6 +29,34 @@ from rkgb.Htools import *
 from rkgb.utils.global_vars import solver_name
 
 
+class knapsack:
+    def __init__(self, parameter_size: list):
+        size = [s[1] for s in parameter_size]
+        self.parameter_size = parameter_size
+        self.size = [s / sum(size) for s in size]
+
+    def get_size(self, indices):
+        return sum(self.size[i] for i in indices)
+
+    # @lru_cache(maxsize=4096 * 4096)
+    def solve(self, frac: float, i: int = 0):
+        if frac < 0:
+            return []
+        if i == len(self.size):
+            return list(range(i))
+        res1 = self.solve(frac, i + 1)
+        res2 = self.solve(frac - self.size[i], i + 1)
+        res2 = [i] + res2
+        if self.get_size(res1) <= self.get_size(res2) + self.size[i]:
+            return res1
+        else:
+            return res2
+
+    def select(self, frac: float):
+        indices = self.solve(frac)
+        return [self.parameter_size[i][0] for i in indices]
+
+
 class RkLpVariable(LpVariable):
     def __init__(self, name, lowBound=None, upBound=None, cat="Continuous", e=None):
         super().__init__(name=name, lowBound=lowBound, upBound=upBound, cat=cat, e=e)
@@ -832,6 +860,17 @@ class ModelPULP:
         if self.feasible:
             self.solve_time = self.md.solutionTime
 
+        def sol(value):
+            return value > 0.9999  # inttol
+        
+        self.active_steps = []
+        for t in list(range(self.loss_idx + 1, self.T)) + list(range(self.loss_idx + 1)):
+            for i in range(t + 1):
+                if not sol(self.sumComp[t, i].value()):
+                    continue
+                self.active_steps.append((t, i))
+
+
     def _refine_solution(self):
         # greedily group offload/prefetch values by updating .sol
         assert self.feasible, "Cannot refine an infeasible model!"
@@ -848,9 +887,9 @@ class ModelPULP:
         offload_pieces = {w: [] for w in range(self.W)}
         prefetch_pieces = {w: [] for w in range(self.W)}
 
-        for t in list(range(self.loss_id + 1, self.T)) + list(range(self.loss_idx + 1)):
+        for t in list(range(self.loss_idx + 1, self.T)) + list(range(self.loss_idx + 1)):
             for i in range(t + 1):
-                if not sol(self.sumComp[t, i]):
+                if not sol(self.sumComp[t, i].value()):
                     continue
                 active_steps.append((t, i))
                 offload_size[(t, i)] = 0
@@ -879,12 +918,64 @@ class ModelPULP:
             avail_size = ...
             offload_pieces[w]
 
-    def group(self):
+    def group(self, w, tol=1):
         # Group the parameters of each block for the task
-        self.parameters = [kdn.name for kdn in self.hgraph.cluster.list_kdn_parameters]
-        self.alive_status = {p: np.ones([self.T, self.T]) for p in self.parameters}
+        fwd_i, bwd_i = self.weight2hcn[w]
+        hcn = self.hgraph.list_hcn[fwd_i]
+        parameters = {
+            kdn.name: kdn.mem for kdn in hcn.sub_cluster.list_kdn_parameters
+        }
+        parameter_size = sum(parameters.values())
 
-        pass
+        Alive = {p:1 for p in parameters.keys()}
+        Offloaded = {p:False for p in parameters.keys()}
+
+        ofl_ops = []
+        prf_ops = []
+        del_ops = []
+
+        assert (bwd_i, bwd_i) in self.active_steps
+        idx = self.active_steps.index((bwd_i, bwd_i))
+        for (t,k) in self.active_steps[idx:]+self.active_steps[:idx]:
+            t_, k_ = self.next_index(t, k)
+            current_size = round(self.AliveW[(t, k, w)].value() * parameter_size)
+            next_size = round(self.AliveW[(t_, k_, w)].value() * parameter_size)
+            ofl_size = self.OflW[t,k,w].value()
+            if ofl_size>0:
+                candidates = {p: parameters[p]*(1-o) for p,o in Offloaded.items() if o<1}
+                selector = knapsack(list(candidates.items()))
+                select_paras = selector.select(ofl_size)
+                if sum(candidates[p] for p in select_paras)/sum(candidates.values())-ofl_size>tol:
+                    pass
+                for p in select_paras:
+                    ofl_ops.append((t,k,p,1-Offloaded[p]))
+                    Offloaded[p] = 1
+
+            if current_size > next_size:
+                del_size = current_size - next_size
+                candidates = {p: parameters[p]*o for p,o in Offloaded.items() if o>0}
+                selector = knapsack(list(candidates.items()))
+                select_paras = selector.select(del_size)
+                if sum(candidates[p] for p in select_paras)/sum(candidates.values())-del_size>tol:
+                    pass
+                for p in select_paras:
+                    del_ops.append((t,k,p,Alive[p]))
+                    Alive[p] = 0
+
+            if current_size < next_size:
+                # TODO: prefetch should be smaller than solution
+                prf_size = next_size - current_size
+                candidates = {p: parameters[p]*(1-a) for p,a in Alive.items() if a<1}
+                selector = knapsack(list(candidates.items()))
+                select_paras = selector.select(prf_size)
+                if sum(candidates[p] for p in select_paras)/sum(candidates.values())-prf_size>tol:
+                    pass
+                for p in select_paras:
+                    prf_ops.append((t,k,p,1-Alive[p]))
+                    Alive[p] = 1
+
+        return ofl_ops, prf_ops, del_ops
+
 
     def schedule(self, hgraph=None, check_valid=False):
         """
