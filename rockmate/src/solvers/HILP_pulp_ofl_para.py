@@ -117,7 +117,7 @@ class ModelPULP:
         self.feasible = None
         self.solve_time = None
         self.enable_offload = accurate_mem
-        self.grouping = True
+        self.grouping = grouping
 
         #############################
         self.hgraph = hgraph
@@ -366,8 +366,14 @@ class ModelPULP:
         )
 
         # define objective function
+        prf_cost = 0.01*lpSum(self.PrfW[t, i, w]*self.weights_size[w] /self.bandwidthPrf
+                         for t in range(T) for i in range(T) 
+                         for w in range(W)) if self.enable_offload else 0
+        ofl_cost = 0.01*lpSum(self.OflW[t, i, w]*self.weights_size[w] /self.bandwidthOfl
+                         for t in range(T) for i in range(T) 
+                         for w in range(W)) if self.enable_offload else 0
         self.md = LpProblem(f"rockmateMILP", LpMinimize)
-        self.md += lpSum(self.Time[t, i] for t in range(T) for i in range(T))
+        self.md += lpSum(self.Time[t, i] for t in range(T) for i in range(T)) + prf_cost + ofl_cost
 
         ##### Time constraints
         for t in range(T):
@@ -948,8 +954,8 @@ class ModelPULP:
                 candidates = {p: parameters[p].mem*(1-o) for p,o in Offloaded.items() if o<1}
                 selector = knapsack(list(candidates.items()))
                 select_paras = selector.select(ofl_size)
-                if sum(candidates[p] for p in select_paras)/sum(candidates.values())-ofl_size>tol:
-                    pass
+                # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-ofl_size>tol:
+                #     pass
                 for p in select_paras:
                     # start = parameters[p].info.tsize.numel()
                     op = OffloadOp(alloc=Parameter(parameters[p]),
@@ -962,8 +968,8 @@ class ModelPULP:
                 candidates = {p: parameters[p].mem*o for p,o in Offloaded.items() if o>0}
                 selector = knapsack(list(candidates.items()))
                 select_paras = selector.select(del_size)
-                if sum(candidates[p] for p in select_paras)/sum(candidates.values())-del_size>tol:
-                    pass
+                # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-del_size>tol:
+                #     pass
                 for p in select_paras:
                     del_ops.append((t,k,DeleteOp(Parameter(parameters[p]))))
                     Alive[p] = 0
@@ -978,8 +984,8 @@ class ModelPULP:
                     selector = knapsack(list(candidates.items()))
                     unselect_paras = selector.select(1-prf_size)
                     select_paras = [p for p in candidates.keys() if p not in unselect_paras]
-                if sum(candidates[p] for p in select_paras)/sum(candidates.values())-prf_size>tol:
-                    pass
+                # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-prf_size>tol:
+                #     pass
                 for p in select_paras:
                     prf_ops.append((t,k,AllocateOp(Parameter(parameters[p]))))
                     op = PrefetchOp(alloc=Parameter(parameters[p]),
@@ -1164,6 +1170,7 @@ class ModelPULP:
                     prefetch_ops = self.create_prefetch_ops(t, k, w)
                     op_list.extend(prefetch_ops[0])
                     prefetch_list.extend(prefetch_ops[1])
+                for w in range(W):
                     if not k in self.weight2hcn[w]:
                         op_list.extend(self.create_offload_ops(t, k, w))
                 if sol(self.sumComp[t, k].value()):
