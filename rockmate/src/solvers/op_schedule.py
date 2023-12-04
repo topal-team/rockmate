@@ -119,11 +119,17 @@ class ComputeOp(Op):
 
         return result
 
+    def __repr__(self):
+        return self.kcn.name
+
 
 class DeleteOp(Op):
     def __init__(self, alloc: Allocation, disabled=False):
         super().__init__("Delete_" + alloc.name, disabled)
         self.target = alloc
+
+    def __repr__(self):
+        return "Delete_" + self.target.name
 
 
 class MappingOp(Op):
