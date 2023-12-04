@@ -383,7 +383,13 @@ class HRockmate(torch.nn.Module):
                             #     requires_grad=v.kdn.info.requires_grad,
                             # )
                         if isinstance(v, Parameter):
-                            storage.ld["cpu_"+k] = self.gd["original_mod"].get_parameter(k.split(" ")[0]).data
+                            target = self.gd["original_mod"].get_parameter(k.split(" ")[0])
+                            storage.ld["cpu_"+k] = torch.empty_like(target, 
+                                                                dtype=target.dtype, 
+                                                                device=torch.device("cpu"),
+                                                                pin_memory=True)
+                            
+                            storage.ld["cpu_"+k].copy_(self.gd["original_mod"].get_parameter(k.split(" ")[0]).data)
                             storage.ld[k] = self.gd["original_mod"].get_parameter(k.split(" ")[0])
                             # storage.ld[k] = self.gd["original_mod"].get_parameter(k.split(" ")[0])
                             # self.storage.shapes[v.kdn.main_target] = self.gd[k].shape
