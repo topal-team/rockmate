@@ -852,30 +852,30 @@ class ModelPULP:
                     self.md += diff <= self.PrfW[t, i, w]
 
     def solve(self, solver=""):
-        # self.add_single_bwd_constraints()
+        # some solvers have no support of 'Time limit reached' status
+
         # self.add_single_fwd_constraints()
+        self.add_single_bwd_constraints()
         try:
-            solver = get_solver(solver, msg=0)
+            solver = get_solver(solver, msg=0, timeLimit=self.ilp_solver_params["TimeLimit"])
         except:
             avail_solver = listSolvers(onlyAvailable=True)[0]
             #     print(f"Cannot get {solver}, will use {avail_solver}")
-            solver = get_solver(avail_solver, msg=0)
+            solver = get_solver(avail_solver, msg=0, timeLimit=self.ilp_solver_params["TimeLimit"])
 
         status = self.md.solve(solver)
         self.status = LpStatus[status]  # readable status
         self.feasible = status == 1
 
+        sol = self.sol
         if self.feasible:
             self.solve_time = self.md.solutionTime
-
-        sol = self.sol
-        
-        self.active_steps = []
-        for t in list(range(self.loss_idx + 1, self.T)) + list(range(self.loss_idx + 1)):
-            for i in range(t + 1):
-                if not sol(self.sumComp[t, i].value()):
-                    continue
-                self.active_steps.append((t, i))
+            self.active_steps = []
+            for t in list(range(self.loss_idx + 1, self.T)) + list(range(self.loss_idx + 1)):
+                for i in range(t + 1):
+                    if not sol(self.sumComp[t, i].value()):
+                        continue
+                    self.active_steps.append((t, i))
     
     def sol(self, value):
             return value > 0.9999
@@ -950,6 +950,15 @@ class ModelPULP:
             current_size = round(self.AliveW[(t, k, w)].value() * parameter_size)
             next_size = round(self.AliveW[(t_, k_, w)].value() * parameter_size)
             ofl_size = self.OflW[t,k,w].value()
+
+            if (t,k) == (0,0):#init
+                for p,a in Alive.items():
+                    if a:
+                        init_ops.append((t,k,AllocateOp(Parameter(parameters[p]))))
+                        op = PrefetchOp(alloc=Parameter(parameters[p]),
+                                   indices=(0,None))
+                        init_ops.append((t,k,op))
+
             if ofl_size>0:
                 candidates = {p: parameters[p].mem*(1-o) for p,o in Offloaded.items() if o<1}
                 selector = knapsack(list(candidates.items()))
@@ -992,16 +1001,6 @@ class ModelPULP:
                                    indices=(0,None))
                     prf_ops.append((t,k,op))
                     Alive[p] = 1
-
-            if (t,k) == (0,0):#init
-                for p,a in Alive.items():
-                    if a:
-                        init_ops.append((t,k,AllocateOp(Parameter(parameters[p]))))
-                        op = PrefetchOp(alloc=Parameter(parameters[p]),
-                                   indices=(0,None))
-                        init_ops.append((t,k,op))
-                
-
 
         return ofl_ops, prf_ops, del_ops, init_ops
 
@@ -1248,6 +1247,7 @@ class ModelPULP:
                         )
                         op_list.append(DeleteOp(self.current_buffers[w]))
 
+                    # print(t, k, len(sub_op_list), len(op_list))
                     op_list += sub_op_list
 
                     # Map parameter tensors to buffer
