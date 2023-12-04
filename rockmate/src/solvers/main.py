@@ -350,18 +350,22 @@ def add_parameter_node(h_cluster, original_mod, minor_size=10*1024):
     for kcn in list_kcn:
         if "loss" in kcn.name or not kcn.is_fwd:
             continue
-        for arg in kcn.get_code_ast().body[0].value.args:
-            if "self" in ast_to_str(arg):
-                arg_id = id(eval(ast_to_str(arg).replace("self[", "original_mod[").replace("self.", "original_mod.")))
-                assert arg_id in parameters_id_to_name.keys()
-                n = parameters_id_to_name[arg_id]
-                p = original_mod.get_parameter(n)
-                if p.numel()<minor_size:
-                    continue
-                info = Var_info(p)
-                kdn = K_D_node(main_target=n, kdn_type="parameter", info=info)
-                kdn.mem = p.shape.numel()*p.element_size()
-                list_kdn_parameters.append(kdn)
+        # for arg in kcn.get_code_ast().body[0].value.args:
+        for assign in kcn.get_code_ast().body:
+            if not hasattr(assign.value, "args"):
+                continue
+            for arg in assign.value.args:
+                if "self" in ast_to_str(arg):
+                    arg_id = id(eval(ast_to_str(arg).replace("self[", "original_mod[").replace("self.", "original_mod.")))
+                    assert arg_id in parameters_id_to_name.keys()
+                    n = parameters_id_to_name[arg_id]
+                    p = original_mod.get_parameter(n)
+                    if p.numel()<minor_size:
+                        continue
+                    info = Var_info(p)
+                    kdn = K_D_node(main_target=n, kdn_type="parameter", info=info)
+                    kdn.mem = p.shape.numel()*p.element_size()
+                    list_kdn_parameters.append(kdn)
     setattr(h_cluster, "list_kdn_parameters", list_kdn_parameters)
     return list_kdn_parameters
 
