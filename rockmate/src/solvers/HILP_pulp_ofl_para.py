@@ -222,8 +222,8 @@ class ModelPULP:
             for i in range(I)
         ]  # outputs of hdn
         _users_c = [
-            [self.hgraph.list_hdn.index(hdn) for hdn in self.hgraph.list_hcn[i].users]
-            for i in range(T)
+            [self.hgraph.list_hdn.index(hdn) for hdn in self.hgraph.list_hcn[k].users]
+            for k in range(T)
         ]  # outputs of hcn
 
         #### Update edges based on .dep_interfaces_data
@@ -259,23 +259,23 @@ class ModelPULP:
         # For every HCN[i], R[i] is of size T*nR[i]
         # self.Comp = [
         #     RkLpVariable.dicts(
-        #         f"Comp{i}",
-        #         [(t, k) for t in range(T) for k in range(self.nR[i])],
+        #         f"Comp{k}",
+        #         [(t, o) for t in range(T) for o in range(self.nR[k])],
         #         cat="Binary",
         #     )
-        #     for i in range(T)
+        #     for k in range(T)
         # ]
         self.Comp = RkLpVariable.dicts(
             f"Comp",
-            [(t, i, o) for t in range(T) for i in range(T) for o in range(self.nR[i])],
+            [(t, k, o) for t in range(T) for k in self.krange(t) for o in range(self.nR[k])],
             cat="Binary",
         )
 
         self.sumComp = {}
         for t in range(T):
-            for i in range(T):
-                self.sumComp[t, i] = lpSum(
-                    self.Comp[t, i, o] for o in range(self.nR[i])
+            for k in self.krange(t):
+                self.sumComp[t, k] = lpSum(
+                    self.Comp[t, k, o] for o in range(self.nR[k])
                 )
 
         # Sp for saved Phantoms, option-related
@@ -323,21 +323,21 @@ class ModelPULP:
         if self.enable_offload:
             self.AliveW = RkLpVariable.dicts(
                 "AliveW",
-                [(t, i, j) for t in range(T) for i in range(T) for j in range(W)],
+                [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
                 cat="Continuous",
                 lowBound=0,
                 upBound=1,
             )  # weight w is alive at the start of step j.
             self.OflW = RkLpVariable.dicts(
                 "OflW",
-                [(t, i, j) for t in range(T) for i in range(T) for j in range(W)],
+                [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
                 cat="Continuous",
                 lowBound=0,
                 upBound=1,
             )
             self.PrfW = RkLpVariable.dicts(
                 "PrfW",
-                [(t, i, j) for t in range(T) for i in range(T) for j in range(W)],
+                [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
                 cat="Continuous",
                 lowBound=0,
                 upBound=1,
@@ -362,42 +362,42 @@ class ModelPULP:
             self.bandwidthPrf = 6 * 1024**2  # byte/ms
 
         self.Time = RkLpVariable.dicts(
-            "Time", [(t, i) for t in range(T) for i in range(T)], cat="Continuous"
+            "Time", [(t, k) for t in range(T) for k in self.krange(t)], cat="Continuous"
         )
 
         # define objective function
-        prf_cost = 0.01*lpSum(self.PrfW[t, i, w]*self.weights_size[w] /self.bandwidthPrf
-                         for t in range(T) for i in range(T) 
+        prf_cost = 0.01*lpSum(self.PrfW[t, k, w]*self.weights_size[w] /self.bandwidthPrf
+                         for t in range(T) for k in self.krange(t) 
                          for w in range(W)) if self.enable_offload else 0
-        ofl_cost = 0.01*lpSum(self.OflW[t, i, w]*self.weights_size[w] /self.bandwidthOfl
-                         for t in range(T) for i in range(T) 
+        ofl_cost = 0.01*lpSum(self.OflW[t, k, w]*self.weights_size[w] /self.bandwidthOfl
+                         for t in range(T) for k in self.krange(t) 
                          for w in range(W)) if self.enable_offload else 0
         self.md = LpProblem(f"rockmateMILP", LpMinimize)
-        self.md += lpSum(self.Time[t, i] for t in range(T) for i in range(T)) + prf_cost + ofl_cost
+        self.md += lpSum(self.Time[t, k] for t in range(T) for k in self.krange(t)) + prf_cost + ofl_cost
 
         ##### Time constraints
         for t in range(T):
-            for i in range(T):
-                # if i==self.loss_idx:continue
-                if self.enable_offload and i != self.loss_idx:
-                    w = self.hcn2weight[i] if i != self.loss_idx else None
+            for k in self.krange(t):
+                # if k==self.loss_idx:continue
+                if self.enable_offload and k != self.loss_idx:
+                    w = self.hcn2weight[k] if k != self.loss_idx else None
                     ofl_time = (
-                        self.weights_size[w] / self.bandwidthOfl * self.OflW[t, i, w]
+                        self.weights_size[w] / self.bandwidthOfl * self.OflW[t, k, w]
                     )
                 else:
                     ofl_time = 0
 
                 self.md += (
-                    self.Time[t, i]
+                    self.Time[t, k]
                     >= lpSum(
-                        self.Comp[t, i, o] * self.time[i][o] for o in range(self.nR[i])
+                        self.Comp[t, k, o] * self.time[k][o] for o in range(self.nR[k])
                     )
                     + ofl_time
                 )
 
         ##### Boundary constraints
         self.md += (
-            lpSum(self.sumComp[t, i] for t in range(T) for i in range(t + 1, T)) == 0
+            lpSum(self.sumComp[t, k] for t in range(T) for k in range(t + 1, T)) == 0
         )
         self.md += (
             lpSum(
@@ -456,11 +456,11 @@ class ModelPULP:
             )
 
         # options don't conflict
-        for i in range(T):
-            for t in range(T):
-                self.md += self.sumComp[t, i] <= 1
-        for j in range(J):
-            for t in range(T + 1):
+        for t in range(T):
+            for k in self.krange(t):
+                self.md += self.sumComp[t, k] <= 1
+        for t in range(T + 1):
+            for j in range(J):
                 self.md += (
                     self.sumAliveP[j, t] <= 1
                 )  # assuming two copies of saved tensors won't be kept at the same time
@@ -492,10 +492,10 @@ class ModelPULP:
                     )
 
         #### Options-related constraints
-        for j in range(J):
-            fwd_i = min(self.sub_c2hcn[j])
-            bwd_i = max(self.sub_c2hcn[j])
-            for t in range(T):
+        for t in range(T):
+            for j in range(J):
+                fwd_i = min(self.sub_c2hcn[j])
+                bwd_i = max(self.sub_c2hcn[j])
                 for o in range(self.nOpts[fwd_i]):
                     self.md += (
                         self.AliveP[t + 1, j, o]
@@ -672,7 +672,7 @@ class ModelPULP:
                         for o in range(self.nOpts[k])
                     )
         for t in range(T):
-            for k in range(T):
+            for k in self.krange(t):
                 if self.enable_offload:
                     # weight_mem = 0
                     weight_mem = lpSum(
@@ -767,6 +767,10 @@ class ModelPULP:
                 if t == self.loss_idx and self.save_budget:
                     self.md += self.U[t, k] <= self.save_budget
 
+    def krange(self, t):
+        # return range(t)
+        return range(self.T)
+
     def next_index(self, t, i, upper_triangle=True):
         # if upper_triangle, consider the case when i>t
         if t == self.T - 1:
@@ -854,7 +858,7 @@ class ModelPULP:
     def solve(self, solver=""):
         # some solvers have no support of 'Time limit reached' status
 
-        # self.add_single_fwd_constraints()
+        self.add_single_fwd_constraints()
         self.add_single_bwd_constraints()
         try:
             solver = get_solver(solver, msg=0, timeLimit=self.ilp_solver_params["TimeLimit"])
@@ -1028,7 +1032,7 @@ class ModelPULP:
             op_list = []
             init_op_list = []
             for t in range(T):
-                for k in range(T):
+                for k in self.krange(t):
                     if t == self.loss_idx and k == self.loss_idx:
                         op_list.append(ComputeOp(self.hgraph.cluster.loss_kcn))
                     j = self.hcn2sub_c[k]
@@ -1156,7 +1160,7 @@ class ModelPULP:
         #     self.current_buffers[w] = Parameter(hcn.sub_cluster.name)
 
         for t in range(T):
-            for k in range(T):
+            for k in self.krange(t):
                 if t == self.loss_idx and k == self.loss_idx:
                     # loss_idx = len(op_list)
                     # loss_op = Op(K_C_node("loss"))
