@@ -91,6 +91,9 @@ class Op:
     def __repr__(self):
         return self.name
 
+class SynchronizeOp(Op):
+    def __init__(self, name="", disabled=False):
+        super().__init__(name, disabled)
 
 class ComputeOp(Op):
     def __init__(self, kcn, fast_forward=False, disabled=False, detach=True):

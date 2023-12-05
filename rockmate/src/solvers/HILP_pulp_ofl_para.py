@@ -23,6 +23,7 @@ from .op_schedule import (
     AllocateOp,
     OffloadOp,
     PrefetchOp,
+    SynchronizeOp,
     OpSchedule,
 )
 from rkgb.Htools import *
@@ -117,6 +118,8 @@ class ModelPULP:
         self.feasible = None
         self.solve_time = None
         self.enable_offload = accurate_mem
+        self.single_fwd = accurate_mem
+        self.single_bwd = False
         self.grouping = grouping
 
         #############################
@@ -782,25 +785,30 @@ class ModelPULP:
                     self.md += self.U[t, k] <= self.save_budget
 
     def krange(self, t):
-        return range(t+1)
+        if self.single_fwd:
+            return [t]
+        elif self.single_bwd and t>self.loss_idx:
+            return list(range(self.loss_idx))+[t]
+        return list(range(t+1))
         # return range(self.T)
 
     def next_index(self, t, i, upper_triangle=False):
         # if upper_triangle, consider the case when i>t
         if t == self.T - 1:
-            if i < t:
+            if i < max(self.krange(t)):
                 t_ = t
-                i_ = i + 1
+                i_ = self.krange(t)[self.krange(t).index(i)+1]
             else:
                 t_ = 0
                 i_ = 0
         else:
-            end = self.T - 1 if upper_triangle else t
+            # end = self.T - 1 if upper_triangle else t
+            end = max(self.krange(t))
             if i < end:
                 t_ = t
-                i_ = i + 1
+                i_ = self.krange(t)[self.krange(t).index(i)+1]
             else:
-                i_ = 0
+                i_ = min(self.krange(t+1))
                 t_ = t + 1
         return (t_, i_)
 
@@ -811,12 +819,12 @@ class ModelPULP:
             self.md += self.U[(self.loss_idx, k)] <= self.save_budget
 
     def add_single_bwd_constraints(self):
-        for i in range(self.loss_idx, self.T):  # only bwd after loss
-            self.md += lpSum(self.sumComp[t, i] for t in range(self.T)) == 1
+        for k in range(self.loss_idx, self.T):  # only bwd after loss
+            self.md += lpSum(self.sumComp[t, k] for t in range(self.T)) == 1
 
     def add_single_fwd_constraints(self):
-        for i in range(self.loss_idx):  # only fwd before loss
-            self.md += lpSum(self.sumComp[t, i] for t in range(self.T)) == 1
+        for k in range(self.loss_idx):  # only fwd before loss
+            self.md += lpSum(self.sumComp[t, k] for t in range(self.T)) == 1
 
     def add_parameter_constraints(self):
         self.OflWProg = dict()
@@ -871,9 +879,9 @@ class ModelPULP:
 
     def solve(self, solver=""):
         # some solvers have no support of 'Time limit reached' status
-
-        self.add_single_fwd_constraints()
-        self.add_single_bwd_constraints()
+        if self.enable_offload:
+            self.add_single_fwd_constraints()
+            self.add_single_bwd_constraints()
         try:
             solver = get_solver(solver, msg=0, timeLimit=self.ilp_solver_params["TimeLimit"])
         except:
@@ -890,10 +898,10 @@ class ModelPULP:
             self.solve_time = self.md.solutionTime
             self.active_steps = []
             for t in list(range(self.loss_idx + 1, self.T)) + list(range(self.loss_idx + 1)):
-                for i in range(t + 1):
-                    if not sol(self.sumComp[t, i].value()):
+                for k in self.krange(t):
+                    if not sol(self.sumComp[t, k].value()):
                         continue
-                    self.active_steps.append((t, i))
+                    self.active_steps.append((t, k))
     
     def sol(self, value):
             return value > 0.9999
@@ -1180,6 +1188,8 @@ class ModelPULP:
                     # loss_op = Op(K_C_node("loss"))
 
                     op_list.append(ComputeOp(self.hgraph.cluster.loss_kcn))
+                if not sol(self.sumComp[t, k].value()):continue
+                op_list.append(SynchronizeOp(f"{(t,k)}"))
                 j = self.hcn2sub_c[k]
                 # if self.sumComp[t, k].value() == 1:
                 prefetch_list = []
@@ -1190,100 +1200,100 @@ class ModelPULP:
                 for w in range(W):
                     if not k in self.weight2hcn[w]:
                         op_list.extend(self.create_offload_ops(t, k, w))
-                if sol(self.sumComp[t, k].value()):
-                    # print(t,k)
-                    hcn = hgraph.list_hcn[k]
+                
+                # print(t,k)
+                hcn = hgraph.list_hcn[k]
 
-                    opt = -1
-                    for o in range(self.nOpts[k]):
-                        if sol(self.Comp[t, k, o].value()):
-                            opt = o
-                            break
-                    if opt > -1:
-                        # print(k, t, opt)
-                        h_obj = self.list_list_sched[j][opt]
-                        if hcn.is_fwd:
-                            # sub_op_list = deepcopy(
-                            #     h_obj.op_list[: h_obj.loss_idx]
-                            # )
-                            sub_op_list = h_obj.op_list[: h_obj.loss_idx]
-                        else:
-                            sub_op_list = h_obj.op_list[h_obj.loss_idx + 1 :]
-
-                            # if self.sumAliveP[(j, t + 1)].value() == 0:
-                            # sub_op_list.append()
-                        sub_op_list = deepcopy(sub_op_list)
-
-                        if (
-                            not hcn.is_fwd
-                            # and self.sumAliveP[(j, t + 1)].value() > 0
-                            and sol(self.sumAliveP[(j, t + 1)].value())
-                        ):  # phantoms should be kept
-                            phantoms_to_keep = h_obj.phantoms
-                            # for op in sub_op_list[::-1]:
-                            #     if (
-                            #         op.is_del
-                            #         and not op.disabled
-                            #         and op.kn in phantoms_to_keep
-                            #     ):
-                            #         # Only the last del should be disabled
-                            #         op.disabled = True
-                            #         phantoms_to_keep.remove(op.kn)
-
-                        # translating sub_op_list
-                        if hcn.sub_cluster is not hcn.sub_cluster.representee_cluster:
-                            sub_op_list = hcn.sub_cluster.translate_op_list(sub_op_list)
-
+                opt = -1
+                for o in range(self.nOpts[k]):
+                    if sol(self.Comp[t, k, o].value()):
+                        opt = o
+                        break
+                if opt > -1:
+                    # print(k, t, opt)
+                    h_obj = self.list_list_sched[j][opt]
+                    if hcn.is_fwd:
+                        # sub_op_list = deepcopy(
+                        #     h_obj.op_list[: h_obj.loss_idx]
+                        # )
+                        sub_op_list = h_obj.op_list[: h_obj.loss_idx]
                     else:
-                        h_obj = hcn
-                        sub_op_list = deepcopy(h_obj.ff_op_list)
+                        sub_op_list = h_obj.op_list[h_obj.loss_idx + 1 :]
 
-                    if hcn.sub_cluster is None:
-                        continue
-                    parameters = [
-                        kdn.name for kdn in hcn.sub_cluster.list_kdn_parameters
-                    ]
+                        # if self.sumAliveP[(j, t + 1)].value() == 0:
+                        # sub_op_list.append()
+                    sub_op_list = deepcopy(sub_op_list)
 
-                    list_alloc_para = [
-                        Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
-                    ]
-                    w = self.hcn2weight[k]
+                    if (
+                        not hcn.is_fwd
+                        # and self.sumAliveP[(j, t + 1)].value() > 0
+                        and sol(self.sumAliveP[(j, t + 1)].value())
+                    ):  # phantoms should be kept
+                        phantoms_to_keep = h_obj.phantoms
+                        # for op in sub_op_list[::-1]:
+                        #     if (
+                        #         op.is_del
+                        #         and not op.disabled
+                        #         and op.kn in phantoms_to_keep
+                        #     ):
+                        #         # Only the last del should be disabled
+                        #         op.disabled = True
+                        #         phantoms_to_keep.remove(op.kn)
 
-                    if not self.grouping and self.current_buffers[w] is not None:  # first time
+                    # translating sub_op_list
+                    if hcn.sub_cluster is not hcn.sub_cluster.representee_cluster:
+                        sub_op_list = hcn.sub_cluster.translate_op_list(sub_op_list)
+
+                else:
+                    h_obj = hcn
+                    sub_op_list = deepcopy(h_obj.ff_op_list)
+
+                if hcn.sub_cluster is None:
+                    continue
+                parameters = [
+                    kdn.name for kdn in hcn.sub_cluster.list_kdn_parameters
+                ]
+
+                list_alloc_para = [
+                    Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
+                ]
+                w = self.hcn2weight[k]
+
+                if not self.grouping and self.current_buffers[w] is not None:  # first time
+                    self.current_buffers[w] = Buffer(
+                        hcn.sub_cluster.name,
+                        mem=sum(alloc.mem for alloc in list_alloc_para),
+                    )
+                    # Map buffer to parameter tensors
+                    # op_list.extend([AllocateOp(alloc) for alloc in list_alloc_para])
+                    op_list.append(
+                        MappingOp(
+                            name=hcn.sub_cluster.name + "_split",
+                            sources=[self.current_buffers[w]],
+                            targets=list_alloc_para,
+                        )
+                    )
+                    op_list.append(DeleteOp(self.current_buffers[w]))
+
+                # print(t, k, len(sub_op_list), len(op_list))
+                op_list += sub_op_list
+
+                # Map parameter tensors to buffer
+                if not self.grouping:
+                    if self.current_buffers[w] is None:
                         self.current_buffers[w] = Buffer(
                             hcn.sub_cluster.name,
                             mem=sum(alloc.mem for alloc in list_alloc_para),
                         )
-                        # Map buffer to parameter tensors
-                        # op_list.extend([AllocateOp(alloc) for alloc in list_alloc_para])
-                        op_list.append(
-                            MappingOp(
-                                name=hcn.sub_cluster.name + "_split",
-                                sources=[self.current_buffers[w]],
-                                targets=list_alloc_para,
-                            )
+                        # op_list.append(AllocateOp(self.current_buffers[w]))
+                    op_list.append(
+                        MappingOp(
+                            name=hcn.sub_cluster.name + "_merge",
+                            sources=list_alloc_para,
+                            targets=[self.current_buffers[w]],
                         )
-                        op_list.append(DeleteOp(self.current_buffers[w]))
-
-                    # print(t, k, len(sub_op_list), len(op_list))
-                    op_list += sub_op_list
-
-                    # Map parameter tensors to buffer
-                    if not self.grouping:
-                        if self.current_buffers[w] is None:
-                            self.current_buffers[w] = Buffer(
-                                hcn.sub_cluster.name,
-                                mem=sum(alloc.mem for alloc in list_alloc_para),
-                            )
-                            # op_list.append(AllocateOp(self.current_buffers[w]))
-                        op_list.append(
-                            MappingOp(
-                                name=hcn.sub_cluster.name + "_merge",
-                                sources=list_alloc_para,
-                                targets=[self.current_buffers[w]],
-                            )
-                        )
-                        op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
+                    )
+                    op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
 
                 for eidx, (k_, i) in enumerate(self.delete_list):
                     # print(k_, i)

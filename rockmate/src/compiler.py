@@ -10,6 +10,7 @@ from .solvers.op_schedule import (
     AllocateOp,
     OffloadOp,
     PrefetchOp,
+    SynchronizeOp,
     OpSchedule,
 )
 
@@ -352,7 +353,7 @@ class Compiler:
                     gd=False,
                 )
             )
-            function_list.append(self.fct_synchronize())
+            # function_list.append(self.fct_synchronize())
             # function_list.append(
             #     self.fct_wait_stream(self.gd["prefetch_stream"], self.gd["main_stream"])
             # )
@@ -511,6 +512,8 @@ class Compiler:
                     # fct_list[-1].append(self.fct_wait_stream(self.gd["prefetch_stream"],
                     #                                      self.gd["offload_stream"]
                     #     ))
+                elif isinstance(op, SynchronizeOp):
+                    fct_list.append([self.fct_synchronize()])
                 else:
                     fct_list.append([])
 
