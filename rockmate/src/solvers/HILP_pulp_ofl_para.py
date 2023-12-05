@@ -278,6 +278,13 @@ class ModelPULP:
                     self.Comp[t, k, o] for o in range(self.nR[k])
                 )
 
+        for t in range(T):
+            for k in range(T):
+                if k not in self.krange(t):
+                    for o in range(self.nR[k]):
+                        self.Comp[t,k,o] = 0
+                    self.sumComp[t,k] = 0
+
         # Sp for saved Phantoms, option-related
         # self.AliveP = [
         #     RkLpVariable.dicts(
@@ -323,7 +330,7 @@ class ModelPULP:
         if self.enable_offload:
             self.AliveW = RkLpVariable.dicts(
                 "AliveW",
-                [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
+                [(t, k, w) for t in range(T) for k in range(T) for w in range(W)],
                 cat="Continuous",
                 lowBound=0,
                 upBound=1,
@@ -342,6 +349,12 @@ class ModelPULP:
                 lowBound=0,
                 upBound=1,
             )
+            for t in range(T):
+                for k in range(T):
+                    if k not in self.krange(t):
+                        for w in range(W):
+                            self.PrfW[t,k,w] = 0
+                            self.OflW[t,k,w] = 0
             # self.weights_size = [3e7 for _ in range(W)]
             self.weights_size = []
             for i in range(W):
@@ -396,31 +409,31 @@ class ModelPULP:
                 )
 
         ##### Boundary constraints
-        self.md += (
-            lpSum(self.sumComp[t, k] for t in range(T) for k in range(t + 1, T)) == 0
-        )
-        self.md += (
-            lpSum(
-                self.sumAliveP[(self.hcn2sub_c[i], t)]
-                for t in range(self.loss_idx)
-                for i in range(t + 1, self.loss_idx)
-                if self.hcn2sub_c[i]
-            )
-            == 0
-        )
-        self.md += (
-            lpSum(
-                self.AliveA[t, j]
-                for j in range(Cr)
-                for t in range(self.create_list[j][0] + 1)
-            )
-            == 0
-        )
-        for i in range(I):
-            if _deps_d[i]:
-                self.md += (
-                    lpSum(self.AliveT[t, i] for t in range(min(_deps_d[i]) + 1)) == 0
-                )
+        # self.md += (
+        #     lpSum(self.sumComp[t, k] for t in range(T) for k in range(t + 1, T)) == 0
+        # )
+        # self.md += (
+        #     lpSum(
+        #         self.sumAliveP[(self.hcn2sub_c[i], t)]
+        #         for t in range(self.loss_idx)
+        #         for i in range(t + 1, self.loss_idx)
+        #         if self.hcn2sub_c[i]
+        #     )
+        #     == 0
+        # )
+        # self.md += (
+        #     lpSum(
+        #         self.AliveA[t, j]
+        #         for j in range(Cr)
+        #         for t in range(self.create_list[j][0] + 1)
+        #     )
+        #     == 0
+        # )
+        # for i in range(I):
+        #     if _deps_d[i]:
+        #         self.md += (
+        #             lpSum(self.AliveT[t, i] for t in range(min(_deps_d[i]) + 1)) == 0
+        #         )
 
         ##### Validity constraints
 
@@ -470,7 +483,7 @@ class ModelPULP:
             lpSum(self.sumComp[t, t] for t in range(T)) == T
         )  # diagonal should be executed
         self.md += (
-            lpSum(self.sumComp[t, self.loss_idx] for t in range(T)) == 1
+            lpSum(self.sumComp[t, self.loss_idx] for t in range(T) if self.loss_idx in self.krange(t)) == 1
         )  # loss should be executed exactly once
 
         for t in range(T):
@@ -481,8 +494,9 @@ class ModelPULP:
         for t in range(T - 1):
             for j in range(Cr):
                 src_i = self.create_list[j][0]
+                src = self.sumComp[t, src_i] if src_i in self.krange(t) else 0
                 self.md += (
-                    self.AliveA[t + 1, j] <= self.AliveA[t, j] + self.sumComp[t, src_i]
+                    self.AliveA[t + 1, j] <= self.AliveA[t, j] + src
                 )
         for t in range(T):
             for j, (k, i) in enumerate(self.create_list):
@@ -768,10 +782,10 @@ class ModelPULP:
                     self.md += self.U[t, k] <= self.save_budget
 
     def krange(self, t):
-        # return range(t)
-        return range(self.T)
+        return range(t+1)
+        # return range(self.T)
 
-    def next_index(self, t, i, upper_triangle=True):
+    def next_index(self, t, i, upper_triangle=False):
         # if upper_triangle, consider the case when i>t
         if t == self.T - 1:
             if i < t:
@@ -781,7 +795,7 @@ class ModelPULP:
                 t_ = 0
                 i_ = 0
         else:
-            end = self.T - 1 if upper_triangle else t + 1
+            end = self.T - 1 if upper_triangle else t
             if i < end:
                 t_ = t
                 i_ = i + 1
@@ -810,50 +824,50 @@ class ModelPULP:
             for w in self.weight2hcn:
                 for k in self.weight2hcn[w]:
                     self.md += self.sumComp[t, k] <= self.AliveW[t, k, w]
-            for i in range(self.T):
-                self.md += self.Time[t, i] >= lpSum(
-                    self.weights_size[w] / self.bandwidthPrf * self.PrfW[t, i, w]
+            for k in self.krange(t):
+                self.md += self.Time[t, k] >= lpSum(
+                    self.weights_size[w] / self.bandwidthPrf * self.PrfW[t, k, w]
                     for w in range(self.W)
                 )
-                self.md += self.Time[t, i] >= lpSum(
-                    self.weights_size[w] / self.bandwidthOfl * self.OflW[t, i, w]
+                self.md += self.Time[t, k] >= lpSum(
+                    self.weights_size[w] / self.bandwidthOfl * self.OflW[t, k, w]
                     for w in range(self.W)
                 )
                 for w in range(self.W):
                     bwd_i = max(self.weight2hcn[w])
                     if bwd_i < t:  # after bwd of w
-                        self.OflWProg[(t, i, w)] = lpSum(
-                            self.OflW[t, ii, w] for ii in range(i)
+                        self.OflWProg[(t, k, w)] = lpSum(
+                            self.OflW[t, kk, w] for kk in range(k)
                         ) + lpSum(
-                            self.OflW[tt, ii, w]
+                            self.OflW[tt, kk, w]
                             for tt in range(bwd_i, t)  # offload right after bwd_i
-                            for ii in range(self.T)
+                            for kk in self.krange(tt)
                         )
                     else:
-                        self.OflWProg[(t, i, w)] = (
-                            lpSum(self.OflW[t, ii, w] for ii in range(i))
+                        self.OflWProg[(t, k, w)] = (
+                            lpSum(self.OflW[t, kk, w] for kk in range(k))
                             + lpSum(
-                                self.OflW[tt, ii, w]
+                                self.OflW[tt, kk, w]
                                 for tt in range(t)
-                                for ii in range(self.T)
+                                for kk in self.krange(tt)
                             )
                             + lpSum(
-                                self.OflW[tt, ii, w]
+                                self.OflW[tt, kk, w]
                                 for tt in range(bwd_i, self.T)
-                                for ii in range(self.T)
+                                for kk in self.krange(tt)
                             )
                         )
-                    self.md += self.OflWProg[(t, i, w)] <= 1
-                    self.md += self.AliveW[t, i, w] + self.OflWProg[(t, i, w)] >= 1
-                    self.md += self.AliveW[t, i, w] + self.PrfW[(t, i, w)] <= 1
-                    self.md += self.OflW[t, i, w] <= self.sumComp[t, i]
-                    self.md += self.PrfW[t, i, w] <= self.sumComp[t, i]
+                    self.md += self.OflWProg[(t, k, w)] <= 1
+                    self.md += self.AliveW[t, k, w] + self.OflWProg[(t, k, w)] >= 1
+                    self.md += self.AliveW[t, k, w] + self.PrfW[(t, k, w)] <= 1
+                    self.md += self.OflW[t, k, w] <= self.sumComp[t, k]
+                    self.md += self.PrfW[t, k, w] <= self.sumComp[t, k]
 
-                    t_, i_ = self.next_index(t, i)
-                    diff = self.AliveW[t_, i_, w] - self.AliveW[t, i, w]
-                    self.md += diff <= self.sumComp[t, i]
-                    self.md += -diff <= self.sumComp[t, i]
-                    self.md += diff <= self.PrfW[t, i, w]
+                    t_, k_ = self.next_index(t, k)
+                    diff = self.AliveW[t_, k_, w] - self.AliveW[t, k, w]
+                    self.md += diff <= self.sumComp[t, k]
+                    self.md += -diff <= self.sumComp[t, k]
+                    self.md += diff <= self.PrfW[t, k, w]
 
     def solve(self, solver=""):
         # some solvers have no support of 'Time limit reached' status
