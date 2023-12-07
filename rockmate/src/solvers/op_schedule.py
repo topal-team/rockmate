@@ -372,6 +372,9 @@ class OpSchedule:
             alive_status[k] = v
         for kdn in self.interfaces["inputs_kdn_data"]:
             alive_status[kdn.name] = True  # kdn share the name as alloc
+        for op in self.init_op_list:
+            if isinstance(op, AllocateOp):
+                alive_status[op.target.name] = True
         # TODO: add init alive for parameters
 
         alive_list = []

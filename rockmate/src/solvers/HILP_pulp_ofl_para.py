@@ -106,6 +106,7 @@ class ModelPULP:
         offload=False,
         protected_names=[],
         grouping=True,
+        grad_mode="keep_all",  # ["free_all", "free_asap", "offload"]
     ):
         self.gcd = gcd if gcd else 1
         self.peak_budget = peak_budget / self.gcd
@@ -117,10 +118,11 @@ class ModelPULP:
         self.ilp_solver_params = ilp_solver_params
         self.feasible = None
         self.solve_time = None
-        self.enable_offload = accurate_mem
+        self.with_parameters = accurate_mem
         self.single_fwd = accurate_mem
         self.single_bwd = False
         self.grouping = grouping
+        self.grad_mode = grad_mode
 
         #############################
         self.hgraph = hgraph
@@ -185,7 +187,7 @@ class ModelPULP:
         self.T = T = len(self.hgraph.list_hcn)
         self.W = W = (
             len(self.hgraph.list_hcn) // 2
-        )  # for now, one weight for each layer
+        )  # for now, one parameter for each layer
         self.I = I = len(self.hgraph.list_hdn)
         self.J = J = len(self.list_list_sched)
 
@@ -351,19 +353,26 @@ class ModelPULP:
         for t in range(T):
             for i in range(Cr):
                 if self.create_list[i][0] not in self.krange(t):
-                    self.create[t,i] = 0
+                    self.create[t, i] = 0
             for i in range(De):
                 if self.delete_list[i][0] not in self.krange(t):
-                    self.delete[t,i] = 0
+                    self.delete[t, i] = 0
 
-        if self.enable_offload:
+        if self.with_parameters:
             self.AliveW = RkLpVariable.dicts(
                 "AliveW",
                 [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
                 cat="Continuous",
                 lowBound=0,
                 upBound=1,
-            )  # weight w is alive at the start of step j.
+            )  # parameter w is alive at the start of step j.
+            self.AliveG = RkLpVariable.dicts(
+                "AliveG",
+                [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
+                cat="Continuous",
+                lowBound=1 if self.grad_mode == "keep_all" else 0,
+                upBound=1,
+            )  # w.grad is alive at the start of step j.
             self.OflW = RkLpVariable.dicts(
                 "OflW",
                 [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
@@ -384,21 +393,21 @@ class ModelPULP:
                         for w in range(W):
                             self.PrfW[t, k, w] = 0
                             self.OflW[t, k, w] = 0
-            # self.weights_size = [3e7 for _ in range(W)]
-            self.weights_size = []
+            # self.parameter_size = [3e7 for _ in range(W)]
+            self.parameter_size = []
             for i in range(W):
                 sub_cluster = self.hgraph.list_hcn[i].sub_cluster
                 if hasattr(sub_cluster, "list_kdn_parameters"):
-                    self.weights_size.append(
+                    self.parameter_size.append(
                         sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters)
                         / self.gcd
                     )
                 else:
-                    self.weights_size.append(0)
-            # print(self.weights_size)
-            self.weight2hcn = {w: [w, T - w - 1] for w in range(W)}
-            self.hcn2weight = {
-                k: w for w in self.weight2hcn for k in self.weight2hcn[w]
+                    self.parameter_size.append(0)
+            # print(self.parameter_size)
+            self.parameter2hcn = {w: [w, T - w - 1] for w in range(W)}
+            self.hcn2parameter = {
+                k: w for w in self.parameter2hcn for k in self.parameter2hcn[w]
             }
             self.bandwidthOfl = 6 * 1024**2  # byte/ms
             self.bandwidthPrf = 6 * 1024**2  # byte/ms
@@ -411,23 +420,23 @@ class ModelPULP:
         prf_cost = (
             0.01
             * lpSum(
-                self.PrfW[t, k, w] * self.weights_size[w] / self.bandwidthPrf
+                self.PrfW[t, k, w] * self.parameter_size[w] / self.bandwidthPrf
                 for t in range(T)
                 for k in self.krange(t)
                 for w in range(W)
             )
-            if self.enable_offload
+            if self.with_parameters
             else 0
         )
         ofl_cost = (
             0.01
             * lpSum(
-                self.OflW[t, k, w] * self.weights_size[w] / self.bandwidthOfl
+                self.OflW[t, k, w] * self.parameter_size[w] / self.bandwidthOfl
                 for t in range(T)
                 for k in self.krange(t)
                 for w in range(W)
             )
-            if self.enable_offload
+            if self.with_parameters
             else 0
         )
         self.md = LpProblem(f"rockmateMILP", LpMinimize)
@@ -441,10 +450,10 @@ class ModelPULP:
         for t in range(T):
             for k in self.krange(t):
                 # if k==self.loss_idx:continue
-                if self.enable_offload and k != self.loss_idx:
-                    w = self.hcn2weight[k] if k != self.loss_idx else None
+                if self.with_parameters and k != self.loss_idx:
+                    w = self.hcn2parameter[k] if k != self.loss_idx else None
                     ofl_time = (
-                        self.weights_size[w] / self.bandwidthOfl * self.OflW[t, k, w]
+                        self.parameter_size[w] / self.bandwidthOfl * self.OflW[t, k, w]
                     )
                 else:
                     ofl_time = 0
@@ -594,7 +603,7 @@ class ModelPULP:
                                 )
 
         #### Offload constraints
-        if self.enable_offload:
+        if self.with_parameters:
             self.add_parameter_constraints()
 
         ##### Memory constraints
@@ -631,9 +640,7 @@ class ModelPULP:
                 if t + 1 < T:
                     self.md += (
                         self.AliveT[t + 1, i]
-                        == self.alive[
-                            (t, max(_deps_d[i] + _users_d[i]), i)
-                        ]
+                        == self.alive[(t, max(_deps_d[i] + _users_d[i]), i)]
                     )
                 elif i not in self.protected_indices:
                     # in the end of bwd, del every HDN
@@ -743,16 +750,17 @@ class ModelPULP:
                     )
         for t in range(T):
             for k in self.krange(t):
-                if self.enable_offload:
-                    # weight_mem = 0
-                    weight_mem = lpSum(
-                        self.AliveW[t, k, w] * self.weights_size[w] for w in range(W)
+                if self.with_parameters:
+                    parameter_mem = lpSum(
+                        (self.AliveW[t, k, w] + self.AliveG[t, k, w] + self.PrfW[t, k, w])
+                        * self.parameter_size[w]
+                        for w in range(W)
                     )
                 else:
-                    weight_mem = 0
+                    parameter_mem = 0
                 j = self.hcn2sub_c[k]
                 self.md += self.U[t, k] >= 0
-                self.md += self.U[t, k] <= self.peak_budget - weight_mem
+                self.md += self.U[t, k] <= self.peak_budget - parameter_mem
                 if j is None or not accurate_mem:
                     # don't consider correction_term
                     self.md += (
@@ -766,7 +774,7 @@ class ModelPULP:
                             for eidx_d, (k_, i_) in enumerate(self.delete_list)
                             if k == k_
                         )
-                        <= self.peak_budget - weight_mem
+                        <= self.peak_budget - parameter_mem
                     )
                 else:
                     hcn = self.hgraph.list_hcn[k]
@@ -817,7 +825,7 @@ class ModelPULP:
                                     for eidx_d, (k_, i_) in enumerate(self.delete_list)
                                     if k == k_
                                 )
-                                <= self.peak_budget - weight_mem
+                                <= self.peak_budget - parameter_mem
                             )
                         if not (
                             op_sched.fwd_overhead_correction
@@ -832,7 +840,7 @@ class ModelPULP:
                                     for eidx_d, (k_, i_) in enumerate(self.delete_list)
                                     if k == k_
                                 )
-                                <= self.peak_budget - weight_mem
+                                <= self.peak_budget - parameter_mem
                             )
                 if t == self.loss_idx and self.save_budget:
                     self.md += self.U[t, k] <= self.save_budget
@@ -882,22 +890,22 @@ class ModelPULP:
     def add_parameter_constraints(self):
         self.OflWProg = dict()
         for t in range(self.T):
-            for w in self.weight2hcn:
-                for k in self.weight2hcn[w]:
+            for w in self.parameter2hcn:
+                for k in self.parameter2hcn[w]:
                     if k not in self.krange(t):
                         continue
                     self.md += self.sumComp[t, k] <= self.AliveW[t, k, w]
             for k in self.krange(t):
                 self.md += self.Time[t, k] >= lpSum(
-                    self.weights_size[w] / self.bandwidthPrf * self.PrfW[t, k, w]
+                    self.parameter_size[w] / self.bandwidthPrf * self.PrfW[t, k, w]
                     for w in range(self.W)
                 )
                 self.md += self.Time[t, k] >= lpSum(
-                    self.weights_size[w] / self.bandwidthOfl * self.OflW[t, k, w]
+                    self.parameter_size[w] / self.bandwidthOfl * self.OflW[t, k, w]
                     for w in range(self.W)
                 )
                 for w in range(self.W):
-                    bwd_i = max(self.weight2hcn[w])
+                    bwd_i = max(self.parameter2hcn[w])
                     if bwd_i < t:  # after bwd of w
                         self.OflWProg[(t, k, w)] = lpSum(
                             self.OflW[t, kk, w] for kk in range(k)
@@ -934,7 +942,7 @@ class ModelPULP:
 
     def solve(self, solver=""):
         # some solvers have no support of 'Time limit reached' status
-        if self.enable_offload:
+        if self.with_parameters:
             self.add_single_fwd_constraints()
             self.add_single_bwd_constraints()
         try:
@@ -992,7 +1000,7 @@ class ModelPULP:
                 offload_size[(t, i)] = 0
                 prefetch_size[(t, i)] = 0
                 for w in range(self.W):
-                    if i in self.weight2hcn[w]:
+                    if i in self.parameter2hcn[w]:
                         if offload_progs[w] > 0:
                             offload_pieces[w].append((t, i, offload_progs[w]))
                             offload_progs[w] = 0
@@ -1002,12 +1010,12 @@ class ModelPULP:
                     if self.OflW[t, i, w].value() > 0:
                         offload_progs[w] += self.OflW[t, i, w].value()
                         offload_size[(t, i)] += (
-                            self.OflW[t, i, w].value() * self.weights_size[w]
+                            self.OflW[t, i, w].value() * self.parameter_size[w]
                         )
                     if self.PrfW[t, i, w].value() > 0:
                         prefetch_progs[w] += self.PrfW[t, i, w].value()
                         prefetch_size[(t, i)] += (
-                            self.PrfW[t, i, w].value() * self.weights_size[w]
+                            self.PrfW[t, i, w].value() * self.parameter_size[w]
                         )
 
         # start to re-organize the offload/prefetch operations
@@ -1017,7 +1025,7 @@ class ModelPULP:
 
     def group(self, w, tol=1):
         # Group the parameters of each block for the task
-        fwd_i, bwd_i = self.weight2hcn[w]
+        fwd_i, bwd_i = self.parameter2hcn[w]
         hcn = self.hgraph.list_hcn[fwd_i]
         parameters = {kdn.name: kdn for kdn in hcn.sub_cluster.list_kdn_parameters}
         parameter_size = sum(kdn.mem for kdn in parameters.values())
@@ -1114,8 +1122,8 @@ class ModelPULP:
         I = len(hgraph.list_hdn)
         J = len(self.list_list_sched)
 
-        if self.enable_offload:
-            W = len(self.weights_size)
+        if self.with_parameters:
+            W = len(self.parameter_size)
             (op_list, init_alive_status, init_op_list) = self.greedy_post_processing(
                 hgraph
             )
@@ -1201,7 +1209,7 @@ class ModelPULP:
             cluster=self.hgraph.cluster,
             # init_alive_status=init_alive_status,
             init_op_list=init_op_list,
-            with_parameters=self.enable_offload,
+            with_parameters=self.with_parameters,
         )
         # check_valid = True
         if check_valid:
@@ -1224,7 +1232,7 @@ class ModelPULP:
         T = len(hgraph.list_hcn)
         I = len(hgraph.list_hdn)
         J = len(self.list_list_sched)
-        W = len(self.weights_size)
+        W = len(self.parameter_size)
 
         self.ofl_ops = []
         self.prf_ops = []
@@ -1247,11 +1255,12 @@ class ModelPULP:
         # for kdn in self.hgraph.cluster.list_kdn_parameters:
         #     init_alive_status[kdn.name] = True
         # for w in range(W):
-        #     hcn = self.hgraph.list_hcn[self.weight2hcn[w]]
+        #     hcn = self.hgraph.list_hcn[self.parameter2hcn[w]]
         #     self.current_buffers[w] = Parameter(hcn.sub_cluster.name)
 
         for t in range(T):
             for k in self.krange(t):
+                op_list.append(SynchronizeOp(f"{(t,k)}"))
                 if t == self.loss_idx and k == self.loss_idx:
                     # loss_idx = len(op_list)
                     # loss_op = Op(K_C_node("loss"))
@@ -1259,7 +1268,6 @@ class ModelPULP:
                     op_list.append(ComputeOp(self.hgraph.cluster.loss_kcn))
                 if not sol(self.sumComp[t, k].value()):
                     continue
-                op_list.append(SynchronizeOp(f"{(t,k)}"))
                 j = self.hcn2sub_c[k]
                 # if self.sumComp[t, k].value() == 1:
                 prefetch_list = []
@@ -1268,7 +1276,7 @@ class ModelPULP:
                     op_list.extend(prefetch_ops[0])
                     prefetch_list.extend(prefetch_ops[1])
                 for w in range(W):
-                    if not k in self.weight2hcn[w]:
+                    if not k in self.parameter2hcn[w]:
                         op_list.extend(self.create_offload_ops(t, k, w))
 
                 # print(t,k)
@@ -1325,7 +1333,7 @@ class ModelPULP:
                 list_alloc_para = [
                     Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
                 ]
-                w = self.hcn2weight[k]
+                w = self.hcn2parameter[k]
 
                 if (
                     not self.grouping and self.current_buffers[w] is not None
@@ -1374,7 +1382,7 @@ class ModelPULP:
 
                 for w in range(W):
                     # op_list.extend(self.create_prefetch_ops(t,k,w))
-                    if k in self.weight2hcn[w]:
+                    if k in self.parameter2hcn[w]:
                         op_list.extend(self.create_offload_ops(t, k, w))
                     op_list.extend(self.create_delete_ops(t, k, w))
                 op_list.extend(prefetch_list)
@@ -1382,7 +1390,7 @@ class ModelPULP:
 
     def create_delete_ops(self, t, k, w, itemsize=4):
         op_list = []
-        sub_cluster = self.hgraph.list_hcn[self.weight2hcn[w][0]].sub_cluster
+        sub_cluster = self.hgraph.list_hcn[self.parameter2hcn[w][0]].sub_cluster
         if self.grouping:
             for t_, k_, op in self.del_ops:
                 if (
@@ -1421,7 +1429,7 @@ class ModelPULP:
     def create_prefetch_ops(self, t, k, w, itemsize=4):
         pre_op_list = []
         post_op_list = []
-        sub_cluster = self.hgraph.list_hcn[self.weight2hcn[w][0]].sub_cluster
+        sub_cluster = self.hgraph.list_hcn[self.parameter2hcn[w][0]].sub_cluster
 
         if self.grouping:
             for t_, k_, op in self.prf_ops:
@@ -1470,7 +1478,7 @@ class ModelPULP:
 
     def create_offload_ops(self, t, k, w, itemsize=4):
         op_list = []
-        sub_cluster = self.hgraph.list_hcn[self.weight2hcn[w][0]].sub_cluster
+        sub_cluster = self.hgraph.list_hcn[self.parameter2hcn[w][0]].sub_cluster
         if self.grouping:
             for t_, k_, op in self.ofl_ops:
                 if (
@@ -1484,7 +1492,7 @@ class ModelPULP:
         parameter_mem = sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters)
         parameter_size = round(parameter_mem / itemsize)
         progress_size = round(self.OflWProg[(t, k, w)].value() * parameter_size)
-        if max(self.weight2hcn[w]) == t and t == k:  # bwd step
+        if max(self.parameter2hcn[w]) == t and t == k:  # bwd step
             progress_size = 0
         offload_size = -progress_size + round(
             (self.OflWProg[(t, k, w)].value() + self.OflW[(t, k, w)].value())
@@ -1508,15 +1516,15 @@ class ModelPULP:
 
     def schedule_init_op_list(
         self,
-        from_cpu=True,  # if assumming weights are all in cpu
+        from_cpu=True,  # if assuming parameters are all in cpu
     ):
-        W = len(self.weights_size)
+        W = len(self.parameter_size)
         init_op_list = []
         init_alive_status = dict()
         self.current_buffers = {}
 
         for w in range(W):
-            hcn = self.hgraph.list_hcn[self.weight2hcn[w][0]]
+            hcn = self.hgraph.list_hcn[self.parameter2hcn[w][0]]
             list_alloc_para = [
                 Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
             ]

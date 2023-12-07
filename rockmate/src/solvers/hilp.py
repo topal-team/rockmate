@@ -62,18 +62,18 @@ class HILP(Solver):
     def __init__(self, config=None, ilp_solver=None):
         super().__init__(config)
         self.ilp_solver = ilp_solver or solver_name[0]
-        if self.ilp_solver == "gurobi":
-            self.model_ilp = ModelGurobi
-            print("Using GUROBI to solve ILP")
-        else:
-            self.model_ilp = ModelPULP
-            try:
-                solver = pulp.get_solver(self.ilp_solver, msg=0)
-            except:
-                avail_solver = pulp.listSolvers(onlyAvailable=True)[0]
-                print(f"Cannot get {ilp_solver}, will use {avail_solver}")
-                self.ilp_solver = avail_solver
-            print(f"Using {self.ilp_solver} to solve ILP")
+        # if self.ilp_solver == "gurobi":
+        #     self.model_ilp = ModelGurobi
+        #     print("Using GUROBI to solve ILP")
+        # else:
+        self.model_ilp = ModelPULP
+        try:
+            solver = pulp.get_solver(self.ilp_solver, msg=0)
+        except:
+            avail_solver = pulp.listSolvers(onlyAvailable=True)[0]
+            print(f"Cannot get {ilp_solver}, will use {avail_solver}")
+            self.ilp_solver = avail_solver
+        print(f"Using {self.ilp_solver} to solve ILP")
 
     # def __repr__(self):
     #     return f"HILP solver"

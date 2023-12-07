@@ -7,12 +7,31 @@ from rkgb.utils import irotor
 timer = irotor.make_timer(torch.device("cuda"))
 
 
+def alive_status_solution(rkmod, t, k):
+    md = rkmod.list_solvers[0].md
+    for w in range(md.W):
+        print(f"layer {w} is {(md.AliveW[t,k,w]+md.PrfW[t,k,w]).value():.1%} alive")
+
+def analyze_mem(rkmod):
+    md = rkmod.list_solvers[0].md
+    mem = {}
+    for t in range(md.T):
+        for k in md.krange(t):
+            mem[t,k] = md.U[t,k].value()
+            for w in range(md.W):
+                mem[t,k] += 1*((md.AliveW[t,k,w]+md.PrfW[t,k,w]).value()>0)*md.parameter_size[w]
+            
+    print(f"solution peak memory {(max(mem.values()) + sum(md.parameter_size))/1024**2:.0f}MB at {max(mem, key=mem.get)}")
+    print(f"op_sched peak memory {(rkmod.op_sched.peak_mem + sum(md.parameter_size))/1024**2:.0f}MB")
+
+
 def test_exec(model, sample, msg="", copy=False):
     torch.random.manual_seed(0)
     if msg:print(msg)
     torch.cuda.reset_peak_memory_stats()
-    model.zero_grad()
+    # model.zero_grad()
     mem = torch.cuda.memory_allocated()
+    print(mem)
     if copy:
         model = deepcopy(model).to("cuda")
 
@@ -25,12 +44,12 @@ def test_exec(model, sample, msg="", copy=False):
         # print("output:", y.mean())
         loss = y.mean()
         loss.backward()
-        model.zero_grad(set_to_none=True)
+        # model.zero_grad(set_to_none=True)
 
     timer.end()
 
     print(f"mean output {y.mean()}")
-    # print(f"mean grad {model.get_parameter('0.weight').grad.mean()}")
+    # print(f"mean grad {model.get_parameter('0.parameter').grad.mean()}")
 
     print(f"peak memory {(torch.cuda.max_memory_allocated() - mem)/1024**2:.0f}MB")
     print(f"time passed {timer.elapsed():.0f}ms")
@@ -44,6 +63,8 @@ def get_wide_decoder_NN(nlayers = 6, d_model = 4096, batch_size = 32, seq_length
     memory = torch.rand(seq_length, batch_size, d_model).to("cuda")
     tgt = torch.rand(seq_length, batch_size, d_model).to("cuda")
     sample = [tgt, memory]
+    for n,p in model.named_parameters():
+        p.grad = torch.empty_like(p)
     return model, sample
 
 def prepare_for_offload(rkmod):
@@ -107,7 +128,7 @@ def print_sched(rkmod):
             for o in range(md.nR[k]):
                 if md.Comp[t, k, o].value() >0.9:
                     for w in range(W):
-                        if md.AliveW[(t,k,w)].value()<1 or k in md.weight2hcn[w]:
+                        if md.AliveW[(t,k,w)].value()<1 or k in md.parameter2hcn[w]:
                             print(f"\t{md.AliveW[(t,k,w)].value():.2%} of layer {w} is alive")
 
 
