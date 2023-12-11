@@ -373,6 +373,9 @@ class ModelPULP:
                 lowBound=1 if self.grad_mode == "keep_all" else 0,
                 upBound=1,
             )  # w.grad is alive at the start of step j.
+            # for k in self.AliveG:
+            #     self.AliveG[k] = 0
+
             self.OflW = RkLpVariable.dicts(
                 "OflW",
                 [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
@@ -750,14 +753,7 @@ class ModelPULP:
                     )
         for t in range(T):
             for k in self.krange(t):
-                if self.with_parameters:
-                    parameter_mem = lpSum(
-                        (self.AliveW[t, k, w] + self.AliveG[t, k, w] + self.PrfW[t, k, w])
-                        * self.parameter_size[w]
-                        for w in range(W)
-                    )
-                else:
-                    parameter_mem = 0
+                parameter_mem = self.parameter_mem(t,k) if self.with_parameters else 0
                 j = self.hcn2sub_c[k]
                 self.md += self.U[t, k] >= 0
                 self.md += self.U[t, k] <= self.peak_budget - parameter_mem
@@ -844,6 +840,12 @@ class ModelPULP:
                             )
                 if t == self.loss_idx and self.save_budget:
                     self.md += self.U[t, k] <= self.save_budget
+
+    def parameter_mem(self, t, k):
+        return lpSum((self.AliveW[t, k, w] + self.AliveG[t, k, w] + self.PrfW[t, k, w])
+                        * self.parameter_size[w]
+                        for w in range(self.W)
+                    )
 
     def krange(self, t):
         if self.single_fwd:
@@ -1090,11 +1092,12 @@ class ModelPULP:
                 candidates = {
                     p: parameters[p].mem * (1 - a) for p, a in Alive.items() if a < 1
                 }
-                if self.sol(next_size):
+                if not candidates:continue
+                if self.sol(self.AliveW[(t_, k_, w)].value()):
                     select_paras = list(candidates.keys())
                 else:
                     selector = knapsack(list(candidates.items()))
-                    unselect_paras = selector.select(1 - prf_size)
+                    unselect_paras = selector.select(parameter_size - prf_size)
                     select_paras = [
                         p for p in candidates.keys() if p not in unselect_paras
                     ]
