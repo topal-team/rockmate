@@ -373,8 +373,8 @@ class ModelPULP:
                 lowBound=1 if self.grad_mode == "keep_all" else 0,
                 upBound=1,
             )  # w.grad is alive at the start of step j.
-            # for k in self.AliveG:
-            #     self.AliveG[k] = 0
+            for k in self.AliveG:
+                self.AliveG[k] = 0
 
             self.OflW = RkLpVariable.dicts(
                 "OflW",
@@ -1046,7 +1046,7 @@ class ModelPULP:
             t_, k_ = self.next_index(t, k)
             current_size = round(self.AliveW[(t, k, w)].value() * parameter_size)
             next_size = round(self.AliveW[(t_, k_, w)].value() * parameter_size)
-            ofl_size = self.OflW[t, k, w].value()
+            ofl_size = round(self.OflW[t, k, w].value() * parameter_size)
 
             if (t, k) == (0, 0):  # init
                 for p, a in Alive.items():

@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 from rockmate.solvers.op_schedule import *
@@ -11,19 +12,33 @@ def alive_status_solution(rkmod, t, k):
     md = rkmod.list_solvers[0].md
     for w in range(md.W):
         print(f"layer {w} is {(md.AliveW[t,k,w]+md.PrfW[t,k,w]).value():.1%} alive")
+    # for i in range(md.I):
+    #     print(f"activation {i} is {(md.alive[t,k,i]).value():.1%} alive")
 
-def analyze_mem(rkmod):
+def analyze_mem(rkmod, print_status=False, with_grad=True):
     md = rkmod.list_solvers[0].md
     mem = {}
     for t in range(md.T):
         for k in md.krange(t):
             mem[t,k] = md.U[t,k].value()
-            for w in range(md.W):
-                mem[t,k] += 1*((md.AliveW[t,k,w]+md.PrfW[t,k,w]).value()>0)*md.parameter_size[w]
-            
-    print(f"solution peak memory {(max(mem.values()) + sum(md.parameter_size))/1024**2:.0f}MB at {max(mem, key=mem.get)}")
-    print(f"op_sched peak memory {(rkmod.op_sched.peak_mem + sum(md.parameter_size))/1024**2:.0f}MB")
+            mem[t,k] += md.parameter_mem(t,k).value()
+            # for w in range(md.W):
+            #     # mem[t,k] += 1*((md.AliveW[t,k,w]+md.PrfW[t,k,w]).value()>0)*md.parameter_size[w]
+            #     mem[t,k] += (md.AliveW[t,k,w]+md.PrfW[t,k,w]).value()*md.parameter_size[w]
+    
+    max_t, max_k= max(mem, key=mem.get)
+    max_i = np.argmax(rkmod.op_sched.save_mem+rkmod.op_sched.overhead)
 
+    print(f"solution peak memory {(max(mem.values()) + with_grad*sum(md.parameter_size))/1024**2:.0f}MB at {max_t, max_k}")
+    print(f"op_sched peak memory {(rkmod.op_sched.peak_mem + with_grad*sum(md.parameter_size))/1024**2:.0f}MB")
+
+    if print_status:
+        print("Solution status")
+        alive_status_solution(rkmod, max_t, max_k)
+
+        print("\nOp_sched status")
+        for k,v in rkmod.op_sched.alive_list[max_i].items():
+            print(k, v)
 
 def test_exec(model, sample, msg="", copy=False):
     torch.random.manual_seed(0)
