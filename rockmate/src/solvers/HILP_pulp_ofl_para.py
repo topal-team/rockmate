@@ -57,6 +57,8 @@ class knapsack:
         indices = self.solve(frac)
         return [self.parameter_size[i][0] for i in indices]
 
+    def select_size(self, size:int):
+        return self.select(size/sum(s[1] for s in self.parameter_size))
 
 class RkLpVariable(LpVariable):
     def __init__(self, name, lowBound=None, upBound=None, cat="Continuous", e=None):
@@ -185,9 +187,7 @@ class ModelPULP:
         ]
 
         self.T = T = len(self.hgraph.list_hcn)
-        self.W = W = (
-            len(self.hgraph.list_hcn) // 2
-        )  # for now, one parameter for each layer
+        self.W = W = len(self.sub_clusters)
         self.I = I = len(self.hgraph.list_hdn)
         self.J = J = len(self.list_list_sched)
 
@@ -359,6 +359,23 @@ class ModelPULP:
                     self.delete[t, i] = 0
 
         if self.with_parameters:
+
+            self.parameter_size = []
+            for w in range(W):
+                sub_cluster = self.sub_clusters[w]
+                if hasattr(sub_cluster, "list_kdn_parameters"):
+                    self.parameter_size.append(
+                        sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters)
+                        / self.gcd
+                    )
+                else:
+                    self.parameter_size.append(0)
+                self.parameter2hcn = {w: self.sub_c2hcn[w] for w in range(W)}
+                self.hcn2parameter = {
+                    k: w for w in self.parameter2hcn for k in self.parameter2hcn[w]
+                }
+
+
             self.AliveW = RkLpVariable.dicts(
                 "AliveW",
                 [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
@@ -396,22 +413,6 @@ class ModelPULP:
                         for w in range(W):
                             self.PrfW[t, k, w] = 0
                             self.OflW[t, k, w] = 0
-            # self.parameter_size = [3e7 for _ in range(W)]
-            self.parameter_size = []
-            for i in range(W):
-                sub_cluster = self.hgraph.list_hcn[i].sub_cluster
-                if hasattr(sub_cluster, "list_kdn_parameters"):
-                    self.parameter_size.append(
-                        sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters)
-                        / self.gcd
-                    )
-                else:
-                    self.parameter_size.append(0)
-            # print(self.parameter_size)
-            self.parameter2hcn = {w: [w, T - w - 1] for w in range(W)}
-            self.hcn2parameter = {
-                k: w for w in self.parameter2hcn for k in self.parameter2hcn[w]
-            }
             self.bandwidthOfl = 6 * 1024**2  # byte/ms
             self.bandwidthPrf = 6 * 1024**2  # byte/ms
 
@@ -1044,10 +1045,12 @@ class ModelPULP:
         idx = self.active_steps.index((bwd_i, bwd_i))
         for t, k in self.active_steps[idx:] + self.active_steps[:idx]:
             t_, k_ = self.next_index(t, k)
-            current_size = round(self.AliveW[(t, k, w)].value() * parameter_size)
-            next_size = round(self.AliveW[(t_, k_, w)].value() * parameter_size)
-            ofl_size = round(self.OflW[t, k, w].value() * parameter_size)
-
+            current_alive_size = sum(parameters[p].mem * a for p, a in Alive.items())
+            current_offloaded_size = sum(parameters[p].mem * a for p, a in Offloaded.items())
+            next_alive_size = round(self.AliveW[(t_, k_, w)].value() * parameter_size)
+            next_offloaded_size = round(self.OflWProg[(t_, k_, w)].value() * parameter_size)
+            
+            
             if (t, k) == (0, 0):  # init
                 for p, a in Alive.items():
                     if a:
@@ -1057,14 +1060,15 @@ class ModelPULP:
                         )
                         init_ops.append((t, k, op))
 
-            if ofl_size > 0:
+            if next_offloaded_size>current_offloaded_size:
+                ofl_size = next_offloaded_size-current_offloaded_size
                 candidates = {
                     p: parameters[p].mem * (1 - o)
                     for p, o in Offloaded.items()
                     if o < 1
                 }
                 selector = knapsack(list(candidates.items()))
-                select_paras = selector.select(ofl_size)
+                select_paras = selector.select_size(ofl_size)
                 # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-ofl_size>tol:
                 #     pass
                 for p in select_paras:
@@ -1073,22 +1077,22 @@ class ModelPULP:
                     ofl_ops.append((t, k, op))
                     Offloaded[p] = 1
 
-            if current_size > next_size:
-                del_size = current_size - next_size
+            if  current_alive_size> next_alive_size:
+                del_size = sum(parameters[p].mem * a for p, a in Alive.items()) - next_alive_size
                 candidates = {
                     p: parameters[p].mem * o for p, o in Offloaded.items() if o > 0
                 }
                 selector = knapsack(list(candidates.items()))
-                select_paras = selector.select(del_size)
+                select_paras = selector.select_size(del_size)
                 # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-del_size>tol:
                 #     pass
                 for p in select_paras:
                     del_ops.append((t, k, DeleteOp(Parameter(parameters[p]))))
                     Alive[p] = 0
 
-            if current_size < next_size:
+            if current_alive_size < next_alive_size:
                 # prefetch should be smaller than solution
-                prf_size = next_size - current_size
+                prf_size = next_alive_size - current_alive_size
                 candidates = {
                     p: parameters[p].mem * (1 - a) for p, a in Alive.items() if a < 1
                 }
@@ -1097,7 +1101,7 @@ class ModelPULP:
                     select_paras = list(candidates.keys())
                 else:
                     selector = knapsack(list(candidates.items()))
-                    unselect_paras = selector.select(parameter_size - prf_size)
+                    unselect_paras = selector.select_size(parameter_size - prf_size)
                     select_paras = [
                         p for p in candidates.keys() if p not in unselect_paras
                     ]
