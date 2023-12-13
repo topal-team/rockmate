@@ -1049,7 +1049,7 @@ class ModelPULP:
             current_offloaded_size = sum(parameters[p].mem * a for p, a in Offloaded.items())
             next_alive_size = round(self.AliveW[(t_, k_, w)].value() * parameter_size)
             next_offloaded_size = round(self.OflWProg[(t_, k_, w)].value() * parameter_size)
-            
+            # assert current_alive_size <= round(self.AliveW[(t, k, w)].value() * parameter_size)
             
             if (t, k) == (0, 0):  # init
                 for p, a in Alive.items():
@@ -1078,10 +1078,12 @@ class ModelPULP:
                     Offloaded[p] = 1
 
             if  current_alive_size> next_alive_size:
-                del_size = sum(parameters[p].mem * a for p, a in Alive.items()) - next_alive_size
-                candidates = {
-                    p: parameters[p].mem * o for p, o in Offloaded.items() if o > 0
-                }
+                del_size = current_alive_size - next_alive_size
+                candidates = {}
+                for p, o in Offloaded.items():
+                    if Alive[p]>0 and o>0:
+                        candidates[p] = min(o, Alive[p])
+
                 selector = knapsack(list(candidates.items()))
                 select_paras = selector.select_size(del_size)
                 # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-del_size>tol:
