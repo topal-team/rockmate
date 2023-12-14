@@ -410,7 +410,7 @@ class Compiler:
         #         #     requires_grad=v.kdn.info.requires_grad,
         #         # )
         #     if isinstance(v, Parameter):
-        #         self.storage.ld[k] = self.gd["original_mod"].get_parameter(k.split(" ")[0])
+        #         self.storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
         #         # self.storage.shapes[v.kdn.main_target] = self.gd[k].shape
         #         # self.storage.dtypes[v.kdn.main_target] = self.gd[k].dtypes
         #     elif isinstance(v, Buffer):
@@ -552,6 +552,7 @@ class Compiler:
             return fct_list
 
         init_fct_list = op_to_fct(op_sched.init_op_list)
+        restore_fct_list = op_to_fct(op_sched.restore_op_list)
         fct_list = op_to_fct(op_sched.op_list)
         # if op in wait_op:
         #     fct_list[-1].insert(
@@ -579,7 +580,7 @@ class Compiler:
         # fct_list[-1].append(self.fct_record_cuda(i, stream=self.gd["prefetch_stream"]))
         # fct_list[-1].append(self.fct_record_cuda(i, stream=self.gd["offload_stream"]))
 
-        return fct_list, init_fct_list
+        return fct_list, init_fct_list, restore_fct_list
 
     def fct_synchronize(self):
         def fct():

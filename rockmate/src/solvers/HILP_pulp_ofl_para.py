@@ -1040,6 +1040,7 @@ class ModelPULP:
         prf_ops = []
         del_ops = []
         init_ops = []
+        restore_ops = []
 
         assert (bwd_i, bwd_i) in self.active_steps
         idx = self.active_steps.index((bwd_i, bwd_i))
@@ -1059,6 +1060,12 @@ class ModelPULP:
                             alloc=Parameter(parameters[p]), indices=(0, None)
                         )
                         init_ops.append((t, k, op))
+                        op = OffloadOp(
+                            alloc=Parameter(parameters[p]), indices=(0, None)
+                        )
+                        restore_ops.append((t,k,op))
+                        restore_ops.append((t, k, DeleteOp(Parameter(parameters[p]))))
+
 
             if next_offloaded_size>current_offloaded_size:
                 ofl_size = next_offloaded_size-current_offloaded_size
@@ -1115,7 +1122,7 @@ class ModelPULP:
                     prf_ops.append((t, k, op))
                     Alive[p] = 1
 
-        return ofl_ops, prf_ops, del_ops, init_ops
+        return ofl_ops, prf_ops, del_ops, init_ops, restore_ops
 
     def schedule(self, hgraph=None, check_valid=False):
         """
@@ -1133,12 +1140,13 @@ class ModelPULP:
 
         if self.with_parameters:
             W = len(self.parameter_size)
-            (op_list, init_alive_status, init_op_list) = self.greedy_post_processing(
+            (op_list, init_alive_status, init_op_list, restore_op_list) = self.greedy_post_processing(
                 hgraph
             )
         else:
             op_list = []
             init_op_list = []
+            restore_op_list = []
             for t in range(T):
                 for k in self.krange(t):
                     if t == self.loss_idx and k == self.loss_idx:
@@ -1218,6 +1226,7 @@ class ModelPULP:
             cluster=self.hgraph.cluster,
             # init_alive_status=init_alive_status,
             init_op_list=init_op_list,
+            restore_op_list=restore_op_list,
             with_parameters=self.with_parameters,
         )
         # check_valid = True
@@ -1247,13 +1256,15 @@ class ModelPULP:
         self.prf_ops = []
         self.del_ops = []
         init_op_list = []
+        restore_op_list = []
         if self.grouping:
             for w in range(self.W):
-                o_l, p_l, d_l, i_l = self.group(w)
+                o_l, p_l, d_l, i_l, r_l = self.group(w)
                 self.ofl_ops.extend(o_l)
                 self.prf_ops.extend(p_l)
                 self.del_ops.extend(d_l)
                 init_op_list.extend([ops[2] for ops in i_l])
+                restore_op_list.extend([ops[2] for ops in r_l])
         else:
             init_op_list = self.schedule_init_op_list()
 
@@ -1395,7 +1406,7 @@ class ModelPULP:
                         op_list.extend(self.create_offload_ops(t, k, w))
                     op_list.extend(self.create_delete_ops(t, k, w))
                 op_list.extend(prefetch_list)
-        return op_list, init_alive_status, init_op_list
+        return op_list, init_alive_status, init_op_list, restore_op_list
 
     def create_delete_ops(self, t, k, w, itemsize=4):
         op_list = []

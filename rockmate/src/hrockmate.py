@@ -237,7 +237,7 @@ class HRockmate(torch.nn.Module):
 
     def get_compiled_fct(self):
         self.compiler = Compiler(self.gd)
-        self.fct_list, self.init_fct_list = self.compiler.compile_from_schedule(self.op_sched)
+        self.fct_list, self.init_fct_list, self.restore_fct_list = self.compiler.compile_from_schedule(self.op_sched)
         loss_idx = self.op_sched.loss_idx
 
         self.fwd_fct_list = self.fct_list[:loss_idx]
@@ -254,6 +254,7 @@ class HRockmate(torch.nn.Module):
             self.max_before = torch.cuda.max_memory_allocated()
             for fct in fct_list:
                 fct()
+            torch.cuda.synchronize()
             allo_mem = torch.cuda.memory_allocated() - self.mem_before
             peak_mem = torch.cuda.max_memory_allocated() - self.max_before
             self.max_mem.append(peak_mem - allo_mem)
@@ -261,6 +262,16 @@ class HRockmate(torch.nn.Module):
         else:
             for fct in fct_list:
                 fct()
+
+    def init_exec(self):
+        for l in self.init_fct_list:
+            self._exec(l)
+        torch.cuda.synchronize()
+        
+    def restore_exec(self):
+        for l in self.restore_fct_list:
+            self._exec(l)
+        torch.cuda.synchronize()
 
     def define_autograd_Function(self):
         #  To define properly new module's forward and backward
@@ -383,15 +394,15 @@ class HRockmate(torch.nn.Module):
                             #     requires_grad=v.kdn.info.requires_grad,
                             # )
                         if isinstance(v, Parameter):
-                            target = self.gd["original_mod"].get_parameter(k.split(" ")[0])
+                            target = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
                             storage.ld["cpu_"+k] = torch.empty_like(target, 
                                                                 dtype=target.dtype, 
                                                                 device=torch.device("cpu"),
                                                                 pin_memory=True)
                             
-                            storage.ld["cpu_"+k].copy_(self.gd["original_mod"].get_parameter(k.split(" ")[0]).data)
-                            storage.ld[k] = self.gd["original_mod"].get_parameter(k.split(" ")[0])
-                            # storage.ld[k] = self.gd["original_mod"].get_parameter(k.split(" ")[0])
+                            storage.ld["cpu_"+k].copy_(self.gd["original_mod"].get_parameter(k.removesuffix(" parameter")).data)
+                            storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
+                            # storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
                             # self.storage.shapes[v.kdn.main_target] = self.gd[k].shape
                             # self.storage.dtypes[v.kdn.main_target] = self.gd[k].dtypes
                         elif isinstance(v, Buffer):
@@ -410,9 +421,7 @@ class HRockmate(torch.nn.Module):
                     torch.cuda.synchronize()
                     with torch.enable_grad():
                         # exec(RkMod.init_code, RkMod.gd, storage.ld)  # is compiler.gd
-                        for l in RkMod.init_fct_list:
-                            RkMod._exec(l)
-                    torch.cuda.synchronize()
+                        self.init_exec()
                     # 1/0
                     # with torch.cuda.stream(self.gd["offload_stream"]):
                     #     # RkMod.compiler.storage.ld[f"cpu_H_Cluster_bottom___12_fv"].copy_(RkMod.compiler.storage.ld[f"H_Cluster_bottom___12_fv"])
