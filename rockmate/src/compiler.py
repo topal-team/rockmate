@@ -371,13 +371,22 @@ class Compiler:
     def get_prefetch(self, op, before_idx=None, after_idx=None):
         function_list = []
         # function_list.append(self.fct_mem_alloc(kn.main_target))
-        function_list.append(self.fct_prefetch(op, after_idx=after_idx))
+        function_list.append(self.fct_prefetch(op.target.name, after_idx=after_idx, indices=op.indices))
         return function_list
 
     def get_offload(self, op, before_idx=None, after_idx=None):
         function_list = []
-        function_list.append(self.fct_offload(op, after_idx=after_idx))
+        function_list.append(self.fct_offload(op.target.name, after_idx=after_idx, indices=op.indices))
         return function_list
+    
+    def compile_all_prefetch(self):
+        fct_list = []
+        for p in self.parameters:
+            fct_list.append(self.fct_mem_alloc(p, 
+                                               shape=self.parameters[p].info.tsize,
+                                               dtype=self.parameters[p].dtype, ))
+            fct_list.append(self.fct_prefetch(p))
+        return fct_list
 
     def compile(self, op_sched):
         self.op_sched = op_sched
@@ -426,7 +435,7 @@ class Compiler:
         if op_sched.alive_list == []:
             op_sched.alive_list = op_sched.create_alive_list()
         self.alive_list = op_sched.alive_list
-        self.parameters = [k for k in self.alive_list[0].keys() if "parameter" in k]
+        self.parameters = {k:op_sched.dict_alloc[k] for k in self.alive_list[0].keys() if "parameter" in k}
         # print(self.parameters)
         # self.prf_list = op_sched.prf_list
         # self.ofl_list = op_sched.ofl_list
@@ -603,12 +612,10 @@ class Compiler:
 
         return fct
 
-    def fct_prefetch(self, op, after_idx=None, stream=None, range=[]):
-        var_name = op.target.name
-        indices = op.indices
+    def fct_prefetch(self, var_name, after_idx=None, stream=None, indices=[0,None]):
+        indices = indices
         device = self.gd["device"]
         stream = stream or self.gd["prefetch_stream"]
-        range = range or [None, None]
 
         def prefetch():
             # if after_idx:
@@ -633,13 +640,11 @@ class Compiler:
 
         return prefetch
 
-    def fct_offload(self, op, after_idx=None, stream=None, range=[]):
-        var_name = op.target.name
-        indices = op.indices
-        indices_ = [0, None] if "offload" in var_name else op.indices
+    def fct_offload(self, var_name, after_idx=None, stream=None, indices=[0,None]):
+        indices = indices
+        indices_ = [0, None] if "offload" in var_name else indices
         device = self.gd["device"]
         stream = stream or self.gd["offload_stream"]
-        range = range or [None, None]
 
         def offload():
             # if after_idx:
@@ -809,7 +814,7 @@ class Compiler:
         return fct
 
     def fct_run_forward_with_grad(self, code, no_save_list=[]):
-        no_save_list.extend(self.parameters)
+        no_save_list.extend(list(self.parameters.keys()))
 
         def fct():
             # with torch.enable_grad():

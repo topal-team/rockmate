@@ -63,6 +63,7 @@ class HRockmate(torch.nn.Module):
 
         self.device = get_device()
         object.__setattr__(self, "original_mod", original_mod)
+        self.exec_with_record_mem = False
         dict_inputs = make_inputs(original_mod, model_inputs, model_kwargs)
         self.named_para_shape = dict()
         for n, p in original_mod.named_parameters():
@@ -264,6 +265,56 @@ class HRockmate(torch.nn.Module):
                 fct()
 
     def init_exec(self):
+        #  -> Initialize the storage
+        storage = self.compiler.storage
+        for kdn in self.rkgb_res.K_graph.list_kdn:
+            storage.ld[kdn.main_target] = torch.empty(
+                0,
+                device=self.device,
+                requires_grad=kdn.info.requires_grad,
+            )
+
+        for op in self.op_sched.init_op_list:
+            if isinstance(op, MappingOp) and len(op.targets)==1:
+                # to create the full size buffer
+                target = op.targets[0]
+                storage.ld["cpu_"+target.name.strip("cpu_")] = torch.empty(target.size, 
+                                                    dtype=target.dtype, 
+                                                    device=torch.device("cpu"),
+                                                    pin_memory=True)
+                
+        for k, v in self.op_sched.dict_alloc.items():
+            if isinstance(v, Activation):
+                continue
+                # self.storage.ld[v.kdn.main_target] = torch.empty(
+                #     0,
+                #     device=self.gd["device"],
+                #     requires_grad=v.kdn.info.requires_grad,
+                # )
+            if isinstance(v, Parameter):
+                target = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
+                storage.ld["cpu_"+k] = torch.empty_like(target, 
+                                                    dtype=target.dtype, 
+                                                    device=torch.device("cpu"),
+                                                    pin_memory=True)
+                
+                storage.ld["cpu_"+k].copy_(self.gd["original_mod"].get_parameter(k.removesuffix(" parameter")).data)
+                storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
+                # storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
+                # self.storage.shapes[v.kdn.main_target] = self.gd[k].shape
+                # self.storage.dtypes[v.kdn.main_target] = self.gd[k].dtypes
+            elif isinstance(v, Buffer):
+                storage.ld[k] = torch.empty(0, device=self.gd["device"])
+                shape = round(v.mem / v.itemsize)
+                # print(k, v.mem)
+                # if "offload" in k or "prefetch" in k:
+                #     continue
+                # storage.ld["cpu_" + k] = torch.empty(shape, 
+                #                                     dtype=v.dtype, 
+                #                                     device=torch.device("cpu"),
+                #                                     pin_memory=True)
+            else:
+                print(f"Unrecognized type {type(v)}")
         for l in self.init_fct_list:
             self._exec(l)
         torch.cuda.synchronize()
@@ -368,60 +419,13 @@ class HRockmate(torch.nn.Module):
                         #  TODO elif iterables of Tensors ?
                         else:
                             storage.ld[k] = v
-                    #  -> Initialize the storage
-                    for kdn in RkMod.rkgb_res.K_graph.list_kdn:
-                        storage.ld[kdn.main_target] = torch.empty(
-                            0,
-                            device=RkMod.device,
-                            requires_grad=kdn.info.requires_grad,
-                        )
-
-                    for op in self.op_sched.init_op_list:
-                        if isinstance(op, MappingOp) and len(op.targets)==1:
-                            # to create the full size buffer
-                            target = op.targets[0]
-                            storage.ld["cpu_"+target.name.strip("cpu_")] = torch.empty(target.size, 
-                                                                dtype=target.dtype, 
-                                                                device=torch.device("cpu"),
-                                                                pin_memory=True)
-                            
-                    for k, v in self.op_sched.dict_alloc.items():
-                        if isinstance(v, Activation):
-                            continue
-                            # self.storage.ld[v.kdn.main_target] = torch.empty(
-                            #     0,
-                            #     device=self.gd["device"],
-                            #     requires_grad=v.kdn.info.requires_grad,
-                            # )
-                        if isinstance(v, Parameter):
-                            target = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
-                            storage.ld["cpu_"+k] = torch.empty_like(target, 
-                                                                dtype=target.dtype, 
-                                                                device=torch.device("cpu"),
-                                                                pin_memory=True)
-                            
-                            storage.ld["cpu_"+k].copy_(self.gd["original_mod"].get_parameter(k.removesuffix(" parameter")).data)
-                            storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
-                            # storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
-                            # self.storage.shapes[v.kdn.main_target] = self.gd[k].shape
-                            # self.storage.dtypes[v.kdn.main_target] = self.gd[k].dtypes
-                        elif isinstance(v, Buffer):
-                            storage.ld[k] = torch.empty(0, device=self.gd["device"])
-                            shape = round(v.mem / v.itemsize)
-                            # print(k, v.mem)
-                            # if "offload" in k or "prefetch" in k:
-                            #     continue
-                            # storage.ld["cpu_" + k] = torch.empty(shape, 
-                            #                                     dtype=v.dtype, 
-                            #                                     device=torch.device("cpu"),
-                            #                                     pin_memory=True)
-                        else:
-                            print(f"Unrecognized type {type(v)}")
+                    
 
                     torch.cuda.synchronize()
                     with torch.enable_grad():
                         # exec(RkMod.init_code, RkMod.gd, storage.ld)  # is compiler.gd
                         self.init_exec()
+                    torch.cuda.synchronize()
                     # 1/0
                     # with torch.cuda.stream(self.gd["offload_stream"]):
                     #     # RkMod.compiler.storage.ld[f"cpu_H_Cluster_bottom___12_fv"].copy_(RkMod.compiler.storage.ld[f"H_Cluster_bottom___12_fv"])
