@@ -310,6 +310,7 @@ class HRockmate(torch.nn.Module):
                 storage.ld["cpu_"+k].copy_(self.gd["original_mod"].get_parameter(k.removesuffix(" parameter")).data)
                 storage.ld["cpu_"+k].grad = torch.empty_like(storage.ld["cpu_"+k])
                 storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
+                # storage.ld[k].grad = torch.empty_like(storage.ld[k], device="cuda")
                 # storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
                 # self.storage.shapes[v.kdn.main_target] = self.gd[k].shape
                 # self.storage.dtypes[v.kdn.main_target] = self.gd[k].dtypes
@@ -328,6 +329,11 @@ class HRockmate(torch.nn.Module):
         for l in self.init_fct_list:
             self._exec(l)
         torch.cuda.synchronize()
+        with torch.enable_grad():
+            exec(self.init_code, self.gd, storage.ld)  # is compiler.gd
+            for l,op in zip(self.fwd_fct_list, self.op_sched.op_list[:self.op_sched.loss_idx+1]):
+                if isinstance(op, OffloadOp) and op.grad:continue#first iteration without grad offload
+                self._exec(l)
         
     def restore_exec(self):
         for l in self.restore_fct_list:
@@ -406,6 +412,10 @@ class HRockmate(torch.nn.Module):
                     ctx.name_of_inputs_which_req_grad = (
                         RkMod.name_of_inputs_which_req_grad_buffer
                     )
+                    with torch.enable_grad():
+                        exec(RkMod.init_code, RkMod.gd, storage.ld)  # is compiler.gd
+                        for l in RkMod.fwd_fct_list:
+                            RkMod._exec(l)
                 else:
                     # *** INITIALIZATION PART ***
                     #  -> Get the inputs using the buffer (Rem 1)
@@ -446,10 +456,7 @@ class HRockmate(torch.nn.Module):
                 #  *** EXECUTION PART ***
                 # -> Autograd turns off itself before giving use the control.
                 # -> But we need it to forward/backward each node.
-                with torch.enable_grad():
-                    exec(RkMod.init_code, RkMod.gd, storage.ld)  # is compiler.gd
-                    for l in RkMod.fwd_fct_list:
-                        RkMod._exec(l)
+                
                 # -> Get the output
                 outs = [
                     RkMod.compiler.get_val(out_mt)

@@ -9,8 +9,8 @@ from rkgb.utils import irotor
 timer = irotor.make_timer(torch.device("cuda"))
 
 def optimize(rkmod, copy=False, lr=1e-6):
+    opt = torch.optim.AdamW
     if copy:
-        opt = torch.optim.SGD
         optimizer = opt(rkmod.parameters(), lr=lr)
         optimizer.step()
     else:
@@ -18,14 +18,11 @@ def optimize(rkmod, copy=False, lr=1e-6):
         for f in prefetch_list:
             f()
         torch.cuda.synchronize()
-        opt = torch.optim.SGD
         # parameters = [rkmod.original_mod.get_parameter(kdn.main_target) for kdn in rkmod.rkgb_res.H_cluster.list_kdn_parameters]
         # optimizer = opt(params=parameters, lr=lr)
                 
         # optimizer = opt(rkmod.parameters(), lr=lr)
         # optimizer.step()
-
-        opt = torch.optim.SGD
         optimizers = []
         for hcn in rkmod.rkgb_res.H_cluster.possible_hg[0].list_hcn:
             if not hcn.is_fwd:continue

@@ -49,7 +49,7 @@ def make_gd(device, nn_mod, dict_constants):
         "torch": torch,
         "meta": torch.ones(1).to(device),
         "cmeta": torch.view_as_complex(torch.ones(2)).to(device),
-        "opt": torch.optim.SGD,
+        "opt": torch.optim.AdamW,
         "opt_kwargs": {"lr":1e-6},
         "main_stream": torch.cuda.current_stream(),
         # "prefetch_stream": torch.cuda.current_stream(),
@@ -654,10 +654,8 @@ class Compiler:
             def offload():
                 with torch.cuda.stream(stream):
                     # stream.wait_stream(self.gd["main_stream"])
-                    self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"][
-                        indices[0] : indices[1]
-                    ].grad.data.copy_(
-                        self.storage.ld[var_name][indices_[0] : indices_[1]].grad,
+                    self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"].grad.data.copy_(
+                        self.storage.ld[var_name].grad,
                         non_blocking=True,
                     )
             return offload
@@ -762,7 +760,8 @@ class Compiler:
             optimizer = self.gd["opt"]([self.storage.ld[p] for p in list_params], **self.gd["opt_kwargs"])
             optimizer.step()
             for p in list_params:
-                self.storage.ld[p].grad = None
+                self.storage.ld[p].grad = torch.zeros_like(self.storage.ld[p].grad)
+                self.storage.ld[p.removeprefix("cpu_")].grad = None
             torch.cuda.synchronize()
         return optimize
 

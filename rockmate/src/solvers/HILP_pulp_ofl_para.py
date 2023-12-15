@@ -1043,6 +1043,13 @@ class ModelPULP:
         init_ops = []
         restore_ops = []
 
+        def switch_cpu_optimize(p):
+            for (t,k,op) in ofl_ops:
+                if op.target.name == p:
+                    op.grad = True
+            op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]))
+            ofl_ops.append((t, k, op))
+
         assert (bwd_i, bwd_i) in self.active_steps
         idx = self.active_steps.index((bwd_i, bwd_i))
         for t, k in self.active_steps[idx:] + self.active_steps[:idx]:
@@ -1081,11 +1088,10 @@ class ModelPULP:
                 #     pass
                 for p in select_paras:
                     # start = parameters[p].info.tsize.numel()
+                    # cpu_opt = t>bwd_i or t < fwd_i
                     op = OffloadOp(alloc=Parameter(parameters[p]), indices=(0, None))
                     ofl_ops.append((t, k, op))
                     Offloaded[p] = 1
-                    op = OptimizeOp(name=p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]))
-                    ofl_ops.append((t, k, op))
 
             if  current_alive_size> next_alive_size:
                 del_size = current_alive_size - next_alive_size
@@ -1124,6 +1130,8 @@ class ModelPULP:
                     op = PrefetchOp(alloc=Parameter(parameters[p]), indices=(0, None))
                     prf_ops.append((t, k, op))
                     Alive[p] = 1
+                    if t>bwd_i or t < fwd_i:#prefetch before fwd
+                        switch_cpu_optimize(p)
 
         return ofl_ops, prf_ops, del_ops, init_ops, restore_ops
 
@@ -1280,9 +1288,10 @@ class ModelPULP:
         # for w in range(W):
         #     hcn = self.hgraph.list_hcn[self.parameter2hcn[w]]
         #     self.current_buffers[w] = Parameter(hcn.sub_cluster.name)
-        offload_parameters = []
+        self.cpu_optimized_params = []
         for (_,_,op) in self.ofl_ops:
-            offload_parameters.append(op.name)
+            if isinstance(op, OptimizeOp):
+                self.cpu_optimized_params.append(op.target.name)
 
         for t in range(T):
             for k in self.krange(t):
@@ -1359,8 +1368,8 @@ class ModelPULP:
                     Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
                 ]
                 w = self.hcn2parameter[k]
-                parameters = [p.name for p in list_alloc_para if p.name not in offload_parameters]
-                if not hcn.is_fwd and list_alloc_para:
+                parameters = [p.name for p in list_alloc_para if p.name not in self.cpu_optimized_params]
+                if not hcn.is_fwd and parameters:
                     sub_op_list += [OptimizeOp(hcn.sub_cluster.name, 
                                                list_params=parameters)]
 
