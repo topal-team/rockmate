@@ -11,6 +11,7 @@ from .solvers.op_schedule import (
     OffloadOp,
     PrefetchOp,
     SynchronizeOp,
+    OptimizeOp,
     OpSchedule,
 )
 
@@ -48,6 +49,8 @@ def make_gd(device, nn_mod, dict_constants):
         "torch": torch,
         "meta": torch.ones(1).to(device),
         "cmeta": torch.view_as_complex(torch.ones(2)).to(device),
+        "opt": torch.optim.SGD,
+        "opt_kwargs": {"lr":1e-6},
         "main_stream": torch.cuda.current_stream(),
         # "prefetch_stream": torch.cuda.current_stream(),
         # "offload_stream": torch.cuda.current_stream(),
@@ -523,6 +526,8 @@ class Compiler:
                     #     ))
                 elif isinstance(op, SynchronizeOp):
                     fct_list.append([self.fct_synchronize()])
+                elif isinstance(op, OptimizeOp):
+                    fct_list.append([self.fct_optimize([p.name for p in op.list_params])])
                 else:
                     fct_list.append([])
 
@@ -740,6 +745,16 @@ class Compiler:
                     # print("merge", targets[0].name, self.storage.ld[sources[1].name].data.mean())
 
         return mapping
+    
+    def fct_optimize(self, list_params):
+        def optimize():
+            optimizer = self.gd["opt"]([self.storage.ld[p] for p in list_params], **self.gd["opt_kwargs"])
+            optimizer.step()
+            for p in list_params:
+                self.storage.ld[p].grad = None
+            torch.cuda.synchronize()
+        return optimize
+
 
     #  ==================================
     #  = ELEMENTARY COMPILING FUNCTIONS =

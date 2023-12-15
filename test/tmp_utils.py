@@ -154,36 +154,38 @@ def test_exec(model_, sample, msg="", copy=False, record_mem=False, niter=10):
     torch.cuda.reset_peak_memory_stats()
     
     mem = torch.cuda.memory_allocated()
-    print(mem)
+    # print(mem)
     if copy:
         model = deepcopy(model_).to("cuda")
     else:
         model = model_
-    
+    model.zero_grad()
     timer.start()
     for i in range(niter):
         if copy:
             model.zero_grad()
             y = model(*sample)
         else:
-            mod_to_cpu(model, grad=True)
-            model.zero_grad()
-            if i>0:
-                model.init_exec()
+            # mod_to_cpu(model, grad=True)
+            # model.zero_grad()
+            # if i>0:
+            #     model.init_exec()
             y = model(*sample, record_mem=record_mem)
         loss = y.sum()
         loss.backward()
         torch.cuda.synchronize()
         print(f"output: {y.mean()}")
-        print(f"grad: {model.get_parameter('30.weight').grad.sum()}")
+        # print(f"grad: {model.get_parameter('30.weight').grad.sum()}")
         # print(model)
-        optimize(model,copy=copy)
+        if copy:
+            optimize(model,copy=copy)
         # opt = torch.optim.SGD
         # optimizer = opt(model.parameters(), lr=0.001)
         # optimizer.step()
 
         torch.cuda.synchronize()
-        print(f"weight: {model.get_parameter('30.weight')[0,0]}\n")
+        # print(f"bias: {model.get_parameter('30.bias')[0]}\n")
+        # print(f"weight: {model.get_parameter('30.weight')[0,0]}\n")
         # del y
         # model.zero_grad(set_to_none=True)
 

@@ -24,6 +24,7 @@ from .op_schedule import (
     OffloadOp,
     PrefetchOp,
     SynchronizeOp,
+    OptimizeOp,
     OpSchedule,
 )
 from rkgb.Htools import *
@@ -1354,6 +1355,8 @@ class ModelPULP:
                     Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
                 ]
                 w = self.hcn2parameter[k]
+                if not hcn.is_fwd:
+                    sub_op_list += [OptimizeOp(hcn.sub_cluster.name, list_params=list_alloc_para)]
 
                 if (
                     not self.grouping and self.current_buffers[w] is not None

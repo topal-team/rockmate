@@ -245,6 +245,15 @@ class HRockmate(torch.nn.Module):
         self.bwd_fct_list = self.fct_list[loss_idx:]
         l = [self.compiler.fct_del_var(v) for v in self.output.tensor_targets]
         self.bwd_fct_list.append(l)
+        parameters = []
+        for n, p in self.original_mod.named_parameters():
+            if n not in [kdn.main_target for kdn in self.rkgb_res.H_cluster.list_kdn_parameters]:
+                parameters.append(p)
+        def optimize():
+            self.compiler.gd["opt"](parameters, **self.compiler.gd["opt_kwargs"]).step()
+            for p in parameters:p.grad=None
+        self.bwd_fct_list.append([optimize])
+
         self.define_autograd_Function()
         self.inherits_original_mod_attributes_and_methods()
 

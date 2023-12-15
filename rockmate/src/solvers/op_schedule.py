@@ -203,6 +203,11 @@ class PrefetchOp(Op):
     def __repr__(self):
         return "Disabled" * self.disabled + f"Prefetch_{self.target}"
 
+class OptimizeOp(Op):
+    def __init__(self, name, list_params, disabled=False):
+        super().__init__("Optimize_" + name, disabled)
+        self.list_params = list_params
+
 
 class OpSchedule:
     solver = None
