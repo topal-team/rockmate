@@ -168,10 +168,11 @@ class OffloadOp(Op):
     def __init__(
         self,
         alloc: Allocation,
-        indices: tuple = (0,-1),
+        indices: tuple = (0,None),
         before: Op = None,
         after: Op = None,
         disabled: bool = False,
+        grad:bool = False
     ):
         super().__init__("Offload_" + alloc.name, disabled)
         self.target = alloc
@@ -179,6 +180,7 @@ class OffloadOp(Op):
         self.disabled = disabled
         self.before = before
         self.after = after
+        self.grad = grad
 
     def __repr__(self):
         return "Disabled" * self.disabled + f"Offload_{self.target}"
@@ -188,7 +190,7 @@ class PrefetchOp(Op):
     def __init__(
         self,
         alloc: Allocation,
-        indices: tuple = (0,-1),
+        indices: tuple = (0,None),
         before: Op = None,
         after: Op = None,
         disabled: bool = False,
@@ -204,9 +206,10 @@ class PrefetchOp(Op):
         return "Disabled" * self.disabled + f"Prefetch_{self.target}"
 
 class OptimizeOp(Op):
-    def __init__(self, name, list_params, disabled=False):
+    def __init__(self, name, list_params, alloc=None, disabled=False):
         super().__init__("Optimize_" + name, disabled)
         self.list_params = list_params
+        self.target = alloc or None
 
 
 class OpSchedule:

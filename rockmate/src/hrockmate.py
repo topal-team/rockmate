@@ -308,6 +308,7 @@ class HRockmate(torch.nn.Module):
                                                     pin_memory=True)
                 
                 storage.ld["cpu_"+k].copy_(self.gd["original_mod"].get_parameter(k.removesuffix(" parameter")).data)
+                storage.ld["cpu_"+k].grad = torch.empty_like(storage.ld["cpu_"+k])
                 storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
                 # storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
                 # self.storage.shapes[v.kdn.main_target] = self.gd[k].shape

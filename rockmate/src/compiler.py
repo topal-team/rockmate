@@ -371,15 +371,15 @@ class Compiler:
             )
         return function_list
 
-    def get_prefetch(self, op, before_idx=None, after_idx=None):
+    def get_prefetch(self, op: PrefetchOp, before_idx=None, after_idx=None):
         function_list = []
         # function_list.append(self.fct_mem_alloc(kn.main_target))
         function_list.append(self.fct_prefetch(op.target.name, after_idx=after_idx, indices=op.indices))
         return function_list
 
-    def get_offload(self, op, before_idx=None, after_idx=None):
+    def get_offload(self, op: OffloadOp, before_idx=None, after_idx=None):
         function_list = []
-        function_list.append(self.fct_offload(op.target.name, after_idx=after_idx, indices=op.indices))
+        function_list.append(self.fct_offload(op.target.name, after_idx=after_idx, indices=op.indices, grad=op.grad))
         return function_list
     
     def compile_all_prefetch(self):
@@ -527,7 +527,7 @@ class Compiler:
                 elif isinstance(op, SynchronizeOp):
                     fct_list.append([self.fct_synchronize()])
                 elif isinstance(op, OptimizeOp):
-                    fct_list.append([self.fct_optimize([p.name for p in op.list_params])])
+                    fct_list.append([self.fct_optimize(op.list_params)])
                 else:
                     fct_list.append([])
 
@@ -645,11 +645,22 @@ class Compiler:
 
         return prefetch
 
-    def fct_offload(self, var_name, after_idx=None, stream=None, indices=[0,None]):
+    def fct_offload(self, var_name, after_idx=None, stream=None, indices=[0,None], grad=False):
         indices = indices
         indices_ = [0, None] if "offload" in var_name else indices
         device = self.gd["device"]
         stream = stream or self.gd["offload_stream"]
+        if grad:
+            def offload():
+                with torch.cuda.stream(stream):
+                    # stream.wait_stream(self.gd["main_stream"])
+                    self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"][
+                        indices[0] : indices[1]
+                    ].grad.data.copy_(
+                        self.storage.ld[var_name][indices_[0] : indices_[1]].grad,
+                        non_blocking=True,
+                    )
+            return offload
 
         def offload():
             # if after_idx:

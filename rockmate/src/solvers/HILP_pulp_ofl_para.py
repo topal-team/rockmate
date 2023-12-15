@@ -1084,6 +1084,8 @@ class ModelPULP:
                     op = OffloadOp(alloc=Parameter(parameters[p]), indices=(0, None))
                     ofl_ops.append((t, k, op))
                     Offloaded[p] = 1
+                    op = OptimizeOp(name=p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]))
+                    ofl_ops.append((t, k, op))
 
             if  current_alive_size> next_alive_size:
                 del_size = current_alive_size - next_alive_size
@@ -1278,6 +1280,9 @@ class ModelPULP:
         # for w in range(W):
         #     hcn = self.hgraph.list_hcn[self.parameter2hcn[w]]
         #     self.current_buffers[w] = Parameter(hcn.sub_cluster.name)
+        offload_parameters = []
+        for (_,_,op) in self.ofl_ops:
+            offload_parameters.append(op.name)
 
         for t in range(T):
             for k in self.krange(t):
@@ -1349,14 +1354,15 @@ class ModelPULP:
 
                 if hcn.sub_cluster is None:
                     continue
-                parameters = [kdn.name for kdn in hcn.sub_cluster.list_kdn_parameters]
 
                 list_alloc_para = [
                     Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
                 ]
                 w = self.hcn2parameter[k]
-                if not hcn.is_fwd:
-                    sub_op_list += [OptimizeOp(hcn.sub_cluster.name, list_params=list_alloc_para)]
+                parameters = [p.name for p in list_alloc_para if p.name not in offload_parameters]
+                if not hcn.is_fwd and list_alloc_para:
+                    sub_op_list += [OptimizeOp(hcn.sub_cluster.name, 
+                                               list_params=parameters)]
 
                 if (
                     not self.grouping and self.current_buffers[w] is not None
