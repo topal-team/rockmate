@@ -163,7 +163,7 @@ def analyze_mem(rkmod, print_status=False, with_grad=True):
             print(k, v)
 
 
-def test_exec(model_, sample, msg="", copy=False, record_mem=False, niter=10):
+def test_exec(model_, sample, msg="", copy=False, record_mem=False, niter=10, opt=torch.optim.AdamW, opt_kwargs={"lr":1e-6}):
     torch.random.manual_seed(0)
     if msg:
         print(msg)
@@ -173,6 +173,7 @@ def test_exec(model_, sample, msg="", copy=False, record_mem=False, niter=10):
     # print(mem)
     if copy:
         model = deepcopy(model_).to("cuda")
+        optimizer = opt(model.parameters(), **opt_kwargs)
     else:
         model = model_
     model.zero_grad()
@@ -194,7 +195,8 @@ def test_exec(model_, sample, msg="", copy=False, record_mem=False, niter=10):
         # print(f"grad: {model.get_parameter('30.weight').grad.sum()}")
         # print(model)
         if copy:
-            optimize(model,copy=copy)
+            # optimize(model,copy=copy)
+            optimizer.step()
         # opt = torch.optim.SGD
         # optimizer = opt(model.parameters(), lr=0.001)
         # optimizer.step()

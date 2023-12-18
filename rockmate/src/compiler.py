@@ -527,7 +527,7 @@ class Compiler:
                 elif isinstance(op, SynchronizeOp):
                     fct_list.append([self.fct_synchronize()])
                 elif isinstance(op, OptimizeOp):
-                    fct_list.append([self.fct_optimize(op.list_params)])
+                    fct_list.append([self.fct_optimize(op)])
                 else:
                     fct_list.append([])
 
@@ -755,11 +755,12 @@ class Compiler:
 
         return mapping
     
-    def fct_optimize(self, list_params):
+    def fct_optimize(self, op):
         def optimize():
-            optimizer = self.gd["opt"]([self.storage.ld[p] for p in list_params], **self.gd["opt_kwargs"])
+            optimizer = self.storage.ld["optimizers"][op.name]
+            # optimizer = self.gd["opt"]([self.storage.ld[p] for p in list_params], **self.gd["opt_kwargs"])
             optimizer.step()
-            for p in list_params:
+            for p in op.list_params:
                 self.storage.ld[p].grad = torch.zeros_like(self.storage.ld[p].grad)
                 self.storage.ld[p.removeprefix("cpu_")].grad = None
             torch.cuda.synchronize()

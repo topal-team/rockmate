@@ -273,7 +273,7 @@ class HRockmate(torch.nn.Module):
             for fct in fct_list:
                 fct()
 
-    def init_exec(self):
+    def init_fwd_exec(self):
         #  -> Initialize the storage
         storage = self.compiler.storage
         for kdn in self.rkgb_res.K_graph.list_kdn:
@@ -316,7 +316,7 @@ class HRockmate(torch.nn.Module):
                 # self.storage.dtypes[v.kdn.main_target] = self.gd[k].dtypes
             elif isinstance(v, Buffer):
                 storage.ld[k] = torch.empty(0, device=self.gd["device"])
-                shape = round(v.mem / v.itemsize)
+                # shape = round(v.mem / v.itemsize)
                 # print(k, v.mem)
                 # if "offload" in k or "prefetch" in k:
                 #     continue
@@ -326,6 +326,11 @@ class HRockmate(torch.nn.Module):
                 #                                     pin_memory=True)
             else:
                 print(f"Unrecognized type {type(v)}")
+        
+        storage.ld["optimizers"] = {}
+        for op in self.op_sched.op_list:
+            if isinstance(op, OptimizeOp):
+                storage.ld["optimizers"][op.name] = self.gd["opt"]([storage.ld[p] for p in op.list_params], **self.gd["opt_kwargs"])
         for l in self.init_fct_list:
             self._exec(l)
         torch.cuda.synchronize()
@@ -444,9 +449,8 @@ class HRockmate(torch.nn.Module):
                     torch.cuda.synchronize()
                     with torch.enable_grad():
                         # exec(RkMod.init_code, RkMod.gd, storage.ld)  # is compiler.gd
-                        self.init_exec()
+                        self.init_fwd_exec()
                     torch.cuda.synchronize()
-                    # 1/0
                     # with torch.cuda.stream(self.gd["offload_stream"]):
                     #     # RkMod.compiler.storage.ld[f"cpu_H_Cluster_bottom___12_fv"].copy_(RkMod.compiler.storage.ld[f"H_Cluster_bottom___12_fv"])
 
