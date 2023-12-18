@@ -1421,7 +1421,10 @@ class ModelPULP:
                 for w in range(W):
                     # op_list.extend(self.create_prefetch_ops(t,k,w))
                     if k in self.parameter2hcn[w]:
-                        op_list.extend(self.create_offload_ops(t, k, w))
+                        ofl_ops = self.create_offload_ops(t, k, w)
+                        if ofl_ops:
+                            op_list.append(SynchronizeOp(str(w)))
+                            op_list.extend(ofl_ops)
                     op_list.extend(self.create_delete_ops(t, k, w))
                 op_list.extend(prefetch_list)
         return op_list, init_alive_status, init_op_list, restore_op_list
