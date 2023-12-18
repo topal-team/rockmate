@@ -1048,7 +1048,7 @@ class ModelPULP:
                 if op.target.name == p:
                     op.grad = True
             op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]))
-            ofl_ops.append((t, k, op))
+            del_ops.append((t, k, op))
 
         assert (bwd_i, bwd_i) in self.active_steps
         idx = self.active_steps.index((bwd_i, bwd_i))
@@ -1289,7 +1289,7 @@ class ModelPULP:
         #     hcn = self.hgraph.list_hcn[self.parameter2hcn[w]]
         #     self.current_buffers[w] = Parameter(hcn.sub_cluster.name)
         self.cpu_optimized_params = []
-        for (_,_,op) in self.ofl_ops:
+        for (_,_,op) in self.del_ops:
             if isinstance(op, OptimizeOp):
                 self.cpu_optimized_params.append(op.target.name)
 
