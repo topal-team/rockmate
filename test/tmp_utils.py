@@ -62,7 +62,26 @@ def debug_mem_solution(rkmod):
             mem += op_sched.dict_alloc[k].mem
     print("parameter memory at {max_i}", mem)
 
+def test_optimize_time(device="cuda", opt=torch.optim.AdamW, opt_kwargs={"lr":1e-6}, niters=5):
+    batch = 1024*4
+    width = 1024*4
+    depth = 16
+    model = torch.nn.Sequential(*[nn.Linear(width, width)for _ in range(depth)]).to(device)
+    sample = [torch.ones([batch, width]).cuda()]
+    size = 0
+    for n,p in model.named_parameters():
+        p.grad = torch.ones_like(p)
+        size += p.numel()
+    optimizer = opt(model.parameters(), **opt_kwargs)
+    timer.start()
 
+    for i in range(niters):
+        optimizer.step()
+    timer.end()
+    print(f"{size*p.element_size()/1024**2:.1f}MB model")
+    print(f"{niters} time optimization cost {timer.elapsed():.2f} ms")
+
+    
 def plot_mem(mem_real, mem_theory, start=0, end=None):
     import matplotlib.pyplot as plt
 
