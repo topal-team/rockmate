@@ -1040,6 +1040,7 @@ class ModelPULP:
         ofl_ops = []
         prf_ops = []
         del_ops = []
+        opt_ops = []
         init_ops = []
         restore_ops = []
 
@@ -1048,7 +1049,7 @@ class ModelPULP:
                 if op.target.name == p:
                     op.grad = True
             op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]))
-            del_ops.append((t, k, op))
+            opt_ops.append((t, k, op))
 
         assert (bwd_i, bwd_i) in self.active_steps
         idx = self.active_steps.index((bwd_i, bwd_i))
@@ -1133,7 +1134,7 @@ class ModelPULP:
                     if t>bwd_i or t < fwd_i:#prefetch before fwd
                         switch_cpu_optimize(p)
 
-        return ofl_ops, prf_ops, del_ops, init_ops, restore_ops
+        return ofl_ops, prf_ops, del_ops, opt_ops, init_ops, restore_ops
 
     def schedule(self, hgraph=None, check_valid=False):
         """
@@ -1266,14 +1267,16 @@ class ModelPULP:
         self.ofl_ops = []
         self.prf_ops = []
         self.del_ops = []
+        self.opt_ops = []
         init_op_list = []
         restore_op_list = []
         if self.grouping:
             for w in range(self.W):
-                o_l, p_l, d_l, i_l, r_l = self.group(w)
+                o_l, p_l, d_l, t_l, i_l, r_l = self.group(w)
                 self.ofl_ops.extend(o_l)
                 self.prf_ops.extend(p_l)
                 self.del_ops.extend(d_l)
+                self.opt_ops.extend(t_l)
                 init_op_list.extend([ops[2] for ops in i_l])
                 restore_op_list.extend([ops[2] for ops in r_l])
         else:
@@ -1289,7 +1292,7 @@ class ModelPULP:
         #     hcn = self.hgraph.list_hcn[self.parameter2hcn[w]]
         #     self.current_buffers[w] = Parameter(hcn.sub_cluster.name)
         self.cpu_optimized_params = []
-        for (_,_,op) in self.del_ops:
+        for (_,_,op) in self.opt_ops:
             if isinstance(op, OptimizeOp):
                 self.cpu_optimized_params.append(op.target.name)
 
@@ -1426,8 +1429,22 @@ class ModelPULP:
                             op_list.append(SynchronizeOp(str(w)))
                             op_list.extend(ofl_ops)
                     op_list.extend(self.create_delete_ops(t, k, w))
+                    op_list.extend(self.create_optimize_ops(t, k, w))
                 op_list.extend(prefetch_list)
         return op_list, init_alive_status, init_op_list, restore_op_list
+    
+    def create_optimize_ops(self, t, k, w, itemsize=4):
+        op_list = []
+        sub_cluster = self.hgraph.list_hcn[self.parameter2hcn[w][0]].sub_cluster
+        if self.grouping:
+            for t_, k_, op in self.opt_ops:
+                if (
+                    t_ == t
+                    and k_ == k
+                    and op.target.kdn in sub_cluster.list_kdn_parameters
+                ):
+                    op_list.append(op)
+            return op_list
 
     def create_delete_ops(self, t, k, w, itemsize=4):
         op_list = []
