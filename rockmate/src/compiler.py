@@ -759,10 +759,9 @@ class Compiler:
         def optimize():
             # pass
             optimizer = self.storage.ld["optimizers"][op.name]
-            # optimizer = self.gd["opt"]([self.storage.ld[p] for p in list_params], **self.gd["opt_kwargs"])
             optimizer.step()
             for p in op.list_params:
-                self.storage.ld[p].grad = torch.zeros_like(self.storage.ld[p].grad)
+                self.storage.ld[p].grad.zero_()
                 self.storage.ld[p.removeprefix("cpu_")].grad = None
             # torch.cuda.synchronize()
         return optimize

@@ -93,7 +93,7 @@ class Op:
 
 class SynchronizeOp(Op):
     def __init__(self, name="", disabled=False):
-        super().__init__(name, disabled)
+        super().__init__("Sync_"+name, disabled)
 
 class ComputeOp(Op):
     def __init__(self, kcn, fast_forward=False, disabled=False, detach=True):
@@ -183,7 +183,7 @@ class OffloadOp(Op):
         self.grad = grad
 
     def __repr__(self):
-        return "Disabled" * self.disabled + f"Offload_{self.target}"
+        return "Disabled" * self.disabled + f"Offload_{self.target}" +"_grad"*self.grad
 
 
 class PrefetchOp(Op):
