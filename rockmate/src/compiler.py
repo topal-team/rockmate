@@ -49,7 +49,7 @@ def make_gd(device, nn_mod, dict_constants):
         "torch": torch,
         "meta": torch.ones(1).to(device),
         "cmeta": torch.view_as_complex(torch.ones(2)).to(device),
-        "opt": torch.optim.AdamW,
+        "opt": torch.optim.Adam,
         "opt_kwargs": {"lr":1e-6},
         "main_stream": torch.cuda.current_stream(),
         # "prefetch_stream": torch.cuda.current_stream(),
@@ -758,6 +758,9 @@ class Compiler:
     def fct_optimize(self, op):
         def optimize():
             # pass
+            # torch.cuda.synchronize()
+            self.gd["offload_stream"].synchronize()
+
             optimizer = self.storage.ld["optimizers"][op.name]
             optimizer.step()
             for p in op.list_params:
