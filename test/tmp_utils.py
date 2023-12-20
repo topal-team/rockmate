@@ -150,7 +150,7 @@ def analyze_mem(rkmod, print_status=False, with_grad=True):
         f"solution peak memory {(max(mem.values()) + with_grad*sum(md.parameter_size))/1024**2:.0f}MB at {max_t, max_k}"
     )
     print(
-        f"op_sched peak memory {(rkmod.op_sched.peak_mem + with_grad*sum(md.parameter_size))/1024**2:.0f}MB"
+        f"op_sched peak memory {(rkmod.op_sched.peak_mem + md.optimizer_states_mem.value()+with_grad*(sum(md.parameter_size)))/1024**2:.0f}MB"
     )
     return (max_i, max_t, max_k)
 
@@ -163,7 +163,15 @@ def analyze_mem(rkmod, print_status=False, with_grad=True):
             print(k, v)
 
 
-def test_exec(model_, sample, msg="", copy=False, record_mem=False, niter=10, opt=torch.optim.AdamW, opt_kwargs={"lr":1e-6}):
+def test_exec(model_, 
+              sample, 
+              msg="", 
+              copy=False, 
+              record_mem=False, 
+              niter=10, 
+              opt=torch.optim.Adam, 
+              opt_kwargs={"lr":1e-6},
+              return_mod = False):
     torch.random.manual_seed(0)
     if msg:
         print(msg)
@@ -177,16 +185,24 @@ def test_exec(model_, sample, msg="", copy=False, record_mem=False, niter=10, op
     else:
         model = model_
     model.zero_grad()
+    # init run
+    if copy:
+        model.zero_grad()
+        y = model(*sample)
+    else:
+        y = model(*sample, record_mem=record_mem)
+    loss = y.sum()
+    loss.backward()
+    if copy:
+        optimizer.step()
+        
+
     timer.start()
     for i in range(niter):
+        model.zero_grad()
         if copy:
-            model.zero_grad()
             y = model(*sample)
         else:
-            # mod_to_cpu(model, grad=True)
-            # model.zero_grad()
-            # if i>0:
-            #     model.init_exec()
             y = model(*sample, record_mem=record_mem)
         loss = y.sum()
         loss.backward()
@@ -209,13 +225,13 @@ def test_exec(model_, sample, msg="", copy=False, record_mem=False, niter=10, op
 
     timer.end()
 
-    print(f"mean output {y.mean()}")
+    # print(f"mean output {y.mean()}")
     # print(f"mean grad {model.get_parameter('0.parameter').grad.mean()}")
 
     print(f"peak memory {(torch.cuda.max_memory_allocated() - mem)/1024**2:.0f}MB")
     print(f"time passed {timer.elapsed():.0f}ms")
-    print()
-
+    if return_mod:
+        return model
 
 def get_wide_decoder_NN(nlayers=6, d_model=4096, batch_size=32, seq_length=40):
     decoder_layer = nn.TransformerDecoderLayer(d_model=d_model, nhead=32)
@@ -239,7 +255,7 @@ def prepare_for_offload(rkmod):
 
 def disable_offload_op(rkmod):
     for op in rkmod.op_sched.op_list:
-        if isinstance(op, OffloadOp):
+        if isinstance(op, OffloadOp):# and op.grad:
             op.disabled = True
     rkmod.get_compiled_fct()
 
