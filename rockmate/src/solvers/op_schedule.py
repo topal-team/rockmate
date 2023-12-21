@@ -59,13 +59,13 @@ class Activation(Allocation):
 
 
 class Parameter(Allocation):
-    def __init__(self, kdn, dtype=torch.float32):
+    def __init__(self, kdn):
         super().__init__(
             name=kdn.name,
             alloc_type="Parameter",
             mem=kdn.mem,
             info=kdn.info,
-            dtype=dtype,
+            dtype=kdn.info.dtype,
         )
         self.kdn = kdn
 

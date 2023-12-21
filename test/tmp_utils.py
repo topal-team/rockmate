@@ -62,12 +62,14 @@ def debug_mem_solution(rkmod):
             mem += op_sched.dict_alloc[k].mem
     print("parameter memory at {max_i}", mem)
 
-def test_optimize_time(device="cuda", opt=torch.optim.AdamW, opt_kwargs={"lr":1e-6}, niters=5):
-    batch = 1024*4
-    width = 1024*4
-    depth = 16
-    model = torch.nn.Sequential(*[nn.Linear(width, width)for _ in range(depth)]).to(device)
-    sample = [torch.ones([batch, width]).cuda()]
+def test_optimize_time(model, sample, device="cuda", opt=torch.optim.AdamW, opt_kwargs={"lr":1e-6}, niters=5):
+    # batch = 1024*4
+    # width = 1024*4
+    # depth = 16
+    # model = torch.nn.Sequential(*[nn.Linear(width, width)for _ in range(depth)]).to(device)
+    # sample = [torch.ones([batch, width]).cuda()]
+    model = model.to(device)
+    sample = [s.to(device) for s in sample]
     size = 0
     for n,p in model.named_parameters():
         p.grad = torch.ones_like(p)
@@ -172,7 +174,8 @@ def test_exec(model_,
               niter=10, 
               opt=torch.optim.Adam, 
               opt_kwargs={"lr":1e-6},
-              return_mod = False):
+              return_mod = False,
+              device="cuda"):
     torch.random.manual_seed(0)
     if msg:
         print(msg)
@@ -181,7 +184,7 @@ def test_exec(model_,
     mem = torch.cuda.memory_allocated()
     # print(mem)
     if copy:
-        model = deepcopy(model_).to("cuda")
+        model = deepcopy(model_).to(device)
         optimizer = opt(model.parameters(), **opt_kwargs)
     else:
         model = model_

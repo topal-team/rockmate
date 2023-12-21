@@ -611,7 +611,7 @@ class HRockmate(torch.nn.Module):
         if md:
             expect_time = md.md.objective.value()/sum(t[0] for t in md.time)
             expect_mem = md.peak_budget
-            return print(f"Expect overhead: {(expect_time-1):.2%}, mem: {(expect_mem/1024**2):.2f}MB")
+            return print(f"Expect overhead: {(expect_time-1):.2%}, mem_limit: {(expect_mem/1024**2):.2f}MB")
 
     def expect_mem(self, overhead=False):
         # Peak mem based on the measured memory/overhead of each operation

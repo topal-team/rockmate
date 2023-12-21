@@ -586,8 +586,8 @@ class Compiler:
 
         # for op in ofl_fct[i]:
         #     stream = self.gd["offload_stream"]
-        #     fct_list[-1].append(self.fct_wait_stream(stream,
-        #                 self.gd["main_stream"]
+            # fct_list[-1].append(self.fct_wait_stream(stream,
+            #             self.gd["main_stream"]
         #             ))
         #     fct_list[-1].append(op)
         # fct_list[-1].extend(page_fct[i])
@@ -598,7 +598,16 @@ class Compiler:
 
     def fct_synchronize(self):
         def fct():
-            torch.cuda.synchronize()
+            # torch.cuda.synchronize()
+            self.gd["prefetch_stream"].synchronize()
+            self.gd["offload_stream"].synchronize()
+            self.gd["main_stream"].synchronize()
+            # self.gd["prefetch_stream"].wait_stream(self.gd["offload_stream"])
+            # self.gd["prefetch_stream"].wait_stream(self.gd["main_stream"])
+            # self.gd["offload_stream"].wait_stream(self.gd["main_stream"])
+            # self.gd["offload_stream"].wait_stream(self.gd["prefetch_stream"])
+            # self.gd["main_stream"].wait_stream(self.gd["prefetch_stream"])
+            # self.gd["main_stream"].wait_stream(self.gd["offload_stream"])
 
         return fct
 
@@ -759,7 +768,7 @@ class Compiler:
         def optimize():
             # pass
             # torch.cuda.synchronize()
-            self.gd["offload_stream"].synchronize()
+            # self.gd["offload_stream"].synchronize()
 
             optimizer = self.storage.ld["optimizers"][op.name]
             optimizer.step()

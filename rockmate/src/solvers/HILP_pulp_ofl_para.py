@@ -978,9 +978,9 @@ class ModelPULP:
                     
                     self.md += self.OflWProg[(t, k, w)] <= 1
                     self.md += self.OptCProg[(t, k, w)] <= self.OflWProg[(t, k, w)]
-                    self.md += self.AliveW[t, k, w] + self.OflWProg[(t, k, w)] >= 1
-                    self.md += self.AliveG + self.OflWProg[(t, k, w)] >= 1
-                    self.md += self.AliveG + self.OptCProg[(t, k, w)] >= 1
+                    self.md += self.AliveW[t, k, w] + self.OflWProg[(t, k, w)] >= 1 - self.sumOptC[w]
+                    self.md += self.AliveG + self.OflWProg[(t, k, w)] >= self.sumOptC[w]
+                    self.md += self.AliveG + self.OptCProg[(t, k, w)] >= self.sumOptC[w]
 
                     # self.md += self.AliveW[t, k, w] + self.PrfW[(t, k, w)] <= 1
                     self.md += self.OflW[t, k, w] <= self.sumComp[t, k]
@@ -1112,7 +1112,8 @@ class ModelPULP:
                 if op.target.name == p:
                     op.grad = True
             op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]))
-            opt_ops.append((t, k, op))
+            i = self.active_steps.index((t,k))
+            opt_ops.append((*self.active_steps[i+1], op))
 
         assert (bwd_i, bwd_i) in self.active_steps
         idx = self.active_steps.index((bwd_i, bwd_i))
