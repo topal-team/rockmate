@@ -145,12 +145,13 @@ def analyze_mem(rkmod, print_status=False, with_grad=True):
 
     max_t, max_k = max(mem, key=mem.get)
     max_i = np.argmax(rkmod.op_sched.save_mem + rkmod.op_sched.overhead)
+    grad_size = sum(md.parameter_size)
 
     print(
-        f"solution peak memory {(max(mem.values()) + with_grad*sum(md.parameter_size))/1024**2:.0f}MB at {max_t, max_k}"
+        f"solution peak memory {(max(mem.values()) + with_grad*grad_size)/1024**2:.0f}MB at {max_t, max_k}"
     )
     print(
-        f"op_sched peak memory {(rkmod.op_sched.peak_mem + md.optimizer_states_mem.value()+with_grad*(sum(md.parameter_size)))/1024**2:.0f}MB"
+        f"op_sched peak memory {(rkmod.op_sched.peak_mem + md.optimizer_states_mem.value()+with_grad*grad_size)/1024**2:.0f}MB"
     )
     return (max_i, max_t, max_k)
 

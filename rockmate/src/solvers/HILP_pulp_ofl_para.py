@@ -109,7 +109,7 @@ class ModelPULP:
         offload=False,
         protected_names=[],
         grouping=True,
-        grad_mode="keep_all",  # ["free_all", "free_asap", "offload"]
+        grad_mode="offload",  # ["keep_all", "free_all", "free_asap", "offload"]
         cpu_optimize = True
     ):
         self.gcd = gcd if gcd else 1
@@ -395,8 +395,8 @@ class ModelPULP:
                 lowBound=1 if self.grad_mode == "keep_all" else 0,
                 upBound=1,
             )  # w.grad is alive at the start of step j.
-            for k in self.AliveG:
-                self.AliveG[k] = 0
+            # for k in self.AliveG:
+            #     self.AliveG[k] = 0
 
             self.OflW = RkLpVariable.dicts(
                 "OflW",
@@ -979,6 +979,8 @@ class ModelPULP:
                     self.md += self.OflWProg[(t, k, w)] <= 1
                     self.md += self.OptCProg[(t, k, w)] <= self.OflWProg[(t, k, w)]
                     self.md += self.AliveW[t, k, w] + self.OflWProg[(t, k, w)] >= 1
+                    self.md += self.AliveG + self.OflWProg[(t, k, w)] >= 1
+                    self.md += self.AliveG + self.OptCProg[(t, k, w)] >= 1
 
                     # self.md += self.AliveW[t, k, w] + self.PrfW[(t, k, w)] <= 1
                     self.md += self.OflW[t, k, w] <= self.sumComp[t, k]
