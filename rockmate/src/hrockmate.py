@@ -245,14 +245,7 @@ class HRockmate(torch.nn.Module):
         self.bwd_fct_list = self.fct_list[loss_idx:]
         l = [self.compiler.fct_del_var(v) for v in self.output.tensor_targets]
         self.bwd_fct_list.append(l)
-        parameters = []
-        for n, p in self.original_mod.named_parameters():
-            if n not in [kdn.main_target for kdn in self.rkgb_res.H_cluster.list_kdn_parameters]:
-                parameters.append(p)
-        def optimize():
-            self.compiler.gd["opt"](parameters, **self.compiler.gd["opt_kwargs"]).step()
-            for p in parameters:p.grad=None
-        self.bwd_fct_list.append([optimize])
+        
 
         self.define_autograd_Function()
         self.inherits_original_mod_attributes_and_methods()
@@ -331,6 +324,18 @@ class HRockmate(torch.nn.Module):
         for op in self.op_sched.op_list:
             if isinstance(op, OptimizeOp):
                 storage.ld["optimizers"][op.name] = self.gd["opt"]([storage.ld[p] for p in op.list_params], **self.gd["opt_kwargs"])
+
+        self.minor_parameters = []
+        for n, p in self.original_mod.named_parameters():
+            if n not in [kdn.main_target for kdn in self.rkgb_res.H_cluster.list_kdn_parameters]:
+                self.minor_parameters.append(p)
+        storage.ld["optimizers"]["minors"] = self.gd["opt"](self.minor_parameters, **self.gd["opt_kwargs"])
+        
+        def optimize():
+            storage.ld["optimizers"]["minors"].step()
+            for p in self.minor_parameters:p.grad=None
+        self.bwd_fct_list.append([optimize])
+
         for l in self.init_fct_list:
             self._exec(l)
         torch.cuda.synchronize()
@@ -600,6 +605,13 @@ class HRockmate(torch.nn.Module):
     def expect_time(self):
         # Sum of the measured time of each operation for one batch
         return self.fwd_seq.compute_time() + self.bwd_seq.compute_time()
+    
+    def expect_md_result(self):
+        md = self.list_solvers[0].md
+        if md:
+            expect_time = md.md.objective.value()/sum(t[0] for t in md.time)
+            expect_mem = md.peak_budget
+            return print(f"Expect overhead: {(expect_time-1):.2%}, mem: {(expect_mem/1024**2):.2f}MB")
 
     def expect_mem(self, overhead=False):
         # Peak mem based on the measured memory/overhead of each operation
