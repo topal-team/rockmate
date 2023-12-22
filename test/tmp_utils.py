@@ -83,6 +83,30 @@ def test_optimize_time(model, sample, device="cuda", opt=torch.optim.AdamW, opt_
     print(f"{size*p.element_size()/1024**2:.1f}MB model")
     print(f"{niters} time optimization cost {timer.elapsed():.2f} ms")
 
+
+def optimize_stats(parameter, opt=torch.optim.AdamW, opt_kwargs={"lr":1e-6}, niters=5):
+    p = parameter.to("cuda")
+    p.grad = parameter.to("cuda")
+    size = p.numel()
+    mem = torch.cuda.memory_allocated()
+    optimizer = opt([p], **opt_kwargs)
+    for i in range(niters):
+        optimizer.step()
+    mem_opt_states = torch.cuda.memory_allocated() - mem
+
+    p = parameter.to("cpu")
+    p.grad = parameter.to("cpu")
+    optimizer = opt([p], **opt_kwargs)
+    optimizer.step()
+
+    timer.start()
+    for i in range(niters):
+        optimizer.step()
+    timer.end()
+    # print(f"{size*p.element_size()/1024**2:.1f}MB model")
+    # print(f"{niters} time optimization cost {timer.elapsed():.2f} ms")
+    return timer.elapsed()/niters/size, mem_opt_states
+
     
 def plot_mem(mem_real, mem_theory, start=0, end=None):
     import matplotlib.pyplot as plt
@@ -147,7 +171,7 @@ def analyze_mem(rkmod, print_status=False, with_grad=True):
 
     max_t, max_k = max(mem, key=mem.get)
     max_i = np.argmax(rkmod.op_sched.save_mem + rkmod.op_sched.overhead)
-    grad_size = sum(md.parameter_size)
+    grad_size = max(md.parameter_size)
 
     print(
         f"solution peak memory {(max(mem.values()) + with_grad*grad_size)/1024**2:.0f}MB at {max_t, max_k}"
