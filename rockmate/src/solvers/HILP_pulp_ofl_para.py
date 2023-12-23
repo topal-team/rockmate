@@ -123,8 +123,8 @@ class ModelPULP:
         self.feasible = None
         self.solve_time = None
         self.with_parameters = accurate_mem
-        self.single_fwd = accurate_mem
-        self.single_bwd = False
+        self.single_fwd = accurate_mem#False
+        self.single_bwd = accurate_mem
         self.grouping = grouping
         self.grad_mode = grad_mode
         self.cpu_optimize = cpu_optimize
@@ -317,9 +317,28 @@ class ModelPULP:
                 for t in range(T + 1)
                 for j, list_sched in enumerate(self.list_list_sched)
                 for o in range(len(list_sched))
+                if t-1 in self.sub_c2hcn[j]
             ],
             cat="Binary",
         )
+        for j, list_sched in enumerate(self.list_list_sched):
+            for o in range(len(list_sched)):
+                if (0,j,o) not in self.AliveP:
+                    self.AliveP[0,j,o] = 0
+                for t in range(1,T + 1):
+                    if (t,j,o) not in self.AliveP:
+                        self.AliveP[t,j,o] = self.AliveP[t-1,j,o]
+
+        # self.AliveP = RkLpVariable.dicts(
+        #     f"AliveP",
+        #     [
+        #         (t, j, o)
+        #         for t in range(T + 1)
+        #         for j, list_sched in enumerate(self.list_list_sched)
+        #         for o in range(len(list_sched))
+        #     ],
+        #     cat="Binary",
+        # )
 
         self.sumAliveP = {}
         for j in range(J):
@@ -327,14 +346,47 @@ class ModelPULP:
                 self.sumAliveP[j, t] = lpSum(
                     self.AliveP[t, j, o] for o in range(len(self.list_list_sched[j]))
                 )
-
-        # to present whether one saved tensor can be inheritaged from the last stage
+        self.active_stages = dict()
+        for i in range(I):
+            self.active_stages[i] = []
+            for t in range(T):
+                for k in self.krange(t):
+                    if k in _deps_d[i]+_users_d[i]:
+                        self.active_stages[i].append(t)
+        # to present whether one saved tensor can be inherited from the last stage
         self.AliveA = RkLpVariable.dicts(
-            "AliveA", [(t, i) for t in range(T) for i in range(Cr)], cat="Binary"
+            "AliveA", [(t, c)
+                       for t in range(1,T) 
+                       for c, (k, i) in enumerate(self.create_list)
+                       if t-1 in self.active_stages[i]], cat="Binary"
         )  # activation
+        for c, (k, i) in enumerate(self.create_list):
+            self.AliveA[0,c] = 0
+            for t in range(1, self.T):
+                if (t,c) not in self.AliveA:
+                    self.AliveA[t,c] = self.AliveA[t-1,c]
+
+        # self.AliveA = RkLpVariable.dicts(
+        #     "AliveA", [(t, i) for t in range(T) for i in range(Cr)], cat="Binary"
+        # )  # activation
+
+        # self.AliveT = RkLpVariable.dicts(
+        #     "AliveT", [(t, i) for t in range(T) for i in range(I)], cat="Binary"
+        # )  # tensor that can be shared by acts
+
         self.AliveT = RkLpVariable.dicts(
-            "AliveT", [(t, i) for t in range(T) for i in range(I)], cat="Binary"
+            "AliveT", [(t, i)
+                       for t in range(T) 
+                       for i in range(I)
+                       if t-1 in self.active_stages[i]], cat="Binary"
         )  # tensor that can be shared by acts
+        for i in range(I):
+            if (0,i) not in self.AliveT:
+                self.AliveT[0,i] = 0
+            for t in range(1, self.T):
+                if (t,i) not in self.AliveT:
+                    self.AliveT[t,i] = self.AliveT[t-1,i]
+
         self.create = RkLpVariable.dicts(
             "create",
             [
@@ -536,13 +588,13 @@ class ModelPULP:
         for j in range(J):
             bwd_i = max(self.sub_c2hcn[j])
             # Forward start with no phantoms
-            self.md += (
-                lpSum(
-                    (self.AliveP[0, j, o])  # - self.Comp[bwd_i][T - 1, o])
-                    for o in range(self.nOpts[bwd_i])
-                )
-                == 0
-            )
+            # self.md += (
+            #     lpSum(
+            #         (self.AliveP[0, j, o])  # - self.Comp[bwd_i][T - 1, o])
+            #         for o in range(self.nOpts[bwd_i])
+            #     )
+            #     == 0
+            # )
             # in the end of bwd, del every phantoms
             self.md += (
                 lpSum(
@@ -978,7 +1030,7 @@ class ModelPULP:
                     
                     self.md += self.OflWProg[(t, k, w)] <= 1
                     self.md += self.OptCProg[(t, k, w)] <= self.OflWProg[(t, k, w)]
-                    self.md += self.AliveW[t, k, w] + self.OflWProg[(t, k, w)] >= 1 - self.sumOptC[w]
+                    self.md += self.AliveW[t, k, w] + self.OflWProg[(t, k, w)] >= 1# - self.sumOptC[w]
                     self.md += self.AliveG + self.OflWProg[(t, k, w)] >= self.sumOptC[w]
                     self.md += self.AliveG + self.OptCProg[(t, k, w)] >= self.sumOptC[w]
 
@@ -1091,7 +1143,7 @@ class ModelPULP:
         fwd_i, bwd_i = self.parameter2hcn[w]
         early_fwd = []
         for t in range(bwd_i, self.T):
-            if self.sol(self.sumComp[t,fwd_i]):
+            if not self.single_fwd and self.sol(self.sumComp[t,fwd_i].value()):
                 early_fwd.append(t)#if recompute fwd after bwd
         hcn = self.hgraph.list_hcn[fwd_i]
         parameters = {kdn.name: kdn for kdn in hcn.sub_cluster.list_kdn_parameters}
@@ -1106,14 +1158,21 @@ class ModelPULP:
         opt_ops = []
         init_ops = []
         restore_ops = []
+        cpu_optimized = []
 
-        def switch_cpu_optimize(p):
+        def apply_cpu_optimize(p):
             for (t,k,op) in ofl_ops:
                 if op.target.name == p:
                     op.grad = True
             op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]))
             i = self.active_steps.index((t,k))
             opt_ops.append((*self.active_steps[i+1], op))
+            del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]))))
+            #if cpu optimize, do not keep w after bwd
+        def apply_gpu_optimize(p):
+            op = OptimizeOp(name=p,list_params=[p], alloc=Parameter(parameters[p]))
+            opt_ops.append((bwd_i, bwd_i, op))# optimize after bwd
+            del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]), grad=True)))
 
         assert (bwd_i, bwd_i) in self.active_steps
         idx = self.active_steps.index((bwd_i, bwd_i))
@@ -1195,8 +1254,13 @@ class ModelPULP:
                     Alive[p] = 1
                     if (t>bwd_i and t<min(early_fwd+[self.T+1])) or t < fwd_i:
                         # cpu optimize only if prefetch before fwd
-                        switch_cpu_optimize(p)
+                        cpu_optimized.append(p)
 
+        for p in parameters:
+            if p in cpu_optimized:
+                apply_cpu_optimize(p)
+            else:
+                apply_gpu_optimize(p)
         return ofl_ops, prf_ops, del_ops, opt_ops, init_ops, restore_ops
 
     def schedule(self, hgraph=None, check_valid=False):
@@ -1434,10 +1498,10 @@ class ModelPULP:
                     Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
                 ]
                 w = self.hcn2parameter[k]
-                parameters = [p.name for p in list_alloc_para if p.name not in self.cpu_optimized_params]
-                if not hcn.is_fwd and parameters:
-                    sub_op_list += [OptimizeOp(hcn.sub_cluster.name, 
-                                               list_params=parameters)]
+                # parameters = [p.name for p in list_alloc_para if p.name not in self.cpu_optimized_params]
+                # if not hcn.is_fwd and parameters:
+                #     sub_op_list += [OptimizeOp(hcn.sub_cluster.name, 
+                #                                list_params=parameters)]
 
                 if (
                     not self.grouping and self.current_buffers[w] is not None
