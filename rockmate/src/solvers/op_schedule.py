@@ -127,9 +127,10 @@ class ComputeOp(Op):
 
 
 class DeleteOp(Op):
-    def __init__(self, alloc: Allocation, disabled=False):
+    def __init__(self, alloc: Allocation, disabled=False, grad=False):
         super().__init__("Delete_" + alloc.name, disabled)
         self.target = alloc
+        self.grad = grad
 
     def __repr__(self):
         return "Delete_" + self.target.name
