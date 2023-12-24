@@ -8,6 +8,20 @@ from rkgb.utils import irotor
 
 timer = irotor.make_timer(torch.device("cuda"))
 
+def number_of_variables(md, exclude="Continuous"):
+    type(md.md.variables()[0])
+    str(md.md.variables()[0]).split("_")
+    variables = dict()
+    for var in md.md.variables():
+        if var.cat == exclude:continue
+        name = str(var).split("_")
+        if name[0] not in variables:
+            variables[name[0]] = ["_".join(name[1:])]
+        else:
+            variables[name[0]].append("_".join(name[1:]))
+    for k, v in variables.items():
+        print(k, len(v))
+
 def optimize(rkmod, copy=False, lr=1e-6):
     opt = torch.optim.AdamW
     if copy:

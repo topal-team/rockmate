@@ -974,6 +974,7 @@ class ModelPULP:
         self.OflWProg = dict()
         self.OptCProg = dict()
         self.UpdWProg = dict()
+        self.PrfWProg = dict()
         self.sumOptC = dict()
         for w in self.parameter2hcn:
             self.sumOptC[w] = lpSum(self.OptC[t,k,w] for t in range(self.T) for k in self.krange(t))
@@ -1019,26 +1020,25 @@ class ModelPULP:
                 #     self.parameter_size[w] / self.cpu_optimize_speed * self.OptC[t, k, w]
                 #     for w in range(self.W)
                 # )
+                if k != self.loss_idx:
+                    w = self.hcn2parameter[k]
+                    self.PrfWProg[t,k,w] = get_progress(self.OflW, t, k, w)
+                    self.md += self.sumComp[t, k] <= self.PrfWProg[t,k,w] + (1-self.sumOptC[w])
                 for w in range(self.W):
                     self.OflWProg[(t,k,w)] = get_progress(self.OflW, t, k, w)
                     self.OptCProg[(t,k,w)] = get_progress(self.OptC, t, k, w)
-                    self.UpdWProg[(t,k,w)] = get_progress(self.UpdW, t, k, w)
-                    if k == max(self.parameter2hcn[w]):
-                        self.md += self.UpdW[t, k, w] == (1-self.sumOptC[w])#single_bwd
-                    else:
-                        self.md += self.UpdW[t, k, w] <= self.PrfW[t, k, w]#TODO: 
                     
                     self.md += self.OflWProg[(t, k, w)] <= 1
                     self.md += self.OptCProg[(t, k, w)] <= self.OflWProg[(t, k, w)]
-                    self.md += self.AliveW[t, k, w] + self.OflWProg[(t, k, w)] >= 1# - self.sumOptC[w]
-                    self.md += self.AliveG + self.OflWProg[(t, k, w)] >= self.sumOptC[w]
-                    self.md += self.AliveG + self.OptCProg[(t, k, w)] >= self.sumOptC[w]
+                    # self.md += self.AliveW[t, k, w] + self.OflWProg[(t, k, w)] >= 1# - self.sumOptC[w]
+                    self.md += self.AliveW[t, k, w] + self.AliveG[t, k, w] + self.OflWProg[(t, k, w)] >= 1
+                    self.md += self.AliveG[t, k, w] + self.OflWProg[(t, k, w)] >= self.sumOptC[w]
+                    # self.md += self.AliveG[t, k, w] + self.OptCProg[(t, k, w)] >= self.sumOptC[w]
 
                     # self.md += self.AliveW[t, k, w] + self.PrfW[(t, k, w)] <= 1
                     self.md += self.OflW[t, k, w] <= self.sumComp[t, k]
                     self.md += self.PrfW[t, k, w] <= self.sumComp[t, k]
                     self.md += self.OptC[t, k, w] <= self.sumComp[t, k]
-                    self.md += self.UpdW[t, k, w] <= self.sumComp[t, k]
 
                     t_, k_ = self.next_index(t, k)
                     self.md += (self.AliveW[t_, k_, w] + self.PrfW[(t_, k_, w)] <= 
@@ -1052,7 +1052,6 @@ class ModelPULP:
                     if k not in self.krange(t):
                         continue
                     self.md += self.sumComp[t, k] <= self.AliveW[t, k, w]
-                    self.md += self.sumComp[t, k] <= self.UpdWProg[t, k, w]
             
 
     def solve(self, solver=""):
@@ -1164,9 +1163,9 @@ class ModelPULP:
             for (t,k,op) in ofl_ops:
                 if op.target.name == p:
                     op.grad = True
+            i = self.active_steps.index((t,k))+1# TODO: distribute cpu optimization based on time
             op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]))
-            i = self.active_steps.index((t,k))
-            opt_ops.append((*self.active_steps[i+1], op))
+            opt_ops.append((*self.active_steps[i], op))
             del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]))))
             #if cpu optimize, do not keep w after bwd
         def apply_gpu_optimize(p):
@@ -1180,7 +1179,7 @@ class ModelPULP:
             t_, k_ = self.next_index(t, k)
             current_alive_size = sum(parameters[p].mem * a for p, a in Alive.items())
             current_offloaded_size = sum(parameters[p].mem * a for p, a in Offloaded.items())
-            next_alive_size = round(self.AliveW[(t_, k_, w)].value() * parameter_size)
+            next_alive_size = round((self.AliveG[(t_, k_, w)]+self.AliveW[(t_, k_, w)]).value() * parameter_size)
             next_offloaded_size = round(self.OflWProg[(t_, k_, w)].value() * parameter_size)
             # assert current_alive_size <= round(self.AliveW[(t, k, w)].value() * parameter_size)
             

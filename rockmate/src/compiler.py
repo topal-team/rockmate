@@ -331,8 +331,8 @@ class Compiler:
 
         return function_list
 
-    def get_del_grad(self, kn, i):
-        return [self.fct_del_tensor_grad(kn.main_target)]
+    def get_del_grad(self, target, i):
+        return [self.fct_del_tensor_grad(target)]
 
     def get_del_parameter(self, alloc, i):
         return [self.fct_del_tensor_data(alloc.name)]
@@ -493,11 +493,14 @@ class Compiler:
                         if "data" in op.target.kdn.name:
                             fct_list.append(self.get_del_data(op.target.kdn, i))
                         elif "grad" in op.target.kdn.name:
-                            fct_list.append(self.get_del_grad(op.target.kdn, i))
+                            fct_list.append(self.get_del_grad(op.target.kdn.main_target, i))
                         else:  # phantom
                             fct_list.append([])
                     elif isinstance(op.target, Parameter):
-                        fct_list.append(self.get_del_parameter(op.target.kdn, i))
+                        if op.grad:
+                            fct_list.append(self.get_del_grad(op.target.kdn.name, i))
+                        else:
+                            fct_list.append(self.get_del_parameter(op.target.kdn, i))
                     elif isinstance(op.target, Buffer):
                         fct_list.append(self.get_del_buffer(op.target, i))
                     else:
@@ -772,9 +775,9 @@ class Compiler:
 
             optimizer = self.storage.ld["optimizers"][op.name]
             optimizer.step()
-            for p in op.list_params:
-                self.storage.ld[p].grad.zero_()
-                self.storage.ld[p.removeprefix("cpu_")].grad = None
+            # for p in op.list_params:
+            #     self.storage.ld[p].grad.zero_()
+            #     self.storage.ld[p.removeprefix("cpu_")].grad = None
             # torch.cuda.synchronize()
         return optimize
 
