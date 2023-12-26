@@ -40,7 +40,11 @@ class RngState:
         torch.cuda.set_rng_state(self.gpu_states[op_name])
 
 
-def make_gd(device, nn_mod, dict_constants):
+def make_gd(device, 
+            nn_mod, 
+            dict_constants,
+            cpu_optim,
+            gpu_optim):
     return {
         **globals(),
         **dict_constants,
@@ -49,7 +53,8 @@ def make_gd(device, nn_mod, dict_constants):
         "torch": torch,
         "meta": torch.ones(1).to(device),
         "cmeta": torch.view_as_complex(torch.ones(2)).to(device),
-        "opt": torch.optim.Adam,
+        "cpu_optim": cpu_optim,
+        "gpu_optim": gpu_optim,
         "opt_kwargs": {"lr":1e-6},
         "main_stream": torch.cuda.current_stream(),
         # "prefetch_stream": torch.cuda.current_stream(),

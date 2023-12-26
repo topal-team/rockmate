@@ -49,6 +49,8 @@ class HRockmate(torch.nn.Module):
         model_kwargs=None,
         partitioners=None,
         max_size_S_graph_for_no_partitioning=40,
+        cpu_optim = torch.optim.Adam,
+        gpu_optim = torch.optim.Adam,
         # [
         #    Ptools.Partitioner(),
         #    Ptools.Partitioner_bottom_to_top(),
@@ -144,7 +146,11 @@ class HRockmate(torch.nn.Module):
             self.output = self.rkgb_res.K_graph.list_outputs_kdn_data[0]
             self.budget = budget
             self.gd = make_gd(
-                self.device, self.original_mod, self.dict_constants
+                self.device, 
+                self.original_mod, 
+                self.dict_constants,
+                cpu_optim, 
+                gpu_optim
             )
             self.list_solutions = []
             if solve_sched:
@@ -323,13 +329,14 @@ class HRockmate(torch.nn.Module):
         storage.ld["optimizers"] = {}
         for op in self.op_sched.op_list:
             if isinstance(op, OptimizeOp):
-                storage.ld["optimizers"][op.name] = self.gd["opt"]([storage.ld[p] for p in op.list_params], **self.gd["opt_kwargs"])
+                optim = self.gd["cpu_optim"] if "cpu" in op.name else self.gd["gpu_optim"]
+                storage.ld["optimizers"][op.name] = optim([storage.ld[p] for p in op.list_params], **self.gd["opt_kwargs"])
 
         self.minor_parameters = []
         for n, p in self.original_mod.named_parameters():
             if n not in [kdn.main_target for kdn in self.rkgb_res.H_cluster.list_kdn_parameters]:
                 self.minor_parameters.append(p)
-        storage.ld["optimizers"]["minors"] = self.gd["opt"](self.minor_parameters, **self.gd["opt_kwargs"])
+        storage.ld["optimizers"]["minors"] = self.gd["gpu_optim"](self.minor_parameters, **self.gd["opt_kwargs"])
         
         def optimize():
             storage.ld["optimizers"]["minors"].step()
