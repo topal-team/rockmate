@@ -79,7 +79,7 @@ class Buffer(Allocation):
 
 
 class Op:
-    def __init__(self, name, disabled=False):
+    def __init__(self, name, time=0, disabled=False):
         """
         Op type should be in Compute/Delete/Mapping/Allocate/Offload/Prefetch
         Compute/Delete/Mapping/Allocate happens in the main stream
@@ -87,22 +87,24 @@ class Op:
         self.name = name
         self.disabled = disabled
         self.overhead = 0
+        self.time = time
 
     def __repr__(self):
         return self.name
 
 class SynchronizeOp(Op):
     def __init__(self, name="", disabled=False):
-        super().__init__("Sync_"+name, disabled)
+        super().__init__("Sync_"+name, disabled=disabled)
 
 class ComputeOp(Op):
     def __init__(self, kcn, fast_forward=False, disabled=False, detach=True):
-        super().__init__(kcn.name, disabled)
+        super().__init__(kcn.name, disabled=disabled)
         self.kcn = kcn
         self.fast_forward = fast_forward
         self.detach = detach
         self.target = kcn
         self.overhead = kcn.overhead
+        self.time = kcn.time if kcn.time is not None else 0
 
     def __copy__(self):
         cls = self.__class__
@@ -128,7 +130,7 @@ class ComputeOp(Op):
 
 class DeleteOp(Op):
     def __init__(self, alloc: Allocation, disabled=False, grad=False):
-        super().__init__("Delete_" + alloc.name, disabled)
+        super().__init__("Delete_" + alloc.name, disabled=disabled)
         self.target = alloc
         self.grad = grad
 
@@ -151,7 +153,7 @@ class MappingOp(Op):
         disabled=False,
         copy=False
     ):
-        super().__init__("Mapping_" + name, disabled)
+        super().__init__("Mapping_" + name, disabled=disabled)
         self.sources = sources
         self.targets = targets
         self.indices = indices
@@ -161,7 +163,7 @@ class MappingOp(Op):
 
 class AllocateOp(Op):
     def __init__(self, alloc: Allocation, disabled=False):
-        super().__init__("Allocate_" + alloc.name, disabled)
+        super().__init__("Allocate_" + alloc.name, disabled=disabled)
         self.target = alloc
 
 
@@ -173,15 +175,17 @@ class OffloadOp(Op):
         before: Op = None,
         after: Op = None,
         disabled: bool = False,
-        grad:bool = False
+        grad:bool = False,
+        time:float = 0,
     ):
-        super().__init__("Offload_" + alloc.name, disabled)
+        super().__init__("Offload_" + alloc.name, disabled=disabled)
         self.target = alloc
         self.indices = indices
         self.disabled = disabled
         self.before = before
         self.after = after
         self.grad = grad
+        self.time = time
 
     def __repr__(self):
         return "Disabled" * self.disabled + f"Offload_{self.target}" +"_grad"*self.grad
@@ -195,22 +199,25 @@ class PrefetchOp(Op):
         before: Op = None,
         after: Op = None,
         disabled: bool = False,
+        time:float = 0,
     ):
-        super().__init__("Prefetch_" + alloc.name, disabled)
+        super().__init__("Prefetch_" + alloc.name, disabled=disabled)
         self.target = alloc
         self.indices = indices
         self.disabled = disabled
         self.before = before
         self.after = after
+        self.time = time
 
     def __repr__(self):
         return "Disabled" * self.disabled + f"Prefetch_{self.target}"
 
 class OptimizeOp(Op):
-    def __init__(self, name, list_params, alloc=None, disabled=False):
-        super().__init__("Optimize_" + name, disabled)
+    def __init__(self, name, list_params, alloc=None, disabled=False,time=0):
+        super().__init__("Optimize_" + name, disabled=disabled)
         self.list_params = list_params
         self.target = alloc or None
+        self.time = time
 
 
 class OpSchedule:

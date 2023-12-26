@@ -1165,7 +1165,8 @@ class ModelPULP:
                 if op.target.name == p:
                     op.grad = True
             i = self.active_steps.index((t,k))+1# TODO: distribute cpu optimization based on time
-            op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]))
+            op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]),
+                            time=parameters[p].mem/self.cpu_optimize_speed)
             opt_ops.append((*self.active_steps[i], op))
             self.cpu_optimized_steps[self.active_steps[i]].append(p)
             del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]))))
@@ -1191,11 +1192,13 @@ class ModelPULP:
                     if a:
                         init_ops.append((t, k, AllocateOp(Parameter(parameters[p]))))
                         op = PrefetchOp(
-                            alloc=Parameter(parameters[p]), indices=(0, None)
+                            alloc=Parameter(parameters[p]), indices=(0, None), 
+                            time=parameters[p].mem/self.bandwidthPrf
                         )
                         init_ops.append((t, k, op))
                         op = OffloadOp(
-                            alloc=Parameter(parameters[p]), indices=(0, None)
+                            alloc=Parameter(parameters[p]), indices=(0, None),
+                            time=parameters[p].mem/self.bandwidthOfl
                         )
                         restore_ops.append((t,k,op))
                         restore_ops.append((t, k, DeleteOp(Parameter(parameters[p]))))
@@ -1213,7 +1216,8 @@ class ModelPULP:
                 # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-ofl_size>tol:
                 #     pass
                 for p in select_paras:
-                    op = OffloadOp(alloc=Parameter(parameters[p]), indices=(0, None))
+                    op = OffloadOp(alloc=Parameter(parameters[p]), indices=(0, None),
+                                   time=parameters[p].mem/self.bandwidthOfl)
                     ofl_ops.append((t, k, op))
                     Offloaded[p] = 1
 
@@ -1251,7 +1255,8 @@ class ModelPULP:
                 #     pass
                 for p in select_paras:
                     prf_ops.append((t, k, AllocateOp(Parameter(parameters[p]))))
-                    op = PrefetchOp(alloc=Parameter(parameters[p]), indices=(0, None))
+                    op = PrefetchOp(alloc=Parameter(parameters[p]), indices=(0, None),
+                                    time=parameters[p].mem/self.bandwidthPrf)
                     prf_ops.append((t, k, op))
                     Alive[p] = 1
                     if (t>bwd_i and t<min(early_fwd+[self.T+1])) or t < fwd_i:
@@ -1572,13 +1577,15 @@ class ModelPULP:
 
                 for w in range(W):
                     # op_list.extend(self.create_prefetch_ops(t,k,w))
+                    op_list.extend(self.create_delete_ops(t, k, w))
+                    op_list.extend(self.create_optimize_ops(t, k, w))
+                for w in range(W):
                     if k in self.parameter2hcn[w]:
                         ofl_ops = self.create_offload_ops(t, k, w)
                         if ofl_ops:
                             op_list.append(SynchronizeOp(str(w)))
                             op_list.extend(ofl_ops)
-                    op_list.extend(self.create_delete_ops(t, k, w))
-                    op_list.extend(self.create_optimize_ops(t, k, w))
+                    
                 op_list.extend(prefetch_list)
         return op_list, init_alive_status, init_op_list, restore_op_list
     
