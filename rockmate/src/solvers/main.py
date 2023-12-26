@@ -1,10 +1,12 @@
 import rkgb
+import torch
 import numpy as np
 from copy import deepcopy
 from rkgb.Htools import H_C_node, H_D_node, H_graph, H_cluster
 from rkgb.Ktools import K_C_node, K_D_node
 from rkgb.utils.ast_add_on import ast_to_str
 from rkgb.utils.def_info import Var_info
+from rkgb.utils import irotor
 from .op_schedule import OpSchedule, ComputeOp, DeleteOp, Activation
 import time
 import psutil
@@ -369,6 +371,31 @@ def add_parameter_node(h_cluster, original_mod, minor_size=10*1024):
     setattr(h_cluster, "list_kdn_parameters", list_kdn_parameters)
     return list_kdn_parameters
 
+
+def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
+    timer = irotor.make_timer(torch.device("cuda"))
+    # p = deepcopy(_p).to("cuda")
+    p = torch.ones([20,1024,1024])
+    size = p.numel()
+    p.grad = torch.ones_like(p)
+    optimizer = gpu_optim([p], **optim_kwargs)
+    mem = torch.cuda.memory_allocated()
+    # timer.start()
+    for i in range(3):
+        optimizer.step()
+    # timer.end()
+    opt_size = torch.cuda.memory_allocated() - mem
+
+    p_c = torch.zeros_like(p, device="cpu")
+    p_c.grad = torch.ones_like(p_c)
+    optimizer = cpu_optim([p_c], **optim_kwargs)
+    timer.start()
+    for i in range(niter):
+        optimizer.step()
+    timer.end()
+    cpu_optimize_stats = {"optimizer_states_size": round(opt_size//size/p.element_size()),
+                          "cpu_optimize_speed": size*p.element_size()*niter/timer.elapsed()}
+    return cpu_optimize_stats
 
 
 

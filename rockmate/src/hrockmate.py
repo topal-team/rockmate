@@ -20,7 +20,7 @@ from rkgb.utils.small_fcts import get_device
 from rkgb.utils.ast_add_on import ast_to_str
 from rkgb import Ptools
 
-from .solvers.main import preprocess, solve_recursive
+from .solvers.main import preprocess, solve_recursive, get_cpu_optimize_stats
 from .solvers.op_schedule import *
 from .solvers import RK_rotor, HILP, TwRemat, RK_checkmate
 from .solvers.hilp import default_time_limit
@@ -51,6 +51,7 @@ class HRockmate(torch.nn.Module):
         max_size_S_graph_for_no_partitioning=40,
         cpu_optim = torch.optim.Adam,
         gpu_optim = torch.optim.Adam,
+        optim_kwargs = {},
         # [
         #    Ptools.Partitioner(),
         #    Ptools.Partitioner_bottom_to_top(),
@@ -145,12 +146,19 @@ class HRockmate(torch.nn.Module):
             )
             self.output = self.rkgb_res.K_graph.list_outputs_kdn_data[0]
             self.budget = budget
+            p = list(original_mod.parameters())[0]
+            cpu_optimize_stats = get_cpu_optimize_stats(p, 
+                                                        cpu_optim=cpu_optim, 
+                                                        gpu_optim=gpu_optim,
+                                                        optim_kwargs=optim_kwargs)
             self.gd = make_gd(
                 self.device, 
                 self.original_mod, 
                 self.dict_constants,
                 cpu_optim, 
-                gpu_optim
+                gpu_optim,
+                optim_kwargs=optim_kwargs,
+                cpu_optimize_stats = cpu_optimize_stats
             )
             self.list_solutions = []
             if solve_sched:
@@ -221,6 +229,7 @@ class HRockmate(torch.nn.Module):
         for solver in list_solvers:
             if isinstance(solver, HILP):
                 solver.config.solve_top_level = True
+                solver.config.cpu_optimize_kwargs = self.gd["cpu_optimize_stats"]
                 # print("temporarily changing total_nodes for top level hilp")
                 list_solutions.extend(
                     solver(self.rkgb_res.H_cluster, [budget], accurate_mem=True)

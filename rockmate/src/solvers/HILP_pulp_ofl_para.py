@@ -110,7 +110,7 @@ class ModelPULP:
         protected_names=[],
         grouping=True,
         grad_mode="offload",  # ["keep_all", "free_all", "free_asap", "offload"]
-        cpu_optimize = True
+        cpu_optimize_kwargs = None
     ):
         self.gcd = gcd if gcd else 1
         self.peak_budget = peak_budget / self.gcd
@@ -127,9 +127,10 @@ class ModelPULP:
         self.single_bwd = accurate_mem
         self.grouping = grouping
         self.grad_mode = grad_mode
-        self.cpu_optimize = cpu_optimize
-        self.optimizer_states_size = 2#*weight size
-        self.cpu_optimize_speed = 1024**2#B/ms
+        if cpu_optimize_kwargs:
+            self.cpu_optimize = True
+            self.optimizer_states_size = cpu_optimize_kwargs["optimizer_states_size"]#*weight size
+            self.cpu_optimize_speed = cpu_optimize_kwargs["cpu_optimize_speed"]#B/ms
 
         #############################
         self.hgraph = hgraph
@@ -1166,7 +1167,9 @@ class ModelPULP:
             i = self.active_steps.index((t,k))+1# TODO: distribute cpu optimization based on time
             op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]))
             opt_ops.append((*self.active_steps[i], op))
+            self.cpu_optimized_steps[self.active_steps[i]].append(p)
             del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]))))
+
             #if cpu optimize, do not keep w after bwd
         def apply_gpu_optimize(p):
             op = OptimizeOp(name=p,list_params=[p], alloc=Parameter(parameters[p]))
@@ -1275,6 +1278,10 @@ class ModelPULP:
             else:
                 apply_gpu_optimize(p)
         return ofl_ops, prf_ops, del_ops, opt_ops, init_ops, restore_ops
+
+    def distribute_cpu_optimize(self):
+        # after grouping the optimize ops, re-distribute them to reduce the overhead
+        pass
 
     def schedule(self, hgraph=None, check_valid=False):
         """
@@ -1409,6 +1416,7 @@ class ModelPULP:
         self.del_ops = []
         self.opt_ops = []
         self.cpu_optimized_params = {}
+        self.cpu_optimized_steps = {step:[] for step in self.active_steps}
         init_op_list = []
         restore_op_list = []
         if self.grouping:
