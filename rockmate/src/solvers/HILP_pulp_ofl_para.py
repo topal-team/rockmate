@@ -127,7 +127,7 @@ class ModelPULP:
         self.single_bwd = accurate_mem
         self.grouping = grouping
         self.grad_mode = grad_mode
-        if cpu_optimize_kwargs:
+        if cpu_optimize_kwargs and accurate_mem:
             self.cpu_optimize = True
             self.optimizer_states_size = cpu_optimize_kwargs["optimizer_states_size"]#*weight size
             self.cpu_optimize_speed = cpu_optimize_kwargs["cpu_optimize_speed"]#B/ms
@@ -354,6 +354,8 @@ class ModelPULP:
                 for k in self.krange(t):
                     if k in _deps_d[i]+_users_d[i]:
                         self.active_stages[i].append(t)
+            if not self.hgraph.list_hdn[i].deps:# src node
+                self.active_stages[i].append(-1)
         # to present whether one saved tensor can be inherited from the last stage
         self.AliveA = RkLpVariable.dicts(
             "AliveA", [(t, c)
@@ -445,11 +447,12 @@ class ModelPULP:
                 "AliveG",
                 [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
                 cat="Continuous",
-                lowBound=1 if self.grad_mode == "keep_all" else 0,
+                lowBound=0,
                 upBound=1,
             )  # w.grad is alive at the start of step j.
-            # for k in self.AliveG:
-            #     self.AliveG[k] = 0
+            if self.grad_mode in ["keep_all", "offload"]:
+                for k in self.AliveG:
+                    self.AliveG[k] = 0
 
             self.OflW = RkLpVariable.dicts(
                 "OflW",
@@ -1057,9 +1060,9 @@ class ModelPULP:
 
     def solve(self, solver=""):
         # some solvers have no support of 'Time limit reached' status
-        if self.with_parameters:
-            self.add_single_fwd_constraints()
-            self.add_single_bwd_constraints()
+        # if self.with_parameters:
+        #     self.add_single_fwd_constraints()
+        #     self.add_single_bwd_constraints()
         try:
             solver = get_solver(
                 solver, msg=0, timeLimit=self.ilp_solver_params["TimeLimit"]
