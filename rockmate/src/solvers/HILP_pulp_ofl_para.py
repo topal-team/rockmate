@@ -1167,10 +1167,15 @@ class ModelPULP:
             for (t,k,op) in ofl_ops:
                 if op.target.name == p:
                     op.grad = True
+                    break
+            # for (t,k,op) in del_ops:
+            #     if op.target.name == p:
+            #         op.grad = True
             i = self.active_steps.index((t,k))+1# TODO: distribute cpu optimization based on time
             op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]),
                             time=parameters[p].mem/self.cpu_optimize_speed)
             opt_ops.append((*self.active_steps[i], op))
+            del_ops.append((*self.active_steps[i],DeleteOp(Parameter(parameters[p]), grad=True)))
             self.cpu_optimized_steps[self.active_steps[i]].append(p)
             del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]))))
 
@@ -1578,16 +1583,25 @@ class ModelPULP:
                         hdn = hgraph.list_hdn[i]
                         op_list.append(DeleteOp(Activation(hdn.kdn)))
 
-                for w in range(W):
-                    # op_list.extend(self.create_prefetch_ops(t,k,w))
-                    op_list.extend(self.create_delete_ops(t, k, w))
-                    op_list.extend(self.create_optimize_ops(t, k, w))
+                wait_op = []
                 for w in range(W):
                     if k in self.parameter2hcn[w]:
-                        ofl_ops = self.create_offload_ops(t, k, w)
-                        if ofl_ops:
-                            op_list.append(SynchronizeOp(str(w)))
-                            op_list.extend(ofl_ops)
+                        wait_op.extend(self.create_offload_ops(t, k, w))
+                        wait_op.extend(self.create_delete_ops(t, k, w))
+                        wait_op.extend(self.create_optimize_ops(t, k, w))
+                        # op_list.extend(self.create_prefetch_ops(t,k,w))
+                    else:
+                        op_list.extend(self.create_offload_ops(t, k, w))
+                        op_list.extend(self.create_delete_ops(t, k, w))
+                        op_list.extend(self.create_optimize_ops(t, k, w))
+                if wait_op:# for the current layer, need to synchronize first
+                    op_list.extend([SynchronizeOp(str(self.hcn2parameter[k]))]+wait_op)
+                # for w in range(W):
+                #     if k in self.parameter2hcn[w]:
+                #         ofl_ops = self.create_offload_ops(t, k, w)
+                #         if ofl_ops:
+                #             op_list.append(SynchronizeOp(str(w)))
+                #             op_list.extend(ofl_ops)
                     
                 op_list.extend(prefetch_list)
         return op_list, init_alive_status, init_op_list, restore_op_list
