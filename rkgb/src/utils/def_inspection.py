@@ -11,6 +11,29 @@ import gc
 # = CREATE A FRESH ENVIRONNEMENT TO EXEC =
 # ========================================
 
+class FakeMod():
+    def __init__(self, *args, **kwargs):
+        self.__list__ = []
+        self.__dict__.update(kwargs)
+        
+    def __getitem__(self, i):
+        if i>=len(self.__list__):
+            self.__list__ += [FakeMod() for _ in range((i-len(self.__list__)+1))]
+        return self.__list__[i]
+
+    def __setitem__(self, i, value):
+        if i>=len(self.__list__):
+            self.__list__ += [FakeMod() for _ in range((i-len(self.__list__)+1))]
+        self.__list__[i] = value
+
+    def __setattr__(self, name: str, value):
+        self.__dict__[name] = value
+
+    def __getattr__(self, name):
+        if name not in self.__dict__:
+            self.__setattr__(name, FakeMod())
+        return self.__dict__[name]
+
 def generate_our_global(sg,model,device):
     our_global = globals().copy()
     our_global.update(sg.dict_constants)
@@ -25,6 +48,7 @@ def generate_our_global(sg,model,device):
 
 def generate_tmp_local(sn,sg,our_global,device):
     tmp_local = dict()
+    add_cuda_tmp_local(sg.init_node, tmp_local, our_global)
     exec(
         sg.init_node.get_code(force_special_kwargs=True),
         our_global,tmp_local)
@@ -41,6 +65,7 @@ def generate_tmp_local(sn,sg,our_global,device):
             # we create the main_target value, and we run the body_code
             # but the body_code may requires some artefacts
             # thus we need req of req
+            add_cuda_tmp_local(req_sn, tmp_local, our_global)
             req_sn_mt = req_sn.main_target
             main_info = sg.dict_info[req_sn_mt]
             req_sn_mt_value = def_info.generate_val(main_info,device)
@@ -58,7 +83,23 @@ def generate_tmp_local(sn,sg,our_global,device):
                             tmp_local[req_req_tar] = (
                                 def_info.generate_val(req_req_info,device))
             exec(body_code,our_global,tmp_local)
+    add_cuda_tmp_local(sn, tmp_local, our_global)
     return tmp_local
+
+def add_cuda_tmp_local(sn, tmp_local, our_global):
+    tmp_local["self"] = FakeMod()
+    for assign in sn.get_code_ast().body:
+        if not hasattr(assign.value, "args"):continue
+        for arg_ast in assign.value.args:
+            if "self" not in ast_add_on.ast_to_str(arg_ast):continue
+            arg_str = ast_add_on.ast_to_str(arg_ast)
+            value = eval(arg_str, our_global)
+            tmp_local["__value"] = value.to("cuda")
+            exec(f"{arg_str} = __value", our_global, tmp_local)
+    for k,v in our_global.items():
+        if isinstance(v, torch.Tensor):
+            tmp_local[k] = v.to("cuda")
+    if "__value" in tmp_local:del tmp_local["__value"]
 
 # ======================
 
@@ -213,6 +254,7 @@ class inspector():
     # -> We define an inspector class to save every intermediate 
     # -> information used during inspection, very helpful to debug.
     def __init__(self,sn,sg,our_global,device):
+        # device = torch.device("cuda")
         self.sn = sn
         self.sg = sg
         self.mt = sn.main_target
