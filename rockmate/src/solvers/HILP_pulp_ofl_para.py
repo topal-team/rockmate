@@ -134,6 +134,7 @@ class ModelPULP:
             self.cpu_optimize = True
             self.optimizer_states_size = cpu_optimize_kwargs["optimizer_states_size"]#*weight size
             self.cpu_optimize_speed = cpu_optimize_kwargs["cpu_optimize_speed"]#B/ms
+            self.optimizer_overhead = cpu_optimize_kwargs["optimizer_overhead"]#*weight size
 
         #############################
         self.hgraph = hgraph
@@ -473,6 +474,7 @@ class ModelPULP:
                     self.AliveG[k] = 0
                 for k, l_w in self.hcn2param.items():
                     grad_size = sum(self.parameter_size[w] for w in l_w)
+                    # grad_size += max(self.parameter_size[w] for w in l_w)* self.optimizer_overhead
                     if k > self.loss_idx:#add params grad size to bwd overhead 
                         self.overhead[k] = [v+grad_size for v in self.overhead[k]]
 
@@ -862,7 +864,8 @@ class ModelPULP:
                 j = self.hcn2sub_c[k]
                 self.md += self.U[t, k] >= 0
                 self.md += self.U[t, k] <= self.peak_budget - parameter_mem
-                if j is None or not accurate_mem:
+                # if j is None or not accurate_mem:
+                if True:
                     # don't consider correction_term
                     self.md += (
                         self.U[t, k]
@@ -956,7 +959,11 @@ class ModelPULP:
                     self.parameter_size[w] *
                     self.optimizer_states_size)
                     for w in range(self.W))
-        return mem + self.optimizer_states_mem
+        optimizer_overhead = 0
+        if k > self.loss_idx and k in self.hcn2param:
+            l_w = self.hcn2param[k]
+            optimizer_overhead += sum((1-self.sumOptC[w])*self.parameter_size[w] for w in l_w)* self.optimizer_overhead
+        return mem + self.optimizer_states_mem + optimizer_overhead
     
     def krange(self, t):
         if self.single_fwd:
@@ -1199,7 +1206,8 @@ class ModelPULP:
             #         op.grad = True
             i = self.active_steps.index((t,k))+1# TODO: distribute cpu optimization based on time
             op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]),
-                            time=parameters[p].mem/self.cpu_optimize_speed)
+                            time=parameters[p].mem/self.cpu_optimize_speed,
+                            )
             opt_ops.append((*self.active_steps[i], op))
             del_ops.append((*self.active_steps[i],DeleteOp(Parameter(parameters[p]), grad=True)))
             self.cpu_optimized_steps[self.active_steps[i]].append(p)
@@ -1207,7 +1215,8 @@ class ModelPULP:
 
             #if cpu optimize, do not keep w after bwd
         def apply_gpu_optimize(p):
-            op = OptimizeOp(name=p,list_params=[p], alloc=Parameter(parameters[p]))
+            op = OptimizeOp(name=p,list_params=[p], alloc=Parameter(parameters[p]),
+                            overhead=parameters[p].mem*self.overhead)
             opt_ops.append((bwd_i, bwd_i, op))# optimize after bwd
             del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]), grad=True)))
 
@@ -1301,13 +1310,15 @@ class ModelPULP:
                     p: parameters[p].mem * a for p, a in cpu_optimize_candidates.items() if a >0
                 }
         select_paras = []
-        if candidates:
-            selector = knapsack(list(candidates.items()))
+        
             # cpu_optimize_size = self.sumOptC[w].value()*parameter_size# size by subgraph
-            cpu_optimize_size = (sum(self.sumOptC[w_].value() * 
-                                    self.parameter_size[w_] 
-                                    for w_ in range(w, self.W)) 
-                                - sum(self.cpu_optimized_params.values()))# size by all graphs
+        cpu_optimize_size = (sum(self.sumOptC[w_].value() * 
+                                self.parameter_size[w_] 
+                                for w_ in range(w, self.W)) 
+                            - sum(self.cpu_optimized_params.values()))# size by all graphs
+        if candidates and cpu_optimize_size>0:
+            # print(cpu_optimize_size, w)
+            selector = knapsack(list(candidates.items()))
             select_paras = selector.select_size(cpu_optimize_size)
             
         for p in parameters:
