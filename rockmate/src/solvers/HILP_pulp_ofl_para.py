@@ -87,6 +87,9 @@ class RkLpVariable(LpVariable):
             )
         return d
 
+    def __repr__(self):
+        if self.varValue:return str(self.varValue)
+        return super().__repr__()
 
 class ModelPULP:
     """
@@ -432,12 +435,23 @@ class ModelPULP:
                     self.parameter_size.append(0)
                 self.param2sub_c = {w: [w] for w in range(W)}#TODO: add shared weight
                 #self.param2hcn = {w: self.sub_c2hcn[w] for w in range(W)}
-                self.param2hcn = {w:[k for k in self.sub_c2hcn[c]] 
-                                   for w, cs in self.param2sub_c.items() 
-                                   for c in cs}
-                self.hcn2param = {
-                    k: w for w, l_k in self.param2hcn.items() for k in l_k
-                }
+                self.param2hcn = {w:[] for w in range(W)}
+                self.hcn2param = {}# is no param for hcn[k], k not in hcn2param
+                for w,l_c in self.param2sub_c.items():
+                    for c in l_c:
+                        for k in self.sub_c2hcn[c]:
+                            if k in self.hcn2param:
+                                self.hcn2param[k].append(w)
+                            else:
+                                self.hcn2param[k] = [w]
+                            self.param2hcn[w].append(k)
+
+                # self.param2hcn = {w:[k for k in self.sub_c2hcn[c]] 
+                #                    for w, cs in self.param2sub_c.items() 
+                #                    for c in cs}
+                # self.hcn2param = {
+                #     k: [w] for w, l_k in self.param2hcn.items() for k in l_k
+                # }
 
 
             self.AliveW = RkLpVariable.dicts(
@@ -540,9 +554,10 @@ class ModelPULP:
             for k in self.krange(t):
                 # if k==self.loss_idx:continue
                 if self.with_parameters and k in self.hcn2param:
-                    w = self.hcn2param[k] if k != self.loss_idx else None
-                    ofl_time = (
+                    # w = self.hcn2param[k] if k != self.loss_idx else None
+                    ofl_time = lpSum(
                         self.parameter_size[w] / self.bandwidthOfl * self.OflW[t, k, w]
+                        for w in self.hcn2param[k]
                     )
                 else:
                     ofl_time = 0
@@ -1032,9 +1047,9 @@ class ModelPULP:
                 #     for w in range(self.W)
                 # )
                 if k in self.hcn2param:
-                    w = self.hcn2param[k]
-                    self.PrfWProg[t,k,w] = get_progress(self.PrfW, t, k, w)
-                    self.md += self.sumComp[t, k] <= self.PrfWProg[t,k,w] + (1-self.sumOptC[w])
+                    for w in self.hcn2param[k]:
+                        self.PrfWProg[t,k,w] = get_progress(self.PrfW, t, k, w)
+                        self.md += self.sumComp[t, k] <= self.PrfWProg[t,k,w] + (1-self.sumOptC[w])
                 for w in range(self.W):
                     self.OflWProg[(t,k,w)] = get_progress(self.OflW, t, k, w)
                     self.OptCProg[(t,k,w)] = get_progress(self.OptC, t, k, w)
@@ -1539,29 +1554,29 @@ class ModelPULP:
                 list_alloc_para = [
                     Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
                 ]
-                w = self.hcn2param[k]
+                for w in self.hcn2param[k]:
                 # parameters = [p.name for p in list_alloc_para if p.name not in self.cpu_optimized_params]
                 # if not hcn.is_fwd and parameters:
                 #     sub_op_list += [OptimizeOp(hcn.sub_cluster.name, 
                 #                                list_params=parameters)]
 
-                if (
-                    not self.grouping and self.current_buffers[w] is not None
-                ):  # first time
-                    self.current_buffers[w] = Buffer(
-                        hcn.sub_cluster.name,
-                        mem=sum(alloc.mem for alloc in list_alloc_para),
-                    )
-                    # Map buffer to parameter tensors
-                    # op_list.extend([AllocateOp(alloc) for alloc in list_alloc_para])
-                    op_list.append(
-                        MappingOp(
-                            name=hcn.sub_cluster.name + "_split",
-                            sources=[self.current_buffers[w]],
-                            targets=list_alloc_para,
+                    if (
+                        not self.grouping and self.current_buffers[w] is not None
+                    ):  # first time
+                        self.current_buffers[w] = Buffer(
+                            hcn.sub_cluster.name,
+                            mem=sum(alloc.mem for alloc in list_alloc_para),
                         )
-                    )
-                    op_list.append(DeleteOp(self.current_buffers[w]))
+                        # Map buffer to parameter tensors
+                        # op_list.extend([AllocateOp(alloc) for alloc in list_alloc_para])
+                        op_list.append(
+                            MappingOp(
+                                name=hcn.sub_cluster.name + "_split",
+                                sources=[self.current_buffers[w]],
+                                targets=list_alloc_para,
+                            )
+                        )
+                        op_list.append(DeleteOp(self.current_buffers[w]))
 
                 # print(t, k, len(sub_op_list), len(op_list))
                 op_list += sub_op_list
@@ -1602,7 +1617,7 @@ class ModelPULP:
                         op_list.extend(self.create_delete_ops(t, k, w))
                         op_list.extend(self.create_optimize_ops(t, k, w))
                 if wait_op:# for the current layer, need to synchronize first
-                    op_list.extend([SynchronizeOp(str(self.hcn2param[k]))]+wait_op)
+                    op_list.extend([SynchronizeOp(str(k))]+wait_op)
                 # for w in range(W):
                 #     if k in self.param2hcn[w]:
                 #         ofl_ops = self.create_offload_ops(t, k, w)
