@@ -532,7 +532,7 @@ class ModelPULP:
         for t in range(T):
             for k in self.krange(t):
                 # if k==self.loss_idx:continue
-                if self.with_parameters and k != self.loss_idx:
+                if self.with_parameters and k in self.hcn2parameter[k]:
                     w = self.hcn2parameter[k] if k != self.loss_idx else None
                     ofl_time = (
                         self.parameter_size[w] / self.bandwidthOfl * self.OflW[t, k, w]
@@ -1475,9 +1475,9 @@ class ModelPULP:
                     prefetch_ops = self.create_prefetch_ops(t, k, w)
                     op_list.extend(prefetch_ops[0])
                     prefetch_list.extend(prefetch_ops[1])
-                for w in range(W):
-                    if not k in self.parameter2hcn[w]:
-                        op_list.extend(self.create_offload_ops(t, k, w))
+                # for w in range(W):
+                #     if not k in self.parameter2hcn[w]:
+                #         op_list.extend(self.create_offload_ops(t, k, w))
 
                 # print(t,k)
                 hcn = hgraph.list_hcn[k]
@@ -1587,8 +1587,8 @@ class ModelPULP:
                 for w in range(W):
                     if k in self.parameter2hcn[w]:
                         wait_op.extend(self.create_offload_ops(t, k, w))
-                        wait_op.extend(self.create_delete_ops(t, k, w))
                         wait_op.extend(self.create_optimize_ops(t, k, w))
+                        wait_op.extend(self.create_delete_ops(t, k, w))
                         # op_list.extend(self.create_prefetch_ops(t,k,w))
                     else:
                         op_list.extend(self.create_offload_ops(t, k, w))
