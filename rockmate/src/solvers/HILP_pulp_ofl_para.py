@@ -1549,6 +1549,7 @@ class ModelPULP:
                     sub_op_list = deepcopy(h_obj.ff_op_list)
 
                 if hcn.sub_cluster is None:
+                    op_list += sub_op_list
                     continue
 
                 list_alloc_para = [
