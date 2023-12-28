@@ -29,7 +29,7 @@ from .op_schedule import (
 )
 from rkgb.Htools import *
 from rkgb.utils.global_vars import solver_name
-
+# from functools import lru_cache
 
 class knapsack:
     def __init__(self, parameter_size: list):
@@ -1113,6 +1113,7 @@ class ModelPULP:
 
         sol = self.sol
         if self.feasible:
+            # print("finished solving")
             self.solve_time = self.md.solutionTime
             self.active_steps = []
             for t in list(range(self.loss_idx + 1, self.T)) + list(
@@ -1216,7 +1217,7 @@ class ModelPULP:
             #if cpu optimize, do not keep w after bwd
         def apply_gpu_optimize(p):
             op = OptimizeOp(name=p,list_params=[p], alloc=Parameter(parameters[p]),
-                            overhead=parameters[p].mem*self.overhead)
+                            overhead=parameters[p].mem*self.optimizer_overhead)
             opt_ops.append((bwd_i, bwd_i, op))# optimize after bwd
             del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]), grad=True)))
 
@@ -1278,7 +1279,6 @@ class ModelPULP:
                 for p in select_paras:
                     del_ops.append((t, k, DeleteOp(Parameter(parameters[p]))))
                     Alive[p] = 0
-
             if current_alive_size < next_alive_size:
                 # prefetch should be smaller than solution
                 prf_size = next_alive_size - current_alive_size
@@ -1317,7 +1317,6 @@ class ModelPULP:
                                 for w_ in range(w, self.W)) 
                             - sum(self.cpu_optimized_params.values()))# size by all graphs
         if candidates and cpu_optimize_size>0:
-            # print(cpu_optimize_size, w)
             selector = knapsack(list(candidates.items()))
             select_paras = selector.select_size(cpu_optimize_size)
             
@@ -1356,7 +1355,7 @@ class ModelPULP:
             op_list = []
             init_op_list = []
             restore_op_list = []
-            init_alive_status = []
+            init_alive_status = {}
             for t in range(T):
                 for k in self.krange(t):
                     if t == self.loss_idx and k == self.loss_idx:
