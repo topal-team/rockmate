@@ -59,15 +59,16 @@ class Activation(Allocation):
 
 
 class Parameter(Allocation):
-    def __init__(self, kdn):
+    def __init__(self, kdn, grad=False):
         super().__init__(
-            name=kdn.name,
+            name=kdn.name + "_grad"*grad,
             alloc_type="Parameter",
             mem=kdn.mem,
             info=kdn.info,
             dtype=kdn.info.dtype,
         )
         self.kdn = kdn
+        self.grad = grad
 
 
 class Buffer(Allocation):
@@ -135,7 +136,7 @@ class DeleteOp(Op):
         self.grad = grad
 
     def __repr__(self):
-        return "Delete_" + self.target.name
+        return "Delete_" + self.target.name+"grad"*self.grad
 
 
 class MappingOp(Op):
@@ -272,6 +273,9 @@ class OpSchedule:
                 self.list_alloc.extend(
                     [Parameter(kdn) for kdn in cluster.list_kdn_parameters]
                 )
+                self.list_alloc.extend(
+                    [Parameter(kdn, grad=True) for kdn in cluster.list_kdn_parameters]
+                )# add parameter grad allocation
                 self.list_alloc.extend(self.create_buffer_list())
         self.dict_alloc = {alloc.name: alloc for alloc in self.list_alloc}
         self.all_interfaces = [
@@ -394,19 +398,26 @@ class OpSchedule:
             if isinstance(op, AllocateOp):
                 alive_status[op.target.name] = True
         # TODO: add init alive for parameters
-
+        bwd2param = {}
+        for alloc in self.list_alloc:
+            if isinstance(alloc, Parameter):
+                for kcn in alloc.kdn.users_real:
+                    bwd2param[kcn.name.replace("fwd", "bwd")] = alloc.kdn.name+"_grad"
+                
         alive_list = []
         for op in self.op_list:
             if op.disabled:
                 alive_list.append(alive_status.copy())
                 continue
             if isinstance(op, DeleteOp):
-                alive_status[op.target.name] = False
+                alive_status[op.target.name+"_grad"*op.grad] = False
             elif isinstance(op, ComputeOp):
                 # compute op should not be disabled except loss which is useful for alive status
                 for kdn in op.kcn.users:
                     if not ("phantoms" in kdn.name and op.fast_forward):
                         alive_status[kdn.name] = True
+                if op.kcn.name in bwd2param:
+                    alive_status[bwd2param[op.kcn.name]] = True
             elif isinstance(op, AllocateOp):
                 alive_status[op.target.name] = True
             alive_list.append(alive_status.copy())

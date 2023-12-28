@@ -309,6 +309,7 @@ class HRockmate(torch.nn.Module):
                 #     requires_grad=v.kdn.info.requires_grad,
                 # )
             if isinstance(v, Parameter):
+                if v.grad:continue
                 target = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
                 storage.ld["cpu_"+k] = torch.empty_like(target, 
                                                     dtype=target.dtype, 

@@ -446,7 +446,8 @@ class Compiler:
         if op_sched.alive_list == []:
             op_sched.alive_list = op_sched.create_alive_list()
         self.alive_list = op_sched.alive_list
-        self.parameters = {k:op_sched.dict_alloc[k] for k in self.alive_list[0].keys() if "parameter" in k}
+        self.parameters = {k:alloc for k, alloc in op_sched.dict_alloc.items() if (
+                           isinstance(alloc, Parameter) and not alloc.grad)}
         # print(self.parameters)
         # self.prf_list = op_sched.prf_list
         # self.ofl_list = op_sched.ofl_list
@@ -776,8 +777,11 @@ class Compiler:
         return mapping
     
     def fct_optimize(self, op):
+        # for i in [15,16,17,18]:
+        # if f"cpu_" in op.name:
+        #     def optimize():pass
+        #     return optimize
         def optimize():
-            # pass
             # torch.cuda.synchronize()
             # self.gd["offload_stream"].synchronize()
 
@@ -787,6 +791,7 @@ class Compiler:
             #     self.storage.ld[p].grad.zero_()
             #     self.storage.ld[p.removeprefix("cpu_")].grad = None
             # torch.cuda.synchronize()
+            # pass
         return optimize
 
 

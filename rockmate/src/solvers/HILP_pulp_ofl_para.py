@@ -471,6 +471,10 @@ class ModelPULP:
             if self.grad_mode in ["keep_all", "offload"]:
                 for k in self.AliveG:
                     self.AliveG[k] = 0
+                for k, l_w in self.hcn2param.items():
+                    grad_size = sum(self.parameter_size[w] for w in l_w)
+                    if k > self.loss_idx:#add params grad size to bwd overhead 
+                        self.overhead[k] = [v+grad_size for v in self.overhead[k]]
 
             self.OflW = RkLpVariable.dicts(
                 "OflW",
@@ -1341,6 +1345,7 @@ class ModelPULP:
             op_list = []
             init_op_list = []
             restore_op_list = []
+            init_alive_status = []
             for t in range(T):
                 for k in self.krange(t):
                     if t == self.loss_idx and k == self.loss_idx:
@@ -1418,7 +1423,7 @@ class ModelPULP:
             # prf_list=prf_list,
             loss_idx=None,
             cluster=self.hgraph.cluster,
-            # init_alive_status=init_alive_status,
+            init_alive_status=init_alive_status,
             init_op_list=init_op_list,
             restore_op_list=restore_op_list,
             with_parameters=self.with_parameters,
