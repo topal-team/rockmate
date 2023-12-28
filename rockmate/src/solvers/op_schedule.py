@@ -80,14 +80,14 @@ class Buffer(Allocation):
 
 
 class Op:
-    def __init__(self, name, time=0, disabled=False):
+    def __init__(self, name, time=0, disabled=False, overhead=0):
         """
         Op type should be in Compute/Delete/Mapping/Allocate/Offload/Prefetch
         Compute/Delete/Mapping/Allocate happens in the main stream
         """
         self.name = name
         self.disabled = disabled
-        self.overhead = 0
+        self.overhead = overhead
         self.time = time
 
     def __repr__(self):
@@ -214,8 +214,8 @@ class PrefetchOp(Op):
         return "Disabled" * self.disabled + f"Prefetch_{self.target}"
 
 class OptimizeOp(Op):
-    def __init__(self, name, list_params, alloc=None, disabled=False,time=0):
-        super().__init__("Optimize_" + name, disabled=disabled)
+    def __init__(self, name, list_params, alloc=None, disabled=False,time=0, overhead=0):
+        super().__init__("Optimize_" + name, disabled=disabled, overhead=overhead)
         self.list_params = list_params
         self.target = alloc or None
         self.time = time
@@ -579,7 +579,13 @@ class OpSchedule:
             / sum(op.kcn.time for op in all_compute)
             - 1
         )
-
+    
+    def optimizer_states_size(self):
+        optim_size = 0
+        for op in self.op_list:
+            if isinstance(op, OptimizeOp) and "cpu" not in op.name:
+                optim_size += sum(self.dict_alloc[kdn].mem for kdn in op.list_params)
+        return optim_size
 
 # def hg_to_cluster(hg: H_graph, kg: K_graph):
 #     interfaces = dict()
