@@ -251,8 +251,9 @@ class HRockmate(torch.nn.Module):
             self.get_compiled_fct()
         self.list_solutions.extend(list_solutions)
 
-    def get_compiled_fct(self):
-        self.compiler = Compiler(self.gd)
+    def get_compiled_fct(self, new_compiler=True):
+        if new_compiler:
+            self.compiler = Compiler(self.gd)
         self.fct_list, self.init_fct_list, self.restore_fct_list = self.compiler.compile_from_schedule(self.op_sched)
         loss_idx = self.op_sched.loss_idx
 
