@@ -365,7 +365,8 @@ def add_parameter_node(h_cluster, original_mod, minor_size=10*1024):
                     if p.numel()<minor_size:
                         continue
                     info = Var_info(p)
-                    kdn = K_D_node(main_target=n, kdn_type="parameter", info=info)
+                    kdn = K_D_node(main_target=n, kdn_type="parameter", info=info,)
+                    kdn.users_real.add(kcn)
                     kdn.mem = p.shape.numel()*p.element_size()
                     list_kdn_parameters.append(kdn)
     setattr(h_cluster, "list_kdn_parameters", list_kdn_parameters)
@@ -380,12 +381,15 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
     size = p.numel()
     p.grad = torch.ones_like(p)
     optimizer = gpu_optim([p], **optim_kwargs)
+    torch.cuda.reset_accumulated_memory_stats()
     mem = torch.cuda.memory_allocated()
     # timer.start()
     for i in range(3):
         optimizer.step()
     # timer.end()
-    opt_size = torch.cuda.memory_allocated() - mem
+    mem_after = torch.cuda.memory_allocated()
+    opt_size = mem_after - mem
+    opt_overhead = torch.cuda.max_memory_allocated() - mem_after
 
     p_c = torch.zeros_like(p, device="cpu")
     p_c.grad = torch.ones_like(p_c)
@@ -395,6 +399,7 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
         optimizer.step()
     timer.end()
     cpu_optimize_stats = {"optimizer_states_size": round(opt_size//size/p.element_size()),
+                          "optimizer_overhead":round(opt_overhead//size/p.element_size()),
                           "cpu_optimize_speed": size*p.element_size()*niter/timer.elapsed()}
     return cpu_optimize_stats
 
