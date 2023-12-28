@@ -346,10 +346,11 @@ class HRockmate(torch.nn.Module):
             if n not in [kdn.main_target for kdn in self.rkgb_res.H_cluster.list_kdn_parameters]:
                 self.minor_parameters.append(p)
                 p.data = p.data.to("cuda")
-        storage.ld["optimizers"]["minors"] = self.gd["gpu_optim"](self.minor_parameters, **self.gd["opt_kwargs"])
+        if self.minor_parameters:
+            storage.ld["optimizers"]["minors"] = self.gd["gpu_optim"](self.minor_parameters, **self.gd["opt_kwargs"])
         
         def optimize():
-            storage.ld["optimizers"]["minors"].step()
+            if self.minor_parameters:storage.ld["optimizers"]["minors"].step()
             for p in self.minor_parameters:p.grad=None
         self.bwd_fct_list.append([optimize])
 
