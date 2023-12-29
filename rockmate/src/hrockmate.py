@@ -42,6 +42,7 @@ class HRockmate(torch.nn.Module):
         model_inputs,
         budget=None,
         list_solvers=[],
+        rkgb_res=None,
         solve_sched=True,
         verbose=False,
         ilp_solver="gurobi",
@@ -106,13 +107,16 @@ class HRockmate(torch.nn.Module):
         # because torch.nn.Module will register it as a submodule
         # -- use gkGB --
         try:
-            self.rkgb_res = make_all_graphs(
-                original_mod,
-                dict_inputs,
-                verbose=verbose,
-                wanted_graphs={"K"},
-                partitioners=partitioners,
-            )
+            if rkgb_res is None:
+                self.rkgb_res = make_all_graphs(
+                    original_mod,
+                    dict_inputs,
+                    verbose=verbose,
+                    wanted_graphs={"K"},
+                    partitioners=partitioners,
+                )
+            else:
+                self.rkgb_res = rkgb_res
             if len(self.rkgb_res.S_graph.nodes) <= max_size_S_graph_for_no_partitioning:
                 # -> No partitioning !
                 make_late_partitioning(
