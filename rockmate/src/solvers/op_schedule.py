@@ -221,6 +221,67 @@ class OptimizeOp(Op):
         self.target = alloc or None
         self.time = time
 
+class ListOp(list):
+    def __init__(self, ops) -> None:
+        super(ListOp, self).__init__(ops)
+        self._pop = super(ListOp, self).pop
+        self._append = super(ListOp, self).append
+        self._insert = super(ListOp, self).insert
+        self.time = sum(op.time for op in ops)
+
+    def pop(self,index):
+        self.time -= self[index].time
+        return self._pop(index)
+    def append(self,op):
+        self.time += op.time
+        return self._append(op)
+    def insert(self,i,op):
+        self.time += op.time
+        return self._insert(i,op)
+
+class Step():
+    def __init__(self, op_list:list) -> None:
+
+        ofl_ops = []
+        prf_ops = []
+        opt_ops = []
+        comp_ops = []
+        self.alloc_ops = []
+        self.del_ops = []
+        for op in op_list:
+            if isinstance(op, OffloadOp):
+                ofl_ops.append(op)
+            elif isinstance(op, PrefetchOp):
+                prf_ops.append(op)
+            elif isinstance(op, OptimizeOp):# and "cpu" in op.name:
+                opt_ops.append(op)
+            elif isinstance(op, ComputeOp):
+                comp_ops.append(op)
+            elif isinstance(op, DeleteOp):
+                self.del_ops.append(op)
+            else:#if isinstance(op, AllocateOp):
+                self.alloc_ops.append(op)
+
+        self.ofl_ops = ListOp(ofl_ops)
+        self.prf_ops = ListOp(prf_ops)
+        self.opt_ops = ListOp(opt_ops)
+        self.comp_ops = ListOp(comp_ops)
+    
+    @property
+    def op_list(self):
+        return self.alloc_ops+self.ofl_ops+self.prf_ops+self.comp_ops+self.opt_ops+self.del_ops
+    @property
+    def time(self):
+        return max(self.ofl_ops.time, 
+                   self.prf_ops.time, 
+                   self.opt_ops.time, 
+                   self.comp_ops.time)
+
+    def all_time(self):
+        return (self.ofl_ops.time, 
+                   self.prf_ops.time, 
+                   self.opt_ops.time, 
+                   self.comp_ops.time)
 
 class OpSchedule:
     solver = None
@@ -247,12 +308,15 @@ class OpSchedule:
         New role: greedy algorithm to rearrange the prefetch/offload ops
         Parameters are read from the cluster
         """
-        self.op_list = op_list
+        self._op_list = op_list
         self.init_op_list = init_op_list
         self.restore_op_list = restore_op_list
         self.prf_list = prf_list
         self.ofl_list = ofl_list
         self.with_parameters = with_parameters
+        self.from_steps = with_parameters
+        if self.from_steps:
+            self.create_steps()
         if loss_idx is None:
             # Find the last loss op before the first bwd
             for i, op in enumerate(self.op_list):
@@ -362,13 +426,28 @@ class OpSchedule:
         else:
             self.alive_list = []
 
+    def create_steps(self):
+        self.steps = []
+        step_op = []
+        for op in self._op_list:
+            if isinstance(op, SynchronizeOp):
+                if step_op:self.steps.append(Step(step_op))
+                step_op = []
+            step_op.append(op)
+        self.steps.append(Step(step_op))
+            # print(op, op.time)
+        
+
     def create_alive_np_array(self):
         alive_list = self.alive_list or self.create_alive_list()
-        self.alloc_mem = np.array([alloc.mem for alloc in self.list_alloc])
-        self.alive_array = np.array([[1 if alive_list[i][a.name] else 0 
+        self.np_alloc_mem = np.array([alloc.mem for alloc in self.list_alloc])
+        self.np_overhead = np.array([op.overhead for op in self.op_list])
+        self.alive_array = np.array([[1 if self.init_alive_status[a.name] else 0 
+                                      for a in self.list_alloc]+
+                                      [1 if alive_list[i][a.name] else 0 
                                       for a in self.list_alloc] 
                                       for i ,_ in enumerate(self.op_list)])
-        
+        self.alive_diff_array = np.diff(self.alive_array, axis=0)
 
     def create_buffer_list(self):
         buffer_set = set()
@@ -406,6 +485,8 @@ class OpSchedule:
         for op in self.init_op_list:
             if isinstance(op, AllocateOp):
                 alive_status[op.target.name] = True
+        self.init_alive_status = alive_status.copy()
+
         # TODO: add init alive for parameters
         bwd2param = {}
         for alloc in self.list_alloc:
@@ -595,6 +676,16 @@ class OpSchedule:
             if isinstance(op, OptimizeOp) and "cpu" not in op.name:
                 optim_size += sum(self.dict_alloc[kdn].mem for kdn in op.list_params)
         return optim_size
+
+    @property
+    def op_list(self):
+        if self.from_steps:
+            op_list = []
+            for step in self.steps:
+                op_list += step.op_list
+            return op_list
+        else:
+            return self._op_list
 
 # def hg_to_cluster(hg: H_graph, kg: K_graph):
 #     interfaces = dict()
