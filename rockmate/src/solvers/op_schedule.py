@@ -5,6 +5,7 @@ from rkgb.Htools import *
 from collections import namedtuple
 from copy import deepcopy
 import warnings
+import numpy as np
 
 
 class Allocation:
@@ -361,14 +362,22 @@ class OpSchedule:
         else:
             self.alive_list = []
 
+    def create_alive_np_array(self):
+        alive_list = self.alive_list or self.create_alive_list()
+        self.alloc_mem = np.array([alloc.mem for alloc in self.list_alloc])
+        self.alive_array = np.array([[1 if alive_list[i][a.name] else 0 
+                                      for a in self.list_alloc] 
+                                      for i ,_ in enumerate(self.op_list)])
+        
+
     def create_buffer_list(self):
         buffer_set = set()
         for op in self.op_list:
             if isinstance(op, MappingOp) and len(op.targets)==1:# merge mapping
                 for target in op.targets:
                     buffer_set.add(target)
-            elif isinstance(op, AllocateOp):
-                buffer_set.add(op.target)
+            # elif isinstance(op, AllocateOp):
+            #     buffer_set.add(op.target)
 
         return list(buffer_set)
 
