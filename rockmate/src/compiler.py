@@ -443,8 +443,8 @@ class Compiler:
         self.op_name_list = [
             (op.name if not op.disabled else "") for op in op_sched.op_list
         ]
-        if op_sched.alive_list == []:
-            op_sched.alive_list = op_sched.create_alive_list()
+        # if op_sched.alive_list == []:
+        op_sched.alive_list = op_sched.create_alive_list()
         self.alive_list = op_sched.alive_list
         self.parameters = {k:alloc for k, alloc in op_sched.dict_alloc.items() if (
                            isinstance(alloc, Parameter) and not alloc.grad)}
@@ -679,6 +679,7 @@ class Compiler:
                         self.storage.ld[var_name].grad,
                         non_blocking=True,
                     )
+                    pass
             return offload
 
         def offload():
@@ -785,8 +786,8 @@ class Compiler:
             # torch.cuda.synchronize()
             # self.gd["offload_stream"].synchronize()
 
-            optimizer = self.storage.ld["optimizers"][op.name]
-            optimizer.step()
+            # optimizer = self.storage.ld["optimizers"][op.name]
+            self.storage.ld["optimizers"][op.name].step()
             # for p in op.list_params:
             #     self.storage.ld[p].grad.zero_()
             #     self.storage.ld[p.removeprefix("cpu_")].grad = None
@@ -862,8 +863,9 @@ class Compiler:
 
     def fct_run_forward_no_grad(self, code):
         def fct():
-            with torch.no_grad():
-                exec(code, self.gd, self.storage.ld)
+            with torch.cuda.stream(self.gd["main_stream"]):
+                with torch.no_grad():
+                    exec(code, self.gd, self.storage.ld)
 
         return fct
 
@@ -871,23 +873,25 @@ class Compiler:
         no_save_list.extend(list(self.parameters.keys()))
 
         def fct():
-            # with torch.enable_grad():
-            with torch.autograd.graph.saved_tensors_hooks(
-                self.fct_get_pack(no_save_list), self.fct_get_unpack()
-            ):
-                exec(code, self.gd, self.storage.ld)
+            with torch.cuda.stream(self.gd["main_stream"]):
+                with torch.autograd.graph.saved_tensors_hooks(
+                    self.fct_get_pack(no_save_list), self.fct_get_unpack()
+                ):
+                    exec(code, self.gd, self.storage.ld)
 
         return fct
 
     def fct_run_inplace(self, tensor_name, inplace_code):
         def fct():
-            exec(inplace_code, self.gd, self.storage.ld)
+            with torch.cuda.stream(self.gd["main_stream"]):
+                exec(inplace_code, self.gd, self.storage.ld)
 
         return fct
 
     def fct_run_detach(self, tensor_name):
         def fct():
-            self.storage.ld[tensor_name].data = self.storage.ld[f"_{tensor_name}"].data
+            with torch.cuda.stream(self.gd["main_stream"]):
+                self.storage.ld[tensor_name].data = self.storage.ld[f"_{tensor_name}"].data
 
         return fct
 
@@ -916,36 +920,39 @@ class Compiler:
         """
 
         def fct():
-            self.storage.ld[f"_{tensor_name}"].backward(
-                self.storage.ld[tensor_name].grad, retain_graph=retain_graph
-            )
+            with torch.cuda.stream(self.gd["main_stream"]):
+                self.storage.ld[f"_{tensor_name}"].backward(
+                    self.storage.ld[tensor_name].grad, retain_graph=retain_graph
+                )
 
         return fct
 
     def fct_run_backward_with_inputs(self, tensor_name, retain_graph, input_names):
         def fct():
-            inputs = [self.storage.ld[name] for name in input_names]
-            self.storage.ld[f"_{tensor_name}"].backward(
-                self.storage.ld[tensor_name].grad,
-                inputs=inputs,
-                retain_graph=retain_graph,
-            )
+            with torch.cuda.stream(self.gd["main_stream"]):
+                inputs = [self.storage.ld[name] for name in input_names]
+                self.storage.ld[f"_{tensor_name}"].backward(
+                    self.storage.ld[tensor_name].grad,
+                    inputs=inputs,
+                    retain_graph=retain_graph,
+                )
 
         return fct
 
     def fct_generate_fake_data(self, tensor_name):
         def fct():
-            m = (
-                self.gd["cmeta"]
-                if self.storage.dtypes[tensor_name].is_complex
-                else self.gd["meta"]
-            )
-            s = self.storage.shapes[tensor_name]
-            if s == torch.Size([]):
-                x = m.sum()  # easy way to obtain a Tensor of shape []
-            else:
-                x = m.expand(np.prod(s)).view(s)
-            self.storage.ld[tensor_name].data = x
+            with torch.cuda.stream(self.gd["main_stream"]):
+                m = (
+                    self.gd["cmeta"]
+                    if self.storage.dtypes[tensor_name].is_complex
+                    else self.gd["meta"]
+                )
+                s = self.storage.shapes[tensor_name]
+                if s == torch.Size([]):
+                    x = m.sum()  # easy way to obtain a Tensor of shape []
+                else:
+                    x = m.expand(np.prod(s)).view(s)
+                self.storage.ld[tensor_name].data = x
 
         return fct
 
