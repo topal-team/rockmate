@@ -265,8 +265,18 @@ class HRockmate(torch.nn.Module):
         self.bwd_fct_list = self.fct_list[loss_idx:]
         l = [self.compiler.fct_del_var(v) for v in self.output.tensor_targets]
         self.bwd_fct_list.append(l)
+        self.minor_parameters = []
+        for n, p in self.original_mod.named_parameters():
+            if n not in [kdn.main_target for kdn in self.rkgb_res.H_cluster.list_kdn_parameters]:
+                self.minor_parameters.append(p)
+                p.data = p.data.to("cuda")
         
-
+        if self.minor_parameters:
+            def optimize():
+                self.compiler.storage.ld["optimizers"]["minors"].step()
+                for p in self.minor_parameters:p.grad=None
+            self.bwd_fct_list.append([optimize])
+        
         self.define_autograd_Function()
         self.inherits_original_mod_attributes_and_methods()
 
@@ -347,18 +357,9 @@ class HRockmate(torch.nn.Module):
                 optim = self.gd["cpu_optim"] if "cpu" in op.name else self.gd["gpu_optim"]
                 storage.ld["optimizers"][op.name] = optim([storage.ld[p] for p in op.list_params], **self.gd["opt_kwargs"])
 
-        self.minor_parameters = []
-        for n, p in self.original_mod.named_parameters():
-            if n not in [kdn.main_target for kdn in self.rkgb_res.H_cluster.list_kdn_parameters]:
-                self.minor_parameters.append(p)
-                p.data = p.data.to("cuda")
         if self.minor_parameters:
             storage.ld["optimizers"]["minors"] = self.gd["gpu_optim"](self.minor_parameters, **self.gd["opt_kwargs"])
         
-        def optimize():
-            if self.minor_parameters:storage.ld["optimizers"]["minors"].step()
-            for p in self.minor_parameters:p.grad=None
-        self.bwd_fct_list.append([optimize])
 
         for l in self.init_fct_list:
             self._exec(l)
