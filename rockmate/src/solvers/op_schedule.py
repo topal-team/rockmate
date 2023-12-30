@@ -92,7 +92,7 @@ class Op:
         self.time = time
 
     def __repr__(self):
-        return self.name
+        return "Disabled_"*self.disabled + self.name
 
 class SynchronizeOp(Op):
     def __init__(self, name="", disabled=False):
@@ -126,18 +126,15 @@ class ComputeOp(Op):
 
         return result
 
-    def __repr__(self):
-        return self.kcn.name
-
 
 class DeleteOp(Op):
     def __init__(self, alloc: Allocation, disabled=False, grad=False):
-        super().__init__("Delete_" + alloc.name, disabled=disabled)
+        super().__init__("Delete_" + alloc.name+"_grad"*grad, disabled=disabled)
         self.target = alloc
         self.grad = grad
 
-    def __repr__(self):
-        return "Delete_" + self.target.name+"grad"*self.grad
+    # def __repr__(self):
+    #     return "Delete_" + self.target.name+"grad"*self.grad
 
 
 class MappingOp(Op):
@@ -180,7 +177,7 @@ class OffloadOp(Op):
         grad:bool = False,
         time:float = 0,
     ):
-        super().__init__("Offload_" + alloc.name, disabled=disabled)
+        super().__init__("Offload_" + alloc.name+"_grad"*grad, disabled=disabled)
         self.target = alloc
         self.indices = indices
         self.disabled = disabled
@@ -189,8 +186,8 @@ class OffloadOp(Op):
         self.grad = grad
         self.time = time
 
-    def __repr__(self):
-        return "Disabled" * self.disabled + f"Offload_{self.target}" +"_grad"*self.grad
+    # def __repr__(self):
+    #     return "Disabled" * self.disabled + f"Offload_{self.target}" +"_grad"*self.grad
 
 
 class PrefetchOp(Op):
@@ -211,8 +208,8 @@ class PrefetchOp(Op):
         self.after = after
         self.time = time
 
-    def __repr__(self):
-        return "Disabled" * self.disabled + f"Prefetch_{self.target}"
+    # def __repr__(self):
+    #     return "Disabled" * self.disabled + f"Prefetch_{self.target}"
 
 class OptimizeOp(Op):
     def __init__(self, name, list_params, alloc=None, disabled=False,time=0, overhead=0):
@@ -437,6 +434,8 @@ class OpSchedule:
         self.steps.append(Step(step_op))
             # print(op, op.time)
         
+    def update_alive_list(self):
+        pass
 
     def create_alive_np_array(self):
         alive_list = self.alive_list or self.create_alive_list()
