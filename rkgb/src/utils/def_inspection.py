@@ -94,7 +94,7 @@ def add_cuda_tmp_local(sn, tmp_local, our_global):
             if "self" not in ast_add_on.ast_to_str(arg_ast):continue
             arg_str = ast_add_on.ast_to_str(arg_ast)
             value = eval(arg_str, our_global)
-            tmp_local["__value"] = value.to("cuda")
+            tmp_local["__value"] = torch.nn.Parameter(value.to("cuda"))
             exec(f"{arg_str} = __value", our_global, tmp_local)
     for k,v in our_global.items():
         if isinstance(v, torch.Tensor):
