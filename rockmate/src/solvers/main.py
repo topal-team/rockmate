@@ -298,6 +298,8 @@ def get_single_compute_op_list(
             return False
         if kdn in cluster.interfaces["inputs_kdn_data"]:
             return False
+        if kdn in cluster.interfaces["inputs_kdn_grad"]:
+            return False
         return True
 
     op_list = []
@@ -381,7 +383,7 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
     size = p.numel()
     p.grad = torch.ones_like(p)
     optimizer = gpu_optim([p], **optim_kwargs)
-    torch.cuda.reset_accumulated_memory_stats()
+    torch.cuda.reset_peak_memory_stats()
     mem = torch.cuda.memory_allocated()
     # timer.start()
     for i in range(3):
