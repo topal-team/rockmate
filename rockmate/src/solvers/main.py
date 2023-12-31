@@ -396,6 +396,7 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
     p_c = torch.zeros_like(p, device="cpu")
     p_c.grad = torch.ones_like(p_c)
     optimizer = cpu_optim([p_c], **optim_kwargs)
+    optimizer.step()
     timer.start()
     for i in range(niter):
         optimizer.step()

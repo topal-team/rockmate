@@ -70,6 +70,24 @@ class Parameter(Allocation):
         )
         self.kdn = kdn
         self.grad = grad
+    
+    def __copy__(self):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        result.__dict__.update(self.__dict__)
+        return result
+
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            if k == "kdn":  # do not deepcopy kn
+                setattr(result, k, v)
+            else:
+                setattr(result, k, deepcopy(v, memo))
+
+        return result
 
 
 class Buffer(Allocation):
@@ -219,9 +237,10 @@ class OptimizeOp(Op):
         self.time = time
 
 class ListOp(list):
-    def __init__(self, ops) -> None:
+    def __init__(self, ops):
         super(ListOp, self).__init__(ops)
         self._pop = super(ListOp, self).pop
+        self._remove = super(ListOp, self).remove
         self._append = super(ListOp, self).append
         self._insert = super(ListOp, self).insert
         self.time = sum(op.time for op in ops)
@@ -229,6 +248,9 @@ class ListOp(list):
     def pop(self,index):
         self.time -= self[index].time
         return self._pop(index)
+    def remove(self,op):
+        self.time -= op.time
+        return self._remove(op)
     def append(self,op):
         self.time += op.time
         return self._append(op)
@@ -280,6 +302,11 @@ class Step():
                    self.opt_ops.time, 
                    self.comp_ops.time)
 
+    def max2nd(self):
+        t = list(self.all_time())
+        t.remove(max(t))
+        return max(t)
+
 class OpSchedule:
     solver = None
 
@@ -312,18 +339,18 @@ class OpSchedule:
         self.ofl_list = ofl_list
         self.with_parameters = with_parameters
         self.from_steps = with_parameters
-        if self.from_steps:
-            self.create_steps()
+        
         if loss_idx is None:
             # Find the last loss op before the first bwd
-            for i, op in enumerate(self.op_list):
+            for i, op in enumerate(self._op_list):
                 if "loss" in op.name:
                     self.loss_idx = i
                 if "bwd" in op.name:
                     break
         else:
             self.loss_idx = loss_idx
-
+        if self.from_steps:
+            self.create_steps()
         if cluster is None:
             warnings.warn("Cluster should be provided to create op_sched")
             self.prepare_allocation_from_op_list(interfaces)
@@ -423,13 +450,48 @@ class OpSchedule:
         else:
             self.alive_list = []
 
+    def refine_optimize(self):
+        steps = self.steps
+        for j in range(len(steps)-1, self.loss_step, -1):
+            opt_ops = list(steps[j].opt_ops)
+            opt2user_step = {op.name:None for op in opt_ops}
+            steps_avail = {op:steps[j:] for op in opt_ops}
+
+            located_ops = []
+            for i,step in enumerate(steps[:]):
+                if None not in opt2user_step.values():break
+                for opt_op in opt_ops:
+                    if opt2user_step[opt_op.name]:continue
+                    for usr in opt_op.target.kdn.users_real:
+                        if str(usr) in [str(op) for op in step.comp_ops]:
+                            # print(opt_op.name)
+                            opt2user_step[opt_op.name] = i
+                            steps_avail[opt_op].extend(steps[:i])
+                            # located_ops.append(opt_op)
+                            # opt_ops.remove(opt_op)
+
+            for op, avail in steps_avail.items():
+                avail_step = max(avail, key=lambda x:x.time-x.opt_ops.time)
+                # print(avail_step.time,avail_step.opt_ops.time)
+                # print(steps[j].time,steps[j].opt_ops.time)
+                if avail_step.time<avail_step.opt_ops.time:continue
+                if steps[j].opt_ops.time<steps[j].time:continue
+                if (avail_step.opt_ops.time+op.time-avail_step.time>
+                    steps[j].opt_ops.time-steps[j].max2nd()):continue
+                
+                # print(avail_step.time, avail_step.opt_ops.time)
+                avail_step.opt_ops.append(op)
+                steps[j].opt_ops.remove(op)
+
     def create_steps(self):
         self.steps = []
         step_op = []
-        for op in self._op_list:
+        for i,op in enumerate(self._op_list):
             if isinstance(op, SynchronizeOp):
                 if step_op:self.steps.append(Step(step_op))
                 step_op = []
+            if i == self.loss_idx:
+                self.loss_step = len(self.steps)
             step_op.append(op)
         self.steps.append(Step(step_op))
             # print(op, op.time)

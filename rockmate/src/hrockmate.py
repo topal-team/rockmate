@@ -665,10 +665,43 @@ class HRockmate(torch.nn.Module):
             #     pred_mem[-1] += op.overhead
         return pred_mem
 
+    def zero_grad(self, set_to_none=True):
+        # if self.compiler.storage:
+            # if set_to_none:
+            #     for k,v in self.compiler.storage.ld.items():
+            #         if "cpu_" in k:
+            #             v.grad = None
+            # else:
+            # for k,v in self.compiler.storage.ld.items():
+            #     if "cpu_" in k:
+            #         v.grad = torch.zeros_like(v)
+        self.original_mod.zero_grad(set_to_none=set_to_none)
+
     def reinit(self, set_to_none=False):
         # In our experiments, we set the parameter grad to 0's
         # so that Backward only creates memory for activations
         self.original_mod.zero_grad(set_to_none=set_to_none)
+
+    def print_sched_results(self):
+        t = sum(kcn.time for kcn in self.rkgb_res.H_cluster.list_kcn if kcn.time)
+        print(f"Original module iter time {t}")
+        t = sum(step.time for step in self.op_sched.steps)
+        print(f"Schedule: total time {t}")
+        t = sum(step.comp_ops.time for step in self.op_sched.steps)
+        print(f"Schedule: total compute time {t}")
+        t = sum(step.ofl_ops.time for step in self.op_sched.steps)
+        print(f"Schedule: total offload time {t}")
+        t = sum(step.prf_ops.time for step in self.op_sched.steps)
+        print(f"Schedule: total prefetch time {t}")
+        t = sum(step.opt_ops.time for step in self.op_sched.steps)
+        print(f"Schedule: total cpu optimize time {t}")
+        t = sum((step.time - step.comp_ops.time) for step in self.op_sched.steps if step.time == step.opt_ops.time)
+        print(f"Schedule: time from waiting cpu optimize {t}")
+        t = sum((step.time - step.max2nd()) for step in self.op_sched.steps if step.time == step.ofl_ops.time)
+        print(f"Schedule: time from waiting offload {t}")
+        t = sum((step.time - step.max2nd()) for step in self.op_sched.steps if step.time == step.prf_ops.time)
+        print(f"Schedule: time from waiting prefetch {t}")
+
 
     # === Inherits original_mod Attributes and Methods ===
     """
