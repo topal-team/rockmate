@@ -8,6 +8,95 @@ from rkgb.utils import irotor
 
 timer = irotor.make_timer(torch.device("cuda"))
 
+from models.GPT import  GPT2
+
+
+def pop_ops(step):
+    ops = []
+    while step.opt_ops:
+        ops.append(step.opt_ops.pop(0))
+    return ops
+
+def append_ops(step, ops):
+    for op in ops:
+        step.opt_ops.append(op)
+    # return ops
+
+
+def efficiency_test():
+    a = np.random.randint(-1,2,[10000,8000])
+    c = np.random.randint(0,10,[8000])
+    d = 100
+    x,y = 100,3000
+    b = np.cumsum(a[:], axis=0)
+    m = np.matmul(b, c)
+    for _ in range(100):
+        # b = np.cumsum(a[:], axis=0)
+        
+        s = a[x][d]
+        a[x][d] = a[y][d]
+        a[y][d] = s
+        # b[:,d] = np.cumsum(a[:,d], axis=0)
+        # m = np.matmul(b, c)
+
+        m += (np.cumsum(a[:,d], axis=0) - b[:,d])*c[d]
+
+def create_steps(rkmod):
+    steps = []
+    step = []
+    for op in rkmod.op_sched.op_list:
+        if isinstance(op, SynchronizeOp):
+            steps.append(step)
+            step = []
+        step.append(op)
+    steps.append(step)
+        # print(op, op.time)
+    step_time = []
+    for s in steps:
+        ofl_time = 0
+        prf_time = 0
+        opt_time = 0
+        comp_time = 0
+        for op in s:
+            if isinstance(op, OffloadOp):
+                ofl_time += op.time
+            elif isinstance(op, PrefetchOp):
+                prf_time += op.time
+            elif isinstance(op, OptimizeOp) and "cpu" in op.name:
+                opt_time += op.time
+            elif isinstance(op, ComputeOp):
+                comp_time += op.time
+        step_time.append((ofl_time, prf_time, opt_time, comp_time))
+    return steps, step_time
+
+def save_mem(rkmod):
+    param_size = 0
+    act_size = 0
+    for k,v in rkmod.compiler.storage.ld.items():
+        if isinstance(v,torch.Tensor) and "parameter" in k and "cuda" in str(v.device):
+            # print(k,v.numel()*v.element_size())
+            param_size += v.numel()*v.element_size()
+            if v.grad is not None:param_size += v.grad.numel()*v.element_size()
+        if isinstance(v,torch.Tensor) and "parameter" not in k:
+            act_size += v.numel()*v.element_size()
+
+    optim_size = 0
+    for k,optimizer in rkmod.compiler.storage.ld["optimizers"].items():#["minors"]
+        for v in optimizer.state:
+            if isinstance(v, torch.Tensor) and "cuda" in str(v.device):
+                optim_size += v.numel()*v.element_size()
+        print(k, optim_size)
+    return param_size, act_size, optim_size
+
+def measure_cost_large_model():
+    niter = 5
+    for n in [1,2]:
+        model = GPT2(nlayers=n, vcb_sz=32000, d_model=4096, n_head=32)
+        sample = [torch.randint(0, 5000, [4,256])]
+
+        test_exec(model, sample, copy=True, niter=niter, opt=torch.optim.Adam, device="cuda")
+
+
 def number_of_variables(md, exclude="Continuous"):
     type(md.md.variables()[0])
     str(md.md.variables()[0]).split("_")
@@ -161,13 +250,13 @@ def analyze_mem(rkmod, print_status=False, with_grad=True):
 
     max_t, max_k = max(mem, key=mem.get)
     max_i = np.argmax(rkmod.op_sched.save_mem + rkmod.op_sched.overhead)
-    grad_size = sum(md.parameter_size)
-
+    grad_size = 0#max(md.parameter_size)
+    optimizer_states_mem = rkmod.op_sched.optimizer_states_size()*rkmod.gd['cpu_optimize_stats']['optimizer_states_size']
     print(
         f"solution peak memory {(max(mem.values()) + with_grad*grad_size)/1024**2:.0f}MB at {max_t, max_k}"
     )
     print(
-        f"op_sched peak memory {(rkmod.op_sched.peak_mem + md.optimizer_states_mem.value()+with_grad*grad_size)/1024**2:.0f}MB"
+        f"op_sched peak memory {(rkmod.op_sched.peak_mem + optimizer_states_mem +with_grad*grad_size)/1024**2:.0f}MB"
     )
     return (max_i, max_t, max_k)
 
@@ -194,9 +283,9 @@ def test_exec(model_,
     if msg:
         print(msg)
     torch.cuda.reset_peak_memory_stats()
-    
+    sample = [s.to(device) for s in sample]
     mem = torch.cuda.memory_allocated()
-    # print(mem)
+    print(mem)
     if copy:
         model = deepcopy(model_).to(device)
         optimizer = opt(model.parameters(), **opt_kwargs)
@@ -273,7 +362,7 @@ def prepare_for_offload(rkmod):
 
 def disable_offload_op(rkmod):
     for op in rkmod.op_sched.op_list:
-        if isinstance(op, OffloadOp):# and op.grad:
+        if isinstance(op, OffloadOp) and op.grad:
             op.disabled = True
     rkmod.get_compiled_fct()
 
