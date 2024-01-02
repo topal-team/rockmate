@@ -364,6 +364,7 @@ def aux_init_S_to_K(model,verbose,d):
     global device
     device = d if d else (
         small_fcts.get_device_and_check_all_same_device(model,dict(),True))
+    device = torch.device("cuda")
     if not (verbose is None): global_vars.ref_verbose[0] = verbose
     for p in model.parameters():
         if p.grad is None:

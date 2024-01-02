@@ -40,7 +40,13 @@ class RngState:
         torch.cuda.set_rng_state(self.gpu_states[op_name])
 
 
-def make_gd(device, nn_mod, dict_constants):
+def make_gd(device, 
+            nn_mod, 
+            dict_constants,
+            cpu_optim,
+            gpu_optim,
+            optim_kwargs={},
+            cpu_optimize_stats={}):
     return {
         **globals(),
         **dict_constants,
@@ -49,8 +55,10 @@ def make_gd(device, nn_mod, dict_constants):
         "torch": torch,
         "meta": torch.ones(1).to(device),
         "cmeta": torch.view_as_complex(torch.ones(2)).to(device),
-        "opt": torch.optim.Adam,
-        "opt_kwargs": {"lr":1e-6},
+        "cpu_optim": cpu_optim,
+        "gpu_optim": gpu_optim,
+        "opt_kwargs": optim_kwargs,
+        "cpu_optimize_stats": cpu_optimize_stats,
         "main_stream": torch.cuda.current_stream(),
         # "prefetch_stream": torch.cuda.current_stream(),
         # "offload_stream": torch.cuda.current_stream(),
@@ -331,8 +339,8 @@ class Compiler:
 
         return function_list
 
-    def get_del_grad(self, kn, i):
-        return [self.fct_del_tensor_grad(kn.main_target)]
+    def get_del_grad(self, target, i):
+        return [self.fct_del_tensor_grad(target)]
 
     def get_del_parameter(self, alloc, i):
         return [self.fct_del_tensor_data(alloc.name)]
@@ -435,10 +443,11 @@ class Compiler:
         self.op_name_list = [
             (op.name if not op.disabled else "") for op in op_sched.op_list
         ]
-        if op_sched.alive_list == []:
-            op_sched.alive_list = op_sched.create_alive_list()
+        # if op_sched.alive_list == []:
+        op_sched.alive_list = op_sched.create_alive_list()
         self.alive_list = op_sched.alive_list
-        self.parameters = {k:op_sched.dict_alloc[k] for k in self.alive_list[0].keys() if "parameter" in k}
+        self.parameters = {k:alloc for k, alloc in op_sched.dict_alloc.items() if (
+                           isinstance(alloc, Parameter) and not alloc.grad)}
         # print(self.parameters)
         # self.prf_list = op_sched.prf_list
         # self.ofl_list = op_sched.ofl_list
@@ -493,11 +502,14 @@ class Compiler:
                         if "data" in op.target.kdn.name:
                             fct_list.append(self.get_del_data(op.target.kdn, i))
                         elif "grad" in op.target.kdn.name:
-                            fct_list.append(self.get_del_grad(op.target.kdn, i))
+                            fct_list.append(self.get_del_grad(op.target.kdn.main_target, i))
                         else:  # phantom
                             fct_list.append([])
                     elif isinstance(op.target, Parameter):
-                        fct_list.append(self.get_del_parameter(op.target.kdn, i))
+                        if op.grad:
+                            fct_list.append(self.get_del_grad(op.target.kdn.name, i))
+                        else:
+                            fct_list.append(self.get_del_parameter(op.target.kdn, i))
                     elif isinstance(op.target, Buffer):
                         fct_list.append(self.get_del_buffer(op.target, i))
                     else:
@@ -667,6 +679,7 @@ class Compiler:
                         self.storage.ld[var_name].grad,
                         non_blocking=True,
                     )
+                    pass
             return offload
 
         def offload():
@@ -765,17 +778,21 @@ class Compiler:
         return mapping
     
     def fct_optimize(self, op):
+        # for i in [15,16,17,18]:
+        # if f"cpu_" in op.name:
+        #     def optimize():pass
+        #     return optimize
         def optimize():
-            # pass
             # torch.cuda.synchronize()
             # self.gd["offload_stream"].synchronize()
 
-            optimizer = self.storage.ld["optimizers"][op.name]
-            optimizer.step()
-            for p in op.list_params:
-                self.storage.ld[p].grad.zero_()
-                self.storage.ld[p.removeprefix("cpu_")].grad = None
+            # optimizer = self.storage.ld["optimizers"][op.name]
+            self.storage.ld["optimizers"][op.name].step()
+            # for p in op.list_params:
+            #     self.storage.ld[p].grad.zero_()
+            #     self.storage.ld[p.removeprefix("cpu_")].grad = None
             # torch.cuda.synchronize()
+            # pass
         return optimize
 
 
@@ -846,8 +863,9 @@ class Compiler:
 
     def fct_run_forward_no_grad(self, code):
         def fct():
-            with torch.no_grad():
-                exec(code, self.gd, self.storage.ld)
+            with torch.cuda.stream(self.gd["main_stream"]):
+                with torch.no_grad():
+                    exec(code, self.gd, self.storage.ld)
 
         return fct
 
@@ -855,23 +873,25 @@ class Compiler:
         no_save_list.extend(list(self.parameters.keys()))
 
         def fct():
-            # with torch.enable_grad():
-            with torch.autograd.graph.saved_tensors_hooks(
-                self.fct_get_pack(no_save_list), self.fct_get_unpack()
-            ):
-                exec(code, self.gd, self.storage.ld)
+            with torch.cuda.stream(self.gd["main_stream"]):
+                with torch.autograd.graph.saved_tensors_hooks(
+                    self.fct_get_pack(no_save_list), self.fct_get_unpack()
+                ):
+                    exec(code, self.gd, self.storage.ld)
 
         return fct
 
     def fct_run_inplace(self, tensor_name, inplace_code):
         def fct():
-            exec(inplace_code, self.gd, self.storage.ld)
+            with torch.cuda.stream(self.gd["main_stream"]):
+                exec(inplace_code, self.gd, self.storage.ld)
 
         return fct
 
     def fct_run_detach(self, tensor_name):
         def fct():
-            self.storage.ld[tensor_name].data = self.storage.ld[f"_{tensor_name}"].data
+            with torch.cuda.stream(self.gd["main_stream"]):
+                self.storage.ld[tensor_name].data = self.storage.ld[f"_{tensor_name}"].data
 
         return fct
 
@@ -900,36 +920,39 @@ class Compiler:
         """
 
         def fct():
-            self.storage.ld[f"_{tensor_name}"].backward(
-                self.storage.ld[tensor_name].grad, retain_graph=retain_graph
-            )
+            with torch.cuda.stream(self.gd["main_stream"]):
+                self.storage.ld[f"_{tensor_name}"].backward(
+                    self.storage.ld[tensor_name].grad, retain_graph=retain_graph
+                )
 
         return fct
 
     def fct_run_backward_with_inputs(self, tensor_name, retain_graph, input_names):
         def fct():
-            inputs = [self.storage.ld[name] for name in input_names]
-            self.storage.ld[f"_{tensor_name}"].backward(
-                self.storage.ld[tensor_name].grad,
-                inputs=inputs,
-                retain_graph=retain_graph,
-            )
+            with torch.cuda.stream(self.gd["main_stream"]):
+                inputs = [self.storage.ld[name] for name in input_names]
+                self.storage.ld[f"_{tensor_name}"].backward(
+                    self.storage.ld[tensor_name].grad,
+                    inputs=inputs,
+                    retain_graph=retain_graph,
+                )
 
         return fct
 
     def fct_generate_fake_data(self, tensor_name):
         def fct():
-            m = (
-                self.gd["cmeta"]
-                if self.storage.dtypes[tensor_name].is_complex
-                else self.gd["meta"]
-            )
-            s = self.storage.shapes[tensor_name]
-            if s == torch.Size([]):
-                x = m.sum()  # easy way to obtain a Tensor of shape []
-            else:
-                x = m.expand(np.prod(s)).view(s)
-            self.storage.ld[tensor_name].data = x
+            with torch.cuda.stream(self.gd["main_stream"]):
+                m = (
+                    self.gd["cmeta"]
+                    if self.storage.dtypes[tensor_name].is_complex
+                    else self.gd["meta"]
+                )
+                s = self.storage.shapes[tensor_name]
+                if s == torch.Size([]):
+                    x = m.sum()  # easy way to obtain a Tensor of shape []
+                else:
+                    x = m.expand(np.prod(s)).view(s)
+                self.storage.ld[tensor_name].data = x
 
         return fct
 

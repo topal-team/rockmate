@@ -29,7 +29,7 @@ from .op_schedule import (
 )
 from rkgb.Htools import *
 from rkgb.utils.global_vars import solver_name
-
+# from functools import lru_cache
 
 class knapsack:
     def __init__(self, parameter_size: list):
@@ -88,6 +88,9 @@ class RkLpVariable(LpVariable):
             )
         return d
 
+    def __repr__(self):
+        if self.varValue:return str(self.varValue)
+        return super().__repr__()
 
 class ModelPULP:
     """
@@ -111,7 +114,7 @@ class ModelPULP:
         protected_names=[],
         grouping=True,
         grad_mode="offload",  # ["keep_all", "free_all", "free_asap", "offload"]
-        cpu_optimize=True,
+        cpu_optimize_kwargs = None
     ):
         self.gcd = gcd if gcd else 1
         self.peak_budget = peak_budget / self.gcd
@@ -124,13 +127,15 @@ class ModelPULP:
         self.feasible = None
         self.solve_time = None
         self.with_parameters = accurate_mem
-        self.single_fwd = accurate_mem
-        self.single_bwd = False
+        self.single_fwd = accurate_mem#False
+        self.single_bwd = accurate_mem
         self.grouping = grouping
         self.grad_mode = grad_mode
-        self.cpu_optimize = cpu_optimize
-        self.optimizer_states_size = 2  # *weight size
-        self.cpu_optimize_speed = 0.5 * 1024**2  # byte/ms
+        if cpu_optimize_kwargs and accurate_mem:
+            self.cpu_optimize = True
+            self.optimizer_states_size = cpu_optimize_kwargs["optimizer_states_size"]#*weight size
+            self.cpu_optimize_speed = cpu_optimize_kwargs["cpu_optimize_speed"]#B/ms
+            self.optimizer_overhead = cpu_optimize_kwargs["optimizer_overhead"]#*weight size
 
         #############################
         self.hgraph = hgraph
@@ -318,9 +323,28 @@ class ModelPULP:
                 for t in range(T + 1)
                 for j, list_sched in enumerate(self.list_list_sched)
                 for o in range(len(list_sched))
+                if t-1 in self.sub_c2hcn[j]
             ],
             cat="Binary",
         )
+        for j, list_sched in enumerate(self.list_list_sched):
+            for o in range(len(list_sched)):
+                if (0,j,o) not in self.AliveP:
+                    self.AliveP[0,j,o] = 0
+                for t in range(1,T + 1):
+                    if (t,j,o) not in self.AliveP:
+                        self.AliveP[t,j,o] = self.AliveP[t-1,j,o]
+
+        # self.AliveP = RkLpVariable.dicts(
+        #     f"AliveP",
+        #     [
+        #         (t, j, o)
+        #         for t in range(T + 1)
+        #         for j, list_sched in enumerate(self.list_list_sched)
+        #         for o in range(len(list_sched))
+        #     ],
+        #     cat="Binary",
+        # )
 
         self.sumAliveP = {}
         for j in range(J):
@@ -328,14 +352,49 @@ class ModelPULP:
                 self.sumAliveP[j, t] = lpSum(
                     self.AliveP[t, j, o] for o in range(len(self.list_list_sched[j]))
                 )
-
-        # to present whether one saved tensor can be inheritaged from the last stage
+        self.active_stages = dict()
+        for i in range(I):
+            self.active_stages[i] = []
+            for t in range(T):
+                for k in self.krange(t):
+                    if k in _deps_d[i]+_users_d[i]:
+                        self.active_stages[i].append(t)
+            if not self.hgraph.list_hdn[i].deps:# src node
+                self.active_stages[i].append(-1)
+        # to present whether one saved tensor can be inherited from the last stage
         self.AliveA = RkLpVariable.dicts(
-            "AliveA", [(t, i) for t in range(T) for i in range(Cr)], cat="Binary"
+            "AliveA", [(t, c)
+                       for t in range(1,T) 
+                       for c, (k, i) in enumerate(self.create_list)
+                       if t-1 in self.active_stages[i]], cat="Binary"
         )  # activation
+        for c, (k, i) in enumerate(self.create_list):
+            self.AliveA[0,c] = 0
+            for t in range(1, self.T):
+                if (t,c) not in self.AliveA:
+                    self.AliveA[t,c] = self.AliveA[t-1,c]
+
+        # self.AliveA = RkLpVariable.dicts(
+        #     "AliveA", [(t, i) for t in range(T) for i in range(Cr)], cat="Binary"
+        # )  # activation
+
+        # self.AliveT = RkLpVariable.dicts(
+        #     "AliveT", [(t, i) for t in range(T) for i in range(I)], cat="Binary"
+        # )  # tensor that can be shared by acts
+
         self.AliveT = RkLpVariable.dicts(
-            "AliveT", [(t, i) for t in range(T) for i in range(I)], cat="Binary"
+            "AliveT", [(t, i)
+                       for t in range(T) 
+                       for i in range(I)
+                       if t-1 in self.active_stages[i]], cat="Binary"
         )  # tensor that can be shared by acts
+        for i in range(I):
+            if (0,i) not in self.AliveT:
+                self.AliveT[0,i] = 0
+            for t in range(1, self.T):
+                if (t,i) not in self.AliveT:
+                    self.AliveT[t,i] = self.AliveT[t-1,i]
+
         self.create = RkLpVariable.dicts(
             "create",
             [
@@ -380,6 +439,7 @@ class ModelPULP:
                     k: w for w in self.parameter2hcn for k in self.parameter2hcn[w]
                 }
 
+
             self.AliveW = RkLpVariable.dicts(
                 "AliveW",
                 [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
@@ -391,11 +451,17 @@ class ModelPULP:
                 "AliveG",
                 [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
                 cat="Continuous",
-                lowBound=1 if self.grad_mode == "keep_all" else 0,
+                lowBound=0,
                 upBound=1,
             )  # w.grad is alive at the start of step j.
-            # for k in self.AliveG:
-            #     self.AliveG[k] = 0
+            if self.grad_mode in ["keep_all", "offload"]:
+                for k in self.AliveG:
+                    self.AliveG[k] = 0
+                for k, l_w in self.hcn2param.items():
+                    grad_size = sum(self.parameter_size[w] for w in l_w)
+                    # grad_size += max(self.parameter_size[w] for w in l_w)* self.optimizer_overhead
+                    if k > self.loss_idx:#add params grad size to bwd overhead 
+                        self.overhead[k] = [v+grad_size for v in self.overhead[k]]
 
             self.OflW = RkLpVariable.dicts(
                 "OflW",
@@ -431,8 +497,11 @@ class ModelPULP:
                         if k not in self.krange(t):
                             self.PrfW[t, k, w] = 0
                             self.OflW[t, k, w] = 0
-                        fwd_i, bwd_i = self.parameter2hcn[w]
-                        if k not in self.krange(t) or (t > fwd_i and t < bwd_i):
+                        
+                        # fwd_i, bwd_i = self.param2hcn[w]
+                        fwd_i = min(self.param2hcn[w])
+                        bwd_i = max(self.param2hcn[w])
+                        if k not in self.krange(t) or (t>fwd_i and t<bwd_i):
                             self.OptC[t, k, w] = 0
             self.bandwidthOfl = 6 * 1024**2  # byte/ms
             self.bandwidthPrf = 6 * 1024**2  # byte/ms
@@ -475,10 +544,11 @@ class ModelPULP:
         for t in range(T):
             for k in self.krange(t):
                 # if k==self.loss_idx:continue
-                if self.with_parameters and k != self.loss_idx:
-                    w = self.hcn2parameter[k] if k != self.loss_idx else None
-                    ofl_time = (
+                if self.with_parameters and k in self.hcn2param:
+                    # w = self.hcn2param[k] if k != self.loss_idx else None
+                    ofl_time = lpSum(
                         self.parameter_size[w] / self.bandwidthOfl * self.OflW[t, k, w]
+                        for w in self.hcn2param[k]
                     )
                 else:
                     ofl_time = 0
@@ -535,13 +605,13 @@ class ModelPULP:
         for j in range(J):
             bwd_i = max(self.sub_c2hcn[j])
             # Forward start with no phantoms
-            self.md += (
-                lpSum(
-                    (self.AliveP[0, j, o])  # - self.Comp[bwd_i][T - 1, o])
-                    for o in range(self.nOpts[bwd_i])
-                )
-                == 0
-            )
+            # self.md += (
+            #     lpSum(
+            #         (self.AliveP[0, j, o])  # - self.Comp[bwd_i][T - 1, o])
+            #         for o in range(self.nOpts[bwd_i])
+            #     )
+            #     == 0
+            # )
             # in the end of bwd, del every phantoms
             self.md += (
                 lpSum(
@@ -779,7 +849,8 @@ class ModelPULP:
                 j = self.hcn2sub_c[k]
                 self.md += self.U[t, k] >= 0
                 self.md += self.U[t, k] <= self.peak_budget - parameter_mem
-                if j is None or not accurate_mem:
+                # if j is None or not accurate_mem:
+                if True:
                     # don't consider correction_term
                     self.md += (
                         self.U[t, k]
@@ -870,16 +941,16 @@ class ModelPULP:
             for w in range(self.W)
         )
         # if self.cpu_optimize:
-        self.optimizer_states_mem = lpSum(
-            (
-                (1 - self.sumOptC[w])
-                * self.parameter_size[w]
-                * self.optimizer_states_size
-            )
-            for w in range(self.W)
-        )
-        return mem + self.optimizer_states_mem
-
+        self.optimizer_states_mem = lpSum(((1-self.sumOptC[w])*
+                    self.parameter_size[w] *
+                    self.optimizer_states_size)
+                    for w in range(self.W))
+        optimizer_overhead = 0
+        if k > self.loss_idx and k in self.hcn2param:
+            l_w = self.hcn2param[k]
+            optimizer_overhead += sum((1-self.sumOptC[w])*self.parameter_size[w] for w in l_w)* self.optimizer_overhead
+        return mem + self.optimizer_states_mem + optimizer_overhead
+    
     def krange(self, t):
         if self.single_fwd:
             return [t]
@@ -926,14 +997,13 @@ class ModelPULP:
         self.OflWProg = dict()
         self.OptCProg = dict()
         self.UpdWProg = dict()
+        self.PrfWProg = dict()
         self.sumOptC = dict()
-        for w in self.parameter2hcn:
-            self.sumOptC[w] = lpSum(
-                self.OptC[t, k, w] for t in range(self.T) for k in self.krange(t)
-            )
+        for w in self.param2hcn:
+            self.sumOptC[w] = lpSum(self.OptC[t,k,w] for t in range(self.T) for k in self.krange(t))
 
         def get_progress(op, t, k, w):
-            bwd_i = max(self.parameter2hcn[w])
+            bwd_i = max(self.param2hcn[w])
             if bwd_i < t:  # after bwd of w
                 progress = lpSum(
                     op[t, kk, w] for kk in self.krange(t) if kk < k
@@ -973,63 +1043,45 @@ class ModelPULP:
                 #     self.parameter_size[w] / self.cpu_optimize_speed * self.OptC[t, k, w]
                 #     for w in range(self.W)
                 # )
+                if k in self.hcn2param:
+                    for w in self.hcn2param[k]:
+                        self.PrfWProg[t,k,w] = get_progress(self.PrfW, t, k, w)
+                        self.md += self.sumComp[t, k] <= self.PrfWProg[t,k,w] + (1-self.sumOptC[w])
                 for w in range(self.W):
-                    self.OflWProg[(t, k, w)] = get_progress(self.OflW, t, k, w)
-                    self.OptCProg[(t, k, w)] = get_progress(self.OptC, t, k, w)
-                    self.UpdWProg[(t, k, w)] = get_progress(self.UpdW, t, k, w)
-                    if k == max(self.parameter2hcn[w]):
-                        self.md += self.UpdW[t, k, w] == (
-                            1 - self.sumOptC[w]
-                        )  # single_bwd
-                        self.md += (
-                            self.AliveG[t_, k_, w] - self.AliveG[t, k, w]
-                            <= self.sumComp[t, k]
-                        )
-                    else:
-                        self.md += self.UpdW[t, k, w] <= self.PrfW[t, k, w]  # TODO:
-                        self.md += self.AliveG[t_, k_, w] - self.AliveG[t, k, w] <= 0
-
+                    self.OflWProg[(t,k,w)] = get_progress(self.OflW, t, k, w)
+                    self.OptCProg[(t,k,w)] = get_progress(self.OptC, t, k, w)
+                    
                     self.md += self.OflWProg[(t, k, w)] <= 1
                     self.md += self.OptCProg[(t, k, w)] <= self.OflWProg[(t, k, w)]
-                    self.md += (
-                        self.AliveG[t, k, w]
-                        + self.AliveW[t, k, w]
-                        + self.OflWProg[(t, k, w)]
-                        >= 1
-                    )  # - self.sumOptC[w]
-                    self.md += (
-                        self.AliveG[t, k, w] + self.OflWProg[(t, k, w)]
-                        >= self.sumOptC[w]
-                    )
-                    self.md += self.AliveG[t, k, w] <= self.sumOptC[w]
+                    self.md += self.AliveW[t, k, w] + self.OflWProg[(t, k, w)] >= 1# - self.sumOptC[w]
+                    # self.md += self.AliveW[t, k, w] + self.AliveG[t, k, w] + self.OflWProg[(t, k, w)] >= 1
+                    # self.md += self.AliveG[t, k, w] + self.OflWProg[(t, k, w)] >= self.sumOptC[w]
                     # self.md += self.AliveG[t, k, w] + self.OptCProg[(t, k, w)] >= self.sumOptC[w]
 
                     # self.md += self.AliveW[t, k, w] + self.PrfW[(t, k, w)] <= 1
                     self.md += self.OflW[t, k, w] <= self.sumComp[t, k]
                     self.md += self.PrfW[t, k, w] <= self.sumComp[t, k]
                     self.md += self.OptC[t, k, w] <= self.sumComp[t, k]
-                    self.md += self.UpdW[t, k, w] <= self.sumComp[t, k]
 
-                    self.md += (
-                        self.AliveW[t_, k_, w] + self.PrfW[(t_, k_, w)]
-                        <= self.OptCProg[(t, k, w)] + 1 - self.sumOptC[w]
-                    )
+                    t_, k_ = self.next_index(t, k)
+                    self.md += (self.AliveW[t_, k_, w] + self.PrfW[(t_, k_, w)] <= 
+                                self.OptCProg[(t, k, w)] + 1 - self.sumOptC[w])
                     diff = self.AliveW[t_, k_, w] - self.AliveW[t, k, w]
                     self.md += diff <= self.sumComp[t, k]
                     self.md += -diff <= self.sumComp[t, k]
                     self.md += diff <= self.PrfW[t, k, w]
-            for w in self.parameter2hcn:
-                for k in self.parameter2hcn[w]:
+            for w in self.param2hcn:
+                for k in self.param2hcn[w]:
                     if k not in self.krange(t):
                         continue
                     self.md += self.sumComp[t, k] <= self.AliveW[t, k, w]
-                    self.md += self.sumComp[t, k] <= self.UpdWProg[t, k, w]
+            
 
     def solve(self, solver=""):
         # some solvers have no support of 'Time limit reached' status
-        if self.with_parameters:
-            self.add_single_fwd_constraints()
-            self.add_single_bwd_constraints()
+        # if self.with_parameters:
+        #     self.add_single_fwd_constraints()
+        #     self.add_single_bwd_constraints()
         try:
             solver = get_solver(
                 solver, msg=0, timeLimit=self.ilp_solver_params["TimeLimit"]
@@ -1047,6 +1099,7 @@ class ModelPULP:
 
         sol = self.sol
         if self.feasible:
+            # print("finished solving")
             self.solve_time = self.md.solutionTime
             self.active_steps = []
             for t in list(range(self.loss_idx + 1, self.T)) + list(
@@ -1085,7 +1138,7 @@ class ModelPULP:
                 offload_size[(t, i)] = 0
                 prefetch_size[(t, i)] = 0
                 for w in range(self.W):
-                    if i in self.parameter2hcn[w]:
+                    if i in self.param2hcn[w]:
                         if offload_progs[w] > 0:
                             offload_pieces[w].append((t, i, offload_progs[w]))
                             offload_progs[w] = 0
@@ -1110,11 +1163,11 @@ class ModelPULP:
 
     def group(self, w, tol=1):
         # Group the parameters of each block for the task
-        fwd_i, bwd_i = self.parameter2hcn[w]
+        fwd_i, bwd_i = self.param2hcn[w]
         early_fwd = []
         for t in range(bwd_i, self.T):
-            if self.sol(self.sumComp[t, fwd_i]):
-                early_fwd.append(t)  # if recompute fwd after bwd
+            if not self.single_fwd and self.sol(self.sumComp[t,fwd_i].value()):
+                early_fwd.append(t)#if recompute fwd after bwd
         hcn = self.hgraph.list_hcn[fwd_i]
         parameters = {kdn.name: kdn for kdn in hcn.sub_cluster.list_kdn_parameters}
         parameter_size = sum(kdn.mem for kdn in parameters.values())
@@ -1128,31 +1181,40 @@ class ModelPULP:
         opt_ops = []
         init_ops = []
         restore_ops = []
+        cpu_optimize_candidates = {p: 0 for p in parameters.keys()}
 
-        def switch_cpu_optimize(p):
-            for t, k, op in ofl_ops:
+        def apply_cpu_optimize(p):
+            for (t,k,op) in ofl_ops:
                 if op.target.name == p:
                     op.grad = True
-            op = OptimizeOp(
-                name="cpu_" + p,
-                list_params=["cpu_" + p],
-                alloc=Parameter(parameters[p]),
-            )
-            i = self.active_steps.index((t, k))
-            opt_ops.append((*self.active_steps[i + 1], op))
+                    break
+            # for (t,k,op) in del_ops:
+            #     if op.target.name == p:
+            #         op.grad = True
+            i = self.active_steps.index((t,k))+1# TODO: distribute cpu optimization based on time
+            op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]),
+                            time=parameters[p].mem/self.cpu_optimize_speed,
+                            )
+            opt_ops.append((*self.active_steps[i], op))
+            del_ops.append((*self.active_steps[i],DeleteOp(Parameter(parameters[p]), grad=True)))
+            self.cpu_optimized_steps[self.active_steps[i]].append(p)
+            del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]))))
+
+            #if cpu optimize, do not keep w after bwd
+        def apply_gpu_optimize(p):
+            op = OptimizeOp(name=p,list_params=[p], alloc=Parameter(parameters[p]),
+                            overhead=parameters[p].mem*self.optimizer_overhead)
+            opt_ops.append((bwd_i, bwd_i, op))# optimize after bwd
+            del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]), grad=True)))
 
         assert (bwd_i, bwd_i) in self.active_steps
         idx = self.active_steps.index((bwd_i, bwd_i))
         for t, k in self.active_steps[idx:] + self.active_steps[:idx]:
             t_, k_ = self.next_index(t, k)
             current_alive_size = sum(parameters[p].mem * a for p, a in Alive.items())
-            current_offloaded_size = sum(
-                parameters[p].mem * a for p, a in Offloaded.items()
-            )
-            next_alive_size = round(self.AliveW[(t_, k_, w)].value() * parameter_size)
-            next_offloaded_size = round(
-                self.OflWProg[(t_, k_, w)].value() * parameter_size
-            )
+            current_offloaded_size = sum(parameters[p].mem * a for p, a in Offloaded.items())
+            next_alive_size = round((self.AliveG[(t_, k_, w)]+self.AliveW[(t_, k_, w)]).value() * parameter_size)
+            next_offloaded_size = round(self.OflWProg[(t_, k_, w)].value() * parameter_size)
             # assert current_alive_size <= round(self.AliveW[(t, k, w)].value() * parameter_size)
 
             if (t, k) == (0, 0):  # init
@@ -1160,11 +1222,13 @@ class ModelPULP:
                     if a:
                         init_ops.append((t, k, AllocateOp(Parameter(parameters[p]))))
                         op = PrefetchOp(
-                            alloc=Parameter(parameters[p]), indices=(0, None)
+                            alloc=Parameter(parameters[p]), indices=(0, None), 
+                            time=parameters[p].mem/self.bandwidthPrf
                         )
                         init_ops.append((t, k, op))
                         op = OffloadOp(
-                            alloc=Parameter(parameters[p]), indices=(0, None)
+                            alloc=Parameter(parameters[p]), indices=(0, None),
+                            time=parameters[p].mem/self.bandwidthOfl
                         )
                         restore_ops.append((t, k, op))
                         restore_ops.append((t, k, DeleteOp(Parameter(parameters[p]))))
@@ -1181,17 +1245,17 @@ class ModelPULP:
                 # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-ofl_size>tol:
                 #     pass
                 for p in select_paras:
-                    op = OffloadOp(alloc=Parameter(parameters[p]), indices=(0, None))
+                    op = OffloadOp(alloc=Parameter(parameters[p]), indices=(0, None),
+                                   time=parameters[p].mem/self.bandwidthOfl)
                     ofl_ops.append((t, k, op))
                     Offloaded[p] = 1
 
             if current_alive_size > next_alive_size:
                 del_size = current_alive_size - next_alive_size
                 candidates = {}
-                for p, a in Alive.items():
-                    candidates[p] = a * parameters[p].mem
-                    # if a>0 and Offloaded[p]>0:
-                    #     candidates[p] = min(a, Offloaded[p])*parameters[p].mem
+                for p, o in Offloaded.items():
+                    if Alive[p]>0 and o>0:
+                        candidates[p] = min(o, Alive[p])*parameters[p].mem
 
                 selector = knapsack(list(candidates.items()))
                 select_paras = selector.select_size(del_size)
@@ -1200,7 +1264,6 @@ class ModelPULP:
                 for p in select_paras:
                     del_ops.append((t, k, DeleteOp(Parameter(parameters[p]))))
                     Alive[p] = 0
-
             if current_alive_size < next_alive_size:
                 # prefetch should be smaller than solution
                 prf_size = next_alive_size - current_alive_size
@@ -1221,14 +1284,39 @@ class ModelPULP:
                 #     pass
                 for p in select_paras:
                     prf_ops.append((t, k, AllocateOp(Parameter(parameters[p]))))
-                    op = PrefetchOp(alloc=Parameter(parameters[p]), indices=(0, None))
+                    op = PrefetchOp(alloc=Parameter(parameters[p]), indices=(0, None),
+                                    time=parameters[p].mem/self.bandwidthPrf)
                     prf_ops.append((t, k, op))
                     Alive[p] = 1
                     if (t > bwd_i and t < min(early_fwd + [self.T + 1])) or t < fwd_i:
                         # cpu optimize only if prefetch before fwd
-                        switch_cpu_optimize(p)
-
+                        cpu_optimize_candidates[p] = 1
+        
+        candidates = {
+                    p: parameters[p].mem * a for p, a in cpu_optimize_candidates.items() if a >0
+                }
+        select_paras = []
+        
+            # cpu_optimize_size = self.sumOptC[w].value()*parameter_size# size by subgraph
+        cpu_optimize_size = (sum(self.sumOptC[w_].value() * 
+                                self.parameter_size[w_] 
+                                for w_ in range(w, self.W)) 
+                            - sum(self.cpu_optimized_params.values()))# size by all graphs
+        if candidates and cpu_optimize_size>0:
+            selector = knapsack(list(candidates.items()))
+            select_paras = selector.select_size(cpu_optimize_size)
+            
+        for p in parameters:
+            if p in select_paras:
+                self.cpu_optimized_params[p] = parameters[p].mem
+                apply_cpu_optimize(p)
+            else:
+                apply_gpu_optimize(p)
         return ofl_ops, prf_ops, del_ops, opt_ops, init_ops, restore_ops
+
+    def distribute_cpu_optimize(self):
+        # after grouping the optimize ops, re-distribute them to reduce the overhead
+        pass
 
     def schedule(self, hgraph=None, check_valid=False):
         """
@@ -1256,6 +1344,7 @@ class ModelPULP:
             op_list = []
             init_op_list = []
             restore_op_list = []
+            init_alive_status = {}
             for t in range(T):
                 for k in self.krange(t):
                     if t == self.loss_idx and k == self.loss_idx:
@@ -1333,7 +1422,7 @@ class ModelPULP:
             # prf_list=prf_list,
             loss_idx=None,
             cluster=self.hgraph.cluster,
-            # init_alive_status=init_alive_status,
+            init_alive_status=init_alive_status,
             init_op_list=init_op_list,
             restore_op_list=restore_op_list,
             with_parameters=self.with_parameters,
@@ -1365,10 +1454,12 @@ class ModelPULP:
         self.prf_ops = []
         self.del_ops = []
         self.opt_ops = []
+        self.cpu_optimized_params = {}
+        self.cpu_optimized_steps = {step:[] for step in self.active_steps}
         init_op_list = []
         restore_op_list = []
         if self.grouping:
-            for w in range(self.W):
+            for w in range(self.W)[::-1]:
                 o_l, p_l, d_l, t_l, i_l, r_l = self.group(w)
                 self.ofl_ops.extend(o_l)
                 self.prf_ops.extend(p_l)
@@ -1386,12 +1477,12 @@ class ModelPULP:
         # for kdn in self.hgraph.cluster.list_kdn_parameters:
         #     init_alive_status[kdn.name] = True
         # for w in range(W):
-        #     hcn = self.hgraph.list_hcn[self.parameter2hcn[w]]
+        #     hcn = self.hgraph.list_hcn[self.param2hcn[w]]
         #     self.current_buffers[w] = Parameter(hcn.sub_cluster.name)
-        self.cpu_optimized_params = []
-        for _, _, op in self.opt_ops:
-            if isinstance(op, OptimizeOp):
-                self.cpu_optimized_params.append(op.target.name)
+        # self.cpu_optimized_params = []
+        # for (_,_,op) in self.opt_ops:
+        #     if isinstance(op, OptimizeOp):
+        #         self.cpu_optimized_params.append(op.target.name)
 
         for t in range(T):
             for k in self.krange(t):
@@ -1410,9 +1501,9 @@ class ModelPULP:
                     prefetch_ops = self.create_prefetch_ops(t, k, w)
                     op_list.extend(prefetch_ops[0])
                     prefetch_list.extend(prefetch_ops[1])
-                for w in range(W):
-                    if not k in self.parameter2hcn[w]:
-                        op_list.extend(self.create_offload_ops(t, k, w))
+                # for w in range(W):
+                #     if not k in self.param2hcn[w]:
+                #         op_list.extend(self.create_offload_ops(t, k, w))
 
                 # print(t,k)
                 hcn = hgraph.list_hcn[k]
@@ -1462,39 +1553,35 @@ class ModelPULP:
                     sub_op_list = deepcopy(h_obj.ff_op_list)
 
                 if hcn.sub_cluster is None:
+                    op_list += sub_op_list
                     continue
 
                 list_alloc_para = [
                     Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
                 ]
-                w = self.hcn2parameter[k]
-                parameters = [
-                    p.name
-                    for p in list_alloc_para
-                    if p.name not in self.cpu_optimized_params
-                ]
-                if not hcn.is_fwd and parameters:
-                    sub_op_list += [
-                        OptimizeOp(hcn.sub_cluster.name, list_params=parameters)
-                    ]
+                for w in self.hcn2param[k]:
+                # parameters = [p.name for p in list_alloc_para if p.name not in self.cpu_optimized_params]
+                # if not hcn.is_fwd and parameters:
+                #     sub_op_list += [OptimizeOp(hcn.sub_cluster.name, 
+                #                                list_params=parameters)]
 
-                if (
-                    not self.grouping and self.current_buffers[w] is not None
-                ):  # first time
-                    self.current_buffers[w] = Buffer(
-                        hcn.sub_cluster.name,
-                        mem=sum(alloc.mem for alloc in list_alloc_para),
-                    )
-                    # Map buffer to parameter tensors
-                    # op_list.extend([AllocateOp(alloc) for alloc in list_alloc_para])
-                    op_list.append(
-                        MappingOp(
-                            name=hcn.sub_cluster.name + "_split",
-                            sources=[self.current_buffers[w]],
-                            targets=list_alloc_para,
+                    if (
+                        not self.grouping and self.current_buffers[w] is not None
+                    ):  # first time
+                        self.current_buffers[w] = Buffer(
+                            hcn.sub_cluster.name,
+                            mem=sum(alloc.mem for alloc in list_alloc_para),
                         )
-                    )
-                    op_list.append(DeleteOp(self.current_buffers[w]))
+                        # Map buffer to parameter tensors
+                        # op_list.extend([AllocateOp(alloc) for alloc in list_alloc_para])
+                        op_list.append(
+                            MappingOp(
+                                name=hcn.sub_cluster.name + "_split",
+                                sources=[self.current_buffers[w]],
+                                targets=list_alloc_para,
+                            )
+                        )
+                        op_list.append(DeleteOp(self.current_buffers[w]))
 
                 # print(t, k, len(sub_op_list), len(op_list))
                 op_list += sub_op_list
@@ -1523,21 +1610,32 @@ class ModelPULP:
                         hdn = hgraph.list_hdn[i]
                         op_list.append(DeleteOp(Activation(hdn.kdn)))
 
+                wait_op = []
                 for w in range(W):
-                    # op_list.extend(self.create_prefetch_ops(t,k,w))
-                    if k in self.parameter2hcn[w]:
-                        ofl_ops = self.create_offload_ops(t, k, w)
-                        if ofl_ops:
-                            op_list.append(SynchronizeOp(str(w)))
-                            op_list.extend(ofl_ops)
-                    op_list.extend(self.create_delete_ops(t, k, w))
-                    op_list.extend(self.create_optimize_ops(t, k, w))
+                    if k in self.param2hcn[w]:
+                        wait_op.extend(self.create_offload_ops(t, k, w))
+                        wait_op.extend(self.create_optimize_ops(t, k, w))
+                        wait_op.extend(self.create_delete_ops(t, k, w))
+                        # op_list.extend(self.create_prefetch_ops(t,k,w))
+                    else:
+                        op_list.extend(self.create_offload_ops(t, k, w))
+                        op_list.extend(self.create_delete_ops(t, k, w))
+                        op_list.extend(self.create_optimize_ops(t, k, w))
+                if wait_op:# for the current layer, need to synchronize first
+                    op_list.extend([SynchronizeOp(str(k))]+wait_op)
+                # for w in range(W):
+                #     if k in self.param2hcn[w]:
+                #         ofl_ops = self.create_offload_ops(t, k, w)
+                #         if ofl_ops:
+                #             op_list.append(SynchronizeOp(str(w)))
+                #             op_list.extend(ofl_ops)
+                    
                 op_list.extend(prefetch_list)
         return op_list, init_alive_status, init_op_list, restore_op_list
 
     def create_optimize_ops(self, t, k, w, itemsize=4):
         op_list = []
-        sub_cluster = self.hgraph.list_hcn[self.parameter2hcn[w][0]].sub_cluster
+        sub_cluster = self.hgraph.list_hcn[min(self.param2hcn[w])].sub_cluster
         if self.grouping:
             for t_, k_, op in self.opt_ops:
                 if (
@@ -1550,7 +1648,7 @@ class ModelPULP:
 
     def create_delete_ops(self, t, k, w, itemsize=4):
         op_list = []
-        sub_cluster = self.hgraph.list_hcn[self.parameter2hcn[w][0]].sub_cluster
+        sub_cluster = self.hgraph.list_hcn[min(self.param2hcn[w])].sub_cluster
         if self.grouping:
             for t_, k_, op in self.del_ops:
                 if (
@@ -1589,7 +1687,7 @@ class ModelPULP:
     def create_prefetch_ops(self, t, k, w, itemsize=4):
         pre_op_list = []
         post_op_list = []
-        sub_cluster = self.hgraph.list_hcn[self.parameter2hcn[w][0]].sub_cluster
+        sub_cluster = self.hgraph.list_hcn[min(self.param2hcn[w])].sub_cluster
 
         if self.grouping:
             for t_, k_, op in self.prf_ops:
@@ -1638,7 +1736,7 @@ class ModelPULP:
 
     def create_offload_ops(self, t, k, w, itemsize=4):
         op_list = []
-        sub_cluster = self.hgraph.list_hcn[self.parameter2hcn[w][0]].sub_cluster
+        sub_cluster = self.hgraph.list_hcn[min(self.param2hcn[w])].sub_cluster
         if self.grouping:
             for t_, k_, op in self.ofl_ops:
                 if (
@@ -1652,7 +1750,7 @@ class ModelPULP:
         parameter_mem = sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters)
         parameter_size = round(parameter_mem / itemsize)
         progress_size = round(self.OflWProg[(t, k, w)].value() * parameter_size)
-        if max(self.parameter2hcn[w]) == t and t == k:  # bwd step
+        if max(self.param2hcn[w]) == t and t == k:  # bwd step
             progress_size = 0
         offload_size = -progress_size + round(
             (self.OflWProg[(t, k, w)].value() + self.OflW[(t, k, w)].value())
@@ -1684,7 +1782,7 @@ class ModelPULP:
         self.current_buffers = {}
 
         for w in range(W):
-            hcn = self.hgraph.list_hcn[self.parameter2hcn[w][0]]
+            hcn = self.hgraph.list_hcn[min(self.param2hcn[w])]
             list_alloc_para = [
                 Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
             ]

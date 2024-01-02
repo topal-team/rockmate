@@ -20,7 +20,7 @@ from rkgb.utils.small_fcts import get_device
 from rkgb.utils.ast_add_on import ast_to_str
 from rkgb import Ptools
 
-from .solvers.main import preprocess, solve_recursive
+from .solvers.main import preprocess, solve_recursive, get_cpu_optimize_stats
 from .solvers.op_schedule import *
 from .solvers import RK_rotor, HILP, TwRemat, RK_checkmate
 from .solvers.hilp import default_time_limit
@@ -42,6 +42,7 @@ class HRockmate(torch.nn.Module):
         model_inputs,
         budget=None,
         list_solvers=[],
+        rkgb_res=None,
         solve_sched=True,
         verbose=False,
         ilp_solver="gurobi",
@@ -49,6 +50,9 @@ class HRockmate(torch.nn.Module):
         model_kwargs=None,
         partitioners=None,
         max_size_S_graph_for_no_partitioning=40,
+        cpu_optim = torch.optim.Adam,
+        gpu_optim = torch.optim.Adam,
+        optim_kwargs = {},
         # [
         #    Ptools.Partitioner(),
         #    Ptools.Partitioner_bottom_to_top(),
@@ -98,18 +102,21 @@ class HRockmate(torch.nn.Module):
                             solver.config.nb_total_nodes_top_level,
                             partitioner.config.max_estimate_for_main_graph,
                         )
-
         #  We don't want to use the default setattr
         # because torch.nn.Module will register it as a submodule
         # -- use gkGB --
         try:
-            self.rkgb_res = make_all_graphs(
-                original_mod,
-                dict_inputs,
-                verbose=verbose,
-                wanted_graphs={"K"},
-                partitioners=partitioners,
-            )
+            if rkgb_res is None:
+                self.rkgb_res = make_all_graphs(
+                    original_mod,
+                    dict_inputs,
+                    verbose=verbose,
+                    wanted_graphs={"K"},
+                    partitioners=partitioners,
+                    check_device_is_gpu=False
+                )
+            else:
+                self.rkgb_res = rkgb_res
             if len(self.rkgb_res.S_graph.nodes) <= max_size_S_graph_for_no_partitioning:
                 # -> No partitioning !
                 make_late_partitioning(
@@ -127,7 +134,7 @@ class HRockmate(torch.nn.Module):
                 make_late_partitioning(
                     self.rkgb_res, original_mod, partitioners=partitioners
                 )
-
+            self.partitioners = partitioners
             self.list_solvers = list_solvers
             self.dict_constants = self.rkgb_res.K_graph.dict_constants
             self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)
@@ -143,8 +150,19 @@ class HRockmate(torch.nn.Module):
             )
             self.output = self.rkgb_res.K_graph.list_outputs_kdn_data[0]
             self.budget = budget
+            p = list(original_mod.parameters())[0]
+            cpu_optimize_stats = get_cpu_optimize_stats(p, 
+                                                        cpu_optim=cpu_optim, 
+                                                        gpu_optim=gpu_optim,
+                                                        optim_kwargs=optim_kwargs)
             self.gd = make_gd(
-                self.device, self.original_mod, self.dict_constants
+                self.device, 
+                self.original_mod, 
+                self.dict_constants,
+                cpu_optim, 
+                gpu_optim,
+                optim_kwargs=optim_kwargs,
+                cpu_optimize_stats = cpu_optimize_stats
             )
             self.list_solutions = []
             if solve_sched:
@@ -215,6 +233,7 @@ class HRockmate(torch.nn.Module):
         for solver in list_solvers:
             if isinstance(solver, HILP):
                 solver.config.solve_top_level = True
+                solver.config.cpu_optimize_kwargs = self.gd["cpu_optimize_stats"]
                 # print("temporarily changing total_nodes for top level hilp")
                 list_solutions.extend(
                     solver(self.rkgb_res.H_cluster, [budget], accurate_mem=True)
@@ -236,8 +255,9 @@ class HRockmate(torch.nn.Module):
             self.get_compiled_fct()
         self.list_solutions.extend(list_solutions)
 
-    def get_compiled_fct(self):
-        self.compiler = Compiler(self.gd)
+    def get_compiled_fct(self, new_compiler=True):
+        if new_compiler:
+            self.compiler = Compiler(self.gd)
         self.fct_list, self.init_fct_list, self.restore_fct_list = self.compiler.compile_from_schedule(self.op_sched)
         loss_idx = self.op_sched.loss_idx
 
@@ -245,8 +265,18 @@ class HRockmate(torch.nn.Module):
         self.bwd_fct_list = self.fct_list[loss_idx:]
         l = [self.compiler.fct_del_var(v) for v in self.output.tensor_targets]
         self.bwd_fct_list.append(l)
+        self.minor_parameters = []
+        for n, p in self.original_mod.named_parameters():
+            if n not in [kdn.main_target for kdn in self.rkgb_res.H_cluster.list_kdn_parameters]:
+                self.minor_parameters.append(p)
+                p.data = p.data.to("cuda")
         
-
+        if self.minor_parameters:
+            def optimize():
+                self.compiler.storage.ld["optimizers"]["minors"].step()
+                for p in self.minor_parameters:p.grad=None
+            self.bwd_fct_list.append([optimize])
+        
         self.define_autograd_Function()
         self.inherits_original_mod_attributes_and_methods()
 
@@ -294,6 +324,7 @@ class HRockmate(torch.nn.Module):
                 #     requires_grad=v.kdn.info.requires_grad,
                 # )
             if isinstance(v, Parameter):
+                if v.grad:continue
                 target = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
                 storage.ld["cpu_"+k] = torch.empty_like(target, 
                                                     dtype=target.dtype, 
@@ -323,18 +354,12 @@ class HRockmate(torch.nn.Module):
         storage.ld["optimizers"] = {}
         for op in self.op_sched.op_list:
             if isinstance(op, OptimizeOp):
-                storage.ld["optimizers"][op.name] = self.gd["opt"]([storage.ld[p] for p in op.list_params], **self.gd["opt_kwargs"])
+                optim = self.gd["cpu_optim"] if "cpu" in op.name else self.gd["gpu_optim"]
+                storage.ld["optimizers"][op.name] = optim([storage.ld[p] for p in op.list_params], **self.gd["opt_kwargs"])
 
-        self.minor_parameters = []
-        for n, p in self.original_mod.named_parameters():
-            if n not in [kdn.main_target for kdn in self.rkgb_res.H_cluster.list_kdn_parameters]:
-                self.minor_parameters.append(p)
-        storage.ld["optimizers"]["minors"] = self.gd["opt"](self.minor_parameters, **self.gd["opt_kwargs"])
+        if self.minor_parameters:
+            storage.ld["optimizers"]["minors"] = self.gd["gpu_optim"](self.minor_parameters, **self.gd["opt_kwargs"])
         
-        def optimize():
-            storage.ld["optimizers"]["minors"].step()
-            for p in self.minor_parameters:p.grad=None
-        self.bwd_fct_list.append([optimize])
 
         for l in self.init_fct_list:
             self._exec(l)
@@ -640,10 +665,43 @@ class HRockmate(torch.nn.Module):
             #     pred_mem[-1] += op.overhead
         return pred_mem
 
+    def zero_grad(self, set_to_none=True):
+        # if self.compiler.storage:
+            # if set_to_none:
+            #     for k,v in self.compiler.storage.ld.items():
+            #         if "cpu_" in k:
+            #             v.grad = None
+            # else:
+            # for k,v in self.compiler.storage.ld.items():
+            #     if "cpu_" in k:
+            #         v.grad = torch.zeros_like(v)
+        self.original_mod.zero_grad(set_to_none=set_to_none)
+
     def reinit(self, set_to_none=False):
         # In our experiments, we set the parameter grad to 0's
         # so that Backward only creates memory for activations
         self.original_mod.zero_grad(set_to_none=set_to_none)
+
+    def print_sched_results(self):
+        t = sum(kcn.time for kcn in self.rkgb_res.H_cluster.list_kcn if kcn.time)
+        print(f"Original module iter time {t}")
+        t = sum(step.time for step in self.op_sched.steps)
+        print(f"Schedule: total time {t}")
+        t = sum(step.comp_ops.time for step in self.op_sched.steps)
+        print(f"Schedule: total compute time {t}")
+        t = sum(step.ofl_ops.time for step in self.op_sched.steps)
+        print(f"Schedule: total offload time {t}")
+        t = sum(step.prf_ops.time for step in self.op_sched.steps)
+        print(f"Schedule: total prefetch time {t}")
+        t = sum(step.opt_ops.time for step in self.op_sched.steps)
+        print(f"Schedule: total cpu optimize time {t}")
+        t = sum((step.time - step.comp_ops.time) for step in self.op_sched.steps if step.time == step.opt_ops.time)
+        print(f"Schedule: time from waiting cpu optimize {t}")
+        t = sum((step.time - step.max2nd()) for step in self.op_sched.steps if step.time == step.ofl_ops.time)
+        print(f"Schedule: time from waiting offload {t}")
+        t = sum((step.time - step.max2nd()) for step in self.op_sched.steps if step.time == step.prf_ops.time)
+        print(f"Schedule: time from waiting prefetch {t}")
+
 
     # === Inherits original_mod Attributes and Methods ===
     """

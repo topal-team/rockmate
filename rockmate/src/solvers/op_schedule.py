@@ -5,6 +5,7 @@ from rkgb.Htools import *
 from collections import namedtuple
 from copy import deepcopy
 import warnings
+import numpy as np
 
 
 class Allocation:
@@ -59,15 +60,34 @@ class Activation(Allocation):
 
 
 class Parameter(Allocation):
-    def __init__(self, kdn):
+    def __init__(self, kdn, grad=False):
         super().__init__(
-            name=kdn.name,
+            name=kdn.name + "_grad"*grad,
             alloc_type="Parameter",
             mem=kdn.mem,
             info=kdn.info,
             dtype=kdn.info.dtype,
         )
         self.kdn = kdn
+        self.grad = grad
+    
+    def __copy__(self):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        result.__dict__.update(self.__dict__)
+        return result
+
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            if k == "kdn":  # do not deepcopy kn
+                setattr(result, k, v)
+            else:
+                setattr(result, k, deepcopy(v, memo))
+
+        return result
 
 
 class Buffer(Allocation):
@@ -79,30 +99,32 @@ class Buffer(Allocation):
 
 
 class Op:
-    def __init__(self, name, disabled=False):
+    def __init__(self, name, time=0, disabled=False, overhead=0):
         """
         Op type should be in Compute/Delete/Mapping/Allocate/Offload/Prefetch
         Compute/Delete/Mapping/Allocate happens in the main stream
         """
         self.name = name
         self.disabled = disabled
-        self.overhead = 0
+        self.overhead = overhead
+        self.time = time
 
     def __repr__(self):
-        return self.name
+        return "Disabled_"*self.disabled + self.name
 
 class SynchronizeOp(Op):
     def __init__(self, name="", disabled=False):
-        super().__init__("Sync_"+name, disabled)
+        super().__init__("Sync_"+name, disabled=disabled)
 
 class ComputeOp(Op):
     def __init__(self, kcn, fast_forward=False, disabled=False, detach=True):
-        super().__init__(kcn.name, disabled)
+        super().__init__(kcn.name, disabled=disabled)
         self.kcn = kcn
         self.fast_forward = fast_forward
         self.detach = detach
         self.target = kcn
         self.overhead = kcn.overhead
+        self.time = kcn.time if kcn.time is not None else 0
 
     def __copy__(self):
         cls = self.__class__
@@ -122,17 +144,15 @@ class ComputeOp(Op):
 
         return result
 
-    def __repr__(self):
-        return self.kcn.name
-
 
 class DeleteOp(Op):
-    def __init__(self, alloc: Allocation, disabled=False):
-        super().__init__("Delete_" + alloc.name, disabled)
+    def __init__(self, alloc: Allocation, disabled=False, grad=False):
+        super().__init__("Delete_" + alloc.name+"_grad"*grad, disabled=disabled)
         self.target = alloc
+        self.grad = grad
 
-    def __repr__(self):
-        return "Delete_" + self.target.name
+    # def __repr__(self):
+    #     return "Delete_" + self.target.name+"grad"*self.grad
 
 
 class MappingOp(Op):
@@ -150,7 +170,7 @@ class MappingOp(Op):
         disabled=False,
         copy=False
     ):
-        super().__init__("Mapping_" + name, disabled)
+        super().__init__("Mapping_" + name, disabled=disabled)
         self.sources = sources
         self.targets = targets
         self.indices = indices
@@ -160,7 +180,7 @@ class MappingOp(Op):
 
 class AllocateOp(Op):
     def __init__(self, alloc: Allocation, disabled=False):
-        super().__init__("Allocate_" + alloc.name, disabled)
+        super().__init__("Allocate_" + alloc.name, disabled=disabled)
         self.target = alloc
 
 
@@ -172,18 +192,20 @@ class OffloadOp(Op):
         before: Op = None,
         after: Op = None,
         disabled: bool = False,
-        grad:bool = False
+        grad:bool = False,
+        time:float = 0,
     ):
-        super().__init__("Offload_" + alloc.name, disabled)
+        super().__init__("Offload_" + alloc.name+"_grad"*grad, disabled=disabled)
         self.target = alloc
         self.indices = indices
         self.disabled = disabled
         self.before = before
         self.after = after
         self.grad = grad
+        self.time = time
 
-    def __repr__(self):
-        return "Disabled" * self.disabled + f"Offload_{self.target}" +"_grad"*self.grad
+    # def __repr__(self):
+    #     return "Disabled" * self.disabled + f"Offload_{self.target}" +"_grad"*self.grad
 
 
 class PrefetchOp(Op):
@@ -194,23 +216,96 @@ class PrefetchOp(Op):
         before: Op = None,
         after: Op = None,
         disabled: bool = False,
+        time:float = 0,
     ):
-        super().__init__("Prefetch_" + alloc.name, disabled)
+        super().__init__("Prefetch_" + alloc.name, disabled=disabled)
         self.target = alloc
         self.indices = indices
         self.disabled = disabled
         self.before = before
         self.after = after
+        self.time = time
 
-    def __repr__(self):
-        return "Disabled" * self.disabled + f"Prefetch_{self.target}"
+    # def __repr__(self):
+    #     return "Disabled" * self.disabled + f"Prefetch_{self.target}"
 
 class OptimizeOp(Op):
-    def __init__(self, name, list_params, alloc=None, disabled=False):
-        super().__init__("Optimize_" + name, disabled)
+    def __init__(self, name, list_params, alloc=None, disabled=False,time=0, overhead=0):
+        super().__init__("Optimize_" + name, disabled=disabled, overhead=overhead)
         self.list_params = list_params
         self.target = alloc or None
+        self.time = time
 
+class ListOp(list):
+    def __init__(self, ops):
+        super(ListOp, self).__init__(ops)
+        self._pop = super(ListOp, self).pop
+        self._remove = super(ListOp, self).remove
+        self._append = super(ListOp, self).append
+        self._insert = super(ListOp, self).insert
+        self.time = sum(op.time for op in ops)
+
+    def pop(self,index):
+        self.time -= self[index].time
+        return self._pop(index)
+    def remove(self,op):
+        self.time -= op.time
+        return self._remove(op)
+    def append(self,op):
+        self.time += op.time
+        return self._append(op)
+    def insert(self,i,op):
+        self.time += op.time
+        return self._insert(i,op)
+
+class Step():
+    def __init__(self, op_list:list) -> None:
+
+        ofl_ops = []
+        prf_ops = []
+        opt_ops = []
+        comp_ops = []
+        self.alloc_ops = []
+        self.del_ops = []
+        for op in op_list:
+            if isinstance(op, OffloadOp):
+                ofl_ops.append(op)
+            elif isinstance(op, PrefetchOp):
+                prf_ops.append(op)
+            elif isinstance(op, OptimizeOp):# and "cpu" in op.name:
+                opt_ops.append(op)
+            elif isinstance(op, ComputeOp):
+                comp_ops.append(op)
+            elif isinstance(op, DeleteOp):
+                self.del_ops.append(op)
+            else:#if isinstance(op, AllocateOp):
+                self.alloc_ops.append(op)
+
+        self.ofl_ops = ListOp(ofl_ops)
+        self.prf_ops = ListOp(prf_ops)
+        self.opt_ops = ListOp(opt_ops)
+        self.comp_ops = ListOp(comp_ops)
+    
+    @property
+    def op_list(self):
+        return self.alloc_ops+self.ofl_ops+self.prf_ops+self.comp_ops+self.opt_ops+self.del_ops
+    @property
+    def time(self):
+        return max(self.ofl_ops.time, 
+                   self.prf_ops.time, 
+                   self.opt_ops.time, 
+                   self.comp_ops.time)
+
+    def all_time(self):
+        return (self.ofl_ops.time, 
+                   self.prf_ops.time, 
+                   self.opt_ops.time, 
+                   self.comp_ops.time)
+
+    def max2nd(self):
+        t = list(self.all_time())
+        t.remove(max(t))
+        return max(t)
 
 class OpSchedule:
     solver = None
@@ -237,22 +332,25 @@ class OpSchedule:
         New role: greedy algorithm to rearrange the prefetch/offload ops
         Parameters are read from the cluster
         """
-        self.op_list = op_list
+        self._op_list = op_list
         self.init_op_list = init_op_list
         self.restore_op_list = restore_op_list
         self.prf_list = prf_list
         self.ofl_list = ofl_list
         self.with_parameters = with_parameters
+        self.from_steps = with_parameters
+        
         if loss_idx is None:
             # Find the last loss op before the first bwd
-            for i, op in enumerate(self.op_list):
+            for i, op in enumerate(self._op_list):
                 if "loss" in op.name:
                     self.loss_idx = i
                 if "bwd" in op.name:
                     break
         else:
             self.loss_idx = loss_idx
-
+        if self.from_steps:
+            self.create_steps()
         if cluster is None:
             warnings.warn("Cluster should be provided to create op_sched")
             self.prepare_allocation_from_op_list(interfaces)
@@ -264,6 +362,9 @@ class OpSchedule:
                 self.list_alloc.extend(
                     [Parameter(kdn) for kdn in cluster.list_kdn_parameters]
                 )
+                self.list_alloc.extend(
+                    [Parameter(kdn, grad=True) for kdn in cluster.list_kdn_parameters]
+                )# add parameter grad allocation
                 self.list_alloc.extend(self.create_buffer_list())
         self.dict_alloc = {alloc.name: alloc for alloc in self.list_alloc}
         self.all_interfaces = [
@@ -349,14 +450,80 @@ class OpSchedule:
         else:
             self.alive_list = []
 
+    def refine_optimize(self):
+        steps = self.steps
+        for j in range(len(steps)-1, self.loss_step, -1):
+            opt_ops = list(steps[j].opt_ops)
+            opt2user_step = {op.name:None for op in opt_ops}
+            steps_avail = {op:steps[j:] for op in opt_ops}
+
+            located_ops = []
+            for i,step in enumerate(steps[:]):
+                if None not in opt2user_step.values():break
+                for opt_op in opt_ops:
+                    if opt2user_step[opt_op.name]:continue
+                    for usr in opt_op.target.kdn.users_real:
+                        if str(usr) in [str(op) for op in step.comp_ops]:
+                            # print(opt_op.name)
+                            opt2user_step[opt_op.name] = i
+                            steps_avail[opt_op].extend(steps[:i])
+                            # located_ops.append(opt_op)
+                            # opt_ops.remove(opt_op)
+
+            for op, avail in steps_avail.items():
+                avail_step = max(avail, key=lambda x:x.time-x.opt_ops.time)
+                # print(avail_step.time,avail_step.opt_ops.time)
+                # print(steps[j].time,steps[j].opt_ops.time)
+                if avail_step.time<avail_step.opt_ops.time:continue
+                if steps[j].opt_ops.time<steps[j].time:continue
+                if (avail_step.opt_ops.time+op.time-avail_step.time>
+                    steps[j].opt_ops.time-steps[j].max2nd()):continue
+                
+                # print(avail_step.time, avail_step.opt_ops.time)
+                avail_step.opt_ops.append(op)
+                steps[j].opt_ops.remove(op)
+
+        for i, op in enumerate(self.op_list):
+            if "loss" in op.name:
+                self.loss_idx = i
+            if "bwd" in op.name:
+                break
+
+    def create_steps(self):
+        self.steps = []
+        step_op = []
+        for i,op in enumerate(self._op_list):
+            if isinstance(op, SynchronizeOp):
+                if step_op:self.steps.append(Step(step_op))
+                step_op = []
+            if i == self.loss_idx:
+                self.loss_step = len(self.steps)
+            step_op.append(op)
+        self.steps.append(Step(step_op))
+            # print(op, op.time)
+        
+    def update_alive_list(self):
+        pass
+
+    def create_alive_np_array(self):
+        alive_list = self.alive_list or self.create_alive_list()
+        self.np_alloc_mem = np.array([alloc.mem for alloc in self.list_alloc])
+        self.np_overhead = np.array([op.overhead for op in self.op_list])
+        self.alive_array = np.array([[1 if self.init_alive_status[a.name] else 0 
+                                      for a in self.list_alloc]+
+                                      [1 if alive_list[i][a.name] else 0 
+                                      for a in self.list_alloc] 
+                                      for i ,_ in enumerate(self.op_list)])
+        self.alive_diff_array = np.diff(self.alive_array, axis=0)
+
     def create_buffer_list(self):
         buffer_set = set()
         for op in self.op_list:
             if isinstance(op, MappingOp) and len(op.targets)==1:# merge mapping
                 for target in op.targets:
                     buffer_set.add(target)
-            elif isinstance(op, AllocateOp):
-                buffer_set.add(op.target)
+            # elif isinstance(op, AllocateOp):
+            #     buffer_set.add(op.target)
 
         return list(buffer_set)
 
@@ -385,20 +552,29 @@ class OpSchedule:
         for op in self.init_op_list:
             if isinstance(op, AllocateOp):
                 alive_status[op.target.name] = True
-        # TODO: add init alive for parameters
+        self.init_alive_status = alive_status.copy()
 
+        # TODO: add init alive for parameters
+        bwd2param = {}
+        for alloc in self.list_alloc:
+            if isinstance(alloc, Parameter):
+                for kcn in alloc.kdn.users_real:
+                    bwd2param[kcn.name.replace("fwd", "bwd")] = alloc.kdn.name+"_grad"
+                
         alive_list = []
         for op in self.op_list:
             if op.disabled:
                 alive_list.append(alive_status.copy())
                 continue
             if isinstance(op, DeleteOp):
-                alive_status[op.target.name] = False
+                alive_status[op.target.name+"_grad"*op.grad] = False
             elif isinstance(op, ComputeOp):
                 # compute op should not be disabled except loss which is useful for alive status
                 for kdn in op.kcn.users:
                     if not ("phantoms" in kdn.name and op.fast_forward):
                         alive_status[kdn.name] = True
+                if op.kcn.name in bwd2param:
+                    alive_status[bwd2param[op.kcn.name]] = True
             elif isinstance(op, AllocateOp):
                 alive_status[op.target.name] = True
             alive_list.append(alive_status.copy())
@@ -560,7 +736,23 @@ class OpSchedule:
             / sum(op.kcn.time for op in all_compute)
             - 1
         )
+    
+    def optimizer_states_size(self):
+        optim_size = 0
+        for op in self.op_list:
+            if isinstance(op, OptimizeOp) and "cpu" not in op.name:
+                optim_size += sum(self.dict_alloc[kdn].mem for kdn in op.list_params)
+        return optim_size
 
+    @property
+    def op_list(self):
+        if self.from_steps:
+            op_list = []
+            for step in self.steps:
+                op_list += step.op_list
+            return op_list
+        else:
+            return self._op_list
 
 # def hg_to_cluster(hg: H_graph, kg: K_graph):
 #     interfaces = dict()

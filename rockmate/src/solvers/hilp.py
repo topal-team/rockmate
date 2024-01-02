@@ -51,6 +51,7 @@ class HILP(Solver):
             self.nb_bdg_peak = nb_bdg_peak
             self.solve_top_level = False
             self.time_limit_ = time_limit
+            self.cpu_optimize_kwargs = {}
 
         @property
         def time_limit(self):
@@ -219,6 +220,7 @@ class HILP(Solver):
                 ilp_solver_params=ilp_solver_params,
                 accurate_mem=accurate_mem,
                 protected_names=protected_names,
+                cpu_optimize_kwargs = self.config.cpu_optimize_kwargs
             )
             # print(f"model building: {time.time()-start}")
             sols = set()
