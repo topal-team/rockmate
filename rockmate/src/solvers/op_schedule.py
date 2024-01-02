@@ -483,6 +483,12 @@ class OpSchedule:
                 avail_step.opt_ops.append(op)
                 steps[j].opt_ops.remove(op)
 
+        for i, op in enumerate(self.op_list):
+            if "loss" in op.name:
+                self.loss_idx = i
+            if "bwd" in op.name:
+                break
+
     def create_steps(self):
         self.steps = []
         step_op = []
