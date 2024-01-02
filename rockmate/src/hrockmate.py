@@ -102,7 +102,6 @@ class HRockmate(torch.nn.Module):
                             solver.config.nb_total_nodes_top_level,
                             partitioner.config.max_estimate_for_main_graph,
                         )
-
         #  We don't want to use the default setattr
         # because torch.nn.Module will register it as a submodule
         # -- use gkGB --
@@ -114,6 +113,7 @@ class HRockmate(torch.nn.Module):
                     verbose=verbose,
                     wanted_graphs={"K"},
                     partitioners=partitioners,
+                    check_device_is_gpu=False
                 )
             else:
                 self.rkgb_res = rkgb_res
@@ -134,7 +134,7 @@ class HRockmate(torch.nn.Module):
                 make_late_partitioning(
                     self.rkgb_res, original_mod, partitioners=partitioners
                 )
-
+            self.partitioners = partitioners
             self.list_solvers = list_solvers
             self.dict_constants = self.rkgb_res.K_graph.dict_constants
             self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)

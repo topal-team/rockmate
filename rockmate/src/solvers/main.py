@@ -376,7 +376,7 @@ def add_parameter_node(h_cluster, original_mod, minor_size=10*1024):
 
 
 def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
-    timer = irotor.make_timer(torch.device("cuda"))
+    timer = irotor.make_timer(torch.device("cpu"))
     p = deepcopy(_p).to("cuda")
     if not p.is_leaf:
         p = torch.ones([10,1024,1024], dtype=_p.dtype).to("cuda")

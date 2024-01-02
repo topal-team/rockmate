@@ -92,7 +92,7 @@ def measure_cost_large_model():
     niter = 5
     for n in [1,2]:
         model = GPT2(nlayers=n, vcb_sz=32000, d_model=4096, n_head=32)
-        sample = [torch.randint(0, 5000, [4,256])]
+        sample = [torch.randint(0, 5000, [8,256])]
 
         test_exec(model, sample, copy=True, niter=niter, opt=torch.optim.Adam, device="cuda")
 
