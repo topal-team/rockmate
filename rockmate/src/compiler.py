@@ -671,11 +671,13 @@ class Compiler:
         indices_ = [0, None] if "offload" in var_name else indices
         device = self.gd["device"]
         stream = stream or self.gd["offload_stream"]
+        var_name = var_name.removesuffix('_offload')
         if grad:
             def offload():
                 with torch.cuda.stream(stream):
                     # stream.wait_stream(self.gd["main_stream"])
-                    self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"].grad.data.copy_(
+                    self.storage.ld[f"cpu_{var_name}"].grad = torch.empty_like(self.storage.ld[f"cpu_{var_name}"])
+                    self.storage.ld[f"cpu_{var_name}"].grad.data.copy_(
                         self.storage.ld[var_name].grad,
                         non_blocking=True,
                     )
@@ -782,17 +784,18 @@ class Compiler:
         # if f"cpu_" in op.name:
         #     def optimize():pass
         #     return optimize
+        del_grad = op.list_params if "cpu" in op.name else []
         def optimize():
             # torch.cuda.synchronize()
             # self.gd["offload_stream"].synchronize()
 
             # optimizer = self.storage.ld["optimizers"][op.name]
             self.storage.ld["optimizers"][op.name].step()
-            # for p in op.list_params:
-            #     self.storage.ld[p].grad.zero_()
+            for p in del_grad:
+                self.storage.ld[p].grad = None
             #     self.storage.ld[p.removeprefix("cpu_")].grad = None
             # torch.cuda.synchronize()
-            # pass
+            pass
         return optimize
 
 
