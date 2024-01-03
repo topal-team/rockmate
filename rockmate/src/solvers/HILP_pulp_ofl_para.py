@@ -434,10 +434,18 @@ class ModelPULP:
                     )
                 else:
                     self.parameter_size.append(0)
-                self.parameter2hcn = {w: self.sub_c2hcn[w] for w in range(W)}
-                self.hcn2parameter = {
-                    k: w for w in self.parameter2hcn for k in self.parameter2hcn[w]
-                }
+                self.param2sub_c = {w: [w] for w in range(W)}#TODO: add shared weight
+                #self.param2hcn = {w: self.sub_c2hcn[w] for w in range(W)}
+                self.param2hcn = {w:[] for w in range(W)}
+                self.hcn2param = {}# is no param for hcn[k], k not in hcn2param
+                for w,l_c in self.param2sub_c.items():
+                    for c in l_c:
+                        for k in self.sub_c2hcn[c]:
+                            if k in self.hcn2param:
+                                self.hcn2param[k].append(w)
+                            else:
+                                self.hcn2param[k] = [w]
+                            self.param2hcn[w].append(k)
 
 
             self.AliveW = RkLpVariable.dicts(
