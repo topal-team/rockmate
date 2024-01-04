@@ -198,7 +198,6 @@ class ModelPULP:
         ]
 
         self.T = T = len(self.hgraph.list_hcn)
-        self.W = W = len(self.sub_clusters)
         self.I = I = len(self.hgraph.list_hdn)
         self.J = J = len(self.list_list_sched)
 
@@ -423,18 +422,51 @@ class ModelPULP:
                 if self.delete_list[i][0] not in self.krange(t):
                     self.delete[t, i] = 0
 
-        if self.with_parameters:
-            self.parameter_size = []
-            for w in range(W):
-                sub_cluster = self.sub_clusters[w]
-                if hasattr(sub_cluster, "list_kdn_parameters"):
-                    self.parameter_size.append(
-                        sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters)
-                        / self.gcd
-                    )
+        self.W = W = len(self.sub_clusters)
+        def get_parameter_cluster(sub_clusters):
+            all_params = {}
+            # all_clusters = {sub_cluster.name:sub_cluster for sub_cluster in sub_clusters if sub_cluster}
+            # sub_c2params = {sub_cluster.name:set() for sub_cluster in sub_clusters if sub_cluster}
+            param2sub_c = {}
+
+            for i,sub_cluster in enumerate(sub_clusters):
+                if not hasattr(sub_cluster, "list_kdn_parameters"):continue
+                for kdn in sub_cluster.list_kdn_parameters:
+                    # sub_c2params[sub_cluster.name].add(kdn.name)
+                    all_params[kdn.name] = kdn
+                    if kdn.name not in param2sub_c:
+                        param2sub_c[kdn.name] = [i]
+                    else:
+                        param2sub_c[kdn.name].append(i)
+            result = {}
+            for p, c in param2sub_c.items():
+                c_ = tuple(sorted(c))
+                if c_ not in result:
+                    result[c_] = {p}
                 else:
-                    self.parameter_size.append(0)
-                self.param2sub_c = {w: [w] for w in range(W)}#TODO: add shared weight
+                    result[c_].add(p)
+
+            parameters = []
+            params2sub_c = {}
+            for k,v in result.items():
+                params2sub_c[len(parameters)] = k
+                parameters.append([all_params[p] for p in v])
+            return params2sub_c, parameters
+        
+        if self.with_parameters:
+            self.param2sub_c, self.parameters = get_parameter_cluster(self.sub_clusters)
+            self.parameter_size = [sum(kdn.mem for kdn in p)/self.gcd for p in self.parameters]
+            self.W = W = len(self.parameters)
+            for w in range(W):
+                # sub_cluster = self.sub_clusters[w]
+                # if hasattr(sub_cluster, "list_kdn_parameters"):
+                #     self.parameter_size.append(
+                #         sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters)
+                #         / self.gcd
+                #     )
+                # else:
+                #     self.parameter_size.append(0)
+                # self.param2sub_c = {w: [w] for w in range(W)}
                 #self.param2hcn = {w: self.sub_c2hcn[w] for w in range(W)}
                 self.param2hcn = {w:[] for w in range(W)}
                 self.hcn2param = {}# is no param for hcn[k], k not in hcn2param
@@ -1171,13 +1203,15 @@ class ModelPULP:
 
     def group(self, w, tol=1):
         # Group the parameters of each block for the task
-        fwd_i, bwd_i = self.param2hcn[w]
+        fwd_i = min(self.param2hcn[w])
+        bwd_i = max(self.param2hcn[w])
         early_fwd = []
         for t in range(bwd_i, self.T):
             if not self.single_fwd and self.sol(self.sumComp[t,fwd_i].value()):
                 early_fwd.append(t)#if recompute fwd after bwd
         hcn = self.hgraph.list_hcn[fwd_i]
-        parameters = {kdn.name: kdn for kdn in hcn.sub_cluster.list_kdn_parameters}
+        # parameters = {kdn.name: kdn for kdn in hcn.sub_cluster.list_kdn_parameters}
+        parameters = {kdn.name: kdn for kdn in self.parameters[w]}
         parameter_size = sum(kdn.mem for kdn in parameters.values())
 
         Alive = {p: 1 for p in parameters.keys()}
@@ -1223,6 +1257,7 @@ class ModelPULP:
             current_offloaded_size = sum(parameters[p].mem * a for p, a in Offloaded.items())
             next_alive_size = round((self.AliveG[(t_, k_, w)]+self.AliveW[(t_, k_, w)]).value() * parameter_size)
             next_offloaded_size = round(self.OflWProg[(t_, k_, w)].value() * parameter_size)
+            
             # assert current_alive_size <= round(self.AliveW[(t, k, w)].value() * parameter_size)
 
             if (t, k) == (0, 0):  # init
@@ -1242,6 +1277,7 @@ class ModelPULP:
                         restore_ops.append((t, k, DeleteOp(Parameter(parameters[p]))))
 
             if next_offloaded_size > current_offloaded_size:
+                # print(t,k, next_offloaded_size, current_offloaded_size)
                 ofl_size = next_offloaded_size - current_offloaded_size
                 candidates = {
                     p: parameters[p].mem * (1 - o)
