@@ -89,7 +89,9 @@ class HILP(Solver):
     def get_budget_list(self, hgraph: H_graph):
         min_bdg = get_hgraph_budget_lb(hgraph)
         max_bdg = get_hgraph_budget_ub(hgraph)
-        interfaces_mem = sum(kdn.mem for kdn in hgraph.cluster.all_interfaces)
+        # interfaces_mem = sum(kdn.mem for kdn in hgraph.cluster.all_interfaces)
+        interfaces_mem = sum(kdn.mem for kdn in hgraph.cluster.interfaces["inputs_kdn_data"])
+        interfaces_mem += sum(kdn.mem for kdn in hgraph.cluster.interfaces["outputs_kdn_data"])
 
         budgets = []
         l_bd_peak = (
@@ -153,6 +155,7 @@ class HILP(Solver):
     def solve(
         self, cluster: H_cluster, budgets=None, accurate_mem=False, gc_collect=True
     ):
+        print(f"solving {cluster.name}")
         list_op_sched = []
 
         for hg in cluster.representee_cluster.possible_hg:
