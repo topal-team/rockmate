@@ -115,7 +115,8 @@ class ModelPULP:
         protected_names=[],
         grouping=True,
         grad_mode="offload",  # ["keep_all", "free_all", "free_asap", "offload"]
-        cpu_optimize_kwargs = None
+        cpu_optimize_kwargs = None,
+        batch_multiplier = 1
     ):
         self.gcd = gcd if gcd else 1
         self.peak_budget = peak_budget / self.gcd
@@ -137,9 +138,10 @@ class ModelPULP:
             self.optimizer_states_size = cpu_optimize_kwargs["optimizer_states_size"]#*weight size
             self.cpu_optimize_speed = cpu_optimize_kwargs["cpu_optimize_speed"]#B/ms
             self.optimizer_overhead = cpu_optimize_kwargs["optimizer_overhead"]#*weight size
-            self.batch_multiplier = 4
-            self.BatMpl = RkLpVariable("BMpl", lowBound=0, upBound=self.batch_multiplier, cat="Integer")
-            self.param_multiplier = 1-self.BatMpl*1/self.batch_multiplier
+            # self.batch_multiplier = 4
+            # self.BatMpl = RkLpVariable("BMpl", lowBound=0, upBound=self.batch_multiplier, cat="Integer")
+            # self.param_multiplier = 1-self.BatMpl*1/self.batch_multiplier
+            self.param_multiplier = RkLpVariable("BMpl", lowBound=0, upBound=1-1/batch_multiplier, cat="Continuous")
 
         #############################
         self.hgraph = hgraph
@@ -1361,10 +1363,10 @@ class ModelPULP:
                                 for w_ in range(w, self.W)) / (1-self.param_multiplier.value())
                             - sum(self.cpu_optimized_params.values()))# size by all graphs
         if candidates and cpu_optimize_size>0:
-            print(candidates, cpu_optimize_size)
+            # print(candidates, cpu_optimize_size)
             selector = knapsack(list(candidates.items()))
             select_paras = selector.select_size(cpu_optimize_size)
-            print(select_paras)
+            # print(select_paras)
             
         for p in parameters:
             if p in select_paras:
