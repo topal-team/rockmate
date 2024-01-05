@@ -1705,13 +1705,13 @@ class ModelPULP:
 
     def create_optimize_ops(self, t, k, w, itemsize=4):
         op_list = []
-        sub_cluster = self.hgraph.list_hcn[min(self.param2hcn[w])].sub_cluster
+        # sub_cluster = self.hgraph.list_hcn[min(self.param2hcn[w])].sub_cluster
         if self.grouping:
             for t_, k_, op in self.opt_ops:
                 if (
                     t_ == t
                     and k_ == k
-                    and op.target.kdn.name in [k.name for k in sub_cluster.list_kdn_parameters]
+                    and op.target.kdn.name in [k.name for k in self.parameters[w]]
                 ):
                     op_list.append(op)
             return op_list
@@ -1724,7 +1724,7 @@ class ModelPULP:
                 if (
                     t_ == t
                     and k_ == k
-                    and op.target.kdn.name in [k.name for k in sub_cluster.list_kdn_parameters]
+                    and op.target.kdn.name in [k.name for k in self.parameters[w]]
                 ):
                     op_list.append(op)
             return op_list
@@ -1764,7 +1764,7 @@ class ModelPULP:
                 if (
                     t_ == t
                     and k_ == k
-                    and op.target.kdn in sub_cluster.list_kdn_parameters
+                    and op.target.kdn.name in [k.name for k in self.parameters[w]]
                 ):
                     pre_op_list.append(op)
 
@@ -1812,7 +1812,7 @@ class ModelPULP:
                 if (
                     t_ == t
                     and k_ == k
-                    and op.target.kdn in sub_cluster.list_kdn_parameters
+                    and op.target.kdn.name in [k.name for k in self.parameters[w]]
                 ):
                     op_list.append(op)
             return op_list
