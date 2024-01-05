@@ -138,10 +138,11 @@ class ModelPULP:
             self.optimizer_states_size = cpu_optimize_kwargs["optimizer_states_size"]#*weight size
             self.cpu_optimize_speed = cpu_optimize_kwargs["cpu_optimize_speed"]#B/ms
             self.optimizer_overhead = cpu_optimize_kwargs["optimizer_overhead"]#*weight size
-            # self.batch_multiplier = 4
+            batch_multiplier = 4
             # self.BatMpl = RkLpVariable("BMpl", lowBound=0, upBound=self.batch_multiplier, cat="Integer")
             # self.param_multiplier = 1-self.BatMpl*1/self.batch_multiplier
-            self.param_multiplier = RkLpVariable("BMpl", lowBound=0, upBound=1-1/batch_multiplier, cat="Continuous")
+            # self.param_multiplier = RkLpVariable("BMpl", lowBound=0, upBound=1-1/batch_multiplier, cat="Continuous")
+            self.param_multiplier = 0.
 
         #############################
         self.hgraph = hgraph
@@ -894,8 +895,7 @@ class ModelPULP:
                 parameter_mem = self.parameter_mem(t, k) if self.with_parameters else 0
                 j = self.hcn2sub_c[k]
                 self.md += self.U[t, k] >= 0
-                self.md += self.U[t, k] <= (self.peak_budget - parameter_mem -
-                                            self.param_multiplier*self.peak_budget)
+                self.md += self.U[t, k] <= (self.peak_budget - parameter_mem)
                 # if j is None or not accurate_mem:
                 if True:
                     # don't consider correction_term
@@ -910,7 +910,7 @@ class ModelPULP:
                             for eidx_d, (k_, i_) in enumerate(self.delete_list)
                             if k == k_
                         )
-                        <= self.peak_budget - parameter_mem -self.param_multiplier*self.peak_budget
+                        <= self.peak_budget - parameter_mem
                     )
                 else:
                     hcn = self.hgraph.list_hcn[k]
@@ -997,7 +997,7 @@ class ModelPULP:
         if k > self.loss_idx and k in self.hcn2param:
             l_w = self.hcn2param[k]
             optimizer_overhead += sum((1-self.sumOptC[w])*self.parameter_size[w] for w in l_w)* self.optimizer_overhead
-        return mem + self.optimizer_states_mem + optimizer_overhead
+        return mem + self.optimizer_states_mem + optimizer_overhead + self.param_multiplier*self.peak_budget
     
     def krange(self, t):
         if self.single_fwd:
@@ -1144,14 +1144,6 @@ class ModelPULP:
         status = self.md.solve(solver)
         self.status = LpStatus[status]  # readable status
         self.feasible = status == 1
-
-        self.params_vars = [self.AliveW, self.OflWProg, self.OflW, 
-                            self.PrfW, self.PrfWProg, self.OptC,
-                            ]
-
-        for p in self.params_vars:
-            for k,v in p.items():
-                p[k] = v*1/ (1-self.param_multiplier.value())
 
         sol = self.sol
         if self.feasible:
@@ -1358,9 +1350,13 @@ class ModelPULP:
         select_paras = []
         
             # cpu_optimize_size = self.sumOptC[w].value()*parameter_size# size by subgraph
+        if isinstance(self.param_multiplier, float):
+            multiplier = self.param_multiplier
+        else:
+            multiplier = self.param_multiplier.value()
         cpu_optimize_size = (sum(self.sumOptC[w_].value() * 
                                 self.parameter_size[w_] 
-                                for w_ in range(w, self.W)) / (1-self.param_multiplier.value())
+                                for w_ in range(w, self.W)) / (1-multiplier)
                             - sum(self.cpu_optimized_params.values()))# size by all graphs
         if candidates and cpu_optimize_size>0:
             # print(candidates, cpu_optimize_size)
@@ -1511,6 +1507,18 @@ class ModelPULP:
         I = len(hgraph.list_hdn)
         J = len(self.list_list_sched)
         W = len(self.parameter_size)
+
+        ### Handle multiplier
+        self.params_vars = [self.AliveW, self.OflWProg, self.OflW, 
+                            self.PrfW, self.PrfWProg, self.OptC,
+                            ]
+        if isinstance(self.param_multiplier, float):
+            multiplier = self.param_multiplier
+        else:
+            multiplier = self.param_multiplier.value()
+        for p in self.params_vars:
+            for k,v in p.items():
+                p[k] = v*1/ (1-multiplier)
 
         self.ofl_ops = []
         self.prf_ops = []
@@ -1703,7 +1711,7 @@ class ModelPULP:
                 if (
                     t_ == t
                     and k_ == k
-                    and op.target.kdn in sub_cluster.list_kdn_parameters
+                    and op.target.kdn.name in [k.name for k in sub_cluster.list_kdn_parameters]
                 ):
                     op_list.append(op)
             return op_list
@@ -1716,7 +1724,7 @@ class ModelPULP:
                 if (
                     t_ == t
                     and k_ == k
-                    and op.target.kdn in sub_cluster.list_kdn_parameters
+                    and op.target.kdn.name in [k.name for k in sub_cluster.list_kdn_parameters]
                 ):
                     op_list.append(op)
             return op_list
