@@ -151,8 +151,13 @@ class DeleteOp(Op):
         self.target = alloc
         self.grad = grad
 
-    # def __repr__(self):
-    #     return "Delete_" + self.target.name+"grad"*self.grad
+    def __repr__(self):
+        return "Delete_" + self.target.name+"grad"*self.grad
+    
+    # @property
+    # def name(self):
+    #     # name changes with target is changed during translation
+    #     return "Delete_" + self.target.name
 
 
 class MappingOp(Op):
@@ -204,8 +209,8 @@ class OffloadOp(Op):
         self.grad = grad
         self.time = time
 
-    # def __repr__(self):
-    #     return "Disabled" * self.disabled + f"Offload_{self.target}" +"_grad"*self.grad
+    def __repr__(self):
+        return "Disabled" * self.disabled + f"Offload_{self.target}" +"_grad"*self.grad
 
 
 class PrefetchOp(Op):
@@ -274,9 +279,10 @@ class Step():
                 prf_ops.append(op)
             elif isinstance(op, OptimizeOp):# and "cpu" in op.name:
                 opt_ops.append(op)
-            elif isinstance(op, ComputeOp):
+            elif isinstance(op, ComputeOp) or (
+                isinstance(op, DeleteOp) and "parameter" not in op.name):
                 comp_ops.append(op)
-            elif isinstance(op, DeleteOp):
+            elif isinstance(op, DeleteOp) and "parameter" in op.name:
                 self.del_ops.append(op)
             else:#if isinstance(op, AllocateOp):
                 self.alloc_ops.append(op)
@@ -373,7 +379,7 @@ class OpSchedule:
         self.interface_names = [kdn.name for kdn in self.all_interfaces]
 
         self.op_name_list = [
-            (op.name if not op.disabled else "") for op in self.op_list
+            (str(op) if not op.disabled else "") for op in self.op_list
         ]
 
         if refine:
@@ -714,7 +720,7 @@ class OpSchedule:
                     pass
 
         self.op_name_list = [
-            (op.name if not op.disabled else "") for op in self.op_list
+            (str(op) if not op.disabled else "") for op in self.op_list
         ]
 
     def __repr__(self):
