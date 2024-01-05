@@ -212,7 +212,7 @@ class Compiler:
                     target
                 ) in kn.tensor_targets:  # kn.tensor_targets is Tensor of pytorch
                     inplace_code = inplace_code.replace(target, "_" + target)
-
+                # print(kn, no_save_list)
                 function_list.append(
                     self.fct_run_forward_with_grad(
                         main_code.replace("self.", "original_mod.").replace(
@@ -441,7 +441,7 @@ class Compiler:
 
         # self.op_name_list = op_sched.op_name_list
         self.op_name_list = [
-            (op.name if not op.disabled else "") for op in op_sched.op_list
+            (str(op) if not op.disabled else "") for op in op_sched.op_list
         ]
         # if op_sched.alive_list == []:
         op_sched.alive_list = op_sched.create_alive_list()
