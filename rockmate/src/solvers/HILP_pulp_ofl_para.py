@@ -1092,7 +1092,7 @@ class ModelPULP:
                 if k in self.hcn2param:
                     for w in self.hcn2param[k]:
                         self.PrfWProg[t,k,w] = get_progress(self.PrfW, t, k, w)
-                        self.md += self.sumComp[t, k] - self.param_multiplier <= self.PrfWProg[t,k,w] + (1-self.sumOptC[w])
+                        self.md += self.sumComp[t, k] <= self.PrfWProg[t,k,w] + (1-self.sumOptC[w])
                 for w in range(self.W):
                     self.OflWProg[(t,k,w)] = get_progress(self.OflW, t, k, w)
                     self.OptCProg[(t,k,w)] = get_progress(self.OptC, t, k, w)
@@ -1142,6 +1142,14 @@ class ModelPULP:
         status = self.md.solve(solver)
         self.status = LpStatus[status]  # readable status
         self.feasible = status == 1
+
+        self.params_vars = [self.AliveW, self.OflWProg, self.OflW, 
+                            self.PrfW, self.PrfWProg, self.OptC,
+                            ]
+
+        for p in self.params_vars:
+            for k,v in p.items():
+                p[k] = v*1/ (1-self.param_multiplier.value())
 
         sol = self.sol
         if self.feasible:
@@ -1350,11 +1358,13 @@ class ModelPULP:
             # cpu_optimize_size = self.sumOptC[w].value()*parameter_size# size by subgraph
         cpu_optimize_size = (sum(self.sumOptC[w_].value() * 
                                 self.parameter_size[w_] 
-                                for w_ in range(w, self.W)) 
+                                for w_ in range(w, self.W)) / (1-self.param_multiplier.value())
                             - sum(self.cpu_optimized_params.values()))# size by all graphs
         if candidates and cpu_optimize_size>0:
+            print(candidates, cpu_optimize_size)
             selector = knapsack(list(candidates.items()))
             select_paras = selector.select_size(cpu_optimize_size)
+            print(select_paras)
             
         for p in parameters:
             if p in select_paras:
