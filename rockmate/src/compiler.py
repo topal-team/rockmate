@@ -205,7 +205,7 @@ class Compiler:
                 candidates = list(kn.deps_global) + list(kn.users_global)
                 candidates = self._get_names(candidates)
                 for kdn_name in candidates:
-                    if kdn_name in self.op_name_list[i:next_bwd_idx]:
+                    if "Delete_"+kdn_name in self.op_name_list[i:next_bwd_idx]:
                         no_save_list.append(kdn_name.split(" ")[0])
 
                 for (
