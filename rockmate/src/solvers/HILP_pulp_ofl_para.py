@@ -59,6 +59,7 @@ class knapsack:
         return [self.parameter_size[i][0] for i in indices]
 
     def select_size(self, size: int):
+        if not self.parameter_size:return []
         return self.select(size / sum(s[1] for s in self.parameter_size))
 
 
@@ -136,6 +137,9 @@ class ModelPULP:
             self.optimizer_states_size = cpu_optimize_kwargs["optimizer_states_size"]#*weight size
             self.cpu_optimize_speed = cpu_optimize_kwargs["cpu_optimize_speed"]#B/ms
             self.optimizer_overhead = cpu_optimize_kwargs["optimizer_overhead"]#*weight size
+            self.batch_multiplier = 4
+            self.BatMpl = RkLpVariable("BMpl", lowBound=0, upBound=self.batch_multiplier, cat="Integer")
+            self.param_multiplier = 1-self.BatMpl*1/self.batch_multiplier
 
         #############################
         self.hgraph = hgraph
@@ -888,7 +892,8 @@ class ModelPULP:
                 parameter_mem = self.parameter_mem(t, k) if self.with_parameters else 0
                 j = self.hcn2sub_c[k]
                 self.md += self.U[t, k] >= 0
-                self.md += self.U[t, k] <= self.peak_budget - parameter_mem
+                self.md += self.U[t, k] <= (self.peak_budget - parameter_mem -
+                                            self.param_multiplier*self.peak_budget)
                 # if j is None or not accurate_mem:
                 if True:
                     # don't consider correction_term
@@ -903,7 +908,7 @@ class ModelPULP:
                             for eidx_d, (k_, i_) in enumerate(self.delete_list)
                             if k == k_
                         )
-                        <= self.peak_budget - parameter_mem
+                        <= self.peak_budget - parameter_mem -self.param_multiplier*self.peak_budget
                     )
                 else:
                     hcn = self.hgraph.list_hcn[k]
@@ -981,7 +986,8 @@ class ModelPULP:
             for w in range(self.W)
         )
         # if self.cpu_optimize:
-        self.optimizer_states_mem = lpSum(((1-self.sumOptC[w])*
+        self.optimizer_states_mem = lpSum(((1-self.sumOptC[w]- 
+                                            self.param_multiplier)*
                     self.parameter_size[w] *
                     self.optimizer_states_size)
                     for w in range(self.W))
@@ -1086,35 +1092,35 @@ class ModelPULP:
                 if k in self.hcn2param:
                     for w in self.hcn2param[k]:
                         self.PrfWProg[t,k,w] = get_progress(self.PrfW, t, k, w)
-                        self.md += self.sumComp[t, k] <= self.PrfWProg[t,k,w] + (1-self.sumOptC[w])
+                        self.md += self.sumComp[t, k] - self.param_multiplier <= self.PrfWProg[t,k,w] + (1-self.sumOptC[w])
                 for w in range(self.W):
                     self.OflWProg[(t,k,w)] = get_progress(self.OflW, t, k, w)
                     self.OptCProg[(t,k,w)] = get_progress(self.OptC, t, k, w)
                     
-                    self.md += self.OflWProg[(t, k, w)] <= 1
+                    self.md += self.OflWProg[(t, k, w)] <= 1- self.param_multiplier
                     self.md += self.OptCProg[(t, k, w)] <= self.OflWProg[(t, k, w)]
-                    self.md += self.AliveW[t, k, w] + self.OflWProg[(t, k, w)] >= 1# - self.sumOptC[w]
+                    self.md += self.AliveW[t, k, w] + self.OflWProg[(t, k, w)] >= 1- self.param_multiplier# - self.sumOptC[w]
                     # self.md += self.AliveW[t, k, w] + self.AliveG[t, k, w] + self.OflWProg[(t, k, w)] >= 1
                     # self.md += self.AliveG[t, k, w] + self.OflWProg[(t, k, w)] >= self.sumOptC[w]
                     # self.md += self.AliveG[t, k, w] + self.OptCProg[(t, k, w)] >= self.sumOptC[w]
 
                     # self.md += self.AliveW[t, k, w] + self.PrfW[(t, k, w)] <= 1
-                    self.md += self.OflW[t, k, w] <= self.sumComp[t, k]
-                    self.md += self.PrfW[t, k, w] <= self.sumComp[t, k]
-                    self.md += self.OptC[t, k, w] <= self.sumComp[t, k]
+                    self.md += self.OflW[t, k, w] <= self.sumComp[t, k] - self.param_multiplier
+                    self.md += self.PrfW[t, k, w] <= self.sumComp[t, k] - self.param_multiplier
+                    self.md += self.OptC[t, k, w] <= self.sumComp[t, k] - self.param_multiplier
 
                     t_, k_ = self.next_index(t, k)
                     self.md += (self.AliveW[t_, k_, w] + self.PrfW[(t_, k_, w)] <= 
-                                self.OptCProg[(t, k, w)] + 1 - self.sumOptC[w])
+                                self.OptCProg[(t, k, w)] + 1- self.param_multiplier - self.sumOptC[w])
                     diff = self.AliveW[t_, k_, w] - self.AliveW[t, k, w]
-                    self.md += diff <= self.sumComp[t, k]
-                    self.md += -diff <= self.sumComp[t, k]
+                    self.md += diff <= self.sumComp[t, k] - self.param_multiplier
+                    self.md += -diff <= self.sumComp[t, k] - self.param_multiplier
                     self.md += diff <= self.PrfW[t, k, w]
             for w in self.param2hcn:
                 for k in self.param2hcn[w]:
                     if k not in self.krange(t):
                         continue
-                    self.md += self.sumComp[t, k] <= self.AliveW[t, k, w]
+                    self.md += self.sumComp[t, k] - self.param_multiplier <= self.AliveW[t, k, w]
             
 
     def solve(self, solver=""):
