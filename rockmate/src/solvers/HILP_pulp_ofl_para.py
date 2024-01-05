@@ -1603,49 +1603,49 @@ class ModelPULP:
                 list_alloc_para = [
                     Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
                 ]
-                for w in self.hcn2param[k]:
-                # parameters = [p.name for p in list_alloc_para if p.name not in self.cpu_optimized_params]
-                # if not hcn.is_fwd and parameters:
-                #     sub_op_list += [OptimizeOp(hcn.sub_cluster.name, 
-                #                                list_params=parameters)]
+                # for w in self.hcn2param[k]:
+                # # parameters = [p.name for p in list_alloc_para if p.name not in self.cpu_optimized_params]
+                # # if not hcn.is_fwd and parameters:
+                # #     sub_op_list += [OptimizeOp(hcn.sub_cluster.name, 
+                # #                                list_params=parameters)]
 
-                    if (
-                        not self.grouping and self.current_buffers[w] is not None
-                    ):  # first time
-                        self.current_buffers[w] = Buffer(
-                            hcn.sub_cluster.name,
-                            mem=sum(alloc.mem for alloc in list_alloc_para),
-                        )
-                        # Map buffer to parameter tensors
-                        # op_list.extend([AllocateOp(alloc) for alloc in list_alloc_para])
-                        op_list.append(
-                            MappingOp(
-                                name=hcn.sub_cluster.name + "_split",
-                                sources=[self.current_buffers[w]],
-                                targets=list_alloc_para,
-                            )
-                        )
-                        op_list.append(DeleteOp(self.current_buffers[w]))
+                #     if (
+                #         not self.grouping and self.current_buffers[w] is not None
+                #     ):  # first time
+                #         self.current_buffers[w] = Buffer(
+                #             hcn.sub_cluster.name,
+                #             mem=sum(alloc.mem for alloc in list_alloc_para),
+                #         )
+                #         # Map buffer to parameter tensors
+                #         # op_list.extend([AllocateOp(alloc) for alloc in list_alloc_para])
+                #         op_list.append(
+                #             MappingOp(
+                #                 name=hcn.sub_cluster.name + "_split",
+                #                 sources=[self.current_buffers[w]],
+                #                 targets=list_alloc_para,
+                #             )
+                #         )
+                #         op_list.append(DeleteOp(self.current_buffers[w]))
 
                 # print(t, k, len(sub_op_list), len(op_list))
                 op_list += sub_op_list
 
                 # Map parameter tensors to buffer
-                if not self.grouping:
-                    if self.current_buffers[w] is None:
-                        self.current_buffers[w] = Buffer(
-                            hcn.sub_cluster.name,
-                            mem=sum(alloc.mem for alloc in list_alloc_para),
-                        )
-                        # op_list.append(AllocateOp(self.current_buffers[w]))
-                    op_list.append(
-                        MappingOp(
-                            name=hcn.sub_cluster.name + "_merge",
-                            sources=list_alloc_para,
-                            targets=[self.current_buffers[w]],
-                        )
-                    )
-                    op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
+                # if not self.grouping:
+                #     if self.current_buffers[w] is None:
+                #         self.current_buffers[w] = Buffer(
+                #             hcn.sub_cluster.name,
+                #             mem=sum(alloc.mem for alloc in list_alloc_para),
+                #         )
+                #         # op_list.append(AllocateOp(self.current_buffers[w]))
+                #     op_list.append(
+                #         MappingOp(
+                #             name=hcn.sub_cluster.name + "_merge",
+                #             sources=list_alloc_para,
+                #             targets=[self.current_buffers[w]],
+                #         )
+                #     )
+                #     op_list.extend([DeleteOp(alloc) for alloc in list_alloc_para])
 
                 for eidx, (k_, i) in enumerate(self.delete_list):
                     # print(k_, i)
