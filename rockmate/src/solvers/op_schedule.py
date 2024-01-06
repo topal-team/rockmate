@@ -152,7 +152,7 @@ class DeleteOp(Op):
         self.grad = grad
 
     def __repr__(self):
-        return "Delete_" + self.target.name+"grad"*self.grad
+        return "Disabled_"*self.disabled+"Delete_" + self.target.name+"grad"*self.grad
     
     # @property
     # def name(self):
@@ -378,9 +378,9 @@ class OpSchedule:
         ]  # all interface KDN's
         self.interface_names = [kdn.name for kdn in self.all_interfaces]
 
-        self.op_name_list = [
-            (str(op) if not op.disabled else "") for op in self.op_list
-        ]
+        # self.op_name_list = [
+        #     (str(op) if not op.disabled else "") for op in self.op_list
+        # ]
 
         if refine:
             self.refine()
@@ -718,15 +718,16 @@ class OpSchedule:
                             )
 
                     if max(src_i) > next_used_i:  # try to use before regenerate
+                        print(f"refine {op} for {self.op_name_list[next_used_i]}")
                         op.disabled = True
 
                 elif isinstance(op.target, Parameter):
                     # TODO: disabled wrong deletion of parameter
                     pass
 
-        self.op_name_list = [
-            (str(op) if not op.disabled else "") for op in self.op_list
-        ]
+        # self.op_name_list = [
+        #     (str(op) if not op.disabled else "") for op in self.op_list
+        # ]
 
     def __repr__(self):
         return (
@@ -764,6 +765,12 @@ class OpSchedule:
             return op_list
         else:
             return self._op_list
+
+    @property
+    def op_name_list(self):
+        return [
+                (str(op) if not op.disabled else "") for op in self.op_list
+            ]
 
 # def hg_to_cluster(hg: H_graph, kg: K_graph):
 #     interfaces = dict()
