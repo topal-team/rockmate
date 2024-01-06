@@ -1622,13 +1622,13 @@ class ModelPULP:
                     h_obj = hcn
                     sub_op_list = deepcopy(h_obj.ff_op_list)
 
-                if hcn.sub_cluster is None:
-                    op_list += sub_op_list
-                    continue
+                # if hcn.sub_cluster is None:
+                #     op_list += sub_op_list
+                #     continue
 
-                list_alloc_para = [
-                    Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
-                ]
+                # list_alloc_para = [
+                #     Parameter(kdn) for kdn in hcn.sub_cluster.list_kdn_parameters
+                # ]
                 # for w in self.hcn2param[k]:
                 # # parameters = [p.name for p in list_alloc_para if p.name not in self.cpu_optimized_params]
                 # # if not hcn.is_fwd and parameters:
