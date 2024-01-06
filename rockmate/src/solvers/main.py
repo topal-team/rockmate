@@ -378,7 +378,7 @@ def add_parameter_node(h_cluster, original_mod, minor_size=10*1024):
     for hcn in h_cluster.possible_hg[0].list_hcn:
         sub_cluster = hcn.sub_cluster
         if sub_cluster is None:
-            return None
+            continue
         if not hasattr(sub_cluster, "list_kcn"):
             setattr(sub_cluster, "list_kdn_parameters", [])
         list_kdn_parameters = []
