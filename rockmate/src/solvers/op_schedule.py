@@ -561,11 +561,15 @@ class OpSchedule:
         self.init_alive_status = alive_status.copy()
 
         # TODO: add init alive for parameters
-        bwd2param = {}
+        self.bwd2param = {}
         for alloc in self.list_alloc:
             if isinstance(alloc, Parameter):
                 for kcn in alloc.kdn.users_real:
-                    bwd2param[kcn.name.replace("fwd", "bwd")] = alloc.kdn.name+"_grad"
+                    kcn_name = kcn.name.replace("fwd", "bwd")
+                    if kcn_name in self.bwd2param:
+                        self.bwd2param[kcn_name].append(alloc.kdn.name+"_grad")
+                    else:
+                        self.bwd2param[kcn_name] = [alloc.kdn.name+"_grad"]
                 
         alive_list = []
         for op in self.op_list:
@@ -579,8 +583,9 @@ class OpSchedule:
                 for kdn in op.kcn.users:
                     if not ("phantoms" in kdn.name and op.fast_forward):
                         alive_status[kdn.name] = True
-                if op.kcn.name in bwd2param:
-                    alive_status[bwd2param[op.kcn.name]] = True
+                if op.kcn.name in self.bwd2param:
+                    for kdn_name in self.bwd2param[op.kcn.name]:
+                        alive_status[kdn_name] = True
             elif isinstance(op, AllocateOp):
                 alive_status[op.target.name] = True
             alive_list.append(alive_status.copy())
