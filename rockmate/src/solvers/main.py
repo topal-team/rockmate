@@ -370,6 +370,7 @@ def add_parameter_node(h_cluster, original_mod, minor_size=10*1024):
                     kdn = K_D_node(main_target=n, kdn_type="parameter", info=info,)
                     kdn.users_real.add(kcn)
                     kdn.mem = p.shape.numel()*p.element_size()
+                    if kdn.name in [k.name for k in list_kdn_parameters]:continue
                     list_kdn_parameters.append(kdn)
     setattr(h_cluster, "list_kdn_parameters", list_kdn_parameters)
     return list_kdn_parameters
