@@ -74,19 +74,27 @@ def save_mem(rkmod):
     act_size = 0
     for k,v in rkmod.compiler.storage.ld.items():
         if isinstance(v,torch.Tensor) and "parameter" in k and "cuda" in str(v.device):
-            # print(k,v.numel()*v.element_size())
+            # if v.numel()>0:print(k,v.numel()*v.element_size())
             param_size += v.numel()*v.element_size()
-            if v.grad is not None:param_size += v.grad.numel()*v.element_size()
-        if isinstance(v,torch.Tensor) and "parameter" not in k:
+            if v.grad is not None:
+                print(k)
+                param_size += v.grad.numel()*v.element_size()
+        if isinstance(v,torch.Tensor) and "parameter" not in k:# and "___" not in k:
+            if v.numel()>0:print(k,v.numel()*v.element_size())
             act_size += v.numel()*v.element_size()
+            # if v.grad is not None:
+            #     act_size += v.grad.numel()*v.element_size()
 
-    optim_size = 0
+    optim_size_all = 0
     for k,optimizer in rkmod.compiler.storage.ld["optimizers"].items():#["minors"]
+        optim_size = 0
         for v in optimizer.state:
             if isinstance(v, torch.Tensor) and "cuda" in str(v.device):
                 optim_size += v.numel()*v.element_size()
-        print(k, optim_size)
-    return param_size, act_size, optim_size
+        if optim_size:
+            print(k, optim_size)
+            optim_size_all += optim_size
+    return param_size, act_size, optim_size_all
 
 def measure_cost_large_model():
     niter = 5
@@ -254,7 +262,6 @@ def analyze_mem(rkmod, print_status=False, with_grad=True):
     for t in range(md.T):
         for k in md.krange(t):
             mem[t, k] = md.U[t, k].value()
-            mem[t, k] += md.parameter_mem(t, k).value()
             mem[t, k] += (
                 sum(
                     md.Comp[t, k, o].value() * md.overhead[k][o]
@@ -268,6 +275,12 @@ def analyze_mem(rkmod, print_status=False, with_grad=True):
                 for eidx_d, (k_, i_) in enumerate(md.delete_list)
                 if k == k_
             )
+            mem[t, k] += md.parameter_mem(t, k).value()
+            if isinstance(md.param_multiplier, float):
+                mem[t, k] = mem[t, k]/(1-md.param_multiplier)
+            else:
+                mem[t, k] = mem[t, k]/(1-md.param_multiplier.value())
+
             # for w in range(md.W):
             #     # mem[t,k] += 1*((md.AliveW[t,k,w]+md.PrfW[t,k,w]).value()>0)*md.parameter_size[w]
             #     mem[t,k] += (md.AliveW[t,k,w]+md.PrfW[t,k,w]).value()*md.parameter_size[w]
@@ -378,8 +391,8 @@ def get_wide_decoder_NN(nlayers=6, d_model=4096, batch_size=32, seq_length=40):
 def prepare_for_offload(rkmod):
     rkmod.preprocess()
     print("finish preprocess")
-    for hcn in rkmod.rkgb_res.H_cluster.possible_hg[0].list_hcn:
-        add_parameter_node(hcn.sub_cluster, rkmod.original_mod)
+    # for hcn in rkmod.rkgb_res.H_cluster.possible_hg[0].list_hcn:
+    #     add_parameter_node(hcn.sub_cluster, rkmod.original_mod)
     add_parameter_node(rkmod.rkgb_res.H_cluster, rkmod.original_mod)
     print("finish adding parameter node")
 

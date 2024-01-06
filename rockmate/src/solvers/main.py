@@ -347,9 +347,7 @@ def add_parameter_node(h_cluster, original_mod, minor_size=10*1024):
         setattr(h_cluster, "list_kdn_parameters", [])
         return None
     list_kcn = h_cluster.list_kcn
-    list_kdn = h_cluster.list_kdn
     list_kdn_parameters = []
-    code = "\n".join([kcn.get_code() for kcn in list_kcn]).strip()
     parameters_id_to_name = {id(p):n for n,p in original_mod.named_parameters()}
     for kcn in list_kcn:
         if "loss" in kcn.name or not kcn.is_fwd:
@@ -377,6 +375,18 @@ def add_parameter_node(h_cluster, original_mod, minor_size=10*1024):
                     
                     list_kdn_parameters.append(kdn)
     setattr(h_cluster, "list_kdn_parameters", list_kdn_parameters)
+    for hcn in h_cluster.possible_hg[0].list_hcn:
+        sub_cluster = hcn.sub_cluster
+        if sub_cluster is None:
+            return None
+        if not hasattr(sub_cluster, "list_kcn"):
+            setattr(sub_cluster, "list_kdn_parameters", [])
+        list_kdn_parameters = []
+        for kcn in sub_cluster.list_kcn:
+            for kdn in h_cluster.list_kdn_parameters:
+                if kcn in kdn.users_real:
+                    list_kdn_parameters.append(kdn)
+        setattr(sub_cluster, "list_kdn_parameters", list_kdn_parameters)
     return list_kdn_parameters
 
 
