@@ -368,11 +368,15 @@ class HRockmate(torch.nn.Module):
             exec(self.init_code, self.gd, storage.ld)  # is compiler.gd
             for l,op in zip(self.fwd_fct_list, self.op_sched.op_list[:self.op_sched.loss_idx+1]):
                 if isinstance(op, OffloadOp) and op.grad:continue#first iteration without grad offload
+                if isinstance(op, OptimizeOp):continue#first iteration no need to optimize
                 self._exec(l)
         
     def restore_exec(self):
+        self.zero_grad()
         for l in self.restore_fct_list:
             self._exec(l)
+        for p in self.minor_parameters:
+            p.data = p.data.to("cpu")
         torch.cuda.synchronize()
 
     def define_autograd_Function(self):
