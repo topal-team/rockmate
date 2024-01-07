@@ -149,8 +149,9 @@ class Llama(nn.Module):
         n_head=32,
         hidden_size=2560,
         # intermediate_size = 2560,
-        # vcb_sz=32000,
+        vcb_sz=32000,
         dropout=0.1,
+        embedding=False
     ):
         super(Llama, self).__init__()
         self.nlayers = nlayers
@@ -164,16 +165,33 @@ class Llama(nn.Module):
         bias=True,
         scale=False,
         dropout=dropout,
-    )
+        )
         self.hidden_size = hidden_size
         self.attens = _get_clones(attn, nlayers)
         self.mlps = _get_clones(mlp, nlayers)
-        
+        self.hidden_size = hidden_size
+        self.attens = _get_clones(attn, nlayers)
+        self.mlps = _get_clones(mlp, nlayers)
+        self.embedding = embedding
+        if self.embedding:
+            self.wte = nn.Embedding(vcb_sz, hidden_size)
+            self.wpe = nn.Embedding(n_ctx, hidden_size)
+            self.out = nn.Linear(hidden_size, vcb_sz, bias=False)
+            self.out.weight = self.wte.weight
+            self.drop = nn.Dropout(dropout)
     def forward(self, inp):
+        if self.embedding:
+            pos_ids = torch.arange(
+                0, inp.size(-1), dtype=torch.long, device=self.wpe.weight.device
+            ).unsqueeze(0)
+            inp = self.drop((self.wte(inp) + self.wpe(pos_ids)))
+
         for i in range(self.nlayers):
             inp = self.attens[i](inp)
             inp = LayerNorm(self.hidden_size)(inp)
             inp = self.mlps[i](inp)
+        if self.embedding:
+            inp = self.out(inp)
         return inp
 
 
@@ -185,15 +203,16 @@ class Bloom(nn.Module):
         n_head=32,
         hidden_size=2560,
         # intermediate_size = 2560,
-        # vcb_sz=32000,
+        vcb_sz=32000,
         dropout=0.1,
+        embedding=False
     ):
         super(Bloom, self).__init__()
         self.nlayers = nlayers
         # block = getTransformer(d_model=d_model, n_head=n_head, dropout=dropout)
         # mlp = BloomMLP(BloomConfig(hidden_size=2560))
         mlp = nn.Sequential(nn.Linear(hidden_size, 4* hidden_size), 
-                            nn.GELU(), 
+                            # nn.GELU(), 
                             nn.Linear(4 * hidden_size, hidden_size))
         attn = Attention(
         d_model=hidden_size,
@@ -202,25 +221,52 @@ class Bloom(nn.Module):
         bias=True,
         scale=False,
         dropout=dropout,
-    )
+        )
         self.hidden_size = hidden_size
         self.attens = _get_clones(attn, nlayers)
         self.mlps = _get_clones(mlp, nlayers)
-        
+        self.embedding = embedding
+        if self.embedding:
+            self.wte = nn.Embedding(vcb_sz, hidden_size)
+            self.wpe = nn.Embedding(n_ctx, hidden_size)
+            self.out = nn.Linear(hidden_size, vcb_sz, bias=False)
+            self.out.weight = self.wte.weight
+            self.drop = nn.Dropout(dropout)
+
+        self.ln = LayerNorm(self.hidden_size)
     def forward(self, inp):
+        if self.embedding:
+            pos_ids = torch.arange(
+                0, inp.size(-1), dtype=torch.long, device=self.wpe.weight.device
+            ).unsqueeze(0)
+            inp = self.drop((self.wte(inp) + self.wpe(pos_ids)))
+
         for i in range(self.nlayers):
-            inp = self.attens[i](inp)
-            # inp = LayerNorm(self.hidden_size)(inp)
+            inp = self.ln(inp)
+            inp_ = self.attens[i](inp)
+            inp = self.ln(inp_)
             inp = self.mlps[i](inp)
+        if self.embedding:
+            inp = self.out(inp)
         return inp
     
-def get3Bllm(batch, seq_len):
+def get3Bllm(batch, seq_len, nlayers=30):
     #https://huggingface.co/bigscience/bloom-3b#model-details
     sample = torch.randn(batch, seq_len, 2560)
-    return Bloom(nlayers=30, hidden_size=2560, n_head=32), [sample]
+    return Bloom(nlayers=nlayers, hidden_size=2560, n_head=32), [sample]
 
-def get7Bllm(batch, seq_len):
+def get3Bllm_embed(batch, seq_len, nlayers=30):
+    #https://huggingface.co/bigscience/bloom-3b#model-details
+    sample = torch.randint(0, 600, [batch, seq_len])
+    return Bloom(nlayers=nlayers, hidden_size=2560, n_head=32, embedding=True), [sample]
+
+def get7Bllm(batch, seq_len, nlayers=32):
     #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
     sample = torch.randn(batch, seq_len, 4096)
-    return Llama(nlayers=32, hidden_size=4096, n_head=32), [sample]
+    return Llama(nlayers=nlayers, hidden_size=4096, n_head=32), [sample]
+
+def get7Bllm_embed(batch, seq_len, nlayers=32):
+    #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
+    sample = torch.randint(0, 600, [batch, seq_len])
+    return Llama(nlayers=nlayers, hidden_size=4096, n_head=32, embedding=True), [sample]
 
