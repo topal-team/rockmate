@@ -494,6 +494,8 @@ class OpSchedule:
                 self.loss_idx = i
             if "bwd" in op.name:
                 break
+        self.alive_list = self.create_alive_list()
+        self.refine()
 
     def create_steps(self):
         self.steps = []
@@ -696,6 +698,7 @@ class OpSchedule:
 
     def refine(self):
         for i, op in enumerate(self.op_list):
+            if op.disabled:continue
             if "loss" in op.name:
                 op.disabled = True
             if isinstance(op, DeleteOp):
@@ -718,7 +721,7 @@ class OpSchedule:
                             )
 
                     if max(src_i) > next_used_i:  # try to use before regenerate
-                        print(f"refine {op} for {self.op_name_list[next_used_i]}")
+                        # print(f"refine {op} for {self.op_name_list[next_used_i]}")
                         op.disabled = True
 
                 elif isinstance(op.target, Parameter):
