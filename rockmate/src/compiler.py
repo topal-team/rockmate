@@ -676,7 +676,8 @@ class Compiler:
             def offload():
                 with torch.cuda.stream(stream):
                     # stream.wait_stream(self.gd["main_stream"])
-                    self.storage.ld[f"cpu_{var_name}"].grad = torch.empty_like(self.storage.ld[f"cpu_{var_name}"])
+                    self.storage.ld[f"cpu_{var_name}"].grad = torch.empty_like(self.storage.ld[f"cpu_{var_name}"], 
+                                                                               pin_memory=True)
                     self.storage.ld[f"cpu_{var_name}"].grad.data.copy_(
                         self.storage.ld[var_name].grad,
                         non_blocking=True,
