@@ -294,7 +294,16 @@ class Step():
     
     @property
     def op_list(self):
-        return self.alloc_ops+self.ofl_ops+self.prf_ops+self.comp_ops+self.opt_ops+self.del_ops
+        gpu_ops = []
+        list_params = []
+        for op in self.opt_ops:
+            if "cpu" in op.name:
+                list_params += op.list_params
+            else:
+                gpu_ops.append(op)
+        cpu_ops = [OptimizeOp("cpu", list_params=list_params)] if list_params else []
+        opt_ops = cpu_ops+gpu_ops
+        return self.alloc_ops+self.ofl_ops+self.prf_ops+self.comp_ops+opt_ops+self.del_ops
     @property
     def time(self):
         return max(self.ofl_ops.time, 
