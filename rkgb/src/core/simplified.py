@@ -505,7 +505,7 @@ class SimplifiedGraph(base.Graph):
                 for tar in sn.all_targets:
                     info = dict_info[tar]
                     target_type = info.variable_type
-                    if target_type == torch.Tensor and not info.is_param:
+                    if target_type == torch.Tensor:
                         tensors.append(tar)
                         info.data_owner_name = sn_main_target
                     elif target_type == tuple or target_type == list:
@@ -654,7 +654,6 @@ class SimplifiedGraph(base.Graph):
         for sn in self.nodes:
             is_view = (sn.info.is_view
                 or sn.info.is_inplace
-                or sn.info.is_param
                 or sn.main_fct == "getattr") 
             if sn.deps == set() and is_view:
                 self.init_node.insert(sn,

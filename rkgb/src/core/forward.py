@@ -119,6 +119,9 @@ class ForwardGraph(base.Graph):
                 fn.info = self.dict_info[rn.target] = input_info
                 if input_info.requires_grad:
                     self.sources_req_grad = True
+                dict_forward_nodes[rn.target] = fn
+                self.nodes.append(fn)
+                continue
             # deps:
             for req_rn in rn.deps:
                 req_fn = dict_forward_nodes[req_rn.target]
@@ -162,7 +165,7 @@ class ForwardGraph(base.Graph):
                     assert len(fn.required_parameter_nodes)==1
                     parent_param_node = fn.required_parameter_nodes.pop()
                     parent_param_node.view_targets.append(fn.target)
-                    parent_param_node.view_code.append(fn.code_ast)
+                    parent_param_node.view_code.append((fn.target,fn.code_ast))
                     list_view_on_params_to_unplug.append((fn,parent_param_node))
                     our_global[fn.target] = exception_object.view_value
                     # We can store it as it takes no memory (as a view over a param)
@@ -419,7 +422,16 @@ class ForwardGraph(base.Graph):
         ):
         name = self._get_render_name(name)
         dot = base.Graph._get_graphviz_dot(name,dot)
+        for param_node in self.parameter_nodes:
+            param_node : base.ParameterNode
+            dot.node(
+                param_node.param_str,
+                param_node.param_str
+                if param_node.view_targets == []
+                else f"{param_node.param_str}\n{param_node.get_code()}",
+                style = "dashed")
         for fn in self.nodes:
+            fn : ForwardNode
             if fn.is_input: color = "blue"
             elif fn.target in self.output_targets: color = "red"
             else: color = None
@@ -428,6 +440,8 @@ class ForwardGraph(base.Graph):
             dot.node(fn.target,label,color=color)
             for req_fn in fn.deps:
                 dot.edge(req_fn.target,fn.target)
+            for req_param in fn.required_parameter_nodes:
+                dot.edge(req_param.param_str,fn.target,style="dashed")
         if render:
             base.Graph._call_graphviz_to_render(
                 dot,view,directory,render_format
