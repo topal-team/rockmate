@@ -23,7 +23,7 @@ class SimplifiedNode(base.Node):
             fct="",
             info=None,
             is_rand=False,
-            deps_rand=None,
+            required_random_tensors=None,
             simplified_graph=None):
         """
         A SimplifiedNode is composed by one "real" computation, defining the
@@ -48,7 +48,6 @@ class SimplifiedNode(base.Node):
         .deps       : set[SimplifiedNode]
         .users      : set[SimplifiedNode]
         .is_rand    : bool
-        .deps_rand  : str set : because we don't want random src nodes here
         """
         super().__init__(main_target,
             parent_structure_with_id_generator=simplified_graph)
@@ -67,8 +66,10 @@ class SimplifiedNode(base.Node):
         self.deps_through_artifacts = set()
         self.users_through_artifacts = set()
         self.info : VariableInfo = info if info is not None else VariableInfo()
-        self.is_rand   = is_rand
-        self.deps_rand = deps_rand if deps_rand else set()
+        self.is_rand = is_rand
+        if required_random_tensors is None:
+            required_random_tensors = set()
+        self.required_random_tensors = required_random_tensors
 
     def get_all_standard_deps(self):
         return self.deps.union(self.deps_through_artifacts)
@@ -114,7 +115,8 @@ class SimplifiedNode(base.Node):
         self.inplace_code.extend(sn_to_insert.inplace_code)
         self.all_targets.extend(sn_to_insert.all_targets)
         self.is_rand = self.is_rand or sn_to_insert.is_rand
-        self.deps_rand.update(sn_to_insert.deps_rand)
+        self.required_random_tensors.update(
+            sn_to_insert.required_random_tensors)
 
 
     def insert(self,sn_to_insert,strong,simplified_graph):
@@ -226,7 +228,8 @@ class SimplifiedNode(base.Node):
                 self.target,self.main_code[1],dict_info)
             # 3) handle randomness
             user_sn.is_rand = user_sn.is_rand or self.is_rand
-            user_sn.deps_rand.update(self.deps_rand)
+            user_sn.required_random_tensors.update(
+                self.required_random_tensors)
             # 4) data_direct_parent_name
             if user_sn.info.data_direct_parent_name == self_target:
                 if self_info.data_direct_parent_name == self_target:
@@ -335,7 +338,7 @@ class SimplifiedGraph(base.Graph):
                     fct=fn.fct,
                     info=fn.info,
                     is_rand=fn.is_rand,
-                    deps_rand=set(fn.deps_rand),
+                    required_random_tensors=set(fn.required_random_tensors),
                     simplified_graph=self)
                 self.nodes.append(sn)
                 dict_simplified_nodes[fn.target] = sn
@@ -443,13 +446,13 @@ class SimplifiedGraph(base.Graph):
             dict_info[random_variable_name] \
                 = random_variable_node.info \
                 = VariableInfo(eval(ast_add_on.ast_to_str(code_ast),our_global))
-        # 2) Link them in the graph, via node.deps_rand
+        # 2) Link them in the graph, via node.required_random_tensors
         # Note: by definition, these nodes don't have deps, only users
         # So they can be put at the beginning of self.nodes (the topo-order)
         sn : SimplifiedNode
         for sn in self.nodes:
             if not sn.is_artifact:
-                for req_rd_target in sn.deps_rand:
+                for req_rd_target in sn.required_random_tensors:
                     req_rd_node = dict_random_nodes[req_rd_target]
                     req_rd_node.users.add(sn)
                     sn.deps.add(req_rd_node)

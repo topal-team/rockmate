@@ -49,7 +49,9 @@ class RawNode(base.Node):
         .is_input : bool : input vars are represented by nodes with dummy code
         .is_rand  : bool : whether .fct involves randomness
         .deps      : RawNode set : required nodes to run .code_ast
-        .deps_rand : str set : required random targets
+        .required_random_tensors : str set : required random fresh tensor;
+        e.g. r = torch.randn(...); y = torch.add(x,r); 
+        => RawNode[y].required_random_tensors = {"r"}
         """
         super().__init__(target,
             parent_structure_with_id_generator=raw_parser)
@@ -60,7 +62,8 @@ class RawNode(base.Node):
         self.fct = fct
         self.is_input = is_input
         self.is_rand = bool(fct in constants.list_random_functions)
-        self.deps_rand : set[str] = set()
+        self.required_random_tensors : set[str] = set()
+        self.required_parameters : set[str] = set()
         # TO REMOVE
         # self.deps : set[RawNode] = deps if deps is not None else set()
         self.deps = set()
@@ -472,7 +475,7 @@ class RawJitParserVariable:
         ):
         self.is_attr_of_self = is_attr_of_self
         self.real_value_as_an_attr_of_self = real_value_as_an_attr_of_self
-        self.value_ast = value_ast
+        self._value_ast = value_ast
         self.has_node = False  # by default
         self.is_rand = False  # by default
         if node: 
@@ -485,15 +488,17 @@ class RawJitParserVariable:
                 self.has_node = True
                 self.node = node
 
-    def use_value_ast(self, calling_node):
-        """ Instead of self.value_ast, you must use this
+    def use_value_ast(self, calling_node : RawNode):
+        """ Instead of self._value_ast, you must use this
         Take care of the "deps" relation
         """
-        if self.has_node:
+        if self.is_attr_of_self:
+            calling_node.required_parameters.add(self._value_ast.id)
+        elif self.has_node:
             calling_node.deps.add(self.node)
         elif self.is_rand:
-            calling_node.deps_rand.add(self.value_ast.id)
-        return self.value_ast
+            calling_node.required_random_tensors.add(self._value_ast.id)
+        return self._value_ast
 
     def inherits_self_attr(self, parent, list_attributes):  
         # for a getattr AND is_attr_of_self
@@ -526,7 +531,7 @@ class RawJitParser(RawParser):
          - `a.b` via an ast.Attribute
         """
         if parent_raw_var.is_attr_of_self:
-            parent_ast = parent_raw_var.value_ast
+            parent_ast = parent_raw_var._value_ast
             new_ast = ast_add_on.make_ast_attribute_from_list(
                 parent_ast,list_attributes)
             new_raw_var = RawJitParserVariable(new_ast,raw_parser=self,is_attr_of_self=True)
@@ -559,11 +564,14 @@ class RawJitParser(RawParser):
         return self.aux_for_attribute(target,parent_raw_var,[attribute])
     
     def aux_handle_ast_call_sub_module(
-            self,called_raw_var,rest_of_func_name ,call_arg_raw_vars):
+            self,
+            called_raw_var,
+            rest_of_func_name,
+            call_arg_raw_vars):
         jit_result_sub_module = called_raw_var.real_value_as_an_attr_of_self
         for attribute in rest_of_func_name[:-1]:
             jit_result_sub_module = getattr(jit_result_sub_module, attribute)
-        sub_module_name = ast_add_on.ast_to_str(called_raw_var.value_ast)
+        sub_module_name = ast_add_on.ast_to_str(called_raw_var._value_ast)
         method_name = rest_of_func_name[-1]
         save_current_dict_raw_vars = self.current_dict_raw_vars
         save_current_jit_memory = self.current_jit_memory
@@ -861,7 +869,7 @@ class RawJitParser(RawParser):
         get the output_node: if not requires_grad => raise Exception
         which is catch in Rockmate, since it implies no Backward
         """
-        if not isinstance(output_raw_var.value_ast,ast.Name):
+        if not isinstance(output_raw_var._value_ast,ast.Name):
             warnings.warn( # TO CHANGE COMMENTS 
                 f"The RawJitParser found that the output isn't an "\
                 f"ast.Name, we assume it's a constant. \nAST type "\
@@ -874,7 +882,7 @@ class RawJitParser(RawParser):
             raise constants.ExceptionModuleDoesNotReqGrad
         else:
             return (
-                output_raw_var.value_ast.id,
+                output_raw_var._value_ast.id,
                 output_raw_var.node
             )
         

@@ -24,7 +24,7 @@ class ForwardNode(base.Node):
             code_ast=None,
             fct="",
             is_rand=False,
-            deps_rand=None,
+            required_random_tensors=None,
             forward_graph=None):
         """ attributes :
         .target    : str  : the name of the only var defined in the node
@@ -33,7 +33,7 @@ class ForwardNode(base.Node):
         .is_input  : bool : inputs are represented by nodes wth dummy code
         .is_rand   : bool : whether .fct involves randomness
         .deps      : ForwardNode set : required nodes to run .code_ast
-        .deps_rand : str set : required random targets
+        .required_random_tensors : str set : e.g. r=randn(); y=add(x,r)
         .users     : ForwardNode set : reciprocal of .deps
         """
         super().__init__(target,
@@ -46,7 +46,7 @@ class ForwardNode(base.Node):
         self.is_rand = is_rand
         self.deps = set()
         self.users = set()
-        self.deps_rand = deps_rand if deps_rand else set()
+        self.required_random_tensors = required_random_tensors if required_random_tensors else set()
         self.info : VariableInfo = None
 
 
@@ -83,7 +83,7 @@ class ForwardGraph(base.Graph):
         for rn in raw_graph.nodes:
             fn = ForwardNode(rn.target,rn.code_ast,rn.fct,
                 is_rand=rn.is_rand,
-                deps_rand=set(rn.deps_rand),
+                required_random_tensors=set(rn.required_random_tensors),
                 forward_graph=self)
             # inputs:
             if rn.is_input:
@@ -160,7 +160,7 @@ class ForwardGraph(base.Graph):
                 or  req_rn_info.is_view
                 or  req_rn.fct == "getattr"):
                     if req_target in ready:
-                        for req_rd in req_rn.deps_rand:
+                        for req_rd in req_rn.required_random_tensors:
                             if not req_rd in done:
                                 code = ast_add_on.make_str_assign(
                                     (req_rd,self.dict_rand[req_rd]))
@@ -416,7 +416,7 @@ class ForwardGraph(base.Graph):
                 # 2) exec each node one by one
                 fn : ForwardNode
                 for fn in forward_graph.nodes:
-                    for req_random in fn.deps_rand:
+                    for req_random in fn.required_random_tensors:
                         if req_random not in tmp_local:
                             code = ast_add_on.make_str_assign(
                                 (req_random,forward_graph.dict_rand[req_random]))
