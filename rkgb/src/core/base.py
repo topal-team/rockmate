@@ -232,15 +232,15 @@ class ParameterNode():
     """
     def __init__(self,
             param_str,
-            requires_grad=None,
             parent_structure_with_id_generator = None, # to get unique_id from it
             unique_id_generator : Node_unique_id_generator = None):
         assert param_str[:4] == "self"
         self.param_str = param_str
-        self.param_name = param_str[5:].replace('[','.').replace(']','.')
+        self.param_name = param_str[5:].replace('[','.').replace(']','')
         self.view_targets = []
         self.view_code = []
-        self.requires_grad = requires_grad
+        self.requires_grad = None
+        self.is_buffer = None
         self.unique_id = Node_unique_id_generator\
             .get_unique_id_one_way_or_the_other(
                 self,
@@ -250,6 +250,11 @@ class ParameterNode():
         self.users = set()
     def get_code(self):
         return ast_add_on.make_str_list_assign(self.view_code)
+    def get_value(self,model):
+        if self.is_buffer:
+            return model.get_buffer(self.param_name)
+        else:
+            return model.get_parameter(self.param_name)
     def __hash__(self):
         if hasattr(self,"unique_id"): return self.unique_id
         else: return id(self) # When init via pickle

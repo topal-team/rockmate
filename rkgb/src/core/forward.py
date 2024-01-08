@@ -15,7 +15,9 @@ from src.core import base
 from src.core.raw import RawNode,RawGraph
 
 class ExceptionViewOverParameter(Exception):
-    pass
+    def __init__(self,view_value):
+        super().__init__("")
+        self.view_value = view_value
 
 # **********
 # * ForwardNode *
@@ -87,8 +89,14 @@ class ForwardGraph(base.Graph):
                 if param_str not in dict_param_str_to_node:
                     param_node = base.ParameterNode(param_str,
                         parent_structure_with_id_generator=self)
+                    dict_param_str_to_node[param_str] = param_node
                     param_name = param_node.param_name # e.g. layer.0.weight
-                    param_value = original_mod.get_parameter(param_name)
+                    try: 
+                        param_value = original_mod.get_parameter(param_name)
+                        param_node.is_buffer = False
+                    except:
+                        param_value = original_mod.get_buffer(param_name)
+                        param_node.is_buffer = True
                     param_node.requires_grad = param_value.requires_grad
         self.parameter_nodes = dict_param_str_to_node.values()
         all_param_data_ptrs = VariableInfo.find_all_data_ptr_of_params(original_mod)
@@ -150,12 +158,14 @@ class ForwardGraph(base.Graph):
                         dict_forward_nodes,
                         all_param_data_ptrs)
                     self.nodes.append(fn)
-                except ExceptionViewOverParameter:
+                except ExceptionViewOverParameter as exception_object:
                     assert len(fn.required_parameter_nodes)==1
                     parent_param_node = fn.required_parameter_nodes.pop()
                     parent_param_node.view_targets.append(fn.target)
                     parent_param_node.view_code.append(fn.code_ast)
                     list_view_on_params_to_unplug.append((fn,parent_param_node))
+                    our_global[fn.target] = exception_object.view_value
+                    # We can store it as it takes no memory (as a view over a param)
                 del tmp_local
 
         self.unplug_view_over_parameters(list_view_on_params_to_unplug)
@@ -184,7 +194,7 @@ class ForwardGraph(base.Graph):
         while todo != []:
             req_rn = todo[-1]
             req_target = req_rn.target
-            if req_target in done:
+            if req_target in done or req_target in our_global:
                 todo.pop()
             else:
                 req_rn_info = self.dict_info[req_target]
@@ -233,7 +243,7 @@ class ForwardGraph(base.Graph):
                 constants.constructor_function_string)): # TO TEST
             current_rn_data_ptr = VariableInfo.get_data_ptr(current_rn_value)
             if current_rn_data_ptr in all_param_data_ptrs:
-                raise ExceptionViewOverParameter
+                raise ExceptionViewOverParameter(current_rn_value)
             else:
                 for o_name,o_value in tmp_local.items():
                     if (o_name != current_target
