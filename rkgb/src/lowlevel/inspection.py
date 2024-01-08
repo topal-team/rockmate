@@ -11,56 +11,10 @@ from src.lowlevel import constants
 from src.lowlevel import measure
 from src.lowlevel.variable_info import VariableInfo
 from src.core import base
-
-# ========================================
-# = CREATE A FRESH ENVIRONNEMENT TO EXEC =
-# ========================================
-
-def generate_our_global(sg,original_mod,device):
-    our_global = sg.make_copy_of_globals(original_mod,device)
-    for inp in sg.whole_model_inputs.union(set(sg.inputs)):
-        info = sg.dict_info[inp]
-        x = info.generate_value(device)
-        our_global[inp]=x
-    return our_global
+from src.core.simplified import SimplifiedNode,SimplifiedGraph
 
 
-def generate_tmp_local(sn,sg,our_global,device):
-    tmp_local = dict()
-    exec(
-        sg.init_node.get_code(force_special_kwargs=True),
-        our_global,tmp_local)
-    req_sn_todo = list(sn.deps.keys())
-    set_req_sn_todo = set(req_sn_todo)
-    while req_sn_todo != []:
-        req_sn = req_sn_todo.pop(0)
-        if set(req_sn.deps).intersection(set_req_sn_todo) != set():
-            req_sn_todo.append(req_sn) # not his turn yet
-            continue
-        else:
-            set_req_sn_todo.remove(req_sn)
-        if not (req_sn is sg.init_node):
-            # we create the main_target value, and we run the body_code
-            # but the body_code may requires some artifacts
-            # thus we need req of req
-            req_sn_mt = req_sn.main_target
-            main_info = sg.dict_info[req_sn_mt]
-            req_sn_mt_value = main_info.generate_value(device)
-            if isinstance(req_sn_mt_value,torch.Tensor):
-                req_sn_mt_value = req_sn_mt_value.clone()
-            tmp_local[req_sn_mt] = req_sn_mt_value
-            body_code = ast_add_on.make_str_list_assign(
-                req_sn.body_code,
-                force_special_kwargs=True)
-            for req_req_sn in req_sn.deps.keys():
-                if not (req_req_sn is sg.init_node):
-                    for req_req_tar in req_req_sn.all_targets:
-                        if req_req_tar in body_code and req_req_tar not in tmp_local:
-                            req_req_info = sg.dict_info[req_req_tar]
-                            tmp_local[req_req_tar] = (
-                                req_req_info.generate_value(device))
-            exec(body_code,our_global,tmp_local)
-    return tmp_local
+
 
 # ======================
 
@@ -191,18 +145,117 @@ def get_useful_vars(sn,sg,our_global,device):
 # ======= INSPECTION =======
 # ==========================
 
-class Inspection_result():
+class InspectionResult():
     def __init__(self):
-        self.relevant     = False # -> turn True if result of inspection
-        self.mem_del_fwd  = 0
-        self.overhead_fwd = 0
-        self.overhead_bwd = 0
+        self.relevant= False # -> turn True if result of inspection
+        self.mem_overhead_fwd = 0
+        self.mem_overhead_bwd = 0
         self.mem_run_fwd  = 0
         self.mem_run_bwd  = 0
         self.mem_fgt_fwd  = 0
         self.mem_fgt_bwd  = 0
         self.time_run_fwd = 0
         self.time_run_bwd = 0
+
+
+class Inspector():
+    """
+    Use Inspector.generate_global() and Inspector.generate_local()
+    to get fresh environnement where to run the inspections.
+    """
+    @staticmethod
+    def generate_global_exec_env(
+            simplified_graph : SimplifiedGraph,
+            original_mod : torch.nn.Module,
+            device : torch.device):
+        our_global = simplified_graph.make_copy_of_globals(
+            original_mod,device)
+        all_inputs = (
+            simplified_graph.original_mod_input_targets
+            + simplified_graph.input_targets) # those defined via the init_code
+        for inp in all_inputs:
+            if inp not in our_global:
+                inp_info = simplified_graph.dict_info[inp]
+                our_global[inp] = inp_info.generate_value(device)
+        return our_global
+    
+    @staticmethod
+    def generate_node_local_exec_env(
+            simplified_node_for_whom_to_generate_env : SimplifiedNode,
+            simplified_graph : SimplifiedGraph,
+            our_global : dict,
+            device : torch.device):
+        tmp_local = dict()
+        exec(
+            simplified_graph.init_node.get_code(force_special_kwargs=True),
+            our_global,tmp_local)
+        list_nodes_to_generate = list(simplified_node_for_whom_to_generate_env.deps)
+        set_nodes_to_generate = set(list_nodes_to_generate)
+        while list_nodes_to_generate != []:
+            # Get next node to generate
+            sn : SimplifiedNode = list_nodes_to_generate.pop(0)
+            if sn is simplified_graph.init_node:
+                set_nodes_to_generate.remove(sn)
+                continue
+            # Check if we have everything to generate sn
+            # ie if none of its dependencies are in the waiting list
+            if set(sn.deps).intersection(set_nodes_to_generate) != set():
+                list_nodes_to_generate.append(sn) # not his turn yet
+                continue
+            else:
+                set_nodes_to_generate.remove(sn)
+
+            # We are ready to generate sn:
+            # - First we create the main_target value based on info
+            # - Then we run the body_code to generate views / sizes
+            main_value = sn.info.generate_value(device)
+            # Some operations are impossible over leaf tensors 
+            # in term of grad_fn. So we have to clone them :
+            if isinstance(main_value,torch.Tensor):
+                main_value = main_value.clone()
+            tmp_local[sn.main_target] = main_value
+            body_code = ast_add_on.make_str_list_assign(
+                sn.body_code, force_special_kwargs=True)
+            
+            # To run the body code we need all the dependencies to be
+            # in tmp_local: so we create those missing using info
+            # Note: a dependency of sn which is also used by
+            # simplified_node_for_whom_to_generate_env isn't created 
+            # from info but previously generated in this while loop
+            
+            
+            
+
+
+        req_sn_todo = list(sn.deps.keys())
+        set_req_sn_todo = set(req_sn_todo)
+        while req_sn_todo != []:
+            req_sn = req_sn_todo.pop(0)
+            if set(req_sn.deps).intersection(set_req_sn_todo) != set():
+                set_req_sn_todo.remove(req_sn)
+            if not (req_sn is sg.init_node):
+                # we create the main_target value, and we run the body_code
+                # but the body_code may requires some artifacts
+                # thus we need req of req
+                req_sn_mt = req_sn.main_target
+                main_info = sg.dict_info[req_sn_mt]
+                req_sn_mt_value = main_info.generate_value(device)
+                if isinstance(req_sn_mt_value,torch.Tensor):
+                    req_sn_mt_value = req_sn_mt_value.clone()
+                tmp_local[req_sn_mt] = req_sn_mt_value
+                body_code = ast_add_on.make_str_list_assign(
+                    req_sn.body_code,
+                    force_special_kwargs=True)
+                for req_req_sn in req_sn.deps.keys():
+                    if not (req_req_sn is sg.init_node):
+                        for req_req_tar in req_req_sn.all_targets:
+                            if req_req_tar in body_code and req_req_tar not in tmp_local:
+                                req_req_info = sg.dict_info[req_req_tar]
+                                tmp_local[req_req_tar] = (
+                                    req_req_info.generate_value(device))
+                exec(body_code,our_global,tmp_local)
+        return tmp_local
+
 
 class inspector():
     # -> We define an inspector class to save every intermediate 
