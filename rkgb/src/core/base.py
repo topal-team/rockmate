@@ -39,6 +39,23 @@ class Node_unique_id_generator():
         u = self.gen
         self.gen = u+1
         return u
+    @staticmethod
+    def get_unique_id_one_way_or_the_other(
+            object,
+            structure_with_id_generator = None, # to get unique_id from it
+            unique_id_generator = None):
+        if structure_with_id_generator is not None:
+            if hasattr(structure_with_id_generator,"node_unique_id_generator"):
+                return structure_with_id_generator\
+                    .node_unique_id_generator.use()
+            elif isinstance(structure_with_id_generator,Node_unique_id_generator):
+                return structure_with_id_generator.use()
+        elif unique_id_generator is not None:
+            return unique_id_generator.use()
+        else:
+            return id(object)
+
+
 # ==============================================
 
 
@@ -67,19 +84,12 @@ class Node():
         else:
             self.main_target = "/!\\ No target /!\\"
         # == init unique_id ==
-        if parent_structure_with_id_generator is not None:
-            if hasattr(
-            parent_structure_with_id_generator,"node_unique_id_generator"):
-                self.unique_id \
-                    = parent_structure_with_id_generator\
-                      .node_unique_id_generator.use()
-            elif isinstance(
-            parent_structure_with_id_generator,Node_unique_id_generator):
-                self.unique_id = parent_structure_with_id_generator.use()
-        elif unique_id_generator is not None:
-            self.unique_id = unique_id_generator.use()
-        else:
-            self.unique_id = id(self)
+        self.unique_id = Node_unique_id_generator\
+            .get_unique_id_one_way_or_the_other(
+                self,
+                parent_structure_with_id_generator,
+                unique_id_generator
+            )
 
     def get_all_standard_deps(self):
         if hasattr(self,"deps"):
@@ -220,15 +230,28 @@ class ParameterNode():
     self.param_str : 'self.wpe[0].weight' as it appears in the code
     self.param_name : 'wpe.0.weight' as it appears in model.named_parameters
     """
-    def __init__(self,param_str,requires_grad):
+    def __init__(self,
+            param_str,
+            requires_grad=None,
+            parent_structure_with_id_generator = None, # to get unique_id from it
+            unique_id_generator : Node_unique_id_generator = None):
         assert param_str[:4] == "self"
         self.param_str = param_str
         self.param_name = param_str[5:].replace('[','.').replace(']','.')
         self.view_targets = []
         self.view_code = []
         self.requires_grad = requires_grad
+        self.unique_id = Node_unique_id_generator\
+            .get_unique_id_one_way_or_the_other(
+                self,
+                parent_structure_with_id_generator,
+                unique_id_generator
+            )
     def get_code(self):
         return ast_add_on.make_str_list_assign(self.view_code)
+    def __hash__(self):
+        if hasattr(self,"unique_id"): return self.unique_id
+        else: return id(self) # When init via pickle
 # ============================
 
 

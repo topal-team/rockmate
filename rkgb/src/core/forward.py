@@ -47,6 +47,7 @@ class ForwardNode(base.Node):
         self.deps = set()
         self.users = set()
         self.required_random_tensors = required_random_tensors if required_random_tensors else set()
+        self.required_parameter_nodes = set()
         self.info : VariableInfo = None
 
 
@@ -64,7 +65,7 @@ class ForwardGraph(base.Graph):
     node_class = ForwardNode
     def __init__(self,
         raw_graph : RawGraph,
-        original_mod,
+        original_mod : torch.nn.Module,
         example_inputs : preprocess_samples.ExampleInputs,
         device,
         build_variable_info=True,
@@ -77,13 +78,18 @@ class ForwardGraph(base.Graph):
         our_global = self.make_copy_of_globals(original_mod,device)
 
         # Parameter nodes
-        dict_param_name_to_node = {
-            param_name : base.ParameterNone()
-            for rn in raw_graph.nodes
-            for param_name in rn.required_parameters
-        }
+        dict_param_str_to_node = dict()
+        for rn in raw_graph.nodes:
+            for param_str in rn.required_parameters: # e.g. self.layer[0].weight
+                if param_str not in dict_param_str_to_node:
+                    param_node = base.ParameterNode(param_str,
+                        parent_structure_with_id_generator=self)
+                    param_name = param_node.param_name # e.g. layer.0.weight
+                    param_value = original_mod.get_parameter(param_name)
+                    param_node.requires_grad = param_value.requires_grad
+        self.parameter_nodes = dict_param_str_to_node.values()
         all_param_data_ptrs = VariableInfo.find_all_data_ptr_of_params(original_mod)
-        # -> to recognize a view of a parameter
+        # -> to recognize views over parameters
 
         # Translate each node one by one following the topo-order
         rn : RawNode
@@ -92,6 +98,7 @@ class ForwardGraph(base.Graph):
                 is_rand=rn.is_rand,
                 required_random_tensors=set(rn.required_random_tensors),
                 forward_graph=self)
+            self.nodes.append(fn)
             # inputs:
             if rn.is_input:
                 fn.is_input = True
@@ -107,8 +114,11 @@ class ForwardGraph(base.Graph):
                 fn.deps.add(req_fn)
                 req_fn.users.add(fn)
             dict_forward_nodes[rn.target] = fn
-            self.nodes.append(fn)
-
+            # required parameters:
+            fn.required_parameter_nodes = set(
+                dict_param_str_to_node[param_str]
+                for param_str in rn.required_parameters
+            )
             # info :
             if not build_variable_info:
                 fn.info = self.dict_info[fn.target] = VariableInfo()
