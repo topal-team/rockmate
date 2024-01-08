@@ -214,6 +214,24 @@ class Node():
 # ============================
 
 
+# ============================
+class ParameterNode():
+    """
+    self.param_str : 'self.wpe[0].weight' as it appears in the code
+    self.param_name : 'wpe.0.weight' as it appears in model.named_parameters
+    """
+    def __init__(self,param_str,requires_grad):
+        assert param_str[:4] == "self"
+        self.param_str = param_str
+        self.param_name = param_str[5:].replace('[','.').replace(']','.')
+        self.view_targets = []
+        self.view_code = []
+        self.requires_grad = requires_grad
+    def get_code(self):
+        return ast_add_on.make_str_list_assign(self.view_code)
+# ============================
+
+
 
 # ==============================
 # =====                    =====

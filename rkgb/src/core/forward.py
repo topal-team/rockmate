@@ -75,8 +75,15 @@ class ForwardGraph(base.Graph):
         self.sources_req_grad = False # by default
         dict_forward_nodes = dict()
         our_global = self.make_copy_of_globals(original_mod,device)
+
+        # Parameter nodes
+        dict_param_name_to_node = {
+            param_name : base.ParameterNone()
+            for rn in raw_graph.nodes
+            for param_name in rn.required_parameters
+        }
         all_param_data_ptrs = VariableInfo.find_all_data_ptr_of_params(original_mod)
-        # to recognize a view over a parameter
+        # -> to recognize a view of a parameter
 
         # Translate each node one by one following the topo-order
         rn : RawNode

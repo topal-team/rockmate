@@ -16,6 +16,7 @@ python_version = sys_info.major + sys_info.minor/10
 
 def ast_to_str(code_ast):
     #return ast.unparse(ast.fix_missing_locations(code_ast))
+    if code_ast is None: return ""
     code = astunparse.unparse(code_ast)
     return utils.remove_prefix(utils.remove_suffix(code,"\n"),"\n")
 
@@ -126,7 +127,7 @@ def make_str_assign(
 def make_str_list_assign(
     lc,prefix="",suffix="",force_special_kwargs=False
 ):
-    ls = [make_str_assign(c,prefix="",suffix="",
+    ls = [make_str_assign(c,prefix=prefix,suffix=suffix,
         force_special_kwargs=force_special_kwargs) for c in lc]
     return "\n".join(ls)
 
