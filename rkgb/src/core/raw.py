@@ -258,10 +258,18 @@ class RawGraph(base.Graph):
                 fct=dynamo_node.target.__name__,
                 raw_parser=parser)
             dict_dynamo_name_to_raw_node[dynamo_node.name] = raw_node
+            # Deps :
             raw_node.deps = set(
                 dict_dynamo_name_to_raw_node[dep_id]
                 for dep_id in dependency_dynamo_names
                 if dep_id in dict_dynamo_name_to_raw_node
+            )
+            # Required parameters :
+            raw_node.required_parameters = set(
+                ast_add_on.ast_to_str(
+                    dict_dynamo_name_to_correct_ast[param_id])
+                for param_id in dependency_dynamo_names
+                if param_id not in dict_dynamo_name_to_raw_node
             )
         self.nodes = parser.all_raw_nodes
 

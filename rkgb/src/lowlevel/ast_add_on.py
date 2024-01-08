@@ -181,7 +181,7 @@ def substitute(code,sub_id,sub_code : ast.AST):
 def substitute_device_call(code : ast.AST):
     r"""
     Change `device = device(type="cpu")` by `device = device`
-    assuming a global variable
+    with the second 'device' being a global variable
     """
     if (isinstance(code,ast.Call)
     and isinstance(code.func,ast.Name)
