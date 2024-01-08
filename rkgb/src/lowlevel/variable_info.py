@@ -21,13 +21,11 @@ class VariableInfo():
         value=None,
         is_view=False,
         is_inplace=False,
-        is_param=False,
         data_owner_name=None,
         data_direct_parent_name=None
     ):
         self.is_view    = is_view
         self.is_inplace = is_inplace
-        self.is_param   = is_param
         self.data_owner_name = data_owner_name
         if data_direct_parent_name is None:
             self.data_direct_parent_name = data_owner_name

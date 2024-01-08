@@ -14,6 +14,9 @@ from src.lowlevel.variable_info import VariableInfo
 from src.core import base
 from src.core.raw import RawNode,RawGraph
 
+class ExceptionViewOverParameter(Exception):
+    pass
+
 # **********
 # * ForwardNode *
 # **********
@@ -89,6 +92,7 @@ class ForwardGraph(base.Graph):
                     param_node.requires_grad = param_value.requires_grad
         self.parameter_nodes = dict_param_str_to_node.values()
         all_param_data_ptrs = VariableInfo.find_all_data_ptr_of_params(original_mod)
+        list_view_on_params_to_unplug = []
         # -> to recognize views over parameters
 
         # Translate each node one by one following the topo-order
@@ -98,7 +102,6 @@ class ForwardGraph(base.Graph):
                 is_rand=rn.is_rand,
                 required_random_tensors=set(rn.required_random_tensors),
                 forward_graph=self)
-            self.nodes.append(fn)
             # inputs:
             if rn.is_input:
                 fn.is_input = True
@@ -119,6 +122,8 @@ class ForwardGraph(base.Graph):
                 dict_param_str_to_node[param_str]
                 for param_str in rn.required_parameters
             )
+            for required_param_node in fn.required_parameter_nodes:
+                required_param_node.users.add(fn)
             # info :
             if not build_variable_info:
                 fn.info = self.dict_info[fn.target] = VariableInfo()
@@ -137,13 +142,23 @@ class ForwardGraph(base.Graph):
                             f"Sorry, we fail to execute the code we got from "\
                             f"the tracer ({self.tracer_used}):\n{rn_code_str}."
                         )
-                fn.info = self.dict_info[rn.target] \
-                    = self.detect_inplace_or_view(
-                    rn,fn,tmp_local,
-                    dict_forward_nodes,
-                    all_param_data_ptrs)
+                    
+                try:
+                    fn.info = self.dict_info[rn.target] \
+                        = self.detect_inplace_or_view(
+                        rn,fn,tmp_local,
+                        dict_forward_nodes,
+                        all_param_data_ptrs)
+                    self.nodes.append(fn)
+                except ExceptionViewOverParameter:
+                    assert len(fn.required_parameter_nodes)==1
+                    parent_param_node = fn.required_parameter_nodes.pop()
+                    parent_param_node.view_targets.append(fn.target)
+                    parent_param_node.view_code.append(fn.code_ast)
+                    list_view_on_params_to_unplug.append((fn,parent_param_node))
                 del tmp_local
-        
+
+        self.unplug_view_over_parameters(list_view_on_params_to_unplug)
 
         self.fix_missing_edges_for_inplace_operations(dict_forward_nodes)
         # -> Might change self.output_targets (previously inherited)
@@ -209,7 +224,6 @@ class ForwardGraph(base.Graph):
         current_rn_value = tmp_local[current_target]
         is_view    = False # by default
         is_inplace = False
-        is_param   = False
         data_parents = set() # variables which have the same data_ptr
 
         # === FIRST WAY TO RECOGNIZE A VIEW ===
@@ -219,8 +233,7 @@ class ForwardGraph(base.Graph):
                 constants.constructor_function_string)): # TO TEST
             current_rn_data_ptr = VariableInfo.get_data_ptr(current_rn_value)
             if current_rn_data_ptr in all_param_data_ptrs:
-                is_param = True
-                is_view = True
+                raise ExceptionViewOverParameter
             else:
                 for o_name,o_value in tmp_local.items():
                     if (o_name != current_target
@@ -249,7 +262,7 @@ class ForwardGraph(base.Graph):
                         is_view = True
 
         # === register ===
-        if (is_inplace or is_view) and not is_param:
+        if is_inplace or is_view:
             current_rn_deps_names = set(
                 req_rn.target for req_rn in current_raw_node.deps)
             data_direct_parents = current_rn_deps_names.intersection(data_parents)
@@ -290,7 +303,6 @@ class ForwardGraph(base.Graph):
             current_rn_value,
             is_view    = is_view,
             is_inplace = is_inplace,
-            is_param   = is_param,
             data_owner_name = data_owner_name,
             data_direct_parent_name = data_direct_parent_name)
         # Correct req_grad of data_parent: 
@@ -311,6 +323,22 @@ class ForwardGraph(base.Graph):
                 "Thus there is nothing to do.")
             raise constants.ExceptionModuleDoesNotReqGrad
 
+    def unplug_view_over_parameters(self,list_view_on_params_to_unplug):
+        """ Unplug all views over parameters, 
+        and replace them by ParameterNodes """
+        for view_param_fn,parent_param_node in list_view_on_params_to_unplug:
+            view_param_fn : ForwardNode
+            parent_param_node : base.ParameterNode
+            for user_fn in view_param_fn.users:
+                user_fn : ForwardNode
+                user_fn.deps.remove(view_param_fn)
+                user_fn.deps.update(view_param_fn.deps)
+                for req_fn in view_param_fn.deps:
+                    req_fn.users.add(user_fn)
+                # => to ensure correct topo-order
+                user_fn.required_parameter_nodes.add(parent_param_node)
+                parent_param_node.users.remove(view_param_fn)
+                parent_param_node.users.add(user_fn)
 
     def fix_missing_edges_for_inplace_operations(self,dict_forward_nodes):
         # example: a = f(x) ; b = inplace(a) ; c = g(a)

@@ -247,6 +247,7 @@ class ParameterNode():
                 parent_structure_with_id_generator,
                 unique_id_generator
             )
+        self.users = set()
     def get_code(self):
         return ast_add_on.make_str_list_assign(self.view_code)
     def __hash__(self):
