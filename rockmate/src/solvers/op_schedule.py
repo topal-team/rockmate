@@ -277,10 +277,12 @@ class Step():
                 ofl_ops.append(op)
             elif isinstance(op, PrefetchOp):
                 prf_ops.append(op)
-            elif isinstance(op, OptimizeOp):# and "cpu" in op.name:
+            elif isinstance(op, OptimizeOp) and "cpu" in op.name:
                 opt_ops.append(op)
             elif isinstance(op, ComputeOp) or (
-                isinstance(op, DeleteOp) and "parameter" not in op.name):
+                isinstance(op, DeleteOp) and "parameter" not in op.name) or(
+                isinstance(op, OptimizeOp) and "cpu" not in op.name):
+                # all happen in the main stream
                 comp_ops.append(op)
             elif isinstance(op, DeleteOp) and "parameter" in op.name:
                 self.del_ops.append(op)
@@ -301,7 +303,7 @@ class Step():
                 list_params += op.list_params
             else:
                 gpu_ops.append(op)
-        cpu_ops = [OptimizeOp("cpu", list_params=list_params)] if list_params else []
+        cpu_ops = [OptimizeOp(f"cpu_{str(list_params[0])}", list_params=list_params)] if list_params else []
         opt_ops = cpu_ops+gpu_ops
         return self.alloc_ops+self.ofl_ops+self.prf_ops+self.comp_ops+opt_ops+self.del_ops
     @property
