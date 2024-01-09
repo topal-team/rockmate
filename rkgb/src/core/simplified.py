@@ -24,6 +24,7 @@ class SimplifiedNode(base.Node):
             info=None,
             is_rand=False,
             required_random_tensors=None,
+            required_parameter_nodes=None,
             simplified_graph=None):
         """
         A SimplifiedNode is composed by one "real" computation, defining the
@@ -70,6 +71,9 @@ class SimplifiedNode(base.Node):
         if required_random_tensors is None:
             required_random_tensors = set()
         self.required_random_tensors = required_random_tensors
+        if required_parameter_nodes is None:
+            required_parameter_nodes = set()
+        self.required_parameter_nodes = required_parameter_nodes
 
     def get_all_standard_deps(self):
         return self.deps.union(self.deps_through_artifacts)
@@ -117,6 +121,8 @@ class SimplifiedNode(base.Node):
         self.is_rand = self.is_rand or sn_to_insert.is_rand
         self.required_random_tensors.update(
             sn_to_insert.required_random_tensors)
+        self.required_parameter_nodes.update(
+            sn_to_insert.required_parameter_nodes)
 
 
     def insert(self,sn_to_insert,strong,simplified_graph):
@@ -173,7 +179,7 @@ class SimplifiedNode(base.Node):
         """
         e.g. id_to_replace = "a"; code_replacing = AST("f(x)")
         with self's code: AST(b = g(a))
-        this method change self's code, to: AST(b = g(f(a)))
+        this method change self's code, to: AST(b = g(f(x)))
         """
         main_code_expr = self.main_code[1]
         if (isinstance(main_code_expr,ast.Subscript)
@@ -230,6 +236,8 @@ class SimplifiedNode(base.Node):
             user_sn.is_rand = user_sn.is_rand or self.is_rand
             user_sn.required_random_tensors.update(
                 self.required_random_tensors)
+            user_sn.required_parameter_nodes.update(
+                self.required_parameter_nodes)
             # 4) data_direct_parent_name
             if user_sn.info.data_direct_parent_name == self_target:
                 if self_info.data_direct_parent_name == self_target:
@@ -328,6 +336,12 @@ class SimplifiedGraph(base.Graph):
                 simplified_graph=self)
             init_node.all_targets=[]
 
+            self.parameter_nodes = [
+                param_node.clone() 
+                for param_node in forward_graph.parameter_nodes]
+            dict_old_param_node_to_new_param_node = dict(
+                zip(forward_graph.parameter_nodes,self.parameter_nodes))
+
             # translate each node one by one
             dict_simplified_nodes = dict()
             fn : ForwardNode
@@ -339,6 +353,10 @@ class SimplifiedGraph(base.Graph):
                     info=fn.info,
                     is_rand=fn.is_rand,
                     required_random_tensors=set(fn.required_random_tensors),
+                    required_parameter_nodes=set(
+                        dict_old_param_node_to_new_param_node[param_node]
+                        for param_node in fn.required_parameter_nodes
+                    ),
                     simplified_graph=self)
                 self.nodes.append(sn)
                 dict_simplified_nodes[fn.target] = sn
@@ -371,6 +389,7 @@ class SimplifiedGraph(base.Graph):
             self.check_edges_are_reciprocal()
             self.make_dict_of_labels_on_edges()
             self.make_targets_attributes_and_fix_info_data_owner_name()
+            self.make_users_attribute_of_param_nodes()
             self.make_inputs()
             self.unplug_init_node()
             self.make_dict_output_viewing_code()
@@ -513,6 +532,12 @@ class SimplifiedGraph(base.Graph):
                 sn.tensor_targets = tensors
                 sn.container_targets = containers
                 sn.inplace_targets = [c[0] for c in sn.inplace_code]
+
+    def make_users_attribute_of_param_nodes(self):
+        sn : SimplifiedNode
+        for sn in self.nodes:
+            for param_node in sn.required_parameter_nodes:
+                param_node.users.add(sn)
 
     def make_inputs(self):
         inputs = set()
@@ -794,6 +819,7 @@ class SimplifiedGraph(base.Graph):
             name=None,
             view=True,
             only_function_name=False,
+            include_parameter_nodes=True,
             directory=base.Graph.default_render_directory,
             render_format=base.Graph.default_render_format,
             render=True,
@@ -808,6 +834,16 @@ class SimplifiedGraph(base.Graph):
                 sn1.main_target,sn2.main_target,
                 label="\n".join(used_targets),
                 style=style)
+        # 0) Parameter nodes
+        if include_parameter_nodes:
+            for param_node in self.parameter_nodes:
+                param_node : base.ParameterNode
+                dot.node(
+                    param_node.param_str,
+                    param_node.param_str
+                    if param_node.view_targets == []
+                    else f"{param_node.param_str}\n{param_node.get_code()}",
+                    style = "dashed")
         # 1) nodes and edges
         sn : SimplifiedNode
         for sn in self.nodes:
@@ -818,6 +854,9 @@ class SimplifiedGraph(base.Graph):
                 edge(req_sn,sn)
             for req_sn in sn.deps_through_artifacts:
                 edge(req_sn,sn,style="dashed")
+            if include_parameter_nodes:
+                for req_param in sn.required_parameter_nodes:
+                    dot.edge(req_param.param_str,sn.target,style="dashed")
         # 2) init node
         if only_function_name: label = "INPUT"
         else: label = "INPUT\n"+self.init_node.get_code()

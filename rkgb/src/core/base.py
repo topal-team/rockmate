@@ -258,6 +258,15 @@ class ParameterNode():
     def __hash__(self):
         if hasattr(self,"unique_id"): return self.unique_id
         else: return id(self) # When init via pickle
+    def clone(self):
+        clone_node = ParameterNode(self.param_str)
+        for attr in [
+                "view_targets","view_code",
+                "requires_grad","is_buffer",
+                "unique_id"]:
+            setattr(clone_node,attr,copy.deepcopy(getattr(self,attr)))
+        return clone_node
+
 # ============================
 
 

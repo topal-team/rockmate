@@ -415,6 +415,7 @@ class ForwardGraph(base.Graph):
             name=None,
             view=True,
             only_function_name=False,
+            include_parameter_nodes=True,
             directory=base.Graph.default_render_directory,
             render_format=base.Graph.default_render_format,
             render=True,
@@ -422,14 +423,15 @@ class ForwardGraph(base.Graph):
         ):
         name = self._get_render_name(name)
         dot = base.Graph._get_graphviz_dot(name,dot)
-        for param_node in self.parameter_nodes:
-            param_node : base.ParameterNode
-            dot.node(
-                param_node.param_str,
-                param_node.param_str
-                if param_node.view_targets == []
-                else f"{param_node.param_str}\n{param_node.get_code()}",
-                style = "dashed")
+        if include_parameter_nodes:
+            for param_node in self.parameter_nodes:
+                param_node : base.ParameterNode
+                dot.node(
+                    param_node.param_str,
+                    param_node.param_str
+                    if param_node.view_targets == []
+                    else f"{param_node.param_str}\n{param_node.get_code()}",
+                    style = "dashed")
         for fn in self.nodes:
             fn : ForwardNode
             if fn.is_input: color = "blue"
@@ -440,8 +442,9 @@ class ForwardGraph(base.Graph):
             dot.node(fn.target,label,color=color)
             for req_fn in fn.deps:
                 dot.edge(req_fn.target,fn.target)
-            for req_param in fn.required_parameter_nodes:
-                dot.edge(req_param.param_str,fn.target,style="dashed")
+            if include_parameter_nodes:
+                for req_param in fn.required_parameter_nodes:
+                    dot.edge(req_param.param_str,fn.target,style="dashed")
         if render:
             base.Graph._call_graphviz_to_render(
                 dot,view,directory,render_format
