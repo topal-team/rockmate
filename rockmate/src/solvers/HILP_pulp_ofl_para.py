@@ -114,7 +114,7 @@ class ModelPULP:
         offload=False,
         protected_names=[],
         grouping=True,
-        grad_mode="offload",  # ["keep_all", "free_all", "free_asap", "offload"]
+        grad_mode="free", #["free", "accumulate"]
         cpu_optimize_kwargs = None,
         batch_multiplier = 1
     ):
@@ -442,9 +442,9 @@ class ModelPULP:
                     # sub_c2params[sub_cluster.name].add(kdn.name)
                     all_params[kdn.name] = kdn
                     if kdn.name not in param2sub_c:
-                        param2sub_c[kdn.name] = [i]
+                        param2sub_c[kdn.name] = {i}
                     else:
-                        param2sub_c[kdn.name].append(i)
+                        param2sub_c[kdn.name].add(i)
             result = {}
             for p, c in param2sub_c.items():
                 c_ = tuple(sorted(c))
@@ -503,14 +503,34 @@ class ModelPULP:
                 lowBound=0,
                 upBound=1,
             )  # w.grad is alive at the start of step j.
-            if self.grad_mode in ["keep_all", "offload"]:
-                for k in self.AliveG:
-                    self.AliveG[k] = 0
-                for k, l_w in self.hcn2param.items():
-                    grad_size = sum(self.parameter_gradient_size[w] for w in l_w)
-                    # grad_size += max(self.parameter_size[w] for w in l_w)* self.optimizer_overhead
-                    if k > self.loss_idx:#add params grad size to bwd overhead 
+            if self.grad_mode in ["free"]:
+                for (t,k,w) in self.AliveG:
+                    grad_size = self.parameter_gradient_size[w]
+                    if len(self.param2sub_c[w]) == 1:
+                        self.AliveG[(t,k,w)] = 0
+                        if k == max(self.param2hcn[w]):
+                            self.overhead[k] = [v+grad_size for v in self.overhead[k]]
+                    else:#shared weight
+                        bwd_first = min(x for x in self.param2hcn[w] if x>self.loss_idx)
+                        bwd_last = max(self.param2hcn[w])
+                        if t<bwd_first or t>bwd_last:#assume single bwd
+                            self.AliveG[(t,k,w)] = 0
+                        else:
+                            self.AliveG[(t,k,w)] = 1
+                            if k in self.param2hcn[w] and k>bwd_first:
+                                self.overhead[k] = [v+grad_size for v in self.overhead[k]]
+            elif self.grad_mode in ["accumulate"]:
+                for (t,k,w) in self.AliveG:
+                    self.AliveG[(t,k,w)] = 1
+                    if k == max(self.param2hcn[w]):
                         self.overhead[k] = [v+grad_size for v in self.overhead[k]]
+                    # TODO: add offload gradient variables for gradient accumulation
+
+                # for k, l_w in self.hcn2param.items():
+                #     grad_size = sum(self.parameter_gradient_size[w] for w in l_w)
+                #     # grad_size += max(self.parameter_size[w] for w in l_w)* self.optimizer_overhead
+                #     if k > self.loss_idx:#add params grad size to bwd overhead 
+                #         self.overhead[k] = [v+grad_size for v in self.overhead[k]]
 
             self.OflW = RkLpVariable.dicts(
                 "OflW",
