@@ -296,15 +296,25 @@ class Step():
     
     @property
     def op_list(self):
-        gpu_ops = []
-        list_params = []
-        for op in self.opt_ops:
-            if "cpu" in op.name:
-                list_params += op.list_params
-            else:
-                gpu_ops.append(op)
-        cpu_ops = [OptimizeOp(f"cpu_{str(list_params[0])}", list_params=list_params)] if list_params else []
-        opt_ops = cpu_ops+gpu_ops
+        # gpu_ops = []
+        # cpu_ops = []
+        # list_params = []
+        # for op in self.opt_ops:
+        #     if "cpu" in op.name:
+        #         cpu_ops.append(op)
+            # list_params += op.list_params
+        #     else:
+        #         gpu_ops.append(op)
+        # if cpu_ops:
+        if not self.opt_ops:
+            opt_ops = []
+        else:
+            list_params = [p for op in self.opt_ops for p in op.list_params]
+            opt_ops = [OptimizeOp(f"cpu_{str(list_params[0])}", 
+                                list_params=list_params,
+                                time=sum(op.time for op in self.opt_ops))]
+        # cpu_ops = [OptimizeOp(f"cpu_{str(list_params[0])}", list_params=list_params)] if list_params else []
+        # opt_ops = cpu_ops+gpu_ops
         return self.alloc_ops+self.ofl_ops+self.prf_ops+self.comp_ops+opt_ops+self.del_ops
     @property
     def time(self):
