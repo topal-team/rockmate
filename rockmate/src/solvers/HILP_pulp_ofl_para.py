@@ -463,6 +463,8 @@ class ModelPULP:
         if self.with_parameters:
             self.param2sub_c, self.parameters = get_parameter_cluster(self.sub_clusters)
             self.parameter_size = [sum(kdn.mem for kdn in p)/self.gcd for p in self.parameters]
+            self.parameter_gradient_size = [sum(kdn.mem for kdn in p if kdn.info.requires_grad
+                                                )/self.gcd for p in self.parameters]
             self.W = W = len(self.parameters)
             for w in range(W):
                 # sub_cluster = self.sub_clusters[w]
@@ -505,7 +507,7 @@ class ModelPULP:
                 for k in self.AliveG:
                     self.AliveG[k] = 0
                 for k, l_w in self.hcn2param.items():
-                    grad_size = sum(self.parameter_size[w] for w in l_w)
+                    grad_size = sum(self.parameter_gradient_size[w] for w in l_w)
                     # grad_size += max(self.parameter_size[w] for w in l_w)* self.optimizer_overhead
                     if k > self.loss_idx:#add params grad size to bwd overhead 
                         self.overhead[k] = [v+grad_size for v in self.overhead[k]]
