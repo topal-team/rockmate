@@ -1012,7 +1012,7 @@ class ModelPULP:
         # if self.cpu_optimize:
         self.optimizer_states_mem = lpSum(((1-self.sumOptC[w]- 
                                             self.param_multiplier)*
-                    self.parameter_size[w] *
+                    self.parameter_gradient_size[w] *
                     self.optimizer_states_size)
                     for w in range(self.W))
         optimizer_overhead = 0
