@@ -145,6 +145,27 @@ def get_useful_vars(sn,sg,our_global,device):
 # ======= INSPECTION =======
 # ==========================
 
+class FakeMod():
+    def __init__(self):
+        self.__list__ = []
+
+    def __getitem__(self, i):
+        if i>=len(self.__list__):
+            self.__list__ += [FakeMod() for _ in range((i-len(self.__list__)+1))]
+        return self.__list__[i]
+    def __setitem__(self, i, value):
+        if i>=len(self.__list__):
+            self.__list__ += [FakeMod() for _ in range((i-len(self.__list__)+1))]
+        self.__list__[i] = value
+
+    def __setattr__(self, name: str, value):
+        self.__dict__[name] = value
+    def __getattr__(self, name):
+        if name not in self.__dict__:
+            self.__setattr__(name, FakeMod())
+        return self.__dict__[name]
+
+
 class InspectionResult():
     def __init__(self):
         self.relevant= False # -> turn True if result of inspection
@@ -160,45 +181,87 @@ class InspectionResult():
 
 class Inspector():
     """
-    Use Inspector.generate_global() and Inspector.generate_local()
-    to get fresh environnement where to run the inspections.
+    Use Inspector.generate_global_env() 
+    and Inspector.generate_local_env()
+    to get fresh environments where to run inspection.
     """
     @staticmethod
-    def generate_global_exec_env(
+    def generate_global_env(
             simplified_graph : SimplifiedGraph,
-            original_mod : torch.nn.Module,
-            device : torch.device):
-        our_global = simplified_graph.make_copy_of_globals(
-            original_mod,device)
-        all_inputs = (
-            simplified_graph.original_mod_input_targets
-            + simplified_graph.input_targets) # those defined via the init_code
-        for inp in all_inputs:
-            if inp not in our_global:
-                inp_info = simplified_graph.dict_info[inp]
-                our_global[inp] = inp_info.generate_value(device)
+            inspection_device : torch.device):
+        our_global = globals().copy()
+        our_global["device"] = inspection_device
+        for cst_name,cst_value in simplified_graph.dict_constants.items():
+            our_global[cst_name] = cst_value.to(inspection_device)
+        # our_global["self"] = original_mod
+        # this time we won't put the whole model in the env
+        # instead we create local FakeMod
+        # all_inputs = (
+            # simplified_graph.original_mod_input_targets
+            # + simplified_graph.input_targets) # those defined via the init_code
+        # for inp in all_inputs:
+            # inp_info = simplified_graph.dict_info[inp]
+            # our_global[inp] = inp_info.generate_value(inspection_device)
+            # TO DELETE: I want to create the input only when needed
         return our_global
     
     @staticmethod
-    def generate_node_local_exec_env(
+    def generate_local_env(
             simplified_node_for_whom_to_generate_env : SimplifiedNode,
             simplified_graph : SimplifiedGraph,
             our_global : dict,
-            device : torch.device):
+            inspection_device : torch.device):
         tmp_local = dict()
-        exec(
-            simplified_graph.init_node.get_code(force_special_kwargs=True),
-            our_global,tmp_local)
+        # 1) Do we need to run the init_code:
+        # - Generating the sizes related to init_code is free
+        # so we can do it anyway, but if we require a tensor
+        # for the moment I generate all the real inputs and then
+        # run the init_code, as the tensor we need may be a view
+        # TO IMPROVE ? Generate exactly the tensors needed
+        init_node = simplified_graph.init_node
+        if (
+                ((simplified_node_for_whom_to_generate_env,init_node)
+                in simplified_graph.dict_of_labels_on_edges)
+        and 
+            any(
+                simplified_graph.dict_info[needed_input].variable_type 
+                is torch.Tensor
+                for needed_input 
+                in simplified_graph.dict_of_labels_on_edges[
+                    (simplified_node_for_whom_to_generate_env,init_node)
+        ])):
+            for inp in simplified_graph.original_mod_input_targets:
+                inp_info = simplified_graph.dict_info[inp]
+                tmp_local[inp] = inp_info.generate_value(inspection_device)
+            exec(
+                init_node.get_code(force_special_kwargs=True),
+                our_global,tmp_local)
+        else:
+            # We don't need any tensor:
+            # we generate sizes anyway as they come free 
+            all_inputs = (
+                simplified_graph.original_mod_input_targets
+                + simplified_graph.input_targets)
+            for inp in all_inputs:
+                inp_info = simplified_graph.dict_info[inp]
+                if inp_info.variable_type is not torch.Tensor:
+                    tmp_local[inp] = inp_info.generate_value(inspection_device)
+
+        # 2) Generate all the deps
         list_nodes_to_generate = list(simplified_node_for_whom_to_generate_env.deps)
         set_nodes_to_generate = set(list_nodes_to_generate)
         while list_nodes_to_generate != []:
             # Get next node to generate
             sn : SimplifiedNode = list_nodes_to_generate.pop(0)
-            if sn is simplified_graph.init_node:
-                set_nodes_to_generate.remove(sn)
-                continue
-            # Check if we have everything to generate sn
-            # ie if none of its dependencies are in the waiting list
+            if sn is init_node: # TO REMOVE
+                raise Exception("init_node in sn.deps ???")
+            # Check if it's `sn`'s turn:
+            # if some of the deps of sn are in the waiting list
+            # ie we plan to properly generate them (because they
+            # are also in main_sn's deps) it's better to wait.
+            # But note that we don't add any additional node to 
+            # the waiting list. So latter on, for sn'deps which
+            # aren't main_sn'deps: we will just generate them on the fly.
             if set(sn.deps).intersection(set_nodes_to_generate) != set():
                 list_nodes_to_generate.append(sn) # not his turn yet
                 continue
@@ -208,20 +271,20 @@ class Inspector():
             # We are ready to generate sn:
             # - First we create the main_target value based on info
             # - Then we run the body_code to generate views / sizes
-            main_value = sn.info.generate_value(device)
+            main_value = sn.info.generate_value(inspection_device)
             # Some operations are impossible over leaf tensors 
             # in term of grad_fn. So we have to clone them :
             if isinstance(main_value,torch.Tensor):
                 main_value = main_value.clone()
             tmp_local[sn.main_target] = main_value
-            body_code = ast_add_on.make_str_list_assign(
-                sn.body_code, force_special_kwargs=True)
             
-            # To run the body code we need all the dependencies to be
-            # in tmp_local: so we create those missing using info
+            # To run the body code we may need some dependencies to be
+            # in tmp_local (e.g. sizes): so we create them on the fly
             # Note: a dependency of sn which is also used by
             # simplified_node_for_whom_to_generate_env isn't created 
             # from info but previously generated in this while loop
+            body_code = ast_add_on.make_str_list_assign(
+                sn.body_code, force_special_kwargs=True)
             
             
             
@@ -246,6 +309,7 @@ class Inspector():
                 body_code = ast_add_on.make_str_list_assign(
                     req_sn.body_code,
                     force_special_kwargs=True)
+                ######
                 for req_req_sn in req_sn.deps.keys():
                     if not (req_req_sn is sg.init_node):
                         for req_req_tar in req_req_sn.all_targets:
