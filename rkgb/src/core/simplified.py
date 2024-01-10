@@ -80,6 +80,10 @@ class SimplifiedNode(base.Node):
     def get_all_standard_users(self):
         return self.users.union(self.users_through_artifacts)
 
+    # /!\ /!\ /!\ /!\ /!\ 
+    # Insert means: put sn_to_insert in self's body_code
+    # Substitute means: replace all occurrences of a target by its code
+    # /!\ /!\ /!\ /!\ /!\ 
     # === INSERT ===
     def insert_code(self,sn_to_insert,simplified_graph):
         sn_info = sn_to_insert.info
@@ -175,7 +179,7 @@ class SimplifiedNode(base.Node):
 
     # === SUBSTITUTE ===
     def substitute_an_id_by_a_code_in_self(
-            self,id_to_replace,code_replacing,dict_info):
+            self,id_to_replace,code_replacing,simplified_graph):
         """
         e.g. id_to_replace = "a"; code_replacing = AST("f(x)")
         with self's code: AST(b = g(a))
@@ -200,7 +204,7 @@ class SimplifiedNode(base.Node):
             self.main_code = (
                 self.main_target,
                 code_replacing.elts[index])
-            self.substitute_self_by_its_code_in_its_users(dict_info)
+            self.substitute_self_by_its_code_in_its_users(simplified_graph)
         else:
             self.main_code = (
                 self.main_target,
@@ -209,13 +213,14 @@ class SimplifiedNode(base.Node):
                     id_to_replace,
                     code_replacing))
 
-    def substitute_self_by_its_code_in_its_users(self,dict_info):
+    def substitute_self_by_its_code_in_its_users(self,simplified_graph):
         """
         e.g. a = f(x) ; b = g(a), calling this function 
         on 'a' => b = g(f(x)); useful notably for list 
         constructors, as we want nodes to represent tensors,
         not tuple or list of tensors.
         """
+        simplified_graph : SimplifiedGraph
         self_info = self.info
         self_deps = self.deps
         self_target = self.main_target # to avoid getattr() inside for loops
@@ -231,13 +236,21 @@ class SimplifiedNode(base.Node):
                 req_sn.users.add(user_sn)
             # 2) insert the code
             user_sn.substitute_an_id_by_a_code_in_self(
-                self.target,self.main_code[1],dict_info)
-            # 3) handle randomness
+                self.target,self.main_code[1],simplified_graph)
+            # 3) handle auxillary attributes: randomness, parameter nodes etc
             user_sn.is_rand = user_sn.is_rand or self.is_rand
             user_sn.required_random_tensors.update(
                 self.required_random_tensors)
             user_sn.required_parameter_nodes.update(
                 self.required_parameter_nodes)
+            direct_var_deps = simplified_graph.dict_target_to_direct_variable_deps
+            direct_param_deps = simplified_graph.dict_target_to_direct_parameter_deps
+            direct_param_deps[user_sn.main_target] \
+                .update(direct_param_deps[self.main_target])
+            direct_var_deps[user_sn.main_target] \
+                .discard(self.main_target)
+            direct_var_deps[user_sn.main_target] \
+                .update(direct_var_deps[self.main_target])
             # 4) data_direct_parent_name
             if user_sn.info.data_direct_parent_name == self_target:
                 if self_info.data_direct_parent_name == self_target:
@@ -259,7 +272,7 @@ class SimplifiedNode(base.Node):
             unique_user_sn : SimplifiedNode = next(iter(self.users))
             unique_user_target = unique_user_sn.main_target
             for view_target in self_info.view_targets:
-                view_info = dict_info[view_target]
+                view_info = simplified_graph.dict_info[view_target]
                 view_info.data_owner_name = unique_user_target # instead of self
                 # data_direct_parent_name already changed
             assert(unique_user_target in self_info.view_targets) # TO REMOVE
@@ -341,6 +354,14 @@ class SimplifiedGraph(base.Graph):
                 for param_node in forward_graph.parameter_nodes]
             dict_old_param_node_to_new_param_node = dict(
                 zip(forward_graph.parameter_nodes,self.parameter_nodes))
+            
+            self.dict_target_to_direct_variable_deps = direct_var_deps = dict()
+            self.dict_target_to_direct_parameter_deps = direct_param_deps = dict()
+            # e.g. "a = f(b,c,self.weight)"; 
+            # then direct_var_deps['a'] = set("b,c")
+            # and direct_param_deps['a'] = set(ParamNode('self.weight'))
+            # 'direct' in the sens: do not consider any simplification
+            # we look for what each target needs
 
             # translate each node one by one
             dict_simplified_nodes = dict()
@@ -364,6 +385,11 @@ class SimplifiedGraph(base.Graph):
                     req_sn = dict_simplified_nodes[req_fn.target]
                     req_sn.users.add(sn)
                     sn.deps.add(req_sn)
+                direct_var_deps[fn.target] = set(
+                    req_fn.target for req_fn in fn.deps)
+                direct_param_deps[fn.target] = set(
+                    sn.required_parameter_nodes)
+                
 
             # merge all the inputs in the special `init_node`
             for input_target in forward_graph.input_targets:
@@ -616,7 +642,7 @@ class SimplifiedGraph(base.Graph):
                     not sn.info.is_view and not sn.info.is_inplace
                     and sn.info.variable_type in [tuple,list]
                     ))):
-                sn.substitute_self_by_its_code_in_its_users(self.dict_info)
+                sn.substitute_self_by_its_code_in_its_users(self)
         self.clear()
 
     def optional_simplify_cheap_operations(self):
@@ -631,7 +657,7 @@ class SimplifiedGraph(base.Graph):
             and len(sn.deps) <= 2
             and len(sn.users) == 1):
                 # with this new conditions, no need to protect against over simplification
-                sn.substitute_self_by_its_code_in_its_users(self.dict_info)
+                sn.substitute_self_by_its_code_in_its_users(self)
         self.clear()
 
     def simplify_sizes(self):

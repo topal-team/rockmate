@@ -196,13 +196,6 @@ class Inspector():
         # our_global["self"] = original_mod
         # this time we won't put the whole model in the env
         # instead we create local FakeMod
-        # all_inputs = (
-            # simplified_graph.original_mod_input_targets
-            # + simplified_graph.input_targets) # those defined via the init_code
-        # for inp in all_inputs:
-            # inp_info = simplified_graph.dict_info[inp]
-            # our_global[inp] = inp_info.generate_value(inspection_device)
-            # TO DELETE: I want to create the input only when needed
         return our_global
     
     @staticmethod

@@ -266,6 +266,8 @@ class ParameterNode():
                 "unique_id"]:
             setattr(clone_node,attr,copy.deepcopy(getattr(self,attr)))
         return clone_node
+    def __repr__(self):
+        return f"ParameterNode({self.param_name})"
 
 # ============================
 
