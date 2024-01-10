@@ -199,12 +199,26 @@ class Inspector():
         return our_global
     
     @staticmethod
+    def aux_generate_a_parameter_locally(
+        param_node : base.ParameterNode,
+        our_global, tmp_local,
+        original_mod,
+        inspection_device
+    ):
+        param_value = param_node.get_value(original_mod)
+        tmp_local["__value"] = param_value.to(inspection_device)
+        exec(f"{param_node.param_str} = __value ; {param_node.get_code()}",
+            our_global, tmp_local)
+
+    @staticmethod
     def generate_local_env(
             simplified_node_for_whom_to_generate_env : SimplifiedNode,
             simplified_graph : SimplifiedGraph,
             our_global : dict,
+            original_mod : torch.nn.Module,
             inspection_device : torch.device):
         tmp_local = dict()
+        tmp_local["self"] = FakeMod()
         # 1) Do we need to run the init_code:
         # - Generating the sizes related to init_code is free
         # so we can do it anyway, but if we require a tensor
@@ -226,6 +240,10 @@ class Inspector():
             for inp in simplified_graph.original_mod_input_targets:
                 inp_info = simplified_graph.dict_info[inp]
                 tmp_local[inp] = inp_info.generate_value(inspection_device)
+            for param_node in init_node.required_parameter_nodes:
+                Inspector.aux_generate_a_parameter_locally(
+                    param_node,our_global,tmp_local,
+                    original_mod,inspection_device)
             exec(
                 init_node.get_code(force_special_kwargs=True),
                 our_global,tmp_local)
@@ -240,7 +258,13 @@ class Inspector():
                 if inp_info.variable_type is not torch.Tensor:
                     tmp_local[inp] = inp_info.generate_value(inspection_device)
 
-        # 2) Generate all the deps
+        # 2) Generate required parameters
+        for param_node in simplified_node_for_whom_to_generate_env.required_parameter_nodes:
+            Inspector.aux_generate_a_parameter_locally(
+                param_node,our_global,tmp_local,
+                original_mod,inspection_device)
+
+        # 3) Generate all the deps
         list_nodes_to_generate = list(simplified_node_for_whom_to_generate_env.deps)
         set_nodes_to_generate = set(list_nodes_to_generate)
         while list_nodes_to_generate != []:
@@ -278,39 +302,16 @@ class Inspector():
             # from info but previously generated in this while loop
             body_code = ast_add_on.make_str_list_assign(
                 sn.body_code, force_special_kwargs=True)
-            
-            
-            
-
-
-        req_sn_todo = list(sn.deps.keys())
-        set_req_sn_todo = set(req_sn_todo)
-        while req_sn_todo != []:
-            req_sn = req_sn_todo.pop(0)
-            if set(req_sn.deps).intersection(set_req_sn_todo) != set():
-                set_req_sn_todo.remove(req_sn)
-            if not (req_sn is sg.init_node):
-                # we create the main_target value, and we run the body_code
-                # but the body_code may requires some artifacts
-                # thus we need req of req
-                req_sn_mt = req_sn.main_target
-                main_info = sg.dict_info[req_sn_mt]
-                req_sn_mt_value = main_info.generate_value(device)
-                if isinstance(req_sn_mt_value,torch.Tensor):
-                    req_sn_mt_value = req_sn_mt_value.clone()
-                tmp_local[req_sn_mt] = req_sn_mt_value
-                body_code = ast_add_on.make_str_list_assign(
-                    req_sn.body_code,
-                    force_special_kwargs=True)
-                ######
-                for req_req_sn in req_sn.deps.keys():
-                    if not (req_req_sn is sg.init_node):
-                        for req_req_tar in req_req_sn.all_targets:
-                            if req_req_tar in body_code and req_req_tar not in tmp_local:
-                                req_req_info = sg.dict_info[req_req_tar]
-                                tmp_local[req_req_tar] = (
-                                    req_req_info.generate_value(device))
-                exec(body_code,our_global,tmp_local)
+            for body_target in sn.all_targets:
+                if body_target is sn.main_target: continue
+                for req_param_node in simplified_graph.dict_target_to_direct_parameter_deps[body_target]:
+                    Inspector.aux_generate_a_parameter_locally(
+                        req_param_node,our_global,tmp_local,
+                        original_mod,inspection_device)
+                for req_var_target in simplified_graph.dict_target_to_direct_variable_deps[body_target]:
+                    req_var_info = simplified_graph.dict_info[req_var_target]
+                    tmp_local[req_var_target] = req_var_info.generate_value(inspection_device)
+            exec(body_code,our_global,tmp_local)
         return tmp_local
 
 
