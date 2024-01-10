@@ -340,7 +340,7 @@ def get_single_compute_op_list(
     return op_list  # , loss_idx
 
 
-def add_parameter_node(h_cluster, original_mod, minor_size=10*1024):
+def add_parameter_node(h_cluster, original_mod, minor_size=1024*1024):
     if h_cluster is None:
         return None
     if not hasattr(h_cluster, "list_kcn"):
