@@ -1386,7 +1386,9 @@ class ModelPULP:
             select_paras = selector.select_size(cpu_optimize_size)
             # print(select_paras)
             
-        for p in parameters:
+        # Optimize parameters which requires grad
+        for p, kdn in parameters.items():
+            if not kdn.info.requires_grad:continue
             if p in select_paras:
                 self.cpu_optimized_params[p] = parameters[p].mem
                 apply_cpu_optimize(p)
