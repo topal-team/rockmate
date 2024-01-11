@@ -466,7 +466,9 @@ class ModelPULP:
             self.parameter_gradient_size = [sum(kdn.mem for kdn in p if kdn.info.requires_grad
                                                 )/self.gcd for p in self.parameters]
             self.W = W = len(self.parameters)
-            for w in range(W):
+            self.param2hcn = {w:[] for w in range(W)}
+            self.hcn2param = {}# is no param for hcn[k], k not in hcn2param
+            # for w in range(W):
                 # sub_cluster = self.sub_clusters[w]
                 # if hasattr(sub_cluster, "list_kdn_parameters"):
                 #     self.parameter_size.append(
@@ -477,16 +479,14 @@ class ModelPULP:
                 #     self.parameter_size.append(0)
                 # self.param2sub_c = {w: [w] for w in range(W)}
                 #self.param2hcn = {w: self.sub_c2hcn[w] for w in range(W)}
-                self.param2hcn = {w:[] for w in range(W)}
-                self.hcn2param = {}# is no param for hcn[k], k not in hcn2param
-                for w,l_c in self.param2sub_c.items():
-                    for c in l_c:
-                        for k in self.sub_c2hcn[c]:
-                            if k in self.hcn2param:
-                                self.hcn2param[k].append(w)
-                            else:
-                                self.hcn2param[k] = [w]
-                            self.param2hcn[w].append(k)
+            for w,l_c in self.param2sub_c.items():
+                for c in l_c:
+                    for k in self.sub_c2hcn[c]:
+                        if k in self.hcn2param:
+                            self.hcn2param[k].append(w)
+                        else:
+                            self.hcn2param[k] = [w]
+                        self.param2hcn[w].append(k)
 
 
             self.AliveW = RkLpVariable.dicts(
