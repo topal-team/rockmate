@@ -57,8 +57,8 @@ class InspectionResult():
         self.mem_run_bwd  = 0
         self.mem_fgt_fwd  = 0
         self.mem_fgt_bwd  = 0
-        self.time_run_fwd = 0
-        self.time_run_bwd = 0
+        self.time_fwd = 0
+        self.time_bwd = 0
 
 
 class Inspector():
@@ -204,6 +204,23 @@ class Inspector():
             exec(body_code,our_global,tmp_local)
         return tmp_local
 
+# ======================
+    
+class InspectorCPU(Inspector):
+    """
+    TO DO : Would be nice to add, but not urgent
+    Could use:
+    https://docs.python.org/3/library/tracemalloc.html
+    """
+    def inspect(self):
+        return InspectionResult()
+    
+
+class InspectorCUDA(Inspector):
+    def inspect(self):
+        pass
+        # TODO
+
 
 # ======================
 # TRACE GRAD_FN TO SEE WHAT IS NEEDED TO BWD
@@ -326,6 +343,9 @@ def get_relevant_dependencies_via_grad_fn(
         has_attribute__base
     )
 # ======================
+
+
+# ======================
 
 
 

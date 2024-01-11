@@ -27,10 +27,6 @@ def change_reasonable_rate(x):
     assert 0 <= x
     ref_reasonable_rate[0] = x
 
-
-# -> to test phantoms detection
-ref_test_phantoms_detection = [False]
-
 # =========================
 # === Custom exceptions ===
 # =========================

@@ -140,8 +140,8 @@ class ForwardBackwardGraph(base.Graph):
     def __init__(self,
             simplified_graph : SimplifiedGraph = None,
             original_mod : torch.nn.Module = None,
-            inspection_device = None,
-            do_inspection = True):
+            do_inspection = True,
+            inspection_device = None):
         # 2 constructors: if given a simplified_graph, 
         # then move from S to FB => run inspection,
         # build the backward part and allocation nodes.
@@ -179,6 +179,7 @@ class ForwardBackwardGraph(base.Graph):
             sn_to_proceed : SimplifiedNode,
             simplified_graph : SimplifiedGraph,
             original_mod : torch.nn.Module,
+            do_inspection,
             inspection_device):
         # 0) Create the execution environment
         our_global = inspection.Inspector.generate_global_env(
@@ -297,20 +298,56 @@ class ForwardBackwardGraph(base.Graph):
                     self.dict_grad_anodes[req_target].deps.add(bwd_cnode)
         else:
             bool_bwd_requires_fwd_data = False
+            bool_exist_phantoms = False
             
         # =========================
         # == Part 3 : INSPECTION ==
         # =========================
-            
+        # 1) Run the inspection
+        if not do_inspection:
+            inspection_result = inspection.InspectionResult()
+        else:
+            if inspection_device == torch.device("cpu"):
+                inspector = inspection.InspectorCPU()
+            else:
+                inspector = inspection.InspectorCUDA()
+            inspection_result = inspector.inspect()
+        
+        # 2) Fill corresponding node attributes
+        # - Forward Computation Node:
+        fwd_cnode.mem_overhead = inspection_result.mem_overhead_fwd
+        fwd_cnode.time = inspection_result.time_fwd
+        # - Data Allocation Node:
+        if bool_bwd_requires_fwd_data: # ie data_anode includes phantoms
+            data_anode.mem = inspection_result.mem_run_fwd
+        else:
+            data_anode.mem = inspection_result.mem_fgt_fwd
 
+        if sn_to_proceed.info.requires_grad:
+            # - Backward Computation Node:
+            bwd_cnode.mem_overhead = inspection_result.mem_overhead_bwd
+            bwd_cnode.time = inspection_result.time_bwd
+            # - Grad Allocation Node:
+            grad_anode.mem = inspection_result.mem_fgt_fwd
+            # Note: It's mem_fgt_FWD not bwd;
+            # Moreover it used to be: grad_anode.mem := data_anode.mem
+            # But I don't understand why: TO TEST / TO CHANGE
 
-
+            # - Phantoms Allocation Node:
+            if bool_exist_phantoms and not bool_bwd_requires_fwd_data:
+                phantoms_anode.mem = (
+                    inspection_result.mem_run_fwd 
+                    - inspection_result.mem_fgt_fwd
+                )
+            # If you want to test an other way to detect phantoms:
+            # exist_diff=res.mem_run_fwd - res.mem_fgt_fwd > 0
+            # if exist_diff or exist_phs:
+            #   print(f"For node {mt}: mem_diff : {exist_diff} "\
+            #         f"and detection {exist_phs}")
     # ======= END OF MAIN LOOP =======
 
-
-
-    # =============================================
-    # Small methods to generate the last attributes
+    # ===================================================
+    # == Small methods to generate the last attributes ==
     def make_special_loss_and_io_nodes(self,
             simplified_graph : SimplifiedGraph):
         # Outputs:
@@ -393,135 +430,12 @@ class ForwardBackwardGraph(base.Graph):
                 forwardbackward_graph=self)
             return True,fresh_cnode_root
     def remove_temporary_global_root_node(self,fresh_root):
-        # We don't need the user relation, as we only use this
+        # We don't need the users relation, as we only use this
         # root_node to toposort; hence nothing to unplug
         pass
 
 # ==========================
 
-
-
-
-        # *** build the bwd part ***
-        if info.requires_grad:
-            # Open grad_fn and collect backward dependencies:
-            (   real_dependencies_of_bwd,
-                exist_phantoms,
-                has_attribute__base ) \
-                = inspection.get_relevant_dependencies_via_grad_fn(
-                    sn,our_global,tmp_local
-                )
-            fake_dependencies_of_bwd = kcn_fwd_deps - real_dependencies_of_bwd
-            if sn.main_target in real_dependencies_of_bwd:
-                attach_phantoms_to_data_node = True
-                kdn_data.includes_phantoms = True
-
-            else:
-                attach_phantoms_to_data_node = False
-
-            bwd_deps_real_mt = (
-                all_deps_mt.intersection(set(sn_deps_mt)))
-            kcn_bwd_deps_real = set(
-                dict_KDN_data[mt] for mt in bwd_deps_real_mt)
-            kcn_bwd_deps_fake = (
-                kcn_fwd_deps - kcn_bwd_deps_real)
-            kdn_data.has_attribute__base = has_attribute__base
-            if mt in all_deps_mt:
-                kcn_bwd_deps_real.add(kdn_data)
-                data_includes_phantoms = kdn_data.includes_phantoms = True
-            else:
-                kcn_bwd_deps_fake.add(kdn_data)
-                data_includes_phantoms = False
-
-            # -> KCN(bwd)
-            kcn_bwd = ForwardBackwardComputationNode(
-                main_target       = mt,
-                all_targets       = sn.all_targets,
-                tensor_targets    = sn.tensor_targets,
-                inplace_targets   = sn.inplace_targets,
-                container_targets = sn.container_targets,
-                is_fwd    = False,
-                deps_real = kcn_bwd_deps_real,
-                deps_fake = kcn_bwd_deps_fake,
-                other_obj = kg)
-            dict_KCN_bwd[mt] = kcn_bwd
-
-            # -> KDN(phantoms)
-            if exist_phs and not data_includes_phantoms:
-                kdn_phantoms = ForwardBackwardAllocationNode(
-                    main_target       = mt,
-                    allocation_type    = "phantoms",
-                    all_targets       = sn.all_targets,
-                    tensor_targets    = sn.tensor_targets,
-                    inplace_targets   = sn.inplace_targets,
-                    container_targets = sn.container_targets,
-                    info        = info,
-                    deps        = set([kcn_fwd]),
-                    other_obj = kg)
-                dict_KDN_phantoms[mt] = kdn_phantoms
-                kcn_bwd.deps_real.add(kdn_phantoms)
-                kcn_fwd.has_phantoms = True
-            else: kcn_fwd.has_phantoms = False
-
-            # -> KDN(grad)
-            kdn_grad = ForwardBackwardAllocationNode(
-                main_target       = mt,
-                allocation_type    = "grad",
-                info        = info,
-                all_targets       = sn.all_targets,
-                tensor_targets    = sn.tensor_targets,
-                inplace_targets   = sn.inplace_targets,
-                container_targets = sn.container_targets,
-                other_obj = kg)
-            dict_KDN_grad[mt] = kdn_grad
-            kcn_bwd.deps_real.add(kdn_grad)
-
-            # -> KDN(grad).deps of fwd_deps
-            for req_sn_mt in sn_deps_mt:
-                if req_sn_mt in dict_KDN_grad: #i.e. requires_grad
-                    dict_KDN_grad[req_sn_mt].deps.add(kcn_bwd)
-        else:
-            data_includes_phantoms = False
-
-
-        # *** inspection ***
-        if (not do_inspection
-        or device == torch.device("cpu")):
-            res = inspection.Inspection_result()
-        else:
-            ins = inspection.inspector(sn,sg,our_global,device)
-            ins.measure_fwd()
-            ins.measure_bwd()
-            res = ins.ret
-
-        # -> fwd ins
-        kcn_fwd.mem_overhead = res.mem_overhead_fwd
-        kcn_fwd.time     = res.time_run_fwd
-        # kdn_data.mem     = info.memsize
-        if data_includes_phantoms:
-            kdn_data.mem = res.mem_run_fwd
-        else:
-            kdn_data.mem = res.mem_fgt_fwd
-
-        # -> bwd ins
-        if info.requires_grad:
-            kcn_bwd.mem_overhead = res.mem_overhead_bwd
-            kcn_bwd.time     = res.time_run_bwd
-            kdn_grad.mem     = kdn_data.mem
-
-            # -> phantoms ins
-            if constants.ref_test_phantoms_detection[0]:
-                exist_diff=res.mem_run_fwd - res.mem_fgt_fwd > 0
-                if exist_diff or exist_phs:
-                    print(f"For node {mt}: mem_diff : {exist_diff} "\
-                          f"and detection {exist_phs}")
-
-            if exist_phs and not data_includes_phantoms:
-                kdn_phantoms.mem = (
-                    res.mem_run_fwd - res.mem_fgt_fwd)
-
-    # ============ 
-# ==========================
 
 # ==========================
 # === printing functions ===
