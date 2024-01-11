@@ -46,15 +46,14 @@ class ForwardBackwardComputationNode(base.Node):
         self.deps_real    = deps_real if deps_real else set() # AllocationNode set
         self.deps_fake    = deps_fake if deps_fake else set() # AllocationNode set
         self.users        = set()
-        self.deps_impossible_to_restore = set() # TODO : REMOVE deps_impossible_to_restore
         if deps_through_artifacts: # ComputationNode set
             self.deps_through_artifacts = deps_through_artifacts
         else:
             self.deps_through_artifacts = set()
-            # -> just for the toposort, we don't need the reciprocal users_..
+            # -> just for the toposort, we don't need the reciprocal attribute (users_..)
         # - inspection:
         self.time = None
-        self.overhead = None
+        self.mem_overhead = None
         self.has_phantoms = None
 
     def get_all_standard_deps(self):
@@ -73,7 +72,7 @@ class ForwardBackwardComputationNode(base.Node):
 
 class ForwardBackwardAllocationNode(base.Node):
     def __init__(self,
-            kdn_type = "/!\\ No kdn_type/!\\",
+            allocation_type = "/!\\ No allocation_type/!\\",
             main_target = "/!\\ No target /!\\",
             all_targets       = None,
             tensor_targets    = None,
@@ -81,10 +80,11 @@ class ForwardBackwardAllocationNode(base.Node):
             container_targets = None,
             info      = None,
             deps      = None,
-            other_obj = None):
+            backward_graph = None):
         # ** informative **
-        super().__init__(other_obj,main_target=main_target)
-        self.kdn_type = kdn_type # data, grad or phantoms
+        super().__init__(main_target,
+            parent_structure_with_id_generator=backward_graph)
+        self.allocation_type = allocation_type # data, grad or phantoms
         mt = main_target
         atars = all_targets
         ttars = tensor_targets
@@ -94,10 +94,10 @@ class ForwardBackwardAllocationNode(base.Node):
         self.tensor_targets    = ttars if ttars else [mt]
         self.inplace_targets   = itars if itars else []
         self.container_targets = ctars if ctars else []
-        self.name        = f"{mt} {self.kdn_type}"
+        self.name        = f"{mt} {self.allocation_type}"
         self.mem         = 0
         self.info        = info
-        self.includes_base = False
+        self.has_attribute__base = False
         self.includes_phantoms = False
         # ** deps/used_by **
         self.users_real   = set() # KCN set
@@ -105,14 +105,15 @@ class ForwardBackwardAllocationNode(base.Node):
         self.users_global = set() # KCN set
         self.deps_global  = set() # KCN set
         self.deps         = deps if deps else set() # KCN set
-        self.users_impossible_to_restore = set() # (KCN * str) set
     
     def get_all_standard_deps(self):
         return set().union(
-            *[bcn.deps_real for bcn in self.deps])
+            *[computation_node.deps_real
+              for computation_node in self.deps])
     def get_all_standard_users(self):
         return set().union(
-            *[bcn.users for bcn in self.users_real])
+            *[computation_node.users
+              for computation_node in self.users_real])
 
 
 
@@ -184,7 +185,7 @@ class ForwardBackwardGraph(base.Graph):
         else:
             self.has_fake_input_kdn_grad = True
             self.input_kdn_grad=input_kdn_grad = ForwardBackwardAllocationNode(
-                kdn_type = "grad", main_target = constants.init_target_string,
+                allocation_type = "grad", main_target = constants.init_target_string,
                 all_targets = self.sg.inputs,
                 other_obj = self)
             firsts_mt = [sn.mt for sn in self.sg.init_node.users]
@@ -214,8 +215,6 @@ class ForwardBackwardGraph(base.Graph):
         for kcn in self.list_kcn:
             for req_kdn in kcn.deps_real: req_kdn.users_real.add(kcn)
             for req_kdn in kcn.deps_fake: req_kdn.users_fake.add(kcn)
-            for req_kdn,ph_name in kcn.deps_impossible_to_restore:
-                req_kdn.users_impossible_to_restore.add((kcn,ph_name))
         for kdn in self.list_kdn:
             for req_kcn in kdn.deps: req_kcn.users.add(kdn)
     def init_deps_and_users_global(self):
@@ -319,7 +318,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
 
         # -> KDN(data)
         kdn_data = ForwardBackwardAllocationNode(
-            kdn_type    = "data",
+            allocation_type    = "data",
             main_target       = mt,
             all_targets       = sn.all_targets,
             tensor_targets    = sn.tensor_targets,
@@ -354,7 +353,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
                 dict_KDN_data[mt] for mt in bwd_deps_real_mt)
             kcn_bwd_deps_fake = (
                 kcn_fwd_deps - kcn_bwd_deps_real)
-            kdn_data.includes_base = hasattr_base
+            kdn_data.has_attribute__base = has_attribute__base
             if mt in all_deps_mt:
                 kcn_bwd_deps_real.add(kdn_data)
                 data_includes_phantoms = kdn_data.includes_phantoms = True
@@ -378,7 +377,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
             # -> KDN(phantoms)
             if exist_phs and not data_includes_phantoms:
                 kdn_phantoms = ForwardBackwardAllocationNode(
-                    kdn_type    = "phantoms",
+                    allocation_type    = "phantoms",
                     main_target       = mt,
                     all_targets       = sn.all_targets,
                     tensor_targets    = sn.tensor_targets,
@@ -394,7 +393,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
 
             # -> KDN(grad)
             kdn_grad = ForwardBackwardAllocationNode(
-                kdn_type    = "grad",
+                allocation_type    = "grad",
                 info        = info,
                 main_target       = mt,
                 all_targets       = sn.all_targets,
@@ -424,7 +423,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
             res = ins.ret
 
         # -> fwd ins
-        kcn_fwd.overhead = res.overhead_fwd
+        kcn_fwd.mem_overhead = res.mem_overhead_fwd
         kcn_fwd.time     = res.time_run_fwd
         # kdn_data.mem     = info.memsize
         if data_includes_phantoms:
@@ -434,7 +433,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
 
         # -> bwd ins
         if info.requires_grad:
-            kcn_bwd.overhead = res.overhead_bwd
+            kcn_bwd.mem_overhead = res.mem_overhead_bwd
             kcn_bwd.time     = res.time_run_bwd
             kdn_grad.mem     = kdn_data.mem
 
@@ -467,7 +466,7 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
         deps_real = set(list_outputs_kdn_data),
         other_obj = kg)
     loss_kcn.time     = 0
-    loss_kcn.overhead = 0
+    loss_kcn.mem_overhead = 0
     dict_KCN_fwd[loss_kcn.main_target] = loss_kcn
     for kdn in list_outputs_kdn_grad:
         kdn.deps.add(loss_kcn)
@@ -505,12 +504,12 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
     else:
         is_sources = True
         kg.input_kdn_data=input_kdn_data = ForwardBackwardAllocationNode(
-            kdn_type = "data", main_target = constants.init_target_string,
+            allocation_type = "data", main_target = constants.init_target_string,
             all_targets = sg.inputs,
             other_obj = kg)
         if sg.sources_req_grad or not is_really_first_graph:
             kg.input_kdn_grad=input_kdn_grad = ForwardBackwardAllocationNode(
-                kdn_type = "grad", main_target = constants.init_target_string,
+                allocation_type = "grad", main_target = constants.init_target_string,
                 all_targets = sg.inputs,
                 other_obj = kg)
         else:
@@ -604,7 +603,7 @@ def aux_print_graph(dot,kg,uniq_num):
             lbl = kcn.get_code() if kcn.is_fwd else f"backward of {mt}"
             node(kcn.name,lbl,color=get_color(kcn),tooltip = (
                 f"Time : {kcn.time}\n"\
-                f"Mem overhead : {measure.MemSize(kcn.overhead)}"))
+                f"Mem overhead : {measure.MemSize(kcn.mem_overhead)}"))
     def print_kdn(kdn):
         node(kdn.name,kdn.name,color=get_color(kdn),
             tooltip = f"Mem {measure.MemSize(kdn.mem)}")

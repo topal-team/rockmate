@@ -70,12 +70,12 @@ class H_D_node(base.Node):
             self.kdn = kdn
             self.name = H_D_node.make_name_from_kdn(kdn)
             self.mem = kdn.mem
-            if kdn.kdn_type == "data":
+            if kdn.allocation_type == "data":
                 self.is_data = True
-            elif kdn.kdn_type == "grad":
+            elif kdn.allocation_type == "grad":
                 self.is_data = False
             else:
-                assert(kdn.kdn_type == "phantoms")
+                assert(kdn.allocation_type == "phantoms")
                 raise Exception("An HDN cannot represent a KDN of type 'phantoms'")
 
     def get_all_standard_deps(self):
@@ -87,7 +87,7 @@ class H_D_node(base.Node):
         
     @staticmethod
     def make_name_from_kdn(kdn):
-        return f"{kdn.kdn_type}_{kdn.mt}"
+        return f"{kdn.allocation_type}_{kdn.mt}"
 
 
 # ***********
@@ -249,7 +249,7 @@ def P_cluster_to_H_cluster(p_cluster : P_cluster, kg : K_graph):
         dict_ano_to_kcn[ano_triplet] = kcn
     for kdn in h_cluster.list_kdn:
         ano_pair = dict_mt_to_ano[kdn.mt]
-        ano_triplet = (kdn.kdn_type,) + ano_pair
+        ano_triplet = (kdn.allocation_type,) + ano_pair
         dict_kdn_to_ano[kdn] = ano_triplet
         dict_ano_to_kdn[ano_triplet] = kdn
     translator.dict_name_to_ano_triplet = dict(
