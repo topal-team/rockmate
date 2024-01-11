@@ -86,18 +86,13 @@ class ForwardBackwardAllocationNode(base.Node):
         super().__init__(main_target,
             parent_structure_with_id_generator=backward_graph)
         self.allocation_type = allocation_type # data, grad or phantoms
-        mt = main_target
-        atars = all_targets
-        ttars = tensor_targets
-        itars = inplace_targets
-        ctars = container_targets
-        self.all_targets       = atars if atars else [mt]
-        self.tensor_targets    = ttars if ttars else [mt]
-        self.inplace_targets   = itars if itars else []
-        self.container_targets = ctars if ctars else []
-        self.name        = f"{mt} {self.allocation_type}"
-        self.mem         = 0
-        self.info        = info
+        self.all_targets = all_targets or [main_target]
+        self.tensor_targets = tensor_targets or [main_target]
+        self.inplace_targets = inplace_targets or []
+        self.container_targets = container_targets or []
+        self.name = f"{main_target} {self.allocation_type}"
+        self.mem  = 0
+        self.info = info
         self.has_attribute__base = False
         self.includes_phantoms = False
         # ** deps/used_by **
@@ -124,16 +119,27 @@ class ForwardBackwardAllocationNode(base.Node):
 # ***********
 
 class ForwardBackwardGraph(base.Graph):
+    input_allocation_node_data = None
     def __init__(self,
-            simplified_graph : SimplifiedGraph):
+            simplified_graph : SimplifiedGraph = None,
+            original_mod : torch.nn.Module = None,
+            inspection_device = None,
+            do_inspection = True):
+        # 2 constructors: if given a simplified_graph, 
+        # then move from S to FB => run inspection,
+        # build the backward part and allocation nodes.
+        # otherwise return an empty graph
         super().__init__()
-        if is None): self.inherit_base_attributes(sg)
-        self.dict_rand = dict() # random operations have been inserted at the end of simplification
-        self.sg = sg
-
-        self.dict_kn  = dict() # KDN/KCN.name -> KDN/KCN
-        self.list_kcn = []     # KCN list : Toposorted
-        self.list_kdn = []     # KDN list : Arbitrary order
+        self.dict_nodes = dict() # node name -> node
+        self.computation_nodes = [] # Toposorted
+        self.allocation_nodes = [] # Arbitrary order
+        if simplified_graph is not None:
+            if original_mod is None or inspection_device is None: 
+                raise Exception(
+                    "You need to pass original_mod and inspection_device"\
+                    "to ForwardBackwardGraph.__init__ (or let "\
+                    "`simplified_graph` to None to get an empty graph")
+            self.inherit_base_attributes(simplified_graph)
 
         self.input_kdn_data        = None # e.g. KDN _13.data
         self.list_outputs_kdn_data = None # e.g. KDN _116.data
@@ -161,12 +167,6 @@ class ForwardBackwardGraph(base.Graph):
         else:
             self.outputs_wrapping_code = ast.parse("")
 
-    def __iter__(self):
-        return iter(self.computation_nodes)
-
-    
-
-
 
 
     def make_users(self):
@@ -183,22 +183,36 @@ class ForwardBackwardGraph(base.Graph):
             kdn.deps_global = set(kdn.deps)
             kdn.users_global = kdn.users_real.union(kdn.users_fake)
 
-    def sort_list_kcn(self):
-        # we want to use sort_based_on_deps over list_kcn
-        # but to do so we need an origin_node, ie a root of
-        # the "deps" relation between KCN.
-        leaves_kcn = set()
-        for kcn in self.list_kcn:
-            if not kcn.is_fwd and len(kcn.users) == 0:
-                leaves_kcn.add(kcn)
-        root_kdn = ForwardBackwardAllocationNode(deps = leaves_kcn,other_obj=self)
-        root_kcn = ForwardBackwardComputationNode(deps_real=set([root_kdn]),other_obj=self)
-        self.list_kcn = l = self.get_sorted_nodes_by_following_deps_relation()
-        l.remove(root_kcn)
-
     def make_kcns_number(self):
         for i,kcn in enumerate(self.list_kcn):
             setattr(kcn,"_number",i)
+
+    # ****************
+    def __iter__(self):
+        return iter(self.computation_nodes)
+
+    def make_temporary_global_root_node_to_deps_relation(self):
+        # OVERWRITE base.Graph METHOD
+        leaves_compnodes = []
+        for compnode in self.computation_nodes:
+            if not compnode.is_fwd and len(compnode.users) == 0:
+                leaves_compnodes.append(compnode)
+        if len(leaves_compnodes):
+            return False,leaves_compnodes[0]
+        else:
+            root_allonode = ForwardBackwardAllocationNode(
+                deps=leaves_compnodes,backward_graph=self)
+            fresh_compnode_root = ForwardBackwardComputationNode(
+                deps_real=set([root_allonode]),backward_graph=self)
+            return True,fresh_compnode_root
+    def remove_temporary_global_root_node(self,fresh_root):
+        # We don't need the user relation, as we only use this
+        # root_node to toposort; hence nothing to unplug
+        pass
+
+    
+
+
 
 # ==========================
 

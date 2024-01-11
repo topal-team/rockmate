@@ -356,7 +356,9 @@ class Graph():
 
     def make_temporary_global_root_node_to_deps_relation(self):
         """return bool * Node
-        bool : True <=> it's a fresh node (=> it must be removed after)
+        True <=> it's a fresh node (=> it must be removed after)
+        Note : In backward.py and hierarchical.py cases, 
+        we are interested by ComputationNodes
         """
         if len(self.output_nodes)==1:
             return False,self.output_nodes[0]
@@ -375,6 +377,10 @@ class Graph():
             out_node.users.discard(fresh_root)
 
     def get_sorted_nodes_by_following_deps_relation(self):
+        """
+        Note : In backward.py and hierarchical.py cases, 
+        we are interested by ComputationNodes
+        """
         is_it_a_tmp_fresh_root , root_node \
             = self.make_temporary_global_root_node_to_deps_relation()
         # /!\ root_node is the source of .deps relation 
@@ -423,8 +429,9 @@ class Graph():
 
     def find_cutting_points(self):
         """
-        self MUST HAVE a global sink to deps relation
-        ie a very first node / like SimplifiedGraph.init_node
+        self MUST HAVE a global SINK to deps relation
+        ie a very first node / like SimplifiedGraph.init_node.
+
         Note : We don't want a block where nothing requires_grad.
         Because it implies that we don't have a output_bdn_grad 
         and that Fe/Be make no sense.
