@@ -399,7 +399,8 @@ class OpSchedule:
                     [Parameter(kdn) for kdn in cluster.list_kdn_parameters]
                 )
                 self.list_alloc.extend(
-                    [Parameter(kdn, grad=True) for kdn in cluster.list_kdn_parameters]
+                    [Parameter(kdn, grad=True) for kdn in cluster.list_kdn_parameters
+                     if kdn.info.requires_grad]
                 )# add parameter grad allocation
                 self.list_alloc.extend(self.create_buffer_list())
         self.dict_alloc = {alloc.name: alloc for alloc in self.list_alloc}
@@ -595,7 +596,7 @@ class OpSchedule:
         # TODO: add init alive for parameters
         self.bwd2param = {}
         for alloc in self.list_alloc:
-            if isinstance(alloc, Parameter):
+            if isinstance(alloc, Parameter) and "grad" in alloc.name:
                 for kcn in alloc.kdn.users_real:
                     kcn_name = kcn.name.replace("fwd", "bwd")
                     if kcn_name in self.bwd2param:
