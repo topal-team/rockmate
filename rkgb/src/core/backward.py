@@ -26,15 +26,8 @@ class ForwardBackwardComputationNode(base.Node):
             deps_fake = None,
             deps_through_artifacts=None,
             backward_graph=None):
-        # ** informative **
         super().__init__(main_target,
             parent_structure_with_id_generator=backward_graph)
-        # - inherits from simplified_node:
-        if simplified_node:
-            for attr in [
-                    "all_targets","tensor_targets",
-                    "inplace_targets","container_targets"]:
-                setattr(self,attr,getattr(simplified_node,attr))
         # - basic attributes:
         self.name = f"FWD[{main_target}]" if is_fwd else f"BWD[{main_target}]"
         self.is_fwd = is_fwd
@@ -42,10 +35,18 @@ class ForwardBackwardComputationNode(base.Node):
         self.main_code = main_code # tuple (target * AST)
         self.inplace_code = inplace_code if inplace_code else []
         self.body_code = body_code if body_code else [] # (str*AST) list
+        # - inherits target attributes from simplified_node:
+        # Not specially useful, but can help debugging
+        if simplified_node:
+            for attr in [
+                    "all_targets","tensor_targets",
+                    "inplace_targets","container_targets"]:
+                setattr(self,attr,getattr(simplified_node,attr))
         # - deps and users:
-        self.deps_real    = deps_real if deps_real else set() # AllocationNode set
-        self.deps_fake    = deps_fake if deps_fake else set() # AllocationNode set
+        self.deps_real    = deps_real if deps_real else set()
+        self.deps_fake    = deps_fake if deps_fake else set()
         self.users        = set()
+        # => all: AllocationNode sets
         if deps_through_artifacts: # ComputationNode set
             self.deps_through_artifacts = deps_through_artifacts
         else:
@@ -72,8 +73,8 @@ class ForwardBackwardComputationNode(base.Node):
 
 class ForwardBackwardAllocationNode(base.Node):
     def __init__(self,
+            main_target = base.Node.no_target_string,
             allocation_type = "/!\\ No allocation_type/!\\",
-            main_target = "/!\\ No target /!\\",
             all_targets       = None,
             tensor_targets    = None,
             inplace_targets   = None,
@@ -100,11 +101,12 @@ class ForwardBackwardAllocationNode(base.Node):
         self.has_attribute__base = False
         self.includes_phantoms = False
         # ** deps/used_by **
-        self.users_real   = set() # KCN set
-        self.users_fake   = set() # KCN set
-        self.users_global = set() # KCN set
-        self.deps_global  = set() # KCN set
-        self.deps         = deps if deps else set() # KCN set
+        self.users_real   = set()
+        self.users_fake   = set()
+        self.users_global = set()
+        self.deps_global  = set()
+        self.deps         = deps if deps else set()
+        # => all: ComputationNode sets
     
     def get_all_standard_deps(self):
         return set().union(
@@ -122,10 +124,10 @@ class ForwardBackwardAllocationNode(base.Node):
 # ***********
 
 class ForwardBackwardGraph(base.Graph):
-    has_fake_input_kdn_grad = False
-    def __init__(self,sg : SimplifiedGraph):
+    def __init__(self,
+            simplified_graph : SimplifiedGraph):
         super().__init__()
-        if not (sg is None): self.inherit_base_attributes(sg)
+        if is None): self.inherit_base_attributes(sg)
         self.dict_rand = dict() # random operations have been inserted at the end of simplification
         self.sg = sg
 
@@ -162,52 +164,8 @@ class ForwardBackwardGraph(base.Graph):
     def __iter__(self):
         return iter(self.computation_nodes)
 
-    @property # FOR ORIGINAL ROCKMATE COMPATIBILITY
-    def output_kdn_data(self):
-        if len(self.list_outputs_kdn_data) != 1:
-            warnings.warn(
-                "Several output nodes, you shouldn't use "\
-                "`output_kdn_data` but `list_outputs_kdn_data")
-        return self.list_outputs_kdn_data[0]
-    @property # FOR ORIGINAL ROCKMATE COMPATIBILITY
-    def output_kdn_grad(self):
-        if len(self.list_outputs_kdn_grad) != 1:
-            warnings.warn(
-                "Several output nodes, you shouldn't use "\
-                "`output_kdn_grad` but `list_outputs_kdn_grad")
-        return self.list_outputs_kdn_grad[0]
     
 
-    # FOR ORIGINAL ROCKMATE COMPATIBILITY 
-    def fake_input_kdn_grad(self):
-        if self.input_kdn_grad is not None:
-            self.has_fake_input_kdn_grad = False
-        else:
-            self.has_fake_input_kdn_grad = True
-            self.input_kdn_grad=input_kdn_grad = ForwardBackwardAllocationNode(
-                allocation_type = "grad", main_target = constants.init_target_string,
-                all_targets = self.sg.inputs,
-                other_obj = self)
-            firsts_mt = [sn.mt for sn in self.sg.init_node.users]
-            self.dict_KDN_grad[input_kdn_grad.mt] = input_kdn_grad
-            self.dict_kn[input_kdn_grad.name] = input_kdn_grad
-            input_kdn_grad_deps = set(
-                self.dict_KCN_bwd[mt] for mt in firsts_mt
-                if mt in self.dict_KCN_bwd)
-            input_kdn_grad.deps_global.update(input_kdn_grad_deps)
-            for user_kcn in input_kdn_grad_deps:
-                user_kcn.users_global.add(input_kdn_grad)
-        assert self.input_kdn_grad is not None
-
-    def release_fake_input_kdn_grad(self):
-        if self.has_fake_input_kdn_grad:
-            self.has_fake_input_kdn_grad = False
-            input_kdn_grad = self.input_kdn_grad
-            self.input_kdn_grad = None
-            del self.dict_KDN_grad[input_kdn_grad.mt]
-            del self.dict_kn[input_kdn_grad.name]
-            for first_kcn in input_kdn_grad.deps_global:
-                first_kcn.users_global.remove(input_kdn_grad)
 
 
 
@@ -256,9 +214,6 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
         device,
         do_inspection=True):
     kg = ForwardBackwardGraph(sg)
-    for p in original_mod.parameters():
-        if p.grad is None:
-            p.grad = torch.zeros_like(p)
     dict_KCN_fwd = kg.dict_KCN_fwd
     dict_KCN_bwd = kg.dict_KCN_bwd
     dict_KDN_data = kg.dict_KDN_data
@@ -377,8 +332,8 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
             # -> KDN(phantoms)
             if exist_phs and not data_includes_phantoms:
                 kdn_phantoms = ForwardBackwardAllocationNode(
-                    allocation_type    = "phantoms",
                     main_target       = mt,
+                    allocation_type    = "phantoms",
                     all_targets       = sn.all_targets,
                     tensor_targets    = sn.tensor_targets,
                     inplace_targets   = sn.inplace_targets,
@@ -393,9 +348,9 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
 
             # -> KDN(grad)
             kdn_grad = ForwardBackwardAllocationNode(
+                main_target       = mt,
                 allocation_type    = "grad",
                 info        = info,
-                main_target       = mt,
                 all_targets       = sn.all_targets,
                 tensor_targets    = sn.tensor_targets,
                 inplace_targets   = sn.inplace_targets,
@@ -504,12 +459,14 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
     else:
         is_sources = True
         kg.input_kdn_data=input_kdn_data = ForwardBackwardAllocationNode(
-            allocation_type = "data", main_target = constants.init_target_string,
+            main_target = constants.init_target_string,
+            allocation_type = "data",
             all_targets = sg.inputs,
             other_obj = kg)
         if sg.sources_req_grad or not is_really_first_graph:
             kg.input_kdn_grad=input_kdn_grad = ForwardBackwardAllocationNode(
-                allocation_type = "grad", main_target = constants.init_target_string,
+                main_target = constants.init_target_string,
+                allocation_type = "grad",
                 all_targets = sg.inputs,
                 other_obj = kg)
         else:
