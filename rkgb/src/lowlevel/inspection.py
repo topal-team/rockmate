@@ -228,7 +228,7 @@ def trace_grad_fn(
     grad_fn.next_functions to trace the whole backward tree.
     """
     explicit_vars  = set() # set of Tensors
-    saved_tensors = set() # set of (value * name)
+    saved_tensors = set() # set of (name * value)
     def trace(current_grad_fn,path_from_the_origin):
         if hasattr(current_grad_fn,"variable"):
             explicit_vars.add(current_grad_fn.variable)
@@ -245,7 +245,7 @@ def trace_grad_fn(
                     f"{main_target}.grad_fn" 
                     + "".join(path_str)
                     + "." + attr)
-                saved_tensors.add((attr_value,saved_tensor_name))
+                saved_tensors.add((saved_tensor_name,attr_value))
         if hasattr(current_grad_fn,"next_functions"):
             for k,next_grad_fn in enumerate(current_grad_fn.next_functions):
                 trace(next_grad_fn[0],path_from_the_origin+[k])
@@ -256,7 +256,7 @@ def trace_grad_fn(
 
 def get_relevant_dependencies_via_grad_fn(
         simplified_node : SimplifiedNode,
-        dict_info,our_global,tmp_local):
+        our_global,tmp_local):
     # 1) init
     exec(
         simplified_node.get_code(force_special_kwargs=True), 
@@ -265,7 +265,8 @@ def get_relevant_dependencies_via_grad_fn(
     has_attribute__base = not (sn_value._base is None)
 
     # 2) Search through grad_fn
-    (explicit_vars,saved_tensors) = trace_grad_fn(
+    (explicit_vars_in_grad_fn,
+     saved_tensors_names_and_values) = trace_grad_fn(
         sn_value.grad_fn,
         simplified_node.main_target,
         tmp_local["all_parameters"],
@@ -273,70 +274,49 @@ def get_relevant_dependencies_via_grad_fn(
     )
 
     # 3) find out which tensors we found are
-    # For the moment we only have some tensors, and we need to find out
+    # We collected all tensors in grad_fn, and we need to find out
     # to which target they correspond to. For `saved_tensors`:
     # Case 1: we find a target in tmp_local with the same data_ptr: 
     # it confirms a dependency from sn to this target = real dependency
-    # Case 2: it isn't in tmp_local: it means it's a new fresh 
-    # tensor, what we call a "phantom"
-    real_dependencies_of_sn = []
-    dict_saved_tensor_to_data_ptr_owner = dict()
-    # dict: saved_tensor_name -> the target in tmp_local with the same data_ptr
-    # ~ of which saved_tensor_value is a view
-    valid_view_ph_deps = dict() 
-    # ph_name -> (var_name,data_owner_name) st .view == ph
-
-    for name,val in tmp_local.items():
-        if (name not in sg.inputs
-        and isinstance(val,torch.Tensor)):
-            if name not in dict_info: 
-                print(
-                    f"Warning: {name} is a Tensor in tmp_local"\
-                    f" which isn't in dict_info ? How is it ?",
-                    file = sys.stderr)
-                data_owner_name = name
-            else:
-                data_owner_name = dict_info[name].data_owner_name
-            if dict_info[name].is_param:
-                continue
-            for explicit_var in explicit_vars:
-                if val is explicit_var:
-                    explicit_deps.append(data_owner_name)
-                    break
-            for ph_val,ph_name in phs_found:
-                if val is ph_val:
-                    explicit_deps.append(data_owner_name)
-                if val.data_ptr() == ph_val.data_ptr():
-                    data_ptr_ph_deps[ph_name] = data_owner_name
-                    if torch.numel(val) == torch.numel(ph_val):
-                        try:
-                            if torch.equal(val.view(ph_val.shape),ph_val):
-                                valid_view_ph_deps[ph_name] = (
-                                    name,data_owner_name)
-                        except: pass
-                        # -> applying val.view raise an error if 
-                        # -> val stride and size isn't compatible with
-                        # -> the original data_owner
+    # Case 2: It doesn't correspond to any dependency:
+    # it means it's a fresh tensor only stored in grad_fn, 
+    # what we call a "phantom"
+    real_dependencies_of_sn = set()
+    saved_tensors_found = set()
     
-    # == check for the presence of original phantoms ==
-    exist_phs = False
-    original_phs = []
-    for ph_val,ph_name in phs_found:
-        if ph_name not in data_ptr_ph_deps:
-            exist_phs = True
-            original_phs.append(ph_name)
+    # To be more precise, for each dependency of sn 
+    # we check whether it is present in grad_fn, 
+    # i.e. whether it is a real dependency.
+    for req_sn in simplified_node.deps:
+        req_target = req_sn.main_target
+        req_value = tmp_local[req_target]
+        req_data_ptr = VariableInfo.get_data_ptr(req_value)
+        found=False
+        for explicit_var in explicit_vars_in_grad_fn:
+            if req_data_ptr == VariableInfo.get_data_ptr(explicit_var):
+                real_dependencies_of_sn.add(req_sn)
+                found=True
+                break
+        if not found:
+            for saved_tensor in saved_tensors_names_and_values:
+                saved_tensor_name,saved_tensor_value = saved_tensor
+                if req_data_ptr == VariableInfo.get_data_ptr(saved_tensor_value):
+                    real_dependencies_of_sn.add(req_sn)
+                    saved_tensors_found.append(saved_tensor_name)
+                    saved_tensors_names_and_values.remove(saved_tensor)
+                    break
+    
+    # 4) check whether all saved_tensors were found
+    exist_phantoms = bool(saved_tensors_names_and_values != set())
 
-    # == clean data_ptr_ph_deps ==
-    for ph_name in valid_view_ph_deps:
-        del data_ptr_ph_deps[ph_name]
+    # 5) clean tmp_local, i.e. remove sn,
+    # So we can reuse it to inspect time and memory usage
+    for target in simplified_node.all_targets:
+        del tmp_local["target"]
 
-    return (
-        explicit_deps,
-        data_ptr_ph_deps,
-        valid_view_ph_deps,
-        exist_phs,
-        original_phs,
-        hasattr_base,
+    return (real_dependencies_of_sn,
+        exist_phantoms,
+        has_attribute__base
     )
 
 # ======================
