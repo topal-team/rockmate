@@ -41,22 +41,27 @@ def Loss(y, labels):
     return y.mean()
     return torch.nn.CrossEntropyLoss()(y, labels)
 
-def exec(model, sample, niters=10, optimize_fct=None, **kwargs):
+def exec(model, 
+         sample, 
+         niters=10, 
+         optimize_fct=None,
+         print_loss=True,
+         print_mem=False,
+          **kwargs):
     y = model(*sample)
     labels = torch.randn(y.shape).softmax(dim=1).to(sample[0].device)
-    print(torch.cuda.memory_allocated())
-
+    if print_mem:print(torch.cuda.memory_allocated())
     loss = Loss(y, labels)
     loss.backward()
-    print(torch.cuda.memory_allocated())
+    if print_mem:print(torch.cuda.memory_allocated())
     if optimize_fct:optimize_fct()
     timer.start()
     for i in range(niters):
-        print(torch.cuda.memory_allocated())
+        if print_mem:print(torch.cuda.memory_allocated())
         model.zero_grad()
         y = model(*sample, **kwargs)
         loss = Loss(y, labels)
-        print(f"loss: {loss}")
+        if print_loss:print(f"loss: {loss}")
         loss.backward()
         torch.cuda.synchronize()
         # print(f"grad: {model.wte.weight.grad[0,0]}")
@@ -97,7 +102,11 @@ def exec_pt(model, sample, optim=torch.optim.Adam, niters=10, device="cuda", **k
 
 def exp_rkmod(nlayers=1, exp_id=None):
     model, sample = get3Bllm_embed(3,512, nlayers=nlayers)
-    budget = 11 * 1024**3
+    for n, p in model.named_parameters():
+        if "mlps" in n:
+            p.requires_grad = False
+
+    budget = 8 * 1024**3
     niters = 10
     partitioners = [
                     Partitioner_bottom_to_top(max_estimate_for_main_graph=model.nlayers*2+3,
@@ -106,9 +115,10 @@ def exp_rkmod(nlayers=1, exp_id=None):
     rkmod = HRockmate(model, sample, 1e8, solve_sched=0, 
                     ilp_solver="PULP_CBC_CMD", 
                     #   ilp_solver="HiGHS_CMD", 
-                      cpu_optim = DeepSpeedCPUAdam,
+                    # cpu_optim = DeepSpeedCPUAdam,
                     partitioners=partitioners,
                     optim_kwargs = {"lr":1e-3},
+                    ilp_time_limit=10*60
                     )
     prepare_for_offload(rkmod)
 
@@ -121,8 +131,9 @@ def exp_rkmod(nlayers=1, exp_id=None):
     exp_stats["act_size"] = sum(kdn.mem for kdn in rkmod.rkgb_res.H_cluster.list_kdn
                                 if "grad" not in kdn.name)
     exp_stats["cpu_optimize_stats"] = rkmod.gd["cpu_optimize_stats"]
-    exp_stats["cpu_optim"] = rkmod.gd["cpu_optim"]
-    exp_stats["gpu_optim"] = rkmod.gd["gpu_optim"]
+    exp_stats["cpu_optim"] = str(rkmod.gd["cpu_optim"])
+    exp_stats["gpu_optim"] = str(rkmod.gd["gpu_optim"])
+    exp_stats["cpu_optimize_stats"] = rkmod.gd["cpu_optimize_stats"]
 
     ### Solve schedule
     rkmod.solve_sched(budget, rec=True)
@@ -156,22 +167,22 @@ def exp_rkmod(nlayers=1, exp_id=None):
     exp_stats["time"] = time/niters
     exp_stats["peak_mem"] = mem
     id=f"3b_{nlayers}"
-    opts = list(rkmod.compiler.storage.ld["optimizers"].keys())
-    for s in sample:
-        s.data = torch.empty(0)
-    for opt in opts:
-        del rkmod.compiler.storage.ld["optimizers"][opt]
-    rkmod.restore_exec()
-    rkmod.compiler.storage.ld[rkmod.output.name.split(" ")[0]].data = torch.empty(0)
-    rkmod.compiler.storage.ld["_"+rkmod.output.name.split(" ")[0]].data = torch.empty(0)
+    # opts = list(rkmod.compiler.storage.ld["optimizers"].keys())
+    # for s in sample:
+    #     s.data = torch.empty(0)
+    # for opt in opts:
+    #     del rkmod.compiler.storage.ld["optimizers"][opt]
+    # rkmod.restore_exec()
+    # rkmod.compiler.storage.ld[rkmod.output.name.split(" ")[0]].data = torch.empty(0)
+    # rkmod.compiler.storage.ld["_"+rkmod.output.name.split(" ")[0]].data = torch.empty(0)
     if exp_id:
+        os.makedirs(os.path.dirname(f"exp_results/{exp_id}/"), exist_ok=True)
         with open(f"exp_results/{exp_id}/res_{id}.pkl", "wb") as f:
             pickle.dump(exp_stats, f)
-        rkmod.save_to_local("exp_results/", id=id)
+        rkmod.save_to_local(f"exp_results/{exp_id}", id=id)
     return rkmod
 
 if __name__=="__main__":
     exp_id = datetime.now().strftime('%d_%m_%H_%M')
-    os.makedirs(os.path.dirname(f"exp_results/{exp_id}/"), exist_ok=True)
     for nlayer in [1,2,6,12,18,24,30][::-1]:
         exp_rkmod(nlayers=nlayer, exp_id=exp_id)
