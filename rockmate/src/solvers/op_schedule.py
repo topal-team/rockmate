@@ -107,10 +107,14 @@ class Op:
         self.name = name
         self.disabled = disabled
         self.overhead = overhead
-        self.time = time
+        self._time = time
 
     def __repr__(self):
         return "Disabled_"*self.disabled + self.name
+    
+    @property
+    def time(self):
+        return self._time
 
 class SynchronizeOp(Op):
     def __init__(self, name="", disabled=False):
@@ -124,7 +128,7 @@ class ComputeOp(Op):
         self.detach = detach
         self.target = kcn
         self.overhead = kcn.overhead
-        self.time = kcn.time if kcn.time is not None else 0
+        # self.time = kcn.time if kcn.time is not None else 0
 
     def __copy__(self):
         cls = self.__class__
@@ -143,6 +147,11 @@ class ComputeOp(Op):
                 setattr(result, k, deepcopy(v, memo))
 
         return result
+    
+    @property
+    def time(self):
+        # kcn can be replaced during translation
+        return self.kcn.time if self.kcn.time is not None else 0
 
 
 class DeleteOp(Op):
@@ -207,7 +216,7 @@ class OffloadOp(Op):
         self.before = before
         self.after = after
         self.grad = grad
-        self.time = time
+        self._time = time
 
     def __repr__(self):
         return "Disabled" * self.disabled + f"Offload_{self.target}" +"_grad"*self.grad
@@ -229,7 +238,7 @@ class PrefetchOp(Op):
         self.disabled = disabled
         self.before = before
         self.after = after
-        self.time = time
+        self._time = time
 
     # def __repr__(self):
     #     return "Disabled" * self.disabled + f"Prefetch_{self.target}"
@@ -239,7 +248,7 @@ class OptimizeOp(Op):
         super().__init__("Optimize_" + name, disabled=disabled, overhead=overhead)
         self.list_params = list_params
         self.target = alloc or None
-        self.time = time
+        self._time = time
 
 class ListOp(list):
     def __init__(self, ops):
