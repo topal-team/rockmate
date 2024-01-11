@@ -43,8 +43,10 @@ class ForwardBackwardComputationNode(base.Node):
                     "inplace_targets","container_targets"]:
                 setattr(self,attr,getattr(simplified_node,attr))
         # - deps and users:
-        self.deps_real    = deps_real if deps_real else set()
-        self.deps_fake    = deps_fake if deps_fake else set()
+        self.deps_real    = deps_real or set()
+        self.deps_fake    = deps_fake or set()
+        self.deps_global  = set()
+        self.users_global = set()
         self.users        = set()
         # => all: AllocationNode sets
         if deps_through_artifacts: # ComputationNode set
@@ -95,12 +97,12 @@ class ForwardBackwardAllocationNode(base.Node):
         self.info = info
         self.has_attribute__base = False
         self.includes_phantoms = False
-        # ** deps/used_by **
+        # ** deps/users **
+        self.deps         = deps or set()
+        self.deps_global  = set()
+        self.users_global = set()
         self.users_real   = set()
         self.users_fake   = set()
-        self.users_global = set()
-        self.deps_global  = set()
-        self.deps         = deps if deps else set()
         # => all: ComputationNode sets
     
     def get_all_standard_deps(self):
@@ -119,7 +121,20 @@ class ForwardBackwardAllocationNode(base.Node):
 # ***********
 
 class ForwardBackwardGraph(base.Graph):
-    input_allocation_node_data = None
+    input_data_node = None
+    list_output_data_nodes = None
+    loss_computation_node = None
+    list_output_grad_nodes = None
+    input_grad_node = None
+    # Note: We no longer have chain/list of K_graph,
+    # as we fully moved to hierarchical structures,
+    # hence the input_data/grad is simply the ad hoc
+    # source node, so it could be removed, but it would
+    # require to adapt quite a lot of lines in the compiler.
+    # So make it easier for the moment I keep them.
+    # !Warning!: input_grad_node is None if 
+    # none of the inputs requires a gradient.
+
     def __init__(self,
             simplified_graph : SimplifiedGraph = None,
             original_mod : torch.nn.Module = None,
@@ -133,6 +148,12 @@ class ForwardBackwardGraph(base.Graph):
         self.dict_nodes = dict() # node name -> node
         self.computation_nodes = [] # Toposorted
         self.allocation_nodes = [] # Arbitrary order
+        self.dict_fwd_cnodes = dict()
+        self.dict_bwd_cnodes = dict()
+        self.dict_data_anodes = dict()
+        self.dict_grad_anodes = dict()
+        self.dict_phantom_anodes = dict()
+        # => all: dict: main_targets => Node
         if simplified_graph is not None:
             if original_mod is None or inspection_device is None: 
                 raise Exception(
@@ -140,52 +161,34 @@ class ForwardBackwardGraph(base.Graph):
                     "to ForwardBackwardGraph.__init__ (or let "\
                     "`simplified_graph` to None to get an empty graph")
             self.inherit_base_attributes(simplified_graph)
+            # init and final codes:
+            self.init_code = simplified_graph.init_node.get_code_ast()
+            self.dict_output_viewing_code = dict(
+                simplified_graph.dict_output_viewing_code)
+            
 
-        self.input_kdn_data        = None # e.g. KDN _13.data
-        self.list_outputs_kdn_data = None # e.g. KDN _116.data
-        self.loss_kcn              = None
-        self.list_outputs_kdn_grad = None # e.g. KDN _116.grad
-        self.input_kdn_grad        = None # e.g. KDN _13.grad
-        # /!\ A ForwardBackwardGraph always has a single input_node
-        # /!\ BUT can have several outputs
-        # -> for a standalone ForwardBackwardGraph, input_kdn_data/grad are fresh nodes
-        # -> otherwise they are shared with the previous k_graph
-        # -> output_kdn_data/grad are shared with the next one
 
-        # ** useful dicts **
-        self.dict_KCN_fwd  = dict() # mt -> KCN(fwd)
-        self.dict_KCN_bwd  = dict() # mt -> KCN(bwd)
-        self.dict_KDN_data = dict() # mt -> KDN(data)
-        self.dict_KDN_grad = dict() # ...
-        self.dict_KDN_phantoms = dict()
-
-        # ** init and final codes **
-        self.init_code = sg.init_node.get_code_ast()
-        self.dict_output_viewing_code = sg.dict_output_viewing_code 
-        if not (sg.wrapper_output_node is None):
-            self.outputs_wrapping_code = sg.wrapper_output_node.get_code_ast()
-        else:
-            self.outputs_wrapping_code = ast.parse("")
+            self.set_computation_node_numbers()
 
 
 
     def make_users(self):
-        for kcn in self.list_kcn:
-            for req_kdn in kcn.deps_real: req_kdn.users_real.add(kcn)
-            for req_kdn in kcn.deps_fake: req_kdn.users_fake.add(kcn)
-        for kdn in self.list_kdn:
-            for req_kcn in kdn.deps: req_kcn.users.add(kdn)
+        for cnode in self.computation_nodes:
+            for req_anode in cnode.deps_real: req_anode.users_real.add(cnode)
+            for req_anode in cnode.deps_fake: req_anode.users_fake.add(cnode)
+        for anode in self.allocation_nodes:
+            for req_cnode in anode.deps: req_cnode.users.add(anode)
     def init_deps_and_users_global(self):
-        for kcn in self.list_kcn:
-            kcn.deps_global = kcn.deps_real.union(kcn.deps_fake)
-            kcn.users_global = set(kcn.users)
-        for kdn in self.list_kdn:
-            kdn.deps_global = set(kdn.deps)
-            kdn.users_global = kdn.users_real.union(kdn.users_fake)
+        for cnode in self.computation_nodes:
+            cnode.deps_global = cnode.deps_real.union(cnode.deps_fake)
+            cnode.users_global = set(cnode.users)
+        for anode in self.allocation_nodes:
+            anode.deps_global = set(anode.deps)
+            anode.users_global = anode.users_real.union(anode.users_fake)
 
-    def make_kcns_number(self):
-        for i,kcn in enumerate(self.list_kcn):
-            setattr(kcn,"_number",i)
+    def set_computation_node_numbers(self):
+        for i,cnode in enumerate(self.computation_nodes):
+            setattr(cnode,"_number",i)
 
     # ****************
     def __iter__(self):
@@ -193,18 +196,18 @@ class ForwardBackwardGraph(base.Graph):
 
     def make_temporary_global_root_node_to_deps_relation(self):
         # OVERWRITE base.Graph METHOD
-        leaves_compnodes = []
-        for compnode in self.computation_nodes:
-            if not compnode.is_fwd and len(compnode.users) == 0:
-                leaves_compnodes.append(compnode)
-        if len(leaves_compnodes):
-            return False,leaves_compnodes[0]
+        leaves_cnodes = []
+        for cnode in self.computation_nodes:
+            if not cnode.is_fwd and len(cnode.users) == 0:
+                leaves_cnodes.append(cnode)
+        if len(leaves_cnodes):
+            return False,leaves_cnodes[0]
         else:
             root_allonode = ForwardBackwardAllocationNode(
-                deps=leaves_compnodes,backward_graph=self)
-            fresh_compnode_root = ForwardBackwardComputationNode(
+                deps=leaves_cnodes,backward_graph=self)
+            fresh_cnode_root = ForwardBackwardComputationNode(
                 deps_real=set([root_allonode]),backward_graph=self)
-            return True,fresh_compnode_root
+            return True,fresh_cnode_root
     def remove_temporary_global_root_node(self,fresh_root):
         # We don't need the user relation, as we only use this
         # root_node to toposort; hence nothing to unplug
@@ -228,8 +231,8 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
         device,
         do_inspection=True):
     kg = ForwardBackwardGraph(sg)
-    dict_KCN_fwd = kg.dict_KCN_fwd
-    dict_KCN_bwd = kg.dict_KCN_bwd
+    dict_compnode_fwd = kg.dict_compnode_fwd
+    dict_compnode_bwd = kg.dict_compnode_bwd
     dict_KDN_data = kg.dict_KDN_data
     dict_KDN_grad = kg.dict_KDN_grad
     dict_KDN_phantoms = kg.dict_KDN_phantoms
@@ -241,10 +244,10 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
         info = sg.dict_info[mt]
 
         # For artifact nodes :
-        #   -> if KCN2 only need KCN1.size, it means in sg there is
-        #   -> an artifact node for KCN1.size to avoid useless dep
-        #   -> between KCN2 and KCN1. We decided to do NOT have KDN(size)
-        #   -> in fact we just need KCN1 to be ordered before KCN2 in
+        #   -> if compnode2 only need compnode1.size, it means in sg there is
+        #   -> an artifact node for compnode1.size to avoid useless dep
+        #   -> between compnode2 and compnode1. We decided to do NOT have KDN(size)
+        #   -> in fact we just need compnode1 to be ordered before compnode2 in
         #   -> the toposort. To do so we create a tmp special dep:
         #   -> "deps_through_artifacts" when we find artifact in sn.deps
         if sn.is_artifact: return ()
@@ -441,14 +444,14 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
         kdn.deps.add(loss_kcn)
 
     # -> list of nodes
-    kg.list_kcn = (
+    kg.computation_nodes = (
         list(dict_KCN_fwd.values()) +
         list(dict_KCN_bwd.values()))
-    kg.list_kdn = (
+    kg.allocation_nodes = (
         list(dict_KDN_data.values()) +
         list(dict_KDN_grad.values()) +
         list(dict_KDN_phantoms.values()))
-    for kn in kg.list_kcn+kg.list_kdn: kg.dict_kn[kn.name]=kn
+    for kn in kg.computation_nodes+kg.allocation_nodes: kg.dict_kn[kn.name]=kn
 
     # -> build "users" attributes as reciprocal of "deps"
     kg.make_users()
@@ -507,8 +510,8 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
         for user_kcn in input_kdn_grad_deps:
             user_kcn.users_global.add(input_kdn_grad)
 
-    # -> TOPOSORT list_kcn
-    kg.sort_list_kcn()
+    # -> TOPOSORT computation_nodes
+    kg.sort_computation_nodes()
 
     return kg
 
@@ -534,12 +537,12 @@ def get_color(kn):
 def aux_print_ForwardBackwardGraph_message(kg : ForwardBackwardGraph):
     return (
         f"ForwardBackwardGraph - Forward + Backward graph, "\
-        f"{len(kg.list_kcn)} ForwardBackwardComputationNodes; {len(kg.list_kdn)} ForwardBackwardAllocationNodes"
+        f"{len(kg.computation_nodes)} ForwardBackwardComputationNodes; {len(kg.allocation_nodes)} ForwardBackwardAllocationNodes"
     )
 
 def aux_print_ForwardBackwardGraph_list_message(lkg : ForwardBackwardGraph_list):
-    list_nb_kcn = [len(kg.list_kcn) for kg in lkg]
-    list_nb_kdn = [len(kg.list_kdn) for kg in lkg]
+    list_nb_kcn = [len(kg.computation_nodes) for kg in lkg]
+    list_nb_kdn = [len(kg.allocation_nodes) for kg in lkg]
     tot_nb_kcn = sum(list_nb_kcn)
     tot_nb_kdn = sum(list_nb_kdn)
     str_list_nb_kcn = "+".join(str(i) for i in list_nb_kcn)
@@ -579,18 +582,18 @@ def aux_print_graph(dot,kg,uniq_num):
         node(kdn.name,kdn.name,color=get_color(kdn),
             tooltip = f"Mem {measure.MemSize(kdn.mem)}")
 
-    for kcn in kg.list_kcn: print_kcn(kcn)
-    for kdn in kg.list_kdn: print_kdn(kdn)
+    for kcn in kg.computation_nodes: print_kcn(kcn)
+    for kdn in kg.allocation_nodes: print_kdn(kdn)
 
     # *** edges ***
-    for kcn in kg.list_kcn:
+    for kcn in kg.computation_nodes:
         for req_kdn in kcn.deps_real:
             c = get_color(req_kdn)
             edge(req_kdn.name,kcn.name,color=c)
         for req_kdn in kcn.deps_fake:
             c = get_color(req_kdn)
             edge(req_kdn.name,kcn.name,color=c,style="dashed")
-    for kdn in kg.list_kdn:
+    for kdn in kg.allocation_nodes:
         for req_kcn in kdn.deps:
             edge(req_kcn.name,kdn.name,color=get_color(req_kcn))
 

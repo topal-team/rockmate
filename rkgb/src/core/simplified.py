@@ -410,6 +410,7 @@ class SimplifiedGraph(base.Graph):
             self.optional_simplify_cheap_operations()
             self.simplify_sizes()
             self.simplify_view()
+
             self.create_nodes_for_random_operations_from_dict_rand(original_mod,device)
             self.remove_artifacts_and_replace_them_by_soft_edges()
             self.check_edges_are_reciprocal()
@@ -607,15 +608,14 @@ class SimplifiedGraph(base.Graph):
 
     def make_dict_output_viewing_code(self):
         """
-        Note: use it after "if_multiple_outputs_break_the_wrapper_in_multiple_nodes"
         Example:
         a = f(x) ; v = view(a)
         Instead of returning 'v', we decide to return 'a',
         and the viewing operation will be done outside.
         This is due to how Rockmate creates an equivalent torch.nn.Module.
-        But since 'v' can still be used by other variables
-        (e.g. c = g(v) and c is a 2nd output). So we don't remove 
-        'v = view(a)' from Node(a), we just duplicate it in self.dict_output_viewing_code
+        But 'v' can still be used by other variables (e.g. c = g(v) 
+        and c is a 2nd output). So we don't remove 'v = view(a)' from Node(a), 
+        we just duplicate it in self.dict_output_viewing_code
         """
         self.output_targets = []
         self.dict_output_viewing_code = dict()
