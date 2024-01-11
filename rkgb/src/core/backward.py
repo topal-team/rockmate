@@ -25,9 +25,9 @@ class ForwardBackwardComputationNode(base.Node):
             deps_real = None,
             deps_fake = None,
             deps_through_artifacts=None,
-            backward_graph=None):
+            forwardbackward_graph=None):
         super().__init__(main_target,
-            parent_structure_with_id_generator=backward_graph)
+            parent_structure_with_id_generator=forwardbackward_graph)
         # - basic attributes:
         self.name = f"FWD[{main_target}]" if is_fwd else f"BWD[{main_target}]"
         self.is_fwd = is_fwd
@@ -81,10 +81,10 @@ class ForwardBackwardAllocationNode(base.Node):
             container_targets = None,
             info      = None,
             deps      = None,
-            backward_graph = None):
+            forwardbackward_graph = None):
         # ** informative **
         super().__init__(main_target,
-            parent_structure_with_id_generator=backward_graph)
+            parent_structure_with_id_generator=forwardbackward_graph)
         self.allocation_type = allocation_type # data, grad or phantoms
         self.all_targets = all_targets or [main_target]
         self.tensor_targets = tensor_targets or [main_target]
@@ -162,14 +162,60 @@ class ForwardBackwardGraph(base.Graph):
 
             for sn in simplified_graph.nodes:
                 self.processes_and_inspect_node(sn)
-            self.make_loss_computation_node()
+            self.make_special_loss_and_io_nodes()
             self.store_all_nodes()
             self.make_reciprocal_users_attributes()
-            self.make_input_allocation_nodes()
             self.computation_nodes = self.get_sorted_nodes_by_following_deps_relation()
             self.set_computation_node_numbers()
 
+    def make_special_loss_and_io_nodes(self,
+            simplified_graph : SimplifiedGraph):
+        # Outputs:
+        self.list_output_data_nodes = [
+            self.dict_data_anodes[output_sn.main_target]
+            for output_sn in simplified_graph.output_nodes
+        ]
+        self.list_output_grad_nodes = [
+            self.dict_grad_anodes[output_sn.main_target]
+            for output_sn in simplified_graph.output_nodes
+        ]
+        # Loss:
+        loss_cnode = ForwardBackwardComputationNode(
+            main_target = "loss",
+            is_fwd    = True,
+            main_code = ("loss",ast_add_on.make_ast_constant("LOSS")),
+            deps_real = set(self.list_output_data_nodes)
+            forwardbackward_graph = self
+        )
+        self.loss_computation_node = loss_cnode
+        loss_cnode.time = 0
+        loss_cnode.mem_overhead = 0
+        self.dict_fwd_cnodes[loss_cnode.main_target] = loss_cnode
+        for output_grad_anode in self.list_output_grad_nodes:
+            output_grad_anode.deps.add(loss_cnode)
+        # Inputs:
+        self.input_data_node = ForwardBackwardAllocationNode(
+            main_target = constants.init_target_string,
+            allocation_type = "data",
+            all_targets = simplified_graph.input_targets,
+            forwardbackward_graph=self)
+        if simplified_graph.sources_req_grad:
+            self.input_grad_node = ForwardBackwardAllocationNode(
+                main_target = constants.init_target_string,
+                allocation_type = "grad",
+                all_targets = simplified_graph.input_targets,
+                forwardbackward_graph=self)
 
+    def store_all_nodes(self):
+        cnodes = self.computation_nodes = (
+            list(self.dict_fwd_cnodes.values()) +
+            list(self.dict_bwd_cnodes.values()))
+        anodes = self.allocation_nodes = (
+            list(self.dict_data_anodes.values()) +
+            list(self.dict_grad_anodes.values()) +
+            list(self.dict_phantom_anodes.values()))
+        for node in cnodes + anodes:
+            self.dict_nodes[node.name] = node
 
     def make_reciprocal_users_attributes(self):
         for cnode in self.computation_nodes:
@@ -196,18 +242,16 @@ class ForwardBackwardGraph(base.Graph):
             return False,leaves_cnodes[0]
         else:
             root_allonode = ForwardBackwardAllocationNode(
-                deps=leaves_cnodes,backward_graph=self)
+                deps=leaves_cnodes,
+                forwardbackward_graph=self)
             fresh_cnode_root = ForwardBackwardComputationNode(
-                deps_real=set([root_allonode]),backward_graph=self)
+                deps_real=set([root_allonode]),
+                forwardbackward_graph=self)
             return True,fresh_cnode_root
     def remove_temporary_global_root_node(self,fresh_root):
         # We don't need the user relation, as we only use this
         # root_node to toposort; hence nothing to unplug
         pass
-
-    
-
-
 
 # ==========================
 
@@ -413,79 +457,6 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
                     res.mem_run_fwd - res.mem_fgt_fwd)
 
     # ============ 
-
-
-    for sn in sg.nodes:
-        handle_node(sn)
-
-    # -> loss_node
-    kg.list_outputs_kdn_data = list_outputs_kdn_data \
-        = [dict_KDN_data[out.mt] for out in sg.output_nodes]
-    kg.list_outputs_kdn_grad = list_outputs_kdn_grad \
-        = [dict_KDN_grad[out.mt] for out in sg.output_nodes]
-    kg.loss_kcn=loss_kcn = ForwardBackwardComputationNode(
-        main_target = "loss",
-        is_fwd    = True,
-        main_code = ("loss",ast_add_on.make_ast_constant("LOSS")),
-        deps_real = set(list_outputs_kdn_data),
-        other_obj = kg)
-    loss_kcn.time     = 0
-    loss_kcn.mem_overhead = 0
-    dict_KCN_fwd[loss_kcn.main_target] = loss_kcn
-    for kdn in list_outputs_kdn_grad:
-        kdn.deps.add(loss_kcn)
-
-    # -> list of nodes
-    kg.computation_nodes = (
-        list(dict_KCN_fwd.values()) +
-        list(dict_KCN_bwd.values()))
-    kg.allocation_nodes = (
-        list(dict_KDN_data.values()) +
-        list(dict_KDN_grad.values()) +
-        list(dict_KDN_phantoms.values()))
-    for kn in kg.computation_nodes+kg.allocation_nodes: kg.dict_kn[kn.name]=kn
-
-    # -> build "users" attributes as reciprocal of "deps"
-    kg.make_users()
-
-    # ** input nodes **
-    # -> get input_kdn_data/grad from prev_kg
-    if prev_kg:
-        is_sources = False
-        nb_input_kdn = len(prev_kg.list_outputs_kdn_data)
-        if nb_input_kdn != 1:
-            raise Exception(
-                f"Except the last one, ForwardBackwardGraph always has "\
-                f"exactly one output. Error here, prev_kg "\
-                f"has {nb_input_kdn} outputs"
-            )
-        kg.input_kdn_data=input_kdn_data = prev_kg.list_outputs_kdn_data[0]
-        kg.input_kdn_grad=input_kdn_grad = prev_kg.list_outputs_kdn_grad[0]
-    # -> or create fresh vars in case kg is a standalone graph
-    else:
-        is_sources = True
-        kg.input_kdn_data=input_kdn_data = ForwardBackwardAllocationNode(
-            main_target = constants.init_target_string,
-            allocation_type = "data",
-            all_targets = sg.inputs,
-            other_obj = kg)
-        if sg.sources_req_grad or not is_really_first_graph:
-            kg.input_kdn_grad=input_kdn_grad = ForwardBackwardAllocationNode(
-                main_target = constants.init_target_string,
-                allocation_type = "grad",
-                all_targets = sg.inputs,
-                other_obj = kg)
-        else:
-            kg.input_kdn_grad = None
-
-    # -> TOPOSORT computation_nodes
-    kg.sort_computation_nodes()
-
-    return kg
-
-
-
-
 # ==========================
 
 # ==========================
