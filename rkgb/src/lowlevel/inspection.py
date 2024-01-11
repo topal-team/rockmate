@@ -87,7 +87,8 @@ class Inspector():
         original_mod,
         inspection_device
     ):
-        param_value = param_node.get_value(original_mod).to(inspection_device)
+        param_value = torch.nn.Parameter(
+            param_node.get_value(original_mod).to(inspection_device))
         tmp_local["all_parameters"].add(param_value)
         tmp_local["__value"] = param_value
         exec(f"{param_node.param_str} = __value ; {param_node.get_code()}",
@@ -95,7 +96,7 @@ class Inspector():
 
     @staticmethod
     def generate_local_env(
-            simplified_node_for_whom_to_generate_env : SimplifiedNode,
+            sn_to_proceed : SimplifiedNode,
             simplified_graph : SimplifiedGraph,
             our_global : dict,
             original_mod : torch.nn.Module,
@@ -106,7 +107,6 @@ class Inspector():
         all_inputs = (
             simplified_graph.original_mod_input_targets
             + simplified_graph.input_targets)
-        tmp_local["all_input_targets"] = all_inputs
         tmp_local["all_input_values"] = set()
         # 1) Do we need to run the init_code:
         # - Generating the sizes related to init_code is free
@@ -116,7 +116,7 @@ class Inspector():
         # TO IMPROVE ? Generate exactly the tensors needed
         init_node = simplified_graph.init_node
         if (
-                ((simplified_node_for_whom_to_generate_env,init_node)
+                ((sn_to_proceed,init_node)
                 in simplified_graph.dict_of_labels_on_edges)
         and 
             any(
@@ -124,7 +124,7 @@ class Inspector():
                 is torch.Tensor
                 for needed_input 
                 in simplified_graph.dict_of_labels_on_edges[
-                    (simplified_node_for_whom_to_generate_env,init_node)
+                    (sn_to_proceed,init_node)
         ])):
             for inp in simplified_graph.original_mod_input_targets:
                 inp_info = simplified_graph.dict_info[inp]
@@ -149,18 +149,18 @@ class Inspector():
                     tmp_local["all_input_values"].add(inp_value)
 
         # 2) Generate required parameters
-        for param_node in simplified_node_for_whom_to_generate_env.required_parameter_nodes:
+        for param_node in sn_to_proceed.required_parameter_nodes:
             Inspector.aux_generate_a_parameter_locally(
                 param_node,our_global,tmp_local,
                 original_mod,inspection_device)
 
         # 3) Generate all the deps
-        list_nodes_to_generate = list(simplified_node_for_whom_to_generate_env.deps)
+        list_nodes_to_generate = list(sn_to_proceed.deps)
         set_nodes_to_generate = set(list_nodes_to_generate)
         while list_nodes_to_generate != []:
             # Get next node to generate
-            sn : SimplifiedNode = list_nodes_to_generate.pop(0)
-            if sn is init_node: # TO REMOVE
+            sn_to_generate : SimplifiedNode = list_nodes_to_generate.pop(0)
+            if sn_to_generate is init_node: # TO REMOVE
                 raise Exception("init_node in sn.deps ???")
             # Check if it's `sn`'s turn:
             # if some of the deps of sn are in the waiting list
@@ -169,31 +169,31 @@ class Inspector():
             # But note that we don't add any additional node to 
             # the waiting list. So latter on, for sn'deps which
             # aren't main_sn'deps: we will just generate them on the fly.
-            if set(sn.deps).intersection(set_nodes_to_generate) != set():
-                list_nodes_to_generate.append(sn) # not his turn yet
+            if set(sn_to_generate.deps).intersection(set_nodes_to_generate) != set():
+                list_nodes_to_generate.append(sn_to_generate) # not his turn yet
                 continue
             else:
-                set_nodes_to_generate.remove(sn)
+                set_nodes_to_generate.remove(sn_to_generate)
 
             # We are ready to generate sn:
             # - First we create the main_target value based on info
             # - Then we run the body_code to generate views / sizes
-            main_value = sn.info.generate_value(inspection_device)
+            main_value = sn_to_generate.info.generate_value(inspection_device)
             # Some operations are impossible over leaf tensors 
             # in term of grad_fn. So we have to clone them :
             if isinstance(main_value,torch.Tensor):
                 main_value = main_value.clone()
-            tmp_local[sn.main_target] = main_value
+            tmp_local[sn_to_generate.main_target] = main_value
             
             # To run the body code we may need some dependencies to be
             # in tmp_local (e.g. sizes): so we create them on the fly
-            # Note: a dependency of sn which is also used by
-            # simplified_node_for_whom_to_generate_env isn't created 
-            # from info but previously generated in this while loop
+            # Note: a dependency of sn_to_generate which also happens to
+            # be a dependency of sn_to_proceed, isn't created from info
+            # but had already been generated in this while loop.
             body_code = ast_add_on.make_str_list_assign(
-                sn.body_code, force_special_kwargs=True)
-            for body_target in sn.all_targets:
-                if body_target is sn.main_target: continue
+                sn_to_generate.body_code, force_special_kwargs=True)
+            for body_target in sn_to_generate.all_targets:
+                if body_target is sn_to_generate.main_target: continue
                 for req_param_node in simplified_graph.dict_target_to_direct_parameter_deps[body_target]:
                     Inspector.aux_generate_a_parameter_locally(
                         req_param_node,our_global,tmp_local,
@@ -253,20 +253,20 @@ def trace_grad_fn(
 
 
 def get_relevant_dependencies_via_grad_fn(
-        simplified_node : SimplifiedNode,
+        sn_to_proceed : SimplifiedNode,
         our_global,tmp_local):
     # 1) init
     exec(
-        simplified_node.get_code(force_special_kwargs=True), 
+        sn_to_proceed.get_code(force_special_kwargs=True), 
         our_global, tmp_local)
-    sn_value = tmp_local[simplified_node.main_target]
+    sn_value = tmp_local[sn_to_proceed.main_target]
     has_attribute__base = not (sn_value._base is None)
 
     # 2) Search through grad_fn
     (explicit_vars_in_grad_fn,
      saved_tensors_names_and_values) = trace_grad_fn(
         sn_value.grad_fn,
-        simplified_node.main_target,
+        sn_to_proceed.main_target,
         tmp_local["all_parameters"],
         tmp_local["all_input_values"]
     )
@@ -279,13 +279,13 @@ def get_relevant_dependencies_via_grad_fn(
     # Case 2: It doesn't correspond to any dependency:
     # it means it's a fresh tensor only stored in grad_fn, 
     # what we call a "phantom"
-    real_dependencies_of_bwd = set()
+    bwd_real_dependencies = set()
     saved_tensors_found = set()
     
     # To be more precise, for each dependency of sn 
     # we check whether it is present in grad_fn, 
     # i.e. whether it is a real dependency.
-    potential_bwd_deps = simplified_node.deps.union({simplified_node})
+    potential_bwd_deps = sn_to_proceed.deps.union({sn_to_proceed})
     for req_sn in potential_bwd_deps:
         req_target = req_sn.main_target
         req_value = tmp_local[req_target]
@@ -293,28 +293,36 @@ def get_relevant_dependencies_via_grad_fn(
         found=False
         for explicit_var in explicit_vars_in_grad_fn:
             if req_data_ptr == VariableInfo.get_data_ptr(explicit_var):
-                real_dependencies_of_bwd.add(req_sn.main_target)
+                bwd_real_dependencies.add(req_sn.main_target)
                 found=True
                 break
         if not found:
             for saved_tensor in saved_tensors_names_and_values:
                 saved_tensor_name,saved_tensor_value = saved_tensor
                 if req_data_ptr == VariableInfo.get_data_ptr(saved_tensor_value):
-                    real_dependencies_of_bwd.add(req_sn.main_target)
+                    bwd_real_dependencies.add(req_sn.main_target)
                     saved_tensors_found.append(saved_tensor_name)
                     saved_tensors_names_and_values.remove(saved_tensor)
                     break
     
-    # 4) check whether all saved_tensors were found
-    exist_phantoms = bool(saved_tensors_names_and_values != set())
+    # 4) check whether the forward result data is a dependency
+    if sn_to_proceed.main_target in bwd_real_dependencies:
+        bool_bwd_requires_fwd_data = True
+        bwd_real_dependencies.remove(sn_to_proceed.main_target)
+    else:
+        bool_bwd_requires_fwd_data = False
 
-    # 5) clean tmp_local, i.e. remove sn,
+    # 5) check whether all saved_tensors were found
+    bool_exist_phantoms = bool(saved_tensors_names_and_values != set())
+
+    # 6) clean tmp_local, i.e. remove sn,
     # So we can reuse it to inspect time and memory usage
-    for target in simplified_node.all_targets:
+    for target in sn_to_proceed.all_targets:
         del tmp_local[target]
 
-    return (real_dependencies_of_bwd,
-        exist_phantoms,
+    return (bwd_real_dependencies,
+        bool_bwd_requires_fwd_data,
+        bool_exist_phantoms,
         has_attribute__base
     )
 # ======================

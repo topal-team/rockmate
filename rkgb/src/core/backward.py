@@ -224,6 +224,18 @@ class ForwardBackwardGraph(base.Graph):
             forwardbackward_graph = self)
         self.dict_data_anodes[sn_to_proceed.main_target] = data_anode
 
+        # == Part 2 : Build the backward part ==
+        if sn_to_proceed.info.requires_grad:
+            # Open grad_fn and collect backward dependencies:
+            (   bwd_real_dependencies,
+                bool_bwd_requires_fwd_data,
+                bool_exist_phantoms,
+                has_attribute__base ) \
+                = inspection.get_relevant_dependencies_via_grad_fn(
+                    sn_to_proceed,our_global,tmp_local
+                )
+
+
 
     # ======= END OF MAIN LOOP =======
 
