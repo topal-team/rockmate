@@ -392,14 +392,14 @@ def add_parameter_node(h_cluster, original_mod, minor_size=1024*1024):
 
 def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
     timer = irotor.make_timer(torch.device("cpu"))
-    a_c = torch.ones([20, 1024,1024], device="cpu", pin_memory=True)
-    a_g = torch.ones([20, 1024,1024], device="cuda")
+    a_c = torch.ones([10, 1024,1024], device="cpu", pin_memory=True)
+    a_g = torch.ones([10, 1024,1024], device="cuda")
     b_c = torch.ones([10, 1024,1024], device="cpu", pin_memory=True)
     b_g = torch.ones([10, 1024,1024], device="cuda")
 
     p = deepcopy(_p).to("cuda")
     # if not p.is_leaf:
-    p = torch.ones([20,1024,1024], dtype=_p.dtype).to("cuda")
+    p = torch.ones([10,1024,1024], dtype=_p.dtype).to("cuda")
     size = p.numel()
     p.grad = torch.ones_like(p)
     optimizer = gpu_optim([p], **optim_kwargs)
@@ -417,6 +417,17 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
     p_c.grad = torch.ones_like(p_c)
     optimizer = cpu_optim([p_c], **optim_kwargs)
     optimizer.step()
+    p_stream = torch.cuda.Stream()
+    o_stream = torch.cuda.Stream()
+    timer.start()
+    for i in range(niter):
+        with torch.cuda.stream(p_stream):
+            a_c.copy_(a_g, non_blocking=True)
+        with torch.cuda.stream(o_stream):
+            b_g.copy_(b_c, non_blocking=True)
+    torch.cuda.synchronize()
+    timer.end()
+    bandwidth = niter*a_c.numel()*a_c.element_size()/timer.elapsed()
     timer.start()
     for i in range(niter):
         with torch.cuda.stream(torch.cuda.Stream()):
@@ -427,7 +438,8 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
     timer.end()
     cpu_optimize_stats = {"optimizer_states_size": round(opt_size//size/p.element_size()),
                           "optimizer_overhead":round(opt_overhead//size/p.element_size()),
-                          "cpu_optimize_speed": size*p.element_size()*niter/timer.elapsed()}
+                          "cpu_optimize_speed": size*p.element_size()*niter/timer.elapsed(),
+                          "bandwidth": bandwidth}
     return cpu_optimize_stats
 
 

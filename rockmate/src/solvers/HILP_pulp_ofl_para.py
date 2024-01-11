@@ -572,8 +572,8 @@ class ModelPULP:
                         bwd_i = max(self.param2hcn[w])
                         if k not in self.krange(t) or (t>fwd_i and t<bwd_i):
                             self.OptC[t, k, w] = 0
-            self.bandwidthOfl = 6 * 1024**2  # byte/ms
-            self.bandwidthPrf = 6 * 1024**2  # byte/ms
+            self.bandwidthOfl = cpu_optimize_kwargs["bandwidth"]#6 * 1024**2  # byte/ms
+            self.bandwidthPrf = cpu_optimize_kwargs["bandwidth"]#6 * 1024**2  # byte/ms
 
         self.Time = RkLpVariable.dicts(
             "Time", [(t, k) for t in range(T) for k in self.krange(t)], cat="Continuous"
