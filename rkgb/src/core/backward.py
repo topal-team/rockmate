@@ -55,8 +55,7 @@ class ForwardBackwardComputationNode(base.Node):
         # - inspection:
         self.time = None
         self.overhead = None
-        self.phantom_names = []
-        self.alias_in_users_phantoms = []
+        self.has_phantoms = None
 
     def get_all_standard_deps(self):
         return set().union(
@@ -107,7 +106,6 @@ class ForwardBackwardAllocationNode(base.Node):
         self.deps_global  = set() # KCN set
         self.deps         = deps if deps else set() # KCN set
         self.users_impossible_to_restore = set() # (KCN * str) set
-        self.alias_in_users_phantoms = []
     
     def get_all_standard_deps(self):
         return set().union(
@@ -372,30 +370,6 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
                 deps_fake = kcn_bwd_deps_fake,
                 other_obj = kg)
             dict_KCN_bwd[mt] = kcn_bwd
-
-            # -> phantom deps
-            for ph_name,(used_name,owner_name) in valid_view_ph_deps.items():
-                if owner_name not in dict_KDN_data: raise Exception(
-                    f"Warning : {ph_name}'s owner is {owner_name} "\
-                    f"but we cannot find it's KDN_data node ??"\
-                    f"its used name is {used_name}")
-                used_kdn = dict_KDN_data[owner_name]
-                used_kcn = dict_KCN_fwd[owner_name]
-                used_kdn.alias_in_users_phantoms.append(
-                    (mt,used_name,ph_name))
-                used_kcn.alias_in_users_phantoms.append(
-                    (mt,used_name,ph_name))
-            for ph_name,owner_name in data_ptr_only_ph_deps.items():
-                if owner_name not in dict_KDN_data: raise Exception(
-                    f"Warning : {ph_name}'s owner is {owner_name}"\
-                    f"but we cannot find it's KDN_data node ??")
-                used_kdn = dict_KDN_data[owner_name]
-                kcn_bwd.deps_impossible_to_restore.add((used_kdn,ph_name))
-            kcn_fwd.phantom_names = (
-                list(valid_view_ph_deps.keys())
-                + list(data_ptr_only_ph_deps.keys())
-                + original_phs)
-
 
             # -> KDN(phantoms)
             if exist_phs and not data_includes_phantoms:

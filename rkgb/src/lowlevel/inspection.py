@@ -103,7 +103,11 @@ class Inspector():
         tmp_local = dict()
         tmp_local["self"] = FakeMod()
         tmp_local["all_parameters"] = set() # to find them easily
-        tmp_local["all_inputs"] = set()
+        all_inputs = (
+            simplified_graph.original_mod_input_targets
+            + simplified_graph.input_targets)
+        tmp_local["all_input_targets"] = all_inputs
+        tmp_local["all_input_values"] = set()
         # 1) Do we need to run the init_code:
         # - Generating the sizes related to init_code is free
         # so we can do it anyway, but if we require a tensor
@@ -111,9 +115,6 @@ class Inspector():
         # run the init_code, as the tensor we need may be a view
         # TO IMPROVE ? Generate exactly the tensors needed
         init_node = simplified_graph.init_node
-        all_inputs = (
-            simplified_graph.original_mod_input_targets
-            + simplified_graph.input_targets)
         if (
                 ((simplified_node_for_whom_to_generate_env,init_node)
                 in simplified_graph.dict_of_labels_on_edges)
@@ -136,7 +137,7 @@ class Inspector():
                 init_node.get_code(force_special_kwargs=True),
                 our_global,tmp_local)
             for inp in all_inputs:
-                tmp_local["all_inputs"].add(tmp_local[inp])
+                tmp_local["all_input_values"].add(tmp_local[inp])
         else:
             # We don't need any tensor:
             # we generate sizes anyway as they come free 
@@ -145,7 +146,7 @@ class Inspector():
                 if inp_info.variable_type is not torch.Tensor:
                     inp_value = inp_info.generate_value(inspection_device)
                     tmp_local[inp] = inp_value
-                    tmp_local["all_inputs"].add(inp_value)
+                    tmp_local["all_input_values"].add(inp_value)
 
         # 2) Generate required parameters
         for param_node in simplified_node_for_whom_to_generate_env.required_parameter_nodes:
@@ -219,7 +220,7 @@ def trace_grad_fn(
         all_input_values=set()):
     """
     Open grad_fn, looking after all the tensors linked in it
-    => Parameters / 'saved_tensors'~'phantoms' / explicit variables.
+    => Parameters / 'saved_tensors' / explicit variables.
     Auxiliary function for "get_relevant_dependencies_via_grad_fn".
     But it can also be used to play with grad_fn and do some tests.
 
@@ -227,7 +228,7 @@ def trace_grad_fn(
     grad_fn.next_functions to trace the whole backward tree.
     """
     explicit_vars  = set() # set of Tensors
-    phantoms_found = set() # set of (phantom_value * phantom_name)
+    saved_tensors = set() # set of (value * name)
     def trace(current_grad_fn,path_from_the_origin):
         if hasattr(current_grad_fn,"variable"):
             explicit_vars.add(current_grad_fn.variable)
@@ -240,41 +241,48 @@ def trace_grad_fn(
                 path_str = [
                     f".next_functions[{k}][0]"
                     for k in path_from_the_origin]
-                phantom_name = (
+                saved_tensor_name = (
                     f"{main_target}.grad_fn" 
                     + "".join(path_str)
                     + "." + attr)
-                phantoms_found.add((attr_value,phantom_name))
+                saved_tensors.add((attr_value,saved_tensor_name))
         if hasattr(current_grad_fn,"next_functions"):
             for k,next_grad_fn in enumerate(current_grad_fn.next_functions):
                 trace(next_grad_fn[0],path_from_the_origin+[k])
     trace(grad_fn,[])
-    return explicit_vars,phantoms_found
+    return explicit_vars,saved_tensors
 
 
 
-def get_relevant_dependencies_via_grad_fn(sn,sg,our_global,device):
-    params = dict(our_global['self'].named_parameters())
-    # == INIT ==
-    dict_info = sg.dict_info
-    mt = sn.main_target
-    tmp_local = generate_tmp_local(sn,sg,our_global,device)
+def get_relevant_dependencies_via_grad_fn(
+        simplified_node : SimplifiedNode,
+        dict_info,our_global,tmp_local):
+    # 1) init
     exec(
-        sn.get_code(force_special_kwargs=True), 
+        simplified_node.get_code(force_special_kwargs=True), 
         our_global, tmp_local)
-    sn_val = tmp_local[mt]
-    hasattr_base = not (sn_val._base is None)
+    sn_value = tmp_local[simplified_node.main_target]
+    has_attribute__base = not (sn_value._base is None)
 
-    # == SEARCH THROUGH GRAD_FN == 
-    grad_fn = sn_val.grad_fn
-    (explicit_vars,phs_found) = trace_grad_fn(
-        grad_fn,sn.main_target,params,our_global
+    # 2) Search through grad_fn
+    (explicit_vars,saved_tensors) = trace_grad_fn(
+        sn_value.grad_fn,
+        simplified_node.main_target,
+        tmp_local["all_parameters"],
+        tmp_local["all_input_values"]
     )
 
-    # == recognize which var are concerned ==
-    explicit_deps = []
-    data_ptr_ph_deps = dict() 
-    # ph_name -> data_owner_name with equal data_ptr
+    # 3) find out which tensors we found are
+    # For the moment we only have some tensors, and we need to find out
+    # to which target they correspond to. For `saved_tensors`:
+    # Case 1: we find a target in tmp_local with the same data_ptr: 
+    # it confirms a dependency from sn to this target = real dependency
+    # Case 2: it isn't in tmp_local: it means it's a new fresh 
+    # tensor, what we call a "phantom"
+    real_dependencies_of_sn = []
+    dict_saved_tensor_to_data_ptr_owner = dict()
+    # dict: saved_tensor_name -> the target in tmp_local with the same data_ptr
+    # ~ of which saved_tensor_value is a view
     valid_view_ph_deps = dict() 
     # ph_name -> (var_name,data_owner_name) st .view == ph
 
