@@ -26,6 +26,39 @@ import tracemalloc
 tracemalloc.start()
 torch.random.manual_seed(0)
 
+def check_correctness(model, sample, budget=1e9, optim=torch.optim.Adam):
+    model_g = deepcopy(model).to("cuda")
+    sample_g = [s.to("cuda") for s in sample]
+    model_c = deepcopy(model).to("cpu")
+    sample_c = [s.to("cpu") for s in sample]
+    
+    optimizer = optim(model_g.parameters())
+    def optimize():
+        optimizer.step()
+    print("gpu model")
+    # print(model_g(*sample_g).mean())
+    exec(model_g, sample_g, print_mem=False, print_loss=True, optimize_fct=optimize)
+
+    optimizer = optim(model_c.parameters())
+    def optimize():
+        optimizer.step()
+    print("cpu model")
+    # print(model_c(*sample_c).mean())
+    exec(model_c, sample_c, print_mem=False, print_loss=True, optimize_fct=optimize)
+
+    model_r = HRockmate(model, sample, budget, 
+                        solve_sched=False,
+                        cpu_optim=optim,
+                        gpu_optim=optim,
+                        ilp_solver = "PULP_CBC_CMD")
+    prepare_for_offload(model_r)
+    model_r.solve_sched(budget)
+    model_r.zero_grad()
+    sample_r = [s.to("cuda") for s in sample]
+    print("rockmate model")    
+    exec(model_r, sample_r, print_mem=False, print_loss=True)
+
+
 def add_sched_stats(stats, rkmod):
     stats[f"Original module iter time"] = sum(kcn.time for kcn in rkmod.rkgb_res.H_cluster.list_kcn if kcn.time)
     stats[f"Schedule_total_time"] = sum(step.time for step in rkmod.op_sched.steps)
