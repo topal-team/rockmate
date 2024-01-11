@@ -206,13 +206,11 @@ class Inspector():
 
 
 # ======================
-# TRACE GRAD_FN TO KNOW
-# WHAT IS NEEDED TO BWD
-# -> REAL_DEPS
-# -> PHANTOMS
+# TRACE GRAD_FN TO SEE WHAT IS NEEDED TO BWD
+# -> Real dependencies
+# -> Phantoms
 # ======================
 
-# -> auxiliary function for "get_useful_vars" below
 def trace_grad_fn(
         grad_fn,
         main_target="var",
@@ -281,27 +279,28 @@ def get_relevant_dependencies_via_grad_fn(
     # Case 2: It doesn't correspond to any dependency:
     # it means it's a fresh tensor only stored in grad_fn, 
     # what we call a "phantom"
-    real_dependencies_of_sn = set()
+    real_dependencies_of_bwd = set()
     saved_tensors_found = set()
     
     # To be more precise, for each dependency of sn 
     # we check whether it is present in grad_fn, 
     # i.e. whether it is a real dependency.
-    for req_sn in simplified_node.deps:
+    potential_bwd_deps = simplified_node.deps.union({simplified_node})
+    for req_sn in potential_bwd_deps:
         req_target = req_sn.main_target
         req_value = tmp_local[req_target]
         req_data_ptr = VariableInfo.get_data_ptr(req_value)
         found=False
         for explicit_var in explicit_vars_in_grad_fn:
             if req_data_ptr == VariableInfo.get_data_ptr(explicit_var):
-                real_dependencies_of_sn.add(req_sn)
+                real_dependencies_of_bwd.add(req_sn.main_target)
                 found=True
                 break
         if not found:
             for saved_tensor in saved_tensors_names_and_values:
                 saved_tensor_name,saved_tensor_value = saved_tensor
                 if req_data_ptr == VariableInfo.get_data_ptr(saved_tensor_value):
-                    real_dependencies_of_sn.add(req_sn)
+                    real_dependencies_of_bwd.add(req_sn.main_target)
                     saved_tensors_found.append(saved_tensor_name)
                     saved_tensors_names_and_values.remove(saved_tensor)
                     break
@@ -312,13 +311,12 @@ def get_relevant_dependencies_via_grad_fn(
     # 5) clean tmp_local, i.e. remove sn,
     # So we can reuse it to inspect time and memory usage
     for target in simplified_node.all_targets:
-        del tmp_local["target"]
+        del tmp_local[target]
 
-    return (real_dependencies_of_sn,
+    return (real_dependencies_of_bwd,
         exist_phantoms,
         has_attribute__base
     )
-
 # ======================
 
 

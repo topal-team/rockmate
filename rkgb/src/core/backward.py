@@ -333,13 +333,21 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
 
         # *** build the bwd part ***
         if info.requires_grad:
-            # -> get kdn_data and phantoms deps for bwd
-            (explicit_deps,
-            exist_phs,
-            hasattr_base) = (
-                inspection.get_useful_vars(sn,sg,our_global,device))
-            all_deps_mt = set(explicit_deps).union(
-                set(data_ptr_only_ph_deps.values()))
+            # Open grad_fn and collect backward dependencies:
+            (   real_dependencies_of_bwd,
+                exist_phantoms,
+                has_attribute__base ) \
+                = inspection.get_relevant_dependencies_via_grad_fn(
+                    sn,our_global,tmp_local
+                )
+            fake_dependencies_of_bwd = kcn_fwd_deps - real_dependencies_of_bwd
+            if sn.main_target in real_dependencies_of_bwd:
+                attach_phantoms_to_data_node = True
+                kdn_data.includes_phantoms = True
+
+            else:
+                attach_phantoms_to_data_node = False
+
             bwd_deps_real_mt = (
                 all_deps_mt.intersection(set(sn_deps_mt)))
             kcn_bwd_deps_real = set(
