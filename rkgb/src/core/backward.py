@@ -43,11 +43,9 @@ class ForwardBackwardComputationNode(base.Node):
                     "inplace_targets","container_targets"]:
                 setattr(self,attr,getattr(simplified_node,attr))
         # - deps and users:
-        self.deps_real    = deps_real or set()
-        self.deps_fake    = deps_fake or set()
-        self.deps_global  = set()
-        self.users_global = set()
-        self.users        = set()
+        self.deps_real = deps_real or set()
+        self.deps_fake = deps_fake or set()
+        self.users     = set()
         # => all: AllocationNode sets
         if deps_through_artifacts: # ComputationNode set
             self.deps_through_artifacts = deps_through_artifacts
@@ -98,11 +96,9 @@ class ForwardBackwardAllocationNode(base.Node):
         self.has_attribute__base = False
         self.includes_phantoms = False
         # ** deps/users **
-        self.deps         = deps or set()
-        self.deps_global  = set()
-        self.users_global = set()
-        self.users_real   = set()
-        self.users_fake   = set()
+        self.deps       = deps or set()
+        self.users_real = set()
+        self.users_fake = set()
         # => all: ComputationNode sets
     
     def get_all_standard_deps(self):
@@ -161,30 +157,26 @@ class ForwardBackwardGraph(base.Graph):
                     "to ForwardBackwardGraph.__init__ (or let "\
                     "`simplified_graph` to None to get an empty graph")
             self.inherit_base_attributes(simplified_graph)
-            # init and final codes:
             self.init_code = simplified_graph.init_node.get_code_ast()
-            self.dict_output_viewing_code = dict(
-                simplified_graph.dict_output_viewing_code)
-            
+            self.dict_output_viewing_code = dict(simplified_graph.dict_output_viewing_code)
 
-
+            for sn in simplified_graph.nodes:
+                self.processes_and_inspect_node(sn)
+            self.make_loss_computation_node()
+            self.store_all_nodes()
+            self.make_reciprocal_users_attributes()
+            self.make_input_allocation_nodes()
+            self.computation_nodes = self.get_sorted_nodes_by_following_deps_relation()
             self.set_computation_node_numbers()
 
 
 
-    def make_users(self):
+    def make_reciprocal_users_attributes(self):
         for cnode in self.computation_nodes:
             for req_anode in cnode.deps_real: req_anode.users_real.add(cnode)
             for req_anode in cnode.deps_fake: req_anode.users_fake.add(cnode)
         for anode in self.allocation_nodes:
             for req_cnode in anode.deps: req_cnode.users.add(anode)
-    def init_deps_and_users_global(self):
-        for cnode in self.computation_nodes:
-            cnode.deps_global = cnode.deps_real.union(cnode.deps_fake)
-            cnode.users_global = set(cnode.users)
-        for anode in self.allocation_nodes:
-            anode.deps_global = set(anode.deps)
-            anode.users_global = anode.users_real.union(anode.users_fake)
 
     def set_computation_node_numbers(self):
         for i,cnode in enumerate(self.computation_nodes):
@@ -456,9 +448,6 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
     # -> build "users" attributes as reciprocal of "deps"
     kg.make_users()
 
-    # *** global relations ***
-    kg.init_deps_and_users_global()
-
     # ** input nodes **
     # -> get input_kdn_data/grad from prev_kg
     if prev_kg:
@@ -488,27 +477,6 @@ def aux_build_S_to_K(sg : SimplifiedGraph,
                 other_obj = kg)
         else:
             kg.input_kdn_grad = None
-
-    # ** make deps/users_global with inputs **
-    # -> users of inp_data
-    kg.dict_KDN_data[input_kdn_data.mt] = input_kdn_data
-    kg.dict_kn[input_kdn_data.name] = input_kdn_data
-    firsts_mt = [sn.mt for sn in sg.init_node.users]
-    input_kdn_data_users = set(dict_KCN_fwd[mt] for mt in firsts_mt)
-    input_kdn_data.users_global.update(input_kdn_data_users)
-    for user_kcn in input_kdn_data_users:
-        user_kcn.deps_global.add(input_kdn_data)
-
-    # -> deps of inp_grad
-    if not is_sources or sg.sources_req_grad or not is_really_first_graph:
-        kg.dict_KDN_grad[input_kdn_grad.mt] = input_kdn_grad
-        kg.dict_kn[input_kdn_grad.name] = input_kdn_grad
-        input_kdn_grad_deps = set(
-            dict_KCN_bwd[mt] for mt in firsts_mt
-            if mt in dict_KCN_bwd)
-        input_kdn_grad.deps_global.update(input_kdn_grad_deps)
-        for user_kcn in input_kdn_grad_deps:
-            user_kcn.users_global.add(input_kdn_grad)
 
     # -> TOPOSORT computation_nodes
     kg.sort_computation_nodes()
