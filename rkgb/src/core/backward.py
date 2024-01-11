@@ -154,7 +154,7 @@ class ForwardBackwardGraph(base.Graph):
         self.dict_bwd_cnodes = dict()
         self.dict_data_anodes = dict()
         self.dict_grad_anodes = dict()
-        self.dict_phantom_anodes = dict()
+        self.dict_phantoms_anodes = dict()
         # => all: dict: main_targets => Node
         if simplified_graph is not None:
             if original_mod is None or inspection_device is None: 
@@ -180,7 +180,7 @@ class ForwardBackwardGraph(base.Graph):
             simplified_graph : SimplifiedGraph,
             original_mod : torch.nn.Module,
             inspection_device):
-        # 1) Create the execution environment
+        # 0) Create the execution environment
         our_global = inspection.Inspector.generate_global_env(
             self,inspection_device)
         tmp_local = inspection.Inspector.generate_local_env(
@@ -188,7 +188,10 @@ class ForwardBackwardGraph(base.Graph):
             original_mod,inspection_device
         )
 
-        # 2) Forward Computation Node
+        # =====================================
+        # == Part 1 : BUILD THE FORWARD PART ==
+        # =====================================
+        # 1) Forward Computation Node
         sn_deps_targets = [
             req_sn.main_target 
             for req_sn in sn_to_proceed.deps]
@@ -214,7 +217,7 @@ class ForwardBackwardGraph(base.Graph):
         )
         self.dict_fwd_cnodes[sn_to_proceed.main_target] = fwd_cnode
 
-        # 3) Data Allocation Node
+        # 2) Data Allocation Node
         data_anode = ForwardBackwardAllocationNode(
             main_target     = sn_to_proceed.main_target,
             allocation_type = "data",
@@ -224,9 +227,11 @@ class ForwardBackwardGraph(base.Graph):
             forwardbackward_graph = self)
         self.dict_data_anodes[sn_to_proceed.main_target] = data_anode
 
-        # == Part 2 : Build the backward part ==
+        # ======================================
+        # == Part 2 : BUILD THE BACKWARD PART ==
+        # ======================================
         if sn_to_proceed.info.requires_grad:
-            # Open grad_fn and collect backward dependencies:
+            # 1) Open grad_fn and collect backward dependencies:
             (   bwd_real_dependencies,
                 bool_bwd_requires_fwd_data,
                 bool_exist_phantoms,
@@ -234,6 +239,69 @@ class ForwardBackwardGraph(base.Graph):
                 = inspection.get_relevant_dependencies_via_grad_fn(
                     sn_to_proceed,our_global,tmp_local
                 )
+            bwd_cnode_deps_real = set(
+                self.dict_data_anodes[req_target]
+                for req_target in bwd_real_dependencies
+            )
+            bwd_cnode_deps_fake = fwd_cnode_deps
+            data_anode.has_attribute__base = has_attribute__base
+            if bool_bwd_requires_fwd_data:
+                bwd_cnode_deps_real.add(data_anode)
+                data_anode.includes_phantoms = True
+            else:
+                bwd_cnode_deps_fake.add(data_anode)
+            
+            # 2) Backward Computation Node
+            bwd_cnode = ForwardBackwardComputationNode(
+                main_target = sn_to_proceed.main_target,
+                simplified_node = sn_to_proceed,
+                is_fwd = False,
+                info = sn_to_proceed.info,
+                deps_real = bwd_cnode_deps_real, # we add grad_anode latter on
+                deps_fake = bwd_cnode_deps_fake,
+                forwardbackward_graph = self
+            )
+            self.dict_bwd_cnodes[sn_to_proceed.main_target] = bwd_cnode
+
+            # 3) Phantom Allocation Node
+            if bool_exist_phantoms and not data_anode.includes_phantoms:
+                phantoms_anode = ForwardBackwardAllocationNode(
+                    main_target = sn_to_proceed.main_target,
+                    allocation_type = "phantoms",
+                    simplified_node = sn_to_proceed,
+                    info = sn_to_proceed.info,
+                    deps = set([fwd_cnode]),
+                    forwardbackward_graph = self
+                )
+                self.dict_phantoms_anodes[sn_to_proceed.main_target] = phantoms_anode
+                fwd_cnode.has_phantoms = True
+            else:
+                fwd_cnode.has_phantoms = False
+
+            # 4) Grad Allocation Node
+            grad_anode = ForwardBackwardAllocationNode(
+                main_target = sn_to_proceed.main_target,
+                allocation_type = "grad",
+                simplified_node = sn_to_proceed,
+                info = sn_to_proceed.info,
+                forwardbackward_graph = self
+            )
+            self.dict_grad_anodes[sn_to_proceed.main_target] = grad_anode
+            bwd_cnode.deps_real.add(grad_anode)
+            # grad_anode depends on the bwd node of the users of the fwd_cnode
+            # which aren't proceed it (as we process them in the topo order)
+            # But we can plug bwd_cnode to its users, which are previously
+            # created grad_anodes.
+            for req_target in sn_deps_targets:
+                if req_target in self.dict_grad_anodes: # ie requires_grad
+                    self.dict_grad_anodes[req_target].deps.add(bwd_cnode)
+        else:
+            bool_bwd_requires_fwd_data = False
+            
+        # =========================
+        # == Part 3 : INSPECTION ==
+        # =========================
+            
 
 
 
@@ -289,7 +357,7 @@ class ForwardBackwardGraph(base.Graph):
         anodes = self.allocation_nodes = (
             list(self.dict_data_anodes.values()) +
             list(self.dict_grad_anodes.values()) +
-            list(self.dict_phantom_anodes.values()))
+            list(self.dict_phantoms_anodes.values()))
         for node in cnodes + anodes:
             self.dict_nodes[node.name] = node
 
