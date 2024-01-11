@@ -19,6 +19,7 @@ class ForwardBackwardComputationNode(base.Node):
             simplified_node : SimplifiedNode = None,
             is_fwd  = True,
             is_rand = False,
+            info = None,
             main_code    = None,
             inplace_code = None,
             body_code    = None,
@@ -32,6 +33,7 @@ class ForwardBackwardComputationNode(base.Node):
         self.name = f"FWD[{main_target}]" if is_fwd else f"BWD[{main_target}]"
         self.is_fwd = is_fwd
         self.is_rand = is_rand
+        self.info = info
         self.main_code = main_code # tuple (target * AST)
         self.inplace_code = inplace_code if inplace_code else []
         self.body_code = body_code if body_code else [] # (str*AST) list
@@ -75,10 +77,7 @@ class ForwardBackwardAllocationNode(base.Node):
     def __init__(self,
             main_target = base.Node.no_target_string,
             allocation_type = "/!\\ No allocation_type/!\\",
-            all_targets       = None,
-            tensor_targets    = None,
-            inplace_targets   = None,
-            container_targets = None,
+            simplified_node = None,
             info      = None,
             deps      = None,
             forwardbackward_graph = None):
@@ -86,10 +85,17 @@ class ForwardBackwardAllocationNode(base.Node):
         super().__init__(main_target,
             parent_structure_with_id_generator=forwardbackward_graph)
         self.allocation_type = allocation_type # data, grad or phantoms
-        self.all_targets = all_targets or [main_target]
-        self.tensor_targets = tensor_targets or [main_target]
-        self.inplace_targets = inplace_targets or []
-        self.container_targets = container_targets or []
+        # inherits target attributes from simplified_node:
+        if simplified_node is not None:
+            for attr in [
+                    "all_targets","tensor_targets",
+                    "inplace_targets","container_targets"]:
+                setattr(self,attr,getattr(simplified_node,attr))
+        else:
+            self.all_targets = [main_target]
+            self.tensor_targets = [main_target]
+            self.inplace_targets = []
+            self.container_targets = []
         self.name = f"{main_target} {self.allocation_type}"
         self.mem  = 0
         self.info = info
@@ -161,13 +167,70 @@ class ForwardBackwardGraph(base.Graph):
             self.dict_output_viewing_code = dict(simplified_graph.dict_output_viewing_code)
 
             for sn in simplified_graph.nodes:
-                self.processes_and_inspect_node(sn)
+                self.process_and_inspect_node(sn)
             self.make_special_loss_and_io_nodes()
             self.store_all_nodes()
             self.make_reciprocal_users_attributes()
             self.computation_nodes = self.get_sorted_nodes_by_following_deps_relation()
             self.set_computation_node_numbers()
 
+    # ======= MAIN LOOP ========
+    def process_and_inspect_node(self,
+            sn_to_proceed : SimplifiedNode,
+            simplified_graph : SimplifiedGraph,
+            original_mod : torch.nn.Module,
+            inspection_device):
+        # 1) Create the execution environment
+        our_global = inspection.Inspector.generate_global_env(
+            self,inspection_device)
+        tmp_local = inspection.Inspector.generate_local_env(
+            sn_to_proceed,simplified_graph,our_global,
+            original_mod,inspection_device
+        )
+
+        # 2) Forward Computation Node
+        sn_deps_targets = [
+            req_sn.main_target 
+            for req_sn in sn_to_proceed.deps]
+        fwd_cnode_deps = set(
+            self.dict_data_anodes[req_target]
+            for req_target in sn_deps_targets
+        )
+        fwd_cnode = ForwardBackwardComputationNode(
+            main_target           = sn_to_proceed.main_target,
+            simplified_node       = sn_to_proceed,
+            forwardbackward_graph = self,
+            is_fwd       = True,
+            is_rand      = sn_to_proceed.is_rand,
+            info         = sn_to_proceed.info,
+            main_code    = sn_to_proceed.main_code,
+            inplace_code = sn_to_proceed.inplace_code,
+            body_code    = sn_to_proceed.body_code,
+            deps_real    = fwd_cnode_deps,
+            deps_through_artifacts = set(
+                self.dict_fwd_cnodes[req_sn.main_target]
+                for req_sn in sn_to_proceed.deps_through_artifacts
+            )
+        )
+        self.dict_fwd_cnodes[sn_to_proceed.main_target] = fwd_cnode
+
+        # 3) Data Allocation Node
+        data_anode = ForwardBackwardAllocationNode(
+            main_target     = sn_to_proceed.main_target,
+            allocation_type = "data",
+            simplified_node = sn_to_proceed,
+            info = sn_to_proceed.info,
+            deps = set([fwd_cnode]),
+            forwardbackward_graph = self)
+        self.dict_data_anodes[sn_to_proceed.main_target] = data_anode
+
+
+    # ======= END OF MAIN LOOP =======
+
+
+
+    # =============================================
+    # Small methods to generate the last attributes
     def make_special_loss_and_io_nodes(self,
             simplified_graph : SimplifiedGraph):
         # Outputs:
@@ -184,7 +247,7 @@ class ForwardBackwardGraph(base.Graph):
             main_target = "loss",
             is_fwd    = True,
             main_code = ("loss",ast_add_on.make_ast_constant("LOSS")),
-            deps_real = set(self.list_output_data_nodes)
+            deps_real = set(self.list_output_data_nodes),
             forwardbackward_graph = self
         )
         self.loss_computation_node = loss_cnode
@@ -199,6 +262,7 @@ class ForwardBackwardGraph(base.Graph):
             allocation_type = "data",
             all_targets = simplified_graph.input_targets,
             forwardbackward_graph=self)
+        self.input_data_node.all_targets = simplified_graph.input_targets
         if simplified_graph.sources_req_grad:
             self.input_grad_node = ForwardBackwardAllocationNode(
                 main_target = constants.init_target_string,
@@ -256,86 +320,6 @@ class ForwardBackwardGraph(base.Graph):
 # ==========================
 
 
-
-# ==========================
-# = Move from S to K graph =
-# ==========================
-
-# the function that does it all
-def aux_build_S_to_K(sg : SimplifiedGraph,
-        original_mod,
-        device,
-        do_inspection=True):
-    kg = ForwardBackwardGraph(sg)
-    dict_compnode_fwd = kg.dict_compnode_fwd
-    dict_compnode_bwd = kg.dict_compnode_bwd
-    dict_KDN_data = kg.dict_KDN_data
-    dict_KDN_grad = kg.dict_KDN_grad
-    dict_KDN_phantoms = kg.dict_KDN_phantoms
-
-    # ============  
-    def handle_node(sn : SimplifiedNode):
-        mt = sn.main_target
-        our_global = inspection.generate_our_global(sg,original_mod,device)
-        info = sg.dict_info[mt]
-
-        # For artifact nodes :
-        #   -> if compnode2 only need compnode1.size, it means in sg there is
-        #   -> an artifact node for compnode1.size to avoid useless dep
-        #   -> between compnode2 and compnode1. We decided to do NOT have KDN(size)
-        #   -> in fact we just need compnode1 to be ordered before compnode2 in
-        #   -> the toposort. To do so we create a tmp special dep:
-        #   -> "deps_through_artifacts" when we find artifact in sn.deps
-        if sn.is_artifact: return ()
-
-        # *** build the fwd part ***
-        sn_deps = set(sn.deps.keys())
-        if sg.init_node in sn_deps:
-            raise Exception("sg.init_node has been unhooked ?!?")
-
-        # -> handle artifact deps :
-        kcn_deps_art_kcn = set()
-        sn_deps_copy = set(sn_deps)
-        for req_sn in sn_deps_copy:
-            if req_sn.is_artifact:
-                sn_deps.discard(req_sn)
-                req_real_sn = list(req_sn.deps.keys())[0] # art's parent
-                kcn_deps_art_kcn.add(dict_KCN_fwd[req_real_sn.main_target])
-
-        # -> get kdn_data deps for fwd
-        sn_deps_mt = [req_sn.main_target for req_sn in sn_deps]
-        kcn_fwd_deps = set(
-            dict_KDN_data[mt] for mt in sn_deps_mt)
-
-        # -> KCN(fwd)
-        kcn_fwd = ForwardBackwardComputationNode(
-            main_target       = mt,
-            all_targets       = sn.all_targets,
-            tensor_targets    = sn.tensor_targets,
-            inplace_targets   = sn.inplace_targets,
-            container_targets = sn.container_targets,
-            is_fwd       = True,
-            is_rand      = sn.is_rand,
-            main_code    = sn.main_code,
-            inplace_code = sn.inplace_code,
-            body_code    = sn.body_code,
-            deps_real    = kcn_fwd_deps,
-            deps_through_artifacts = kcn_deps_art_kcn,
-            other_obj = kg)
-        dict_KCN_fwd[mt] = kcn_fwd
-
-        # -> KDN(data)
-        kdn_data = ForwardBackwardAllocationNode(
-            allocation_type    = "data",
-            main_target       = mt,
-            all_targets       = sn.all_targets,
-            tensor_targets    = sn.tensor_targets,
-            inplace_targets   = sn.inplace_targets,
-            container_targets = sn.container_targets,
-            info        = info,
-            deps        = set([kcn_fwd]),
-            other_obj = kg)
-        dict_KDN_data[mt] = kdn_data
 
 
         # *** build the bwd part ***
