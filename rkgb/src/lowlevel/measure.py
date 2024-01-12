@@ -66,11 +66,14 @@ class Timer:
                 /(len(measures)-2))
         else:
             return np.median(measures)
+        
+    # TO OVERWRITE:
+    def start(self): pass
+    def end(self): pass
+    def elapsed(self): pass
 
 
 class TimerCPU(Timer):
-    def __init__(self):
-        self.reset()
     def reset(self):
         self.elapsed_time = None
     def start(self):
@@ -138,10 +141,10 @@ class MemoryTrackerCPU(MemoryTracker):
     Could use:
     https://docs.python.org/3/library/tracemalloc.html
     """
-    def __init__(self,device):
+    def __init__(self):
         self.process = psutil.Process(os.getpid())
         self.max_memory = 0
-        super().__init__(device)
+        super().__init__(torch.device("cpu"))
     def maximum(self):
         return self.max_memory
     def current(self):

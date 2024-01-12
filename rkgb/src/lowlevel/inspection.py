@@ -206,16 +206,54 @@ class Inspector():
 
 # ======================
     
-class InspectorCPU(Inspector):
-    def inspect(self):
-        return InspectionResult()
-    
+class InspectorDefault(Inspector):
+    def __init__(self,
+            sn_to_proceed : SimplifiedNode,
+            inspection_device,
+            our_global, 
+            tmp_local,
+            timer : measure.Timer, 
+            memory_tracker : measure.MemoryTracker,
+            # TO CHANGE:
+            simplified_graph,
+            original_mod):
+        self.sn_to_proceed = sn_to_proceed
+        self.inspection_device = inspection_device
+        self.our_global = our_global
+        self.tmp_local = tmp_local
+        self.timer = timer
+        self.memory_tracker = memory_tracker
+        # For debugging it's helpful to store all results and what we execute
+        self.inspection_result = InspectionResult()
+        self.code_run_fwd = sn_to_proceed.get_code(force_special_kwargs=True)
+        # TO CHANGE:
+        self.simplified_graph = simplified_graph
+        self.original_mod = original_mod
 
-class InspectorCUDA(Inspector):
-    def __init__(self):
-        pass
     def inspect(self):
-        pass
+
+        self.inspection_result.relevant = True
+        return self.inspection_result
+        
+    # ==================================
+    # == ALL STEPS WE WANT TO MEASURE ==
+    def func_run_fwd(self):
+        exec(self.code_run_fwd, self.our_global, self.tmp_local)
+
+    def func_prepare_bwd(self):
+        # TO CHANGE: I think it's not efficient to regenerate
+        # a new tmp_local before every backward run. 
+        # Instead it should be enough to set the gradients 
+        # of all dependencies and parameters to None.
+        self.tmp_local = self.generate_local_env(
+            self.sn_to_proceed,
+            self.simplified_graph,
+            self.our_global,
+            self.original_mod,
+            self.inspection_device
+        )
+        
+
 
 
 # ======================

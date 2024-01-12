@@ -311,16 +311,19 @@ class ForwardBackwardGraph(base.Graph):
                 timer = measure.TimerCPU()
                 memory_tracker = measure.MemoryTrackerCPU()
             elif inspection_device.type == "cuda":
-                timer = measure.TimerCUDA()
-                memory_tracker = measure.MemoryTrackerCUDA()
+                timer = measure.TimerCUDA(inspection_device)
+                memory_tracker = measure.MemoryTrackerCUDA(inspection_device)
             else:
                 raise Exception(
                     f"Unrecognized device type: neither 'cpu' nor "\
                     f"'cuda' but {inspection_device.type}")
             inspector = inspection.InspectorDefault(
                 sn_to_proceed,
+                inspection_device,
                 our_global, tmp_local,
-                timer, memory_tracker
+                timer, memory_tracker,
+                simplified_graph,
+                original_mod
             )
             inspection_result = inspector.inspect()
         
