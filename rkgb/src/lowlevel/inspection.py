@@ -262,11 +262,12 @@ class InspectorDefault(Inspector):
             self.func_prepare_bwd()
             time_run_bwd = self.timer.robust_measure(
                 self.func_run_bwd,reset_func=self.func_prepare_bwd)
-        
+
         gc.enable()
+        Inspector.reset_local_env(self.sn_to_proceed,self.tmp_local)
         result = self.inspection_result
         result.mem_run_fwd = mem_run_fwd
-        result.mem_fgt_fwd = mem_fgt_fwd
+        result.mem_fgt_fwd = - mem_fgt_fwd
         result.mem_overhead_fwd = mem_overhead_fwd
         result.time_fwd = time_run_fwd
         result.mem_overhead_bwd = mem_overhead_bwd
@@ -437,74 +438,4 @@ def get_relevant_dependencies_via_grad_fn(
         has_attribute__base
     )
 # ======================
-
-
-# ======================
-
-
-
-class inspector():
-
-    # === FORWARD ===
-    # -- measure forward --
-    def measure_fwd(self,only_run=False):
-        gc.disable()
-        # -> We don't want the gc to disturb the memory measurement
-        _ , mem_run_fwd , peak_fwd = self.memUsage.measure(fct_run_fwd)
-        overhead_fwd = peak_fwd - mem_run_fwd
-        self.ret.overhead_fwd = overhead_fwd
-        self.ret.mem_run_fwd = mem_run_fwd
-        if not only_run:
-            _ , mem_del_fwd , _ = self.memUsage.measure(fct_del_fwd)
-            self.ret.mem_del_fwd = - mem_del_fwd
-            fct_run_fwd()
-
-            _ , mem_fgt_fwd , _ = self.memUsage.measure(fct_fgt_fwd)
-            time_run_fwd = self.measure_time(fct_run_fwd)
-            self.ret.mem_fgt_fwd = - mem_fgt_fwd
-            self.ret.time_run_fwd = time_run_fwd
-        gc.enable()
-    # ===============
-
-    # === BACKWARD ===
-
-    def fct_run_bwd(self):
-        self.code_run_bwd = f"{self.mt}.backward({self.mt}.grad)"
-        exec(self.code_run_bwd, self.our_global, self.tmp_local)
-
-    def fct_fgt_bwd(self):
-        for req_sn in self.sn.deps.keys():
-            if not req_sn.is_artifact:
-                for tar in req_sn.tensor_targets:
-                    self.tmp_local[tar].grad = None
-    def fct_prepare_bwd(self):
-        self.tmp_local = generate_tmp_local(
-            self.sn,self.sg,self.our_global,self.device)
-        exec(self.code_run_fwd, self.our_global, self.tmp_local)
-        self.tmp_local[self.sn.main_target].grad = (
-            self.info.generate_value(self.device))
-
-    # measure
-    def measure_bwd(self):
-        if self.info.requires_grad:
-            gc.disable() 
-            self.fct_prepare_bwd()
-            _ , mem_run_bwd , peak_bwd = (
-                self.memUsage.measure(self.fct_run_bwd))
-            overhead_bwd = peak_bwd - mem_run_bwd
-            _ , mem_fgt_bwd , _ = self.memUsage.measure(self.fct_fgt_bwd)
-
-            self.fct_prepare_bwd()
-            time_run_bwd = self.measure_time(
-                self.fct_run_bwd, self.fct_prepare_bwd)
-            # overhead_bwd contains n.target.data now /!\
-            gc.enable()
-            self.ret.overhead_bwd = overhead_bwd
-            self.ret.mem_run_bwd  = mem_run_bwd
-            self.ret.mem_fgt_bwd  = - mem_fgt_bwd
-            self.ret.time_run_bwd = time_run_bwd
-    
-            self.tmp_local.clear()
-
-# ==========================
 
