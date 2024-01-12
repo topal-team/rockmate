@@ -68,12 +68,8 @@ class SimplifiedNode(base.Node):
         self.users_through_artifacts = set()
         self.info : VariableInfo = info if info is not None else VariableInfo()
         self.is_rand = is_rand
-        if required_random_tensors is None:
-            required_random_tensors = set()
-        self.required_random_tensors = required_random_tensors
-        if required_parameter_nodes is None:
-            required_parameter_nodes = set()
-        self.required_parameter_nodes = required_parameter_nodes
+        self.required_random_tensors = required_random_tensors or set()
+        self.required_parameter_nodes = required_parameter_nodes or set()
 
     def get_all_standard_deps(self):
         return self.deps.union(self.deps_through_artifacts)

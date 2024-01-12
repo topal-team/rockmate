@@ -117,6 +117,16 @@ class ForwardBackwardAllocationNode(base.Node):
               for computation_node in self.users_real])
 
 
+class ParameterNode(base.ParameterNode):
+    """
+    backward.ParameterNode sub class base.ParameterNode
+    only to change `.users` attribute by `.users_real/fake` 
+    """
+    def __init__(self,*args):
+        super().__init__(*args)
+        del self.users
+        self.users_real = set()
+        self.users_fake = set()
 
 # ***********
 # * ForwardBackwardGraph *
@@ -166,8 +176,13 @@ class ForwardBackwardGraph(base.Graph):
             self.init_code = simplified_graph.init_node.get_code_ast()
             self.dict_output_viewing_code = dict(simplified_graph.dict_output_viewing_code)
 
-            for sn in simplified_graph.nodes:
-                self.process_and_inspect_node(sn)
+            for sn_to_proceed in simplified_graph.nodes:
+                self.process_and_inspect_node(
+                    sn_to_proceed,
+                    simplified_graph,
+                    original_mod,
+                    do_inspection,
+                    inspection_device)
             self.make_special_loss_and_io_nodes()
             self.store_all_nodes()
             self.make_reciprocal_users_attributes()
