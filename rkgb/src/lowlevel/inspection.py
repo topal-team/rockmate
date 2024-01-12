@@ -228,13 +228,31 @@ class InspectorDefault(Inspector):
         self.code_run_fwd = sn_to_proceed.get_code(force_special_kwargs=True)
         target = sn_to_proceed.main_target
         self.code_run_bwd = f"{target}.backward({target}.grad)"
-        self.code_del_all_targets = "; ".join(
-            [f"del {target}" for target in self.sn_to_proceed.tensor_targets])
         # TO CHANGE:
         self.simplified_graph = simplified_graph
         self.original_mod = original_mod
 
     def inspect(self):
+        gc.disable()
+        # -> We don't want the gc to disturb the memory measurement
+        # 1) Forward:
+        _,mem_run_fwd,peak_fwd = self.memory_tracker.measure(self.func_run_fwd)
+        mem_overhead_fwd = peak_fwd - mem_run_fwd
+        _,mem_fgt_fwd,_ = self.memory_tracker.measure(self.func_fgt_fwd)
+        time_run_fwd = self.timer.measure(self.func_run_fwd)
+
+        # 2) Backward:
+        if self.sn_to_proceed.info.requires_grad:
+            self.func_prepare_bwd()
+            # TODO
+        
+        gc.enable()
+        result = self.inspection_result
+        result.mem_run_fwd = mem_run_fwd
+        result.mem_fgt_fwd = mem_fgt_fwd
+        result.mem_overhead_fwd = mem_overhead_fwd
+        result.time_fwd = time_run_fwd
+        result.relevant = True
 
         self.inspection_result.relevant = True
         return self.inspection_result
@@ -251,9 +269,6 @@ class InspectorDefault(Inspector):
             value.data = torch.zeros(0,device=self.inspection_device)
             if value._base is not None:
                 value._base.data = torch.empty(0,device=self.inspection_device)
-
-    def func_del_fwd(self):
-        exec(self.code_del_all_targets, self.our_global, self.tmp_local)
 
     # BACKWARD:
     def func_prepare_bwd(self):
@@ -418,44 +433,10 @@ def get_relevant_dependencies_via_grad_fn(
 
 
 class inspector():
-    # -> We define an inspector class to save every intermediate 
-    # -> information used during inspection, very helpful to debug.
-    def __init__(self,sn,sg,our_global,device):
-        self.sn = sn
-        self.sg = sg
-        self.mt = sn.main_target
-        self.info = sg.dict_info[self.mt]
-        self.timer = measure.make_timer(device)
-        self.memUsage = measure.MeasureMemory(device)
-        self.our_global = our_global
-        self.tmp_local = generate_tmp_local(sn,sg,our_global,device)
-        self.ret = Inspection_result()
-        self.ret.relevant = True
-        self.device = device
-
-    # ---------
 
     # === FORWARD ===
     # -- measure forward --
     def measure_fwd(self,only_run=False):
-        def fct_run_fwd():
-            self.code_run_fwd = self.sn.get_code(force_special_kwargs=True)
-            exec(self.code_run_fwd, self.our_global, self.tmp_local)
-
-        def fct_fgt_fwd():
-            for tar in self.sn.tensor_targets:
-                val = self.tmp_local[tar]
-                val.data = torch.zeros(0,device=self.device)
-                if val._base is not None:
-                    val._base.data = torch.empty(0,device=self.device)
-                
-        def fct_del_fwd():
-            code = ""
-            for tar in self.sn.tensor_targets:
-                code += f"del {tar};"
-            self.code_del_fwd = code
-            exec(self.code_del_fwd, self.our_global, self.tmp_local)
-
         gc.disable()
         # -> We don't want the gc to disturb the memory measurement
         _ , mem_run_fwd , peak_fwd = self.memUsage.measure(fct_run_fwd)
