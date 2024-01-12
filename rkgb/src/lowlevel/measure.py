@@ -87,46 +87,63 @@ def tensorMsize(t):
 # =========
 
 class Timer:
+    # To get robust results:
+    minimum_total_duration = 0
+    minimum_number_of_iterations = 5
+    
     def measure(self, func, iterations = 1):
         self.start()
         for _ in range(iterations):
             func()
         self.end()
         return self.elapsed() / iterations
+    
+    def robust_measure(self, func, reset_func = None):
+        """
+        Measures the time it takes for `func` to be executed.
+        Do several iterations to get a robust result,
+        the final result is the average of all the iterations,
+        excluding the two extreme values:
+        `result = [sum(measures)-max(measures)-min(measures)] / (len-2)`
 
-    """ # -> Reimplemented in def_inspection
-    def measure_median(self, func, samples = 3, **kwargs):
-        values = []
-        for _ in range(samples):
-            values.append(self.measure(func, **kwargs))
-        return statistics.median(values)
-    """
-            
-class TimerSys(Timer):
+        `reset_func` is executed between each call to `func`,
+        to reset the execution environment.
+        """
+        elapsed_time = self.measure(func)
+        nb_iterations = 1
+        measures = [elapsed_time]
+        total_elapsed_time = elapsed_time
+        while (total_elapsed_time < self.minimum_total_duration
+        or nb_iterations < self.minimum_number_of_iterations):
+            if reset_func is not None:
+                reset_func()
+            elapsed_time = self.measure(func)
+            measures.append(elapsed_time)
+            total_elapsed_time += elapsed_time
+            nb_iterations += 1
+        if nb_iterations > 2:
+            return (
+                (sum(measures)-max(measures)-min(measures))
+                /(len(measures)-2))
+        else:
+            return np.median(measures)
+
+
+class TimerCPU(Timer):
     def __init__(self):
         self.reset()
-
     def reset(self):
         self.elapsed_time = None
-    
     def start(self):
         self.elapsed_time = time.perf_counter()
-
     def end(self):
         self.elapsed_time = time.perf_counter() - self.elapsed_time
-
     # In milliseconds
     def elapsed(self):
         return self.elapsed_time * 1000
 
-    def elapsedAndReset(self):
-        self.end()
-        result = self.elapsed()
-        self.reset()
-        self.start()
-        return result
 
-class TimerCuda(Timer):
+class TimerCUDA(Timer):
     def __init__(self, device):
         self.device = device
         self.stream = torch.cuda.current_stream(device)
@@ -147,13 +164,6 @@ class TimerCuda(Timer):
     def elapsed(self):
         return self.startEvent.elapsed_time(self.endEvent)
 
-    def elapsedAndReset(self):
-        self.end()
-        result = self.elapsed()
-        self.reset()
-        self.start()
-        return result
-    
 def make_timer(device):
     if device.type == 'cuda':
         return TimerCuda(device)

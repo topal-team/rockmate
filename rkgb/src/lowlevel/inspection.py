@@ -217,9 +217,10 @@ class InspectorCPU(Inspector):
     
 
 class InspectorCUDA(Inspector):
+    def __init__(self):
+        pass
     def inspect(self):
         pass
-        # TODO
 
 
 # ======================
@@ -365,22 +366,6 @@ class inspector():
         self.ret.relevant = True
         self.device = device
 
-    # -- aux --
-    def measure_time(self, fct, inter_fct=None):
-        t = self.timer.measure(fct)
-        nb_repeat = 1
-        measures = [t] ; tot = t
-        while (tot < constants.time_min_duration
-        or nb_repeat < constants.time_min_repeat):
-            if inter_fct: inter_fct()
-            t = self.timer.measure(fct)
-            measures.append(t)
-            tot += t ; nb_repeat += 1
-        if len(measures)>2:
-            return (
-                (sum(measures)-max(measures)-min(measures))
-                /(len(measures)-2))
-        else:np.median(measures)
     # ---------
 
     # === FORWARD ===

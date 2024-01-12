@@ -307,10 +307,21 @@ class ForwardBackwardGraph(base.Graph):
         if not do_inspection:
             inspection_result = inspection.InspectionResult()
         else:
-            if inspection_device == torch.device("cpu"):
-                inspector = inspection.InspectorCPU()
+            if inspection_device.type == "cpu":
+                timer = measure.TimerCPU()
+                memory_tracker = measure.MemoryTrackerCPU()
+            elif inspection_device.type == "cuda":
+                timer = measure.TimerCUDA()
+                memory_tracker = measure.MemoryTrackerCUDA()
             else:
-                inspector = inspection.InspectorCUDA()
+                raise Exception(
+                    f"Unrecognized device type: neither 'cpu' nor "\
+                    f"'cuda' but {inspection_device.type}")
+            inspector = inspection.InspectorDefault(
+                sn_to_proceed,
+                our_global, tmp_local,
+                timer, memory_tracker
+            )
             inspection_result = inspector.inspect()
         
         # 2) Fill corresponding node attributes
