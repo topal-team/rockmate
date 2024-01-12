@@ -9,8 +9,6 @@ init_target_string = "__sources__"
 constructor_function_string = "__constructor__"
 getattr_function_string = str(getattr)
 
-render_color_special = "green"
-
 time_min_duration = 0
 time_min_repeat = 5
 

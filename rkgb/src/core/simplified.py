@@ -346,7 +346,7 @@ class SimplifiedGraph(base.Graph):
             init_node.all_targets=[]
 
             self.parameter_nodes = [
-                param_node.clone() 
+                base.ParameterNode(node_to_clone=param_node)
                 for param_node in forward_graph.parameter_nodes]
             dict_old_param_node_to_new_param_node = dict(
                 zip(forward_graph.parameter_nodes,self.parameter_nodes))
@@ -837,17 +837,20 @@ class SimplifiedGraph(base.Graph):
 
     def __str__(self):
         return f"Simplified Forward Graph with {len(self.nodes)} nodes."
+
     def render(self,
             name=None,
             view=True,
             only_function_name=False,
             include_parameter_nodes=True,
+            include_artifact_edges=True,
             directory=base.Graph.default_render_directory,
             render_format=base.Graph.default_render_format,
             render=True,
             dot=None):
         name = self._get_render_name(name)
         dot = base.Graph._get_graphviz_dot(name,dot)
+        color_special = "green"
         # Reminder: at the end of __init__, artifacts are removed
         # and replace by soft edges "deps_through_artifacts"
         def edge(sn1,sn2,style=None):
@@ -856,7 +859,7 @@ class SimplifiedGraph(base.Graph):
                 sn1.main_target,sn2.main_target,
                 label="\n".join(used_targets),
                 style=style)
-        # 0) Parameter nodes
+        # 1) Parameter nodes
         if include_parameter_nodes:
             for param_node in self.parameter_nodes:
                 param_node : base.ParameterNode
@@ -866,7 +869,7 @@ class SimplifiedGraph(base.Graph):
                     if param_node.view_targets == []
                     else f"{param_node.param_str}\n{param_node.get_code()}",
                     style = "dashed")
-        # 1) nodes and edges
+        # 2) nodes and edges
         sn : SimplifiedNode
         for sn in self.nodes:
             if only_function_name: label = sn.main_fct
@@ -874,27 +877,28 @@ class SimplifiedGraph(base.Graph):
             dot.node(sn.main_target,label)
             for req_sn in sn.deps:
                 edge(req_sn,sn)
-            for req_sn in sn.deps_through_artifacts:
-                edge(req_sn,sn,style="dashed")
+            if include_artifact_edges:
+                for req_sn in sn.deps_through_artifacts:
+                    edge(req_sn,sn,style="dashed")
             if include_parameter_nodes:
                 for req_param in sn.required_parameter_nodes:
                     dot.edge(req_param.param_str,sn.target,style="dashed")
-        # 2) init node
+        # 3) init node
         if only_function_name: label = "INPUT"
         else: label = "INPUT\n"+self.init_node.get_code()
         dot.node(self.init_node.main_target,
             label,
-            color=constants.render_color_special,
+            color=color_special,
             style="dashed")
         for user_sn in (
                 self.init_node.users.union(
                 self.init_node.users_through_artifacts)):
             edge(self.init_node,user_sn,style="dashed")
-        # 3) output nodes
+        # 4) output nodes
         output_node = self.output_nodes[0]
         dot.node("output",
             f"OUTPUT:\n{self.original_mod_output_targets}",
-            color=constants.render_color_special,
+            color=color_special,
             style="dashed")
         for output_node in self.output_nodes:
             dot.edge(output_node.main_target,"output",
@@ -915,6 +919,7 @@ class SimplifiedGraph(base.Graph):
             dot=None):
         name = self._get_render_name(name)
         dot = base.Graph._get_graphviz_dot(name,dot)
+        color_special = "green"
         self.make_sequentialized_list_of_blocks_of_nodes(aggressive)
         # Auxiliary functions
         def make_unique(target,block_id):
@@ -938,13 +943,13 @@ class SimplifiedGraph(base.Graph):
                 node(block_id,
                     self.init_node.main_target,
                     "GLOBAL INPUT\n"+self.init_node.get_code(),
-                    color=constants.render_color_special,
+                    color=color_special,
                     style="dashed")
             else:
                 node(block_id,
                     blocks[block_id-1][-1].main_target,
                     f"INPUT block {block_id+1}",
-                    color=constants.render_color_special,
+                    color=color_special,
                     style="dashed")
             # 2) nodes and edges
             for sn in block_nodes:
@@ -960,7 +965,7 @@ class SimplifiedGraph(base.Graph):
                 output_code = "OUTPUT"
             node(block_id,
                 "output",output_code,
-                color=constants.render_color_special,
+                color=color_special,
                 style="dashed")
             dot.edge(
                 make_unique(block_nodes[-1].main_target,block_id),

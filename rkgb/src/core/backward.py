@@ -122,8 +122,8 @@ class ParameterNode(base.ParameterNode):
     backward.ParameterNode sub class base.ParameterNode
     only to change `.users` attribute by `.users_real/fake` 
     """
-    def __init__(self,*args):
-        super().__init__(*args)
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
         del self.users
         self.users_real = set()
         self.users_fake = set()
@@ -160,6 +160,7 @@ class ForwardBackwardGraph(base.Graph):
         self.dict_nodes = dict() # node name -> node
         self.computation_nodes = [] # Toposorted
         self.allocation_nodes = [] # Arbitrary order
+        self.parameter_nodes = []
         self.dict_fwd_cnodes = dict()
         self.dict_bwd_cnodes = dict()
         self.dict_data_anodes = dict()
@@ -175,6 +176,12 @@ class ForwardBackwardGraph(base.Graph):
             self.inherit_base_attributes(simplified_graph)
             self.init_code = simplified_graph.init_node.get_code_ast()
             self.dict_output_viewing_code = dict(simplified_graph.dict_output_viewing_code)
+
+            self.parameter_nodes = [
+                ParameterNode(node_to_clone=param_node)
+                for param_node in simplified_graph.parameter_nodes]
+            dict_old_param_node_to_new_param_node = dict(
+                zip(simplified_graph.parameter_nodes,self.parameter_nodes))
 
             for sn_to_proceed in simplified_graph.nodes:
                 self.process_and_inspect_node(
@@ -463,51 +470,52 @@ class ForwardBackwardGraph(base.Graph):
         # root_node to toposort; hence nothing to unplug
         pass
 
+    # = print and render =
+    def __str__(self):
+        return f"Forward+Backward and Computation+Allocation Graph:"\
+               f"{len(self.computation_nodes)} Computation Nodes, "\
+               f"{len(self.allocation_nodes)} Allocation Nodes."
+
+    @staticmethod
+    def get_render_color(node):
+        color_fwd_cnode = "blue"
+        color_bwd_cnode = "blueviolet"
+        color_anode = "olive"
+        color_parameter_node = "black"
+        if isinstance(node,ForwardBackwardAllocationNode):
+            return color_anode
+        elif isinstance(node,ParameterNode):
+            return color_parameter_node
+        else:
+            assert isinstance(node,ForwardBackwardComputationNode)
+            if node.is_fwd: return color_fwd_cnode
+            else: return color_bwd_cnode
+
+    def render(self,
+            name=None,
+            view=True,
+            only_function_name=False,
+            include_parameter_nodes=True,
+            include_artifact_edges=True,
+            directory=base.Graph.default_render_directory,
+            render_format=base.Graph.default_render_format,
+            render=True,
+            dot=None):
+        name = self._get_render_name(name)
+        dot = base.Graph._get_graphviz_dot(name,dot)
+        color_special = "green"
+
+        # 1) Parameter nodes
+        if include_parameter_nodes:
+            for param_node in self.parameter_nodes
+
+
 # ==========================
 
 
 # ==========================
 # === printing functions ===
 # ==========================
-
-color_kcn_fwd  = "blue"
-color_kcn_bwd  = "blueviolet"
-color_special  = "green"
-color_kdn      = "olive"
-
-def get_color(kn):
-    if isinstance(kn,ForwardBackwardAllocationNode): return color_kdn
-    if kn.is_fwd: return color_kcn_fwd
-    return color_kcn_bwd
-
-def aux_print_ForwardBackwardGraph_message(kg : ForwardBackwardGraph):
-    return (
-        f"ForwardBackwardGraph - Forward + Backward graph, "\
-        f"{len(kg.computation_nodes)} ForwardBackwardComputationNodes; {len(kg.allocation_nodes)} ForwardBackwardAllocationNodes"
-    )
-
-def aux_print_ForwardBackwardGraph_list_message(lkg : ForwardBackwardGraph_list):
-    list_nb_kcn = [len(kg.computation_nodes) for kg in lkg]
-    list_nb_kdn = [len(kg.allocation_nodes) for kg in lkg]
-    tot_nb_kcn = sum(list_nb_kcn)
-    tot_nb_kdn = sum(list_nb_kdn)
-    str_list_nb_kcn = "+".join(str(i) for i in list_nb_kcn)
-    str_list_nb_kdn = "+".join(str(i) for i in list_nb_kdn)
-    return (
-        f"ForwardBackwardGraph_list - Sequentialized Forward + Backward graphs, "\
-        f"{len(lkg)} blocks, with :\n"\
-        f"     -> {str_list_nb_kcn} = {tot_nb_kcn} Comp nodes\n"\
-        f"     -> {str_list_nb_kdn} = {tot_nb_kdn} Data nodes\n"\
-        f"     => total of {tot_nb_kcn + tot_nb_kdn} nodes"
-    )
-
-def aux_print_ForwardBackwardGraph_name(kg : ForwardBackwardGraph,name=None):
-    if name is not None: return name
-    else: return "Forward_and_Backward_ForwardBackwardGraph"
-
-def aux_print_ForwardBackwardGraph_list_name(lkg : ForwardBackwardGraph_list,name=None):
-    if name is not None: return name
-    else: return "Sequentialized_Forward_and_Backward_ForwardBackwardGraph_list"
 
 def aux_print_graph(dot,kg,uniq_num):
     def uni(tar): return f"_{uniq_num}_{tar}"

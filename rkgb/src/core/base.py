@@ -231,22 +231,31 @@ class ParameterNode():
     self.param_name : 'wpe.0.weight' as it appears in model.named_parameters
     """
     def __init__(self,
-            param_str,
+            param_str = None,
+            node_to_clone = None,
             parent_structure_with_id_generator = None, # to get unique_id from it
             unique_id_generator : Node_unique_id_generator = None):
-        assert param_str[:4] == "self"
-        self.param_str = param_str
-        self.param_name = param_str[5:].replace('[','.').replace(']','')
-        self.view_targets = []
-        self.view_code = []
-        self.requires_grad = None
-        self.is_buffer = None
-        self.unique_id = Node_unique_id_generator\
-            .get_unique_id_one_way_or_the_other(
-                self,
-                parent_structure_with_id_generator,
-                unique_id_generator
-            )
+        if node_to_clone is not None:
+            for attr in [
+                    "param_str","param_name"
+                    "view_targets","view_code",
+                    "requires_grad","is_buffer",
+                    "unique_id"]:
+                setattr(self,attr,copy.deepcopy(getattr(node_to_clone,attr)))
+        else:
+            assert param_str[:4] == "self"
+            self.param_str = param_str
+            self.param_name = param_str[5:].replace('[','.').replace(']','')
+            self.view_targets = []
+            self.view_code = []
+            self.requires_grad = None
+            self.is_buffer = None
+            self.unique_id = Node_unique_id_generator\
+                .get_unique_id_one_way_or_the_other(
+                    self,
+                    parent_structure_with_id_generator,
+                    unique_id_generator
+                )
         self.users = set()
     def get_code(self):
         return ast_add_on.make_str_list_assign(self.view_code)
@@ -258,14 +267,6 @@ class ParameterNode():
     def __hash__(self):
         if hasattr(self,"unique_id"): return self.unique_id
         else: return id(self) # When init via pickle
-    def clone(self):
-        clone_node = ParameterNode(self.param_str)
-        for attr in [
-                "view_targets","view_code",
-                "requires_grad","is_buffer",
-                "unique_id"]:
-            setattr(clone_node,attr,copy.deepcopy(getattr(self,attr)))
-        return clone_node
     def __repr__(self):
         return f"ParameterNode({self.param_name})"
 
