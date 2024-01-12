@@ -56,7 +56,6 @@ class InspectionResult():
         self.mem_run_fwd  = 0
         self.mem_run_bwd  = 0
         self.mem_fgt_fwd  = 0
-        self.mem_fgt_bwd  = 0
         self.time_fwd = 0
         self.time_bwd = 0
 
@@ -203,6 +202,20 @@ class Inspector():
                     tmp_local[req_var_target] = req_var_info.generate_value(inspection_device)
             exec(body_code,our_global,tmp_local)
         return tmp_local
+    
+    @staticmethod
+    def reset_local_env(sn_to_proceed : SimplifiedNode,tmp_local):
+        # 1) Remove result from forward
+        for target in sn_to_proceed.tensor_targets:
+            del tmp_local[target]
+        # 2) Remove deps' gradients
+        for req_sn in sn_to_proceed.deps:
+            for req_target in req_sn.tensor_targets:
+                tmp_local[req_target].grad = None
+        # 3) Remove parameters' gradients
+        all_required_params = tmp_local["all_parameters"]
+        for param_value in all_required_params:
+            param_value.grad = None
 
 # ======================
     
@@ -239,12 +252,16 @@ class InspectorDefault(Inspector):
         _,mem_run_fwd,peak_fwd = self.memory_tracker.measure(self.func_run_fwd)
         mem_overhead_fwd = peak_fwd - mem_run_fwd
         _,mem_fgt_fwd,_ = self.memory_tracker.measure(self.func_fgt_fwd)
-        time_run_fwd = self.timer.measure(self.func_run_fwd)
+        time_run_fwd = self.timer.robust_measure(self.func_run_fwd)
 
         # 2) Backward:
         if self.sn_to_proceed.info.requires_grad:
+            self.func_prepare_bwd() # is it useful ? TO TEST TO REMOVE
+            _,mem_run_bwd,peak_bwd = self.memory_tracker.measure(self.func_run_bwd)
+            mem_overhead_bwd = peak_bwd - mem_run_bwd
             self.func_prepare_bwd()
-            # TODO
+            time_run_bwd = self.timer.robust_measure(
+                self.func_run_bwd,reset_func=self.func_prepare_bwd)
         
         gc.enable()
         result = self.inspection_result
@@ -252,6 +269,8 @@ class InspectorDefault(Inspector):
         result.mem_fgt_fwd = mem_fgt_fwd
         result.mem_overhead_fwd = mem_overhead_fwd
         result.time_fwd = time_run_fwd
+        result.mem_overhead_bwd = mem_overhead_bwd
+        result.time_bwd = time_run_bwd
         result.relevant = True
 
         self.inspection_result.relevant = True
@@ -276,14 +295,14 @@ class InspectorDefault(Inspector):
         # a new tmp_local before every backward run. 
         # Instead it should be enough to set the gradients 
         # of all dependencies and parameters to None.
-        self.tmp_local = self.generate_local_env(
+        self.tmp_local = Inspector.generate_local_env(
             self.sn_to_proceed,
             self.simplified_graph,
             self.our_global,
             self.original_mod,
             self.inspection_device
         )
-        # TO REPLACE by: self.func_fgt_bwd()
+        # TO REPLACE by: Inspector.reset_tmp_local(...)
         self.func_run_fwd()
         self.tmp_local[self.sn_to_proceed.main_target].grad = (
             self.sn_to_proceed.info.generate_value(self.inspection_device)
@@ -291,14 +310,6 @@ class InspectorDefault(Inspector):
 
     def func_run_bwd(self):
         exec(self.code_run_bwd, self.our_global, self.tmp_local)
-
-    def func_fgt_bwd(self):
-        for req_sn in self.sn_to_proceed.deps:
-            for req_target in req_sn.tensor_targets:
-                self.tmp_local[req_target].grad = None
-        all_required_params = self.tmp_local["all_parameters"]
-        for param_value in all_required_params:
-            param_value.grad = None
     # ==================================
             
         
