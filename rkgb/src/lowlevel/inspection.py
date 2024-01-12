@@ -226,6 +226,10 @@ class InspectorDefault(Inspector):
         # For debugging it's helpful to store all results and what we execute
         self.inspection_result = InspectionResult()
         self.code_run_fwd = sn_to_proceed.get_code(force_special_kwargs=True)
+        target = sn_to_proceed.main_target
+        self.code_run_bwd = f"{target}.backward({target}.grad)"
+        self.code_del_all_targets = "; ".join(
+            [f"del {target}" for target in self.sn_to_proceed.tensor_targets])
         # TO CHANGE:
         self.simplified_graph = simplified_graph
         self.original_mod = original_mod
@@ -237,9 +241,21 @@ class InspectorDefault(Inspector):
         
     # ==================================
     # == ALL STEPS WE WANT TO MEASURE ==
+    # FORWARD:
     def func_run_fwd(self):
         exec(self.code_run_fwd, self.our_global, self.tmp_local)
 
+    def func_fgt_fwd(self):
+        for target in self.sn_to_proceed.tensor_targets:
+            value = self.tmp_local[target]
+            value.data = torch.zeros(0,device=self.inspection_device)
+            if value._base is not None:
+                value._base.data = torch.empty(0,device=self.inspection_device)
+
+    def func_del_fwd(self):
+        exec(self.code_del_all_targets, self.our_global, self.tmp_local)
+
+    # BACKWARD:
     def func_prepare_bwd(self):
         # TO CHANGE: I think it's not efficient to regenerate
         # a new tmp_local before every backward run. 
@@ -252,6 +268,24 @@ class InspectorDefault(Inspector):
             self.original_mod,
             self.inspection_device
         )
+        # TO REPLACE by: self.func_fgt_bwd()
+        self.func_run_fwd()
+        self.tmp_local[self.sn_to_proceed.main_target].grad = (
+            self.sn_to_proceed.info.generate_value(self.inspection_device)
+        )
+
+    def func_run_bwd(self):
+        exec(self.code_run_bwd, self.our_global, self.tmp_local)
+
+    def func_fgt_bwd(self):
+        for req_sn in self.sn_to_proceed.deps:
+            for req_target in req_sn.tensor_targets:
+                self.tmp_local[req_target].grad = None
+        all_required_params = self.tmp_local["all_parameters"]
+        for param_value in all_required_params:
+            param_value.grad = None
+    # ==================================
+            
         
 
 
