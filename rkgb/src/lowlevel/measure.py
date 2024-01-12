@@ -1,7 +1,3 @@
-# ==========================
-# =  REIMPLEMENTATION OF   =
-# =  ROTOR FUNCTIONS USED  =
-# ==========================
 
 import torch
 import numpy as np
@@ -9,78 +5,21 @@ import time
 import os
 import psutil
 import subprocess
-# import statistics # unused
 
-# -> We don't want to include Rotor repository
-# -> in Rockmate since we use very few of their
-# -> functions. But the following functions 
-# -> belong to Rotor authors.
+# Simplified version of Rotor measure
 
-# =================
-# = class MemSize =
-# =================
+def tensor_memory_size(t):
+    if isinstance(t, torch.Tensor):
+        return t.element_size() * np.prod(t.shape)
+    else:
+        return sum(tensor_memory_size(u) for u in t)
 
-def sizeof_fmt(num, suffix='B'):
+def pretty_format_memory(num, suffix='B'):
     for unit in ['','Ki','Mi','Gi','Ti','Pi','Ei','Zi']:
         if abs(num) < 1024.0:
             return "%3.1f%s%s" % (num, unit, suffix)
         num /= 1024.0
     return "%.1f%s%s" % (num, 'Yi', suffix)
-
-class MemSize:
-    def __init__(self, v):
-        self.v = v
-
-    def __add__(self, other):
-        return self.__class__(self.v + other.v)
-    def __sub__(self, other):
-        return self.__class__(self.v - other.v)
-    def __neg__(self): # new
-        return self.__class__(-self.v)
-    
-    @classmethod
-    def fromStr(cls, str):
-        suffixes = {'k': 1024, 'M': 1024*1024, 'G': 1024*1024*1024}
-        if str[-1] in suffixes:
-            val = int(float(str[:-1]) * suffixes[str[-1]])
-        else:
-            val = int(str)
-        return MemSize(val)
-
-    def __str__(self):
-        return sizeof_fmt(self.v)
-
-    def __format__(self, fmt_spec):
-        return sizeof_fmt(self.v).__format__(fmt_spec)
-    
-    def __repr__(self):
-        return str(self.v)
-
-    def __int__(self):
-        return self.v
-
-    def __eq__(self,m):
-        return self.v == m.v
-    def __hash__(self):
-        return id(self)
-
-# =================
-
-
-
-# ===============
-# = tensorMsize =
-# ===============
-
-def tensorMsize(t):
-    if isinstance(t, torch.Tensor):
-        return t.element_size() * np.prod(t.shape)
-    else:
-        return sum(tensorMsize(u) for u in t)
-
-# ===============
-
-
 
 # =========
 # = timer =
@@ -148,27 +87,17 @@ class TimerCUDA(Timer):
         self.device = device
         self.stream = torch.cuda.current_stream(device)
         self.reset()
-
     def reset(self):
         self.startEvent = torch.cuda.Event(enable_timing = True)
         self.endEvent = torch.cuda.Event(enable_timing = True)
-
     def start(self):
         self.startEvent.record(self.stream)
-
     def end(self):
         self.endEvent.record(self.stream)
         torch.cuda.synchronize(self.device)
-
     # In milliseconds
     def elapsed(self):
         return self.startEvent.elapsed_time(self.endEvent)
-
-def make_timer(device):
-    if device.type == 'cuda':
-        return TimerCuda(device)
-    else:
-        return TimerSys()
 
 # =========
 
@@ -178,75 +107,73 @@ def make_timer(device):
 # = MeasureMemory =
 # =================
 
-class MeasureMemory:
-    def __init__(self, device):
+class MemoryTracker:
+    def __init__(self,device):
         self.device = device
-        self.cuda = self.device.type == 'cuda'
-        if not self.cuda:
-            self.process = psutil.Process(os.getpid())
-            self.max_memory = 0
-        self.last_memory = self.currentValue()
-        self.start_memory = self.last_memory
-
-    def currentValue(self):
-        if self.cuda:
-            result = torch.cuda.memory_allocated(self.device)
-        else: 
-            result = int(self.process.memory_info().rss)
-            self.max_memory = max(self.max_memory, result)
+        self.last_memory = self.current()
+    def diff_compared_to_last(self):
+        current = self.current()
+        result = current - self.last_memory
+        self.last_memory = current
         return result
-        
-    def maximumValue(self):
-        if self.cuda:
-            return MemSize(torch.cuda.max_memory_allocated(self.device))
-        else:
-            return MemSize(self.max_memory)
+    def measure(self, func, *args):
+        self.last_memory = self.current()
+        self.reset_max()
+        max_before = self.maximum()
+        result = func(*args) # run
+        usage = self.diff_compared_to_last()
+        max_usage = self.maximum() - max_before
+        return result, usage, max_usage
+    
+    # TO OVERWRITE:
+    def maximum(self): pass
+    def current(self): pass
+    def reset_max(self): pass
 
+
+class MemoryTrackerCPU(MemoryTracker):
+    """
+    TO DO : Right now it's not usable, as we miss `maximum_value`
+    Would be nice to add, but not urgent
+    Could use:
+    https://docs.python.org/3/library/tracemalloc.html
+    """
+    def __init__(self,device):
+        self.process = psutil.Process(os.getpid())
+        self.max_memory = 0
+        super().__init__(device)
+    def maximum(self):
+        return self.max_memory
+    def current(self):
+        result = int(self.process.memory_info().rss)
+        self.max_memory = max(self.max_memory, result)
+        return result
+    def reset_max(self):
+        self.max_memory = 0
+        self.max_memory = self.current()
+    
+    
+class MemoryTrackerCUDA(MemoryTracker):
+    def maximum(self):
+        return torch.cuda.max_memory_allocated(self.device)
+    def current(self):
+        return torch.cuda.memory_allocated(self.device)
+    def reset_max(self):
+        return torch.cuda.reset_max_memory_allocated(self.device)
+    
+    # Optional / to help debug
     def available(self, index=None):
-        assert self.cuda
-        result = subprocess.check_output(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,nounits,noheader"])
+        result = subprocess.check_output(
+            ["nvidia-smi", 
+             "--query-gpu=memory.free", 
+             "--format=csv,nounits,noheader"])
         l = [int(x) for x in result.strip().split(b"\n")]
         if index is None:
             index = self.device.index
         if index is None: index = torch.cuda.current_device()
-        return l[index]*1024*1024 + torch.cuda.memory_cached(self.device) - torch.cuda.memory_allocated(self.device)
-        
-    ## Requires Pytorch >= 1.1.0
-    def resetMax(self):
-        if self.cuda:
-            torch.cuda.reset_max_memory_allocated(self.device)
-        else:
-            self.max_memory = 0
-            self.max_memory = self.currentValue()
-        
-
-    def current(self):
-        return MemSize(self.currentValue())
-        
-    def diffFromLast(self):
-        current = self.currentValue()
-        result = current - self.last_memory
-        self.last_memory = current
-        return MemSize(result)
-
-    def diffFromStart(self):
-        current = self.currentValue()
-        return MemSize(current - self.start_memory)
-
-    def currentCached(self):
-        if not self.cuda: 
-            return 0
-        else: 
-            return MemSize(torch.cuda.memory_cached(self.device))
-
-    def measure(self, func, *args):
-        self.diffFromLast()
-        self.resetMax()
-        maxBefore = self.maximumValue()
-        result = func(*args)
-        usage = self.diffFromLast()
-        maxUsage = self.maximumValue() - maxBefore
-
-        return result, usage.v, maxUsage.v
+        return (
+            l[index]*1024*1024 
+            + torch.cuda.memory_cached(self.device) 
+            - torch.cuda.memory_allocated(self.device))
 
 # =================

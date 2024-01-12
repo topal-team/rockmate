@@ -54,7 +54,7 @@ class VariableInfo():
                 self.tensor_size = value.shape
                 self.dtype = value.dtype
                 self.requires_grad = value.requires_grad
-                self.memsize = int(measure.tensorMsize(value))
+                self.memsize = int(measure.tensor_memory_size(value))
             elif self.variable_type==tuple or self.variable_type==list:
                 self.sub_info = [VariableInfo(y) for y in value]
                 self.requires_grad = any([

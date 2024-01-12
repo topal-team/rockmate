@@ -207,11 +207,6 @@ class Inspector():
 # ======================
     
 class InspectorCPU(Inspector):
-    """
-    TO DO : Would be nice to add, but not urgent
-    Could use:
-    https://docs.python.org/3/library/tracemalloc.html
-    """
     def inspect(self):
         return InspectionResult()
     
