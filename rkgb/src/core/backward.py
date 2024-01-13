@@ -23,6 +23,7 @@ class ForwardBackwardComputationNode(base.Node):
             main_code    = None,
             inplace_code = None,
             body_code    = None,
+            main_fct     = None,
             deps_real = None,
             deps_fake = None,
             deps_through_artifacts=None,
@@ -37,8 +38,9 @@ class ForwardBackwardComputationNode(base.Node):
         self.is_rand = is_rand
         self.info = info
         self.main_code = main_code # tuple (target * AST)
-        self.inplace_code = inplace_code if inplace_code else []
-        self.body_code = body_code if body_code else [] # (str*AST) list
+        self.inplace_code = inplace_code or []
+        self.body_code = body_code or [] # (str*AST) list
+        self.main_fct = main_fct or ""
         # - inherits target attributes from simplified_node:
         # Not specially useful, but can help debugging
         if simplified_node:
@@ -196,11 +198,11 @@ class ForwardBackwardGraph(base.Graph):
                     do_inspection,
                     inspection_device,
                     dict_old_param_node_to_new_param_node)
-            self.make_special_loss_and_output_nodes()
+            self.make_special_loss_and_output_nodes(simplified_graph)
             self.store_all_nodes()
             self.make_reciprocal_users_attributes()
             self.computation_nodes = self.get_sorted_nodes_by_following_deps_relation()
-            self.make_special_input_nodes()
+            self.make_special_input_nodes(simplified_graph)
             self.set_computation_node_numbers()
 
     # ======= MAIN LOOP ========
@@ -244,6 +246,7 @@ class ForwardBackwardGraph(base.Graph):
             main_code    = sn_to_proceed.main_code,
             inplace_code = sn_to_proceed.inplace_code,
             body_code    = sn_to_proceed.body_code,
+            main_fct     = sn_to_proceed.main_fct,
             deps_real    = fwd_cnode_deps,
             deps_through_artifacts = set(
                 self.dict_fwd_cnodes[req_sn.main_target]
@@ -307,6 +310,7 @@ class ForwardBackwardGraph(base.Graph):
                 main_target = sn_to_proceed.main_target,
                 simplified_node = sn_to_proceed,
                 is_fwd = False,
+                main_fct = sn_to_proceed.main_target+".backward",
                 info = sn_to_proceed.info,
                 deps_real = bwd_cnode_deps_real, # we add grad_anode latter on
                 deps_fake = bwd_cnode_deps_fake,
@@ -447,7 +451,6 @@ class ForwardBackwardGraph(base.Graph):
         input_data_anode = ForwardBackwardAllocationNode(
             main_target = constants.init_target_string,
             allocation_type = "data",
-            all_targets = simplified_graph.input_targets,
             forwardbackward_graph=self)
         input_data_anode.all_targets = simplified_graph.input_targets
         self.input_data_anode = input_data_anode
@@ -465,8 +468,8 @@ class ForwardBackwardGraph(base.Graph):
             input_grad_anode = ForwardBackwardAllocationNode(
                 main_target = constants.init_target_string,
                 allocation_type = "grad",
-                all_targets = simplified_graph.input_targets,
                 forwardbackward_graph=self)
+            input_grad_anode.all_targets = simplified_graph.input_targets,
             self.input_grad_anode = input_grad_anode
             self.dict_grad_anodes[input_grad_anode.main_target] = input_grad_anode
             self.dict_nodes[input_grad_anode.name] = input_grad_anode
@@ -589,6 +592,7 @@ class ForwardBackwardGraph(base.Graph):
                 dot.node(cnode.name,"LOSS computation",color=color_special)
             else:
                 if cnode.is_fwd:
+                    if only_function_name: render_label = 
                     render_label = cnode.get_code()
                 else:
                     render_label = f"backward of {cnode.main_target}"
@@ -646,6 +650,11 @@ class ForwardBackwardGraph(base.Graph):
             dot.node(input_grad.name,input_grad.name,**kwargs)
             for req_anode in input_grad.deps:
                 dot.edge(req_anode.name,input_grad.name,**kwargs)
+
+        if render:
+            base.Graph._call_graphviz_to_render(
+                dot,view,directory,render_format
+            )
 
 
 # ==========================
