@@ -86,10 +86,11 @@ class Inspector():
         original_mod,
         inspection_device
     ):
-        param_value = torch.nn.Parameter(
-            param_node.get_value(original_mod).to(inspection_device))
-        tmp_local["all_parameter_values"].append(param_value)
-        tmp_local["all_parameter_names"].append(param_node.param_name)
+        param_value = param_node.get_value(original_mod).to(inspection_device)
+        if not param_node.is_buffer:
+            param_value = torch.nn.Parameter(param_value)
+        tmp_local["all_parameters_values"].append(param_value)
+        tmp_local["all_parameters_names"].append(param_node.param_name)
         tmp_local["__value"] = param_value
         exec(f"{param_node.param_str} = __value ; {param_node.get_code()}",
             our_global, tmp_local)
@@ -103,12 +104,12 @@ class Inspector():
             inspection_device : torch.device):
         tmp_local = dict()
         tmp_local["self"] = FakeMod()
-        tmp_local["all_parameter_names"] = [] # to find them easily
-        tmp_local["all_parameter_values"] = []
+        tmp_local["all_parameters_names"] = [] # to find them easily
+        tmp_local["all_parameters_values"] = []
         all_inputs = (
             simplified_graph.original_mod_input_targets
             + simplified_graph.input_targets)
-        tmp_local["all_input_values"] = set()
+        tmp_local["all_inputs_values"] = set()
         # 1) Do we need to run the init_code:
         # - Generating the sizes related to init_code is free
         # so we can do it anyway, but if we require a tensor
@@ -138,7 +139,7 @@ class Inspector():
                 init_node.get_code(force_special_kwargs=True),
                 our_global,tmp_local)
             for inp in all_inputs:
-                tmp_local["all_input_values"].add(tmp_local[inp])
+                tmp_local["all_inputs_values"].add(tmp_local[inp])
         else:
             # We don't need any tensor:
             # we generate sizes anyway as they come free 
@@ -147,7 +148,7 @@ class Inspector():
                 if inp_info.variable_type is not torch.Tensor:
                     inp_value = inp_info.generate_value(inspection_device)
                     tmp_local[inp] = inp_value
-                    tmp_local["all_input_values"].add(inp_value)
+                    tmp_local["all_inputs_values"].add(inp_value)
 
         # 2) Generate required parameters
         for param_node in sn_to_proceed.required_parameter_nodes:
@@ -215,7 +216,7 @@ class Inspector():
             for req_target in req_sn.tensor_targets:
                 tmp_local[req_target].grad = None
         # 3) Remove parameters' gradients
-        all_required_params = tmp_local["all_parameter_values"]
+        all_required_params = tmp_local["all_parameters_values"]
         for param_value in all_required_params:
             param_value.grad = None
 
@@ -248,6 +249,7 @@ class InspectorDefault(Inspector):
         self.original_mod = original_mod
 
     def inspect(self):
+        result = self.inspection_result
         gc.disable()
         # -> We don't want the gc to disturb the memory measurement
         # 1) Forward:
@@ -255,6 +257,10 @@ class InspectorDefault(Inspector):
         mem_overhead_fwd = peak_fwd - mem_run_fwd
         _,mem_fgt_fwd,_ = self.memory_tracker.measure(self.func_fgt_fwd)
         time_run_fwd = self.timer.robust_measure(self.func_run_fwd)
+        result.mem_run_fwd = mem_run_fwd
+        result.mem_fgt_fwd = - mem_fgt_fwd
+        result.mem_overhead_fwd = mem_overhead_fwd
+        result.time_fwd = time_run_fwd
 
         # 2) Backward:
         if self.sn_to_proceed.info.requires_grad:
@@ -264,19 +270,12 @@ class InspectorDefault(Inspector):
             self.func_prepare_bwd()
             time_run_bwd = self.timer.robust_measure(
                 self.func_run_bwd,reset_func=self.func_prepare_bwd)
+            result.mem_overhead_bwd = mem_overhead_bwd
+            result.time_bwd = time_run_bwd
 
         gc.enable()
         Inspector.reset_local_env(self.sn_to_proceed,self.tmp_local)
-        result = self.inspection_result
-        result.mem_run_fwd = mem_run_fwd
-        result.mem_fgt_fwd = - mem_fgt_fwd
-        result.mem_overhead_fwd = mem_overhead_fwd
-        result.time_fwd = time_run_fwd
-        result.mem_overhead_bwd = mem_overhead_bwd
-        result.time_bwd = time_run_bwd
         result.relevant = True
-
-        self.inspection_result.relevant = True
         return self.inspection_result
         
     # ==================================
@@ -328,9 +327,9 @@ class InspectorDefault(Inspector):
 def trace_grad_fn(
         grad_fn,
         main_target="var",
-        all_parameter_names=[],
-        all_parameter_values=[],
-        all_input_values=set()):
+        all_parameters_names=[],
+        all_parameters_values=[],
+        all_inputs_values=set()):
     """
     Open grad_fn, looking after all the tensors linked in it
     => Parameters / 'saved_tensors' / explicit variables.
@@ -340,6 +339,9 @@ def trace_grad_fn(
     It checks all attributes of grad_fn, and then open 
     grad_fn.next_functions to trace the whole backward tree.
     """
+    all_parameters_data_ptr = [
+        VariableInfo.get_data_ptr(param_value) 
+        for param_value in all_parameters_values]
     explicit_vars  = set() # set of Tensors
     saved_tensors = set() # set of (name * value)
     parameter_names_found = set()
@@ -349,10 +351,12 @@ def trace_grad_fn(
         for attr in dir(current_grad_fn):
             attr_value = getattr(current_grad_fn,attr)
             if (attr != "variable" 
-            and isinstance(attr_value,torch.Tensor)
-            and not attr_value in all_input_values):
-                if attr_value in all_parameter_values:
-                    param_name = all_parameter_names[all_parameter_values.index(attr_value)]
+            and VariableInfo.has_a_data_ptr(attr_value)
+            and not attr_value in all_inputs_values):
+                attr_data_ptr=  VariableInfo.get_data_ptr(attr_value)
+                if attr_data_ptr in all_parameters_data_ptr:
+                    param_name = all_parameters_names[
+                        all_parameters_data_ptr.index(attr_data_ptr)]
                     parameter_names_found.add(param_name)
                 else:
                     path_str = [
@@ -387,9 +391,9 @@ def get_relevant_dependencies_via_grad_fn(
      parameter_names_found) = trace_grad_fn(
         sn_value.grad_fn,
         sn_to_proceed.main_target,
-        tmp_local["all_parameter_names"],
-        tmp_local["all_parameter_values"],
-        tmp_local["all_input_values"]
+        tmp_local["all_parameters_names"],
+        tmp_local["all_parameters_values"],
+        tmp_local["all_inputs_values"]
     )
 
     # 3) find out which tensors we found are
@@ -422,7 +426,7 @@ def get_relevant_dependencies_via_grad_fn(
                 saved_tensor_name,saved_tensor_value = saved_tensor
                 if req_data_ptr == VariableInfo.get_data_ptr(saved_tensor_value):
                     bwd_real_dependencies.add(req_sn.main_target)
-                    saved_tensors_found.append(saved_tensor_name)
+                    saved_tensors_found.add(saved_tensor_name)
                     saved_tensors_names_and_values.remove(saved_tensor)
                     break
     

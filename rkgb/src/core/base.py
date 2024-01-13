@@ -237,7 +237,7 @@ class ParameterNode():
             unique_id_generator : Node_unique_id_generator = None):
         if node_to_clone is not None:
             for attr in [
-                    "param_str","param_name"
+                    "param_str","param_name",
                     "view_targets","view_code",
                     "requires_grad","is_buffer",
                     "unique_id"]:
