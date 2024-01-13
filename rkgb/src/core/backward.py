@@ -454,7 +454,7 @@ class ForwardBackwardGraph(base.Graph):
         self.dict_data_anodes[input_data_anode.main_target] = input_data_anode
         self.dict_nodes[input_data_anode.name] = input_data_anode
 
-        # 2) Users of input_data_cnode
+        # 2) Users of input_data_anode
         input_data_anode.users_real = set(
             self.dict_fwd_cnodes[sn.main_target]
             for sn in simplified_graph.init_node.users
@@ -634,44 +634,18 @@ class ForwardBackwardGraph(base.Graph):
                 dot.edge(req_cnode.name,anode.name,
                     color=ForwardBackwardGraph.get_render_color(cnode))
         
-        # 4) 
+        # 4) Input_data/grad_cnode
+        kwargs = {"color":color_special , "style":"dashed"}
+        input_data = self.input_data_anode
+        if input_data.users_real != set():
+            dot.node(input_data.name,input_data.name,**kwargs)
+            for user_anode in input_data.users_real:
+                dot.edge(input_data.name,user_anode.name,**kwargs)
+        input_grad = self.input_grad_anode
+        if input_grad is not None:
+            dot.node(input_grad.name,input_grad.name,**kwargs)
+            for req_anode in input_grad.deps:
+                dot.edge(req_anode.name,input_grad.name,**kwargs)
 
 
 # ==========================
-
-    # *** io - global relations *** # TO REMOVE = il n'y a plus de list de backward
-    kwargs = {"color":color_special , "style":"dashed"}
-    inp_data = kg.input_kdn_data
-    inp_users = list(inp_data.users_only_global)
-    if len(inp_users)!=0:
-        node(inp_data.name,inp_data.name,**kwargs)
-        for user_inp_data in inp_users:
-            edge(inp_data.name,user_inp_data.name,**kwargs)
-    inp_grad = kg.input_kdn_grad
-    if inp_grad is not None:
-        node(inp_grad.name,inp_grad.name,**kwargs)
-        for req_inp_grad in inp_grad.deps_only_global:
-            edge(req_inp_grad.name,inp_grad.name,**kwargs)
-
-
-def print_ForwardBackwardGraph(kg : ForwardBackwardGraph,name=None,open=True,render_format="svg",dot=None,uniq_num=0):
-    if dot is None:
-        render = True
-        name = aux_print_ForwardBackwardGraph_name(kg,name)
-        dot = graphviz.Digraph(name,comment=name)
-    else:
-        render = False
-    aux_print_graph(dot,kg,uniq_num)
-    if render:
-        small_fcts.graph_render(dot,open,"K",render_format)
-
-
-def print_ForwardBackwardGraph_list(lkg : ForwardBackwardGraph_list,name=None,open=True,render_format="svg"):
-    name = aux_print_ForwardBackwardGraph_list_name(lkg,name)
-    dot = graphviz.Digraph(name,comment=name)
-    for i in range(len(lkg)):
-        aux_print_graph(dot,lkg[i],i)
-    small_fcts.graph_render(dot,open,"K",render_format)
-
-# ==========================
-
