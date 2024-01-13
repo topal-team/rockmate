@@ -18,7 +18,7 @@ class rkGB_res():
         self.D_graph = dg
         self.S_graph = sg
         self.K_graph = kg
-        self.P_structure = ps
+        self.PartitionedStructure = ps
         self.H_cluster = hc
         self.S_graph_list = list_sg
         self.K_graph_list = list_kg
@@ -45,11 +45,11 @@ class rkGB_res():
         return self.K_graph_list
     @property
     def Ps(self):
-        return self.P_structure
+        return self.PartitionedStructure
     @property
     def Pc(self):
-        if hasattr("main_cluster",self.P_structure):
-            return self.P_structure.main_cluster
+        if hasattr("main_cluster",self.PartitionedStructure):
+            return self.PartitionedStructure.main_cluster
         else:
             return None
     @property
@@ -75,8 +75,8 @@ def make_all_graphs(model,
     model_kwargs=None,
     wanted_graphs = {"B","D","S","K","P","H","Sl","Kl"},
     partitioners = [
-        Ptools.Partitioner_bottom_to_top(),
-        #Ptools.Partitioner_seq()
+        Ptools.PartitionerBottomToTop(),
+        #Ptools.PartitionerSequence()
     ],
     verbose=False,
     impose_device=True,
@@ -86,7 +86,7 @@ def make_all_graphs(model,
     ***** this function returns an objet with attributes *****
      -> .B_graph, .D_graph, .S_graph and .K_graph of the whole module
      -> .S_graph_list and .K_graph_list of the sequentialized module
-     -> .P_structure, .H_cluster
+     -> .PartitionedStructure, .H_cluster
     on which you can use : rkgb.print
 
     ***** args *****
@@ -187,7 +187,7 @@ def make_all_graphs(model,
 def make_late_partitioning(res : rkGB_res, model, partitioners):
     assert(res.S is not None)
     assert(res.K is not None)
-    res.P_structure = ps = Ptools.S_to_P(res.S,model,partitioners)
+    res.PartitionedStructure = ps = Ptools.S_to_P(res.S,model,partitioners)
     res.H_cluster = Htools.P_and_K_to_H(ps,res.K)
 
 # ==========================
@@ -211,7 +211,7 @@ def RK_print(*args,
     - Given a list of rk-GB graphs, render all graphs next to each other in a single file.
     - Given a `rkGB_res`, render all the graphs in separate files.
     - Given a cluster, render all the possible partitioning in separate files.
-    - Given a P_structure, render main_cluster.
+    - Given a PartitionedStructure, render main_cluster.
     - For any other object, call python default print.
 
     Note: /!\ You need external Graphviz tool to generate the pdf/svg /!\
@@ -274,10 +274,10 @@ def RK_print(*args,
             msg += Ktools.aux_print_K_graph_message(arg)
             name = Ktools.aux_print_K_graph_name(arg,get_name(name))
             to_render.append((name,arg,Ktools.print_K_graph))
-        elif isinstance(arg,Ptools.P_graph):
-            msg += Ptools.aux_print_P_graph_message(arg)
-            name = Ptools.aux_print_P_graph_name(arg,get_name(name))
-            to_render.append((name,arg,Ptools.print_P_graph))
+        elif isinstance(arg,Ptools.PartitionedGraph):
+            msg += Ptools.aux_print_PartitionedGraph_message(arg)
+            name = Ptools.aux_print_PartitionedGraph_name(arg,get_name(name))
+            to_render.append((name,arg,Ptools.print_PartitionedGraph))
         elif isinstance(arg,Htools.H_graph):
             msg += Htools.aux_print_H_graph_message(arg)
             name = Htools.aux_print_H_graph_name(arg,get_name(name))
@@ -305,9 +305,9 @@ def RK_print(*args,
             name = name if name is not None else f"List_of_{len(arg)}_base.Graphs"
             to_render.append((name,[c[1] for c in list_sub],[c[2] for c in list_sub]))
             msg += "\n".join(sub_msgs)
-        elif isinstance(arg,Ptools.P_cluster):
-            msg += Ptools.aux_print_P_cluster_message(arg)+"\n"
-            names[:0] = Ptools.aux_print_P_cluster_names(arg,get_name(name))
+        elif isinstance(arg,Ptools.PartitionedCluster):
+            msg += Ptools.aux_print_PartitionedCluster_message(arg)+"\n"
+            names[:0] = Ptools.aux_print_PartitionedCluster_names(arg,get_name(name))
             sub_msgs = []
             for pg in arg.representee_cluster.possible_partitioning:
                 sub_msgs.append(process_arg(pg,to_render,2))
@@ -319,8 +319,8 @@ def RK_print(*args,
             for pg in arg.representee_cluster.possible_hg:
                 sub_msgs.append(process_arg(pg,to_render,2))
             msg += "\n".join(sub_msgs)
-        elif isinstance(arg,Ptools.P_structure):
-            msg += "P_structure's main cluster :\n"
+        elif isinstance(arg,Ptools.PartitionedStructure):
+            msg += "PartitionedStructure's main cluster :\n"
             msg += process_arg(arg.main_cluster,to_render)
         elif isinstance(arg,rkGB_res):
             msg += "rkGB_res : all graphs\n"
@@ -332,7 +332,7 @@ def RK_print(*args,
                 "K_graph",
                 "S_graph_list",
                 "K_graph_list",
-                "P_structure",
+                "PartitionedStructure",
                 "H_cluster"]:
                 if getattr(arg,at) is None: continue
                 sub_msgs.append(

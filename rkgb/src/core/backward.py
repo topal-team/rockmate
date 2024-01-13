@@ -13,7 +13,7 @@ from src.core import base
 from src.core.simplified import SimplifiedNode,SimplifiedGraph
 
 
-class ForwardBackwardComputationNode(base.Node):
+class ComputationNode(base.Node):
     def __init__(self,
             main_target=base.Node.no_target_string,
             simplified_node : SimplifiedNode = None,
@@ -76,10 +76,10 @@ class ForwardBackwardComputationNode(base.Node):
               for req_allocation_node in self.users])
 
 # ************
-# * ForwardBackwardAllocationNode *
+# * AllocationNode *
 # ************
 
-class ForwardBackwardAllocationNode(base.Node):
+class AllocationNode(base.Node):
     def __init__(self,
             main_target = base.Node.no_target_string,
             allocation_type = "/!\\ No allocation_type/!\\",
@@ -135,10 +135,10 @@ class ParameterNode(base.ParameterNode):
         self.users_fake = set()
 
 # ***********
-# * ForwardBackwardGraph *
+# * Graph *
 # ***********
 
-class ForwardBackwardGraph(base.Graph):
+class Graph(base.Graph):
     input_data_anode = None
     list_output_data_anodes = None
     loss_computation_node = None
@@ -177,7 +177,7 @@ class ForwardBackwardGraph(base.Graph):
             if original_mod is None or inspection_device is None: 
                 raise Exception(
                     "You need to pass original_mod and inspection_device"\
-                    "to ForwardBackwardGraph.__init__ (or let "\
+                    "to Graph.__init__ (or let "\
                     "`simplified_graph` to None to get an empty graph")
             self.inherit_base_attributes(simplified_graph)
             self.init_code = simplified_graph.init_node.get_code_ast()
@@ -236,7 +236,7 @@ class ForwardBackwardGraph(base.Graph):
             dict_old_param_node_to_new_param_node[param_node]
             for param_node in sn_to_proceed.required_parameter_nodes
         )
-        fwd_cnode = ForwardBackwardComputationNode(
+        fwd_cnode = ComputationNode(
             main_target           = sn_to_proceed.main_target,
             simplified_node       = sn_to_proceed,
             forwardbackward_graph = self,
@@ -257,7 +257,7 @@ class ForwardBackwardGraph(base.Graph):
         self.dict_fwd_cnodes[sn_to_proceed.main_target] = fwd_cnode
 
         # 2) Data Allocation Node
-        data_anode = ForwardBackwardAllocationNode(
+        data_anode = AllocationNode(
             main_target     = sn_to_proceed.main_target,
             allocation_type = "data",
             simplified_node = sn_to_proceed,
@@ -306,7 +306,7 @@ class ForwardBackwardGraph(base.Graph):
             )
             
             # 2) Backward Computation Node
-            bwd_cnode = ForwardBackwardComputationNode(
+            bwd_cnode = ComputationNode(
                 main_target = sn_to_proceed.main_target,
                 simplified_node = sn_to_proceed,
                 is_fwd = False,
@@ -322,7 +322,7 @@ class ForwardBackwardGraph(base.Graph):
 
             # 3) Phantom Allocation Node
             if bool_exist_phantoms and not data_anode.includes_phantoms:
-                phantoms_anode = ForwardBackwardAllocationNode(
+                phantoms_anode = AllocationNode(
                     main_target = sn_to_proceed.main_target,
                     allocation_type = "phantoms",
                     simplified_node = sn_to_proceed,
@@ -336,7 +336,7 @@ class ForwardBackwardGraph(base.Graph):
                 fwd_cnode.has_phantoms = False
 
             # 4) Grad Allocation Node
-            grad_anode = ForwardBackwardAllocationNode(
+            grad_anode = AllocationNode(
                 main_target = sn_to_proceed.main_target,
                 allocation_type = "grad",
                 simplified_node = sn_to_proceed,
@@ -430,7 +430,7 @@ class ForwardBackwardGraph(base.Graph):
             for output_sn in simplified_graph.output_nodes
         ]
         # Loss:
-        loss_cnode = ForwardBackwardComputationNode(
+        loss_cnode = ComputationNode(
             main_target = "loss",
             is_fwd    = True,
             main_code = ("loss",ast_add_on.make_ast_constant("LOSS")),
@@ -448,7 +448,7 @@ class ForwardBackwardGraph(base.Graph):
     def make_special_input_nodes(self,
             simplified_graph : SimplifiedGraph):
         # 1) Input Data Allocation Node
-        input_data_anode = ForwardBackwardAllocationNode(
+        input_data_anode = AllocationNode(
             main_target = constants.init_target_string,
             allocation_type = "data",
             forwardbackward_graph=self)
@@ -465,7 +465,7 @@ class ForwardBackwardGraph(base.Graph):
 
         if simplified_graph.sources_req_grad:
             # 3) Input Grad Allocation Node
-            input_grad_anode = ForwardBackwardAllocationNode(
+            input_grad_anode = AllocationNode(
                 main_target = constants.init_target_string,
                 allocation_type = "grad",
                 forwardbackward_graph=self)
@@ -492,8 +492,8 @@ class ForwardBackwardGraph(base.Graph):
             self.dict_nodes[node.name] = node
 
     def make_reciprocal_users_attributes(self):
-        cnode : ForwardBackwardComputationNode
-        anode : ForwardBackwardAllocationNode
+        cnode : ComputationNode
+        anode : AllocationNode
         for cnode in self.computation_nodes:
             for req_anode in cnode.deps_real: req_anode.users_real.add(cnode)
             for req_anode in cnode.deps_fake: req_anode.users_fake.add(cnode)
@@ -521,10 +521,10 @@ class ForwardBackwardGraph(base.Graph):
         if len(leaves_cnodes)<2:
             return False,leaves_cnodes[0]
         else:
-            root_allonode = ForwardBackwardAllocationNode(
+            root_allonode = AllocationNode(
                 deps=leaves_cnodes,
                 forwardbackward_graph=self)
-            fresh_cnode_root = ForwardBackwardComputationNode(
+            fresh_cnode_root = ComputationNode(
                 deps_real=set([root_allonode]),
                 forwardbackward_graph=self)
             return True,fresh_cnode_root
@@ -545,12 +545,12 @@ class ForwardBackwardGraph(base.Graph):
         color_bwd_cnode = "blueviolet"
         color_anode = "olive"
         color_parameter_node = "black"
-        if isinstance(node,ForwardBackwardAllocationNode):
+        if isinstance(node,AllocationNode):
             return color_anode
         elif isinstance(node,ParameterNode):
             return color_parameter_node
         else:
-            assert isinstance(node,ForwardBackwardComputationNode)
+            assert isinstance(node,ComputationNode)
             if node.is_fwd: return color_fwd_cnode
             else: return color_bwd_cnode
 
@@ -582,12 +582,12 @@ class ForwardBackwardGraph(base.Graph):
                 dot.node(
                     param_node.param_str,
                     render_label,
-                    color = ForwardBackwardGraph.get_render_color(param_node),
+                    color = Graph.get_render_color(param_node),
                     style = "dashed")
                 
         # 2) Nodes
         for cnode in self.computation_nodes:
-            cnode : ForwardBackwardComputationNode
+            cnode : ComputationNode
             if cnode.main_target == "loss":
                 dot.node(cnode.name,"LOSS computation",color=color_special)
             else:
@@ -601,18 +601,18 @@ class ForwardBackwardGraph(base.Graph):
                 dot.node(
                     cnode.name,
                     render_label,
-                    color = ForwardBackwardGraph.get_render_color(cnode),
+                    color = Graph.get_render_color(cnode),
                     tooltip = (
                         f"Time : {cnode.time}\n Memory Overhead : "\
                         f"{measure.pretty_format_memory(cnode.mem_overhead)}")
                 )
 
         for anode in self.allocation_nodes:
-            anode : ForwardBackwardAllocationNode
+            anode : AllocationNode
             dot.node(
                 anode.name,
                 anode.name,
-                color = ForwardBackwardGraph.get_render_color(anode),
+                color = Graph.get_render_color(anode),
                 tooltip = "Memory : "+measure.pretty_format_memory(anode.mem)
             )
 
@@ -620,10 +620,10 @@ class ForwardBackwardGraph(base.Graph):
         for cnode in self.computation_nodes:
             for req_anode in cnode.deps_real:
                 dot.edge(req_anode.name,cnode.name,
-                    color=ForwardBackwardGraph.get_render_color(cnode))
+                    color=Graph.get_render_color(cnode))
             for req_anode in cnode.deps_fake:
                 dot.edge(req_anode.name,cnode.name,
-                    color=ForwardBackwardGraph.get_render_color(cnode),
+                    color=Graph.get_render_color(cnode),
                     style="dashed")
 
             if include_artifact_edges:
@@ -638,7 +638,7 @@ class ForwardBackwardGraph(base.Graph):
         for anode in self.allocation_nodes:
             for req_cnode in anode.deps:
                 dot.edge(req_cnode.name,anode.name,
-                    color=ForwardBackwardGraph.get_render_color(cnode))
+                    color=Graph.get_render_color(cnode))
         
         # 4) Input_data/grad_cnode
         kwargs = {"color":color_special , "style":"dashed"}

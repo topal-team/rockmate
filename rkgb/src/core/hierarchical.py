@@ -3,7 +3,7 @@
 # ==========================
 
 from .utils import *
-from .Ptools import P_structure, P_cluster, P_graph, P_node, Cluster_translator 
+from .Ptools import PartitionedStructure, PartitionedCluster, PartitionedGraph, PartitionedNode, ClusterTranslator 
 from .Ktools import K_graph, K_C_node, K_D_node
 
 from src.core import base
@@ -156,9 +156,9 @@ class H_cluster():
     loss_idx : int = None
     dict_kn : dict = None
     interfaces : dict[str, set[K_D_node]]
-    translator : Cluster_translator = None
-    p_cluster : P_cluster = None
-    p_node : P_node = None
+    translator : ClusterTranslator = None
+    p_cluster : PartitionedCluster = None
+    p_node : PartitionedNode = None
     all_clusters : set = None
     representee_cluster = None # : H_cluster
     possible_hg : list[H_graph] = None
@@ -182,7 +182,7 @@ class H_cluster():
         return set().union(*self.interfaces.values())
 
 
-def P_cluster_to_H_cluster(p_cluster : P_cluster, kg : K_graph):
+def PartitionedCluster_to_H_cluster(p_cluster : PartitionedCluster, kg : K_graph):
     if hasattr(p_cluster,"h_cluster"): return p_cluster.h_cluster
     h_cluster = H_cluster(p_cluster.name.replace("P","H"),False)
     h_cluster.p_cluster = p_cluster
@@ -266,13 +266,13 @@ def P_cluster_to_H_cluster(p_cluster : P_cluster, kg : K_graph):
         h_cluster.possible_hg = possible_hg = []
         h_cluster.list_sched = []
         for pg in p_cluster.possible_partitioning:
-            hg = P_graph_to_H_graph(pg,h_cluster,kg)
+            hg = PartitionedGraph_to_H_graph(pg,h_cluster,kg)
             h_cluster.all_clusters.update(hg.all_clusters)
             possible_hg.append(hg)
     else:
         h_cluster.representee_cluster \
             = representee \
-            = P_cluster_to_H_cluster(p_cluster.representee_cluster,kg)
+            = PartitionedCluster_to_H_cluster(p_cluster.representee_cluster,kg)
         # === make list_kdn order match ===
         assert(len(representee.list_kdn) == len(h_cluster.list_kdn))
         old_list = h_cluster.list_kdn
@@ -284,9 +284,9 @@ def P_cluster_to_H_cluster(p_cluster : P_cluster, kg : K_graph):
     return h_cluster
 
 
-def P_node_to_H_cluster(pn : P_node, kg : K_graph):
+def PartitionedNode_to_H_cluster(pn : PartitionedNode, kg : K_graph):
     if pn.sub_cluster is not None:
-        return P_cluster_to_H_cluster(pn.sub_cluster, kg)
+        return PartitionedCluster_to_H_cluster(pn.sub_cluster, kg)
     elif pn.mt not in kg.dict_KCN_bwd:
         return None
     else:
@@ -331,8 +331,8 @@ def P_node_to_H_cluster(pn : P_node, kg : K_graph):
 
 
 
-def P_graph_to_H_graph(
-        pg : P_graph, 
+def PartitionedGraph_to_H_graph(
+        pg : PartitionedGraph, 
         h_cluster : H_cluster,
         kg : K_graph):
     hg = H_graph(pg.name.replace("pg","hg"),h_cluster)
@@ -348,7 +348,7 @@ def P_graph_to_H_graph(
     #  -> These two dict make it super easy to build edges
 
     for pn in pg.nodes:
-        sub_cluster = P_node_to_H_cluster(pn,kg)
+        sub_cluster = PartitionedNode_to_H_cluster(pn,kg)
         if sub_cluster is not None:
             hg.all_clusters.update(sub_cluster.all_clusters)
         if pn.is_leaf:
@@ -502,9 +502,9 @@ def P_graph_to_H_graph(
     return hg
 
 
-def P_and_K_to_H(ps : P_structure, kg : K_graph):
+def P_and_K_to_H(ps : PartitionedStructure, kg : K_graph):
     kg.make_kcns_number()
-    return P_cluster_to_H_cluster(ps.main_cluster,kg)
+    return PartitionedCluster_to_H_cluster(ps.main_cluster,kg)
 
 
 
@@ -530,7 +530,7 @@ def nb_clusters(main_cluster : H_cluster):
         if c.representee_cluster is c:
             for pg in c.possible_partitioning:
                 for pn in pg.nodes:
-                    pn : P_node
+                    pn : PartitionedNode
                     if pn.sub_cluster is not None:
                         explore(pn.sub_cluster,depth+1)
     explore(main_cluster.p_cluster,0)
