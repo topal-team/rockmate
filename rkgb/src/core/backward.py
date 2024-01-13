@@ -270,21 +270,36 @@ class ForwardBackwardGraph(base.Graph):
             (   bwd_real_dependencies,
                 bool_bwd_requires_fwd_data,
                 bool_exist_phantoms,
+                parameter_names_found,
                 has_attribute__base ) \
                 = inspection.get_relevant_dependencies_via_grad_fn(
                     sn_to_proceed,our_global,tmp_local
                 )
+            data_anode.has_attribute__base = has_attribute__base
+            # - real deps
             bwd_cnode_deps_real = set(
                 self.dict_data_anodes[req_target]
                 for req_target in bwd_real_dependencies
             )
+            # - fake deps
             bwd_cnode_deps_fake = fwd_cnode_deps
-            data_anode.has_attribute__base = has_attribute__base
+            # - phantoms
             if bool_bwd_requires_fwd_data:
                 bwd_cnode_deps_real.add(data_anode)
                 data_anode.includes_phantoms = True
             else:
                 bwd_cnode_deps_fake.add(data_anode)
+            # - real param deps
+            bwd_cnode_required_param_nodes_real = set(
+                param_node
+                for param_node in fwd_cnode_required_param_nodes
+                if param_node.param_name in parameter_names_found
+            )
+            # - fake param deps
+            bwd_cnode_required_param_nodes_fake = (
+                fwd_cnode_required_param_nodes
+                - bwd_cnode_required_param_nodes_real
+            )
             
             # 2) Backward Computation Node
             bwd_cnode = ForwardBackwardComputationNode(
@@ -294,6 +309,8 @@ class ForwardBackwardGraph(base.Graph):
                 info = sn_to_proceed.info,
                 deps_real = bwd_cnode_deps_real, # we add grad_anode latter on
                 deps_fake = bwd_cnode_deps_fake,
+                required_parameter_nodes_real=bwd_cnode_required_param_nodes_real,
+                required_parameter_nodes_fake=bwd_cnode_required_param_nodes_fake,
                 forwardbackward_graph = self
             )
             self.dict_bwd_cnodes[sn_to_proceed.main_target] = bwd_cnode
@@ -447,9 +464,15 @@ class ForwardBackwardGraph(base.Graph):
             self.dict_nodes[node.name] = node
 
     def make_reciprocal_users_attributes(self):
+        cnode : ForwardBackwardComputationNode
+        anode : ForwardBackwardAllocationNode
         for cnode in self.computation_nodes:
             for req_anode in cnode.deps_real: req_anode.users_real.add(cnode)
             for req_anode in cnode.deps_fake: req_anode.users_fake.add(cnode)
+            for param_node in cnode.required_parameter_nodes_real:
+                param_node.users_real.add(cnode)
+            for param_node in cnode.required_parameter_nodes_fake:
+                param_node.users_fake.add(cnode)
         for anode in self.allocation_nodes:
             for req_cnode in anode.deps: req_cnode.users.add(anode)
 

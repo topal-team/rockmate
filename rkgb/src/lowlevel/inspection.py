@@ -88,7 +88,8 @@ class Inspector():
     ):
         param_value = torch.nn.Parameter(
             param_node.get_value(original_mod).to(inspection_device))
-        tmp_local["all_parameters"].add(param_value)
+        tmp_local["all_parameter_values"].append(param_value)
+        tmp_local["all_parameter_names"].append(param_node.param_name)
         tmp_local["__value"] = param_value
         exec(f"{param_node.param_str} = __value ; {param_node.get_code()}",
             our_global, tmp_local)
@@ -102,7 +103,8 @@ class Inspector():
             inspection_device : torch.device):
         tmp_local = dict()
         tmp_local["self"] = FakeMod()
-        tmp_local["all_parameters"] = set() # to find them easily
+        tmp_local["all_parameter_names"] = [] # to find them easily
+        tmp_local["all_parameter_values"] = []
         all_inputs = (
             simplified_graph.original_mod_input_targets
             + simplified_graph.input_targets)
@@ -213,7 +215,7 @@ class Inspector():
             for req_target in req_sn.tensor_targets:
                 tmp_local[req_target].grad = None
         # 3) Remove parameters' gradients
-        all_required_params = tmp_local["all_parameters"]
+        all_required_params = tmp_local["all_parameter_values"]
         for param_value in all_required_params:
             param_value.grad = None
 
@@ -326,7 +328,8 @@ class InspectorDefault(Inspector):
 def trace_grad_fn(
         grad_fn,
         main_target="var",
-        all_parameter_values=set(),
+        all_parameter_names=[],
+        all_parameter_values=[],
         all_input_values=set()):
     """
     Open grad_fn, looking after all the tensors linked in it
@@ -339,6 +342,7 @@ def trace_grad_fn(
     """
     explicit_vars  = set() # set of Tensors
     saved_tensors = set() # set of (name * value)
+    parameter_names_found = set()
     def trace(current_grad_fn,path_from_the_origin):
         if hasattr(current_grad_fn,"variable"):
             explicit_vars.add(current_grad_fn.variable)
@@ -346,21 +350,24 @@ def trace_grad_fn(
             attr_value = getattr(current_grad_fn,attr)
             if (attr != "variable" 
             and isinstance(attr_value,torch.Tensor)
-            and not attr_value in all_parameter_values
             and not attr_value in all_input_values):
-                path_str = [
-                    f".next_functions[{k}][0]"
-                    for k in path_from_the_origin]
-                saved_tensor_name = (
-                    f"{main_target}.grad_fn" 
-                    + "".join(path_str)
-                    + "." + attr)
-                saved_tensors.add((saved_tensor_name,attr_value))
+                if attr_value in all_parameter_values:
+                    param_name = all_parameter_names[all_parameter_values.index(attr_value)]
+                    parameter_names_found.add(param_name)
+                else:
+                    path_str = [
+                        f".next_functions[{k}][0]"
+                        for k in path_from_the_origin]
+                    saved_tensor_name = (
+                        f"{main_target}.grad_fn" 
+                        + "".join(path_str)
+                        + "." + attr)
+                    saved_tensors.add((saved_tensor_name,attr_value))
         if hasattr(current_grad_fn,"next_functions"):
             for k,next_grad_fn in enumerate(current_grad_fn.next_functions):
                 trace(next_grad_fn[0],path_from_the_origin+[k])
     trace(grad_fn,[])
-    return explicit_vars,saved_tensors
+    return explicit_vars,saved_tensors,parameter_names_found
 
 
 
@@ -376,10 +383,12 @@ def get_relevant_dependencies_via_grad_fn(
 
     # 2) Search through grad_fn
     (explicit_vars_in_grad_fn,
-     saved_tensors_names_and_values) = trace_grad_fn(
+     saved_tensors_names_and_values,
+     parameter_names_found) = trace_grad_fn(
         sn_value.grad_fn,
         sn_to_proceed.main_target,
-        tmp_local["all_parameters"],
+        tmp_local["all_parameter_names"],
+        tmp_local["all_parameter_values"],
         tmp_local["all_input_values"]
     )
 
@@ -435,6 +444,7 @@ def get_relevant_dependencies_via_grad_fn(
     return (bwd_real_dependencies,
         bool_bwd_requires_fwd_data,
         bool_exist_phantoms,
+        parameter_names_found,
         has_attribute__base
     )
 # ======================
