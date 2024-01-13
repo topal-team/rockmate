@@ -108,17 +108,27 @@ class VariableInfo():
         elif (isinstance(value,list) or isinstance(value,tuple)):
             for v in value:
                 v_ptr = VariableInfo.get_data_ptr(v)
-                if not (v_ptr is None):
+                if v_ptr is not None:
                     return v_ptr
             return None
         else: return None
 
     @staticmethod
+    def get_all_data_ptrs(value): # e.g. for list of tensors
+        if isinstance(value,torch.Tensor):
+            return {value.data_ptr()}
+        elif (isinstance(value,list) or isinstance(value,tuple)):
+            all_data_ptrs = set()
+            for v in value:
+                all_data_ptrs.update(VariableInfo.get_all_data_ptrs(v))
+            return all_data_ptrs
+        else: return set()
+
+    @staticmethod
     def find_all_data_ptr_of_params(original_mod : torch.nn.Module):
         all_data_ptrs = set()
         for param in original_mod.parameters():
-            data_ptr = VariableInfo.get_data_ptr(param)
-            if data_ptr is not None: all_data_ptrs.add(data_ptr)
+            all_data_ptrs.update(VariableInfo.get_all_data_ptrs(param))
         return all_data_ptrs
 
 

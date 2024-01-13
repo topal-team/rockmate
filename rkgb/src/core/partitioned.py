@@ -6,7 +6,7 @@ import warnings
 import math
 import ast
 import torch
-from src.lowlevel import variable_info
+from src.lowlevel.variable_info import VariableInfo
 from src.core import base
 from src.core.simplified import SimplifiedGraph, SimplifiedNode
 from src.core.backward import ComputationNode, AllocationNode
@@ -23,9 +23,9 @@ class Ano_SimplifiedNode_Info():
     dict_tar_to_ano_tar : dict[str, str] = None
     dict_cst_to_ano_cst : dict[str, str] = None
     dict_param_to_ano_param : dict[str, str] = None
-    dict_ano_tar_to_basic_info : dict[str, variable_info.VariableInfo] = None
-    dict_ano_cst_to_basic_info : dict[str, variable_info.VariableInfo] = None
-    dict_ano_param_to_basic_info : dict[str, variable_info.VariableInfo] = None
+    dict_ano_tar_to_basic_info : dict[str, VariableInfo] = None
+    dict_ano_cst_to_basic_info : dict[str, VariableInfo] = None
+    dict_ano_param_to_basic_info : dict[str, VariableInfo] = None
 
     # =====================================================================
     def __init__(self,sn : SimplifiedNode, sg : SimplifiedGraph, original_mod : torch.nn.Module):
@@ -90,7 +90,7 @@ class Ano_SimplifiedNode_Info():
             nb_cst += 1
             acst = f"_cst_{nb_cst}_ano"
             dict_cst_acst[cst_real_name] = acst
-            dict_acst_info[acst] = variable_info.VariableInfo(value)
+            dict_acst_info[acst] = VariableInfo(value)
 
         # Build ano params + info
         nb_param = 0
@@ -100,7 +100,7 @@ class Ano_SimplifiedNode_Info():
             nb_param += 1
             aparam = f"self.param_{nb_param}"
             dict_param_aparam[param_full_name] = aparam
-            dict_aparam_info[aparam] = variable_info.VariableInfo(param_value)
+            dict_aparam_info[aparam] = VariableInfo(param_value)
                 
         # =============================
         # === THIRD: build ano code ===
@@ -117,7 +117,7 @@ class Ano_SimplifiedNode_Info():
 
     # ============================
     @staticmethod
-    def make_charac_info(info : variable_info.VariableInfo):
+    def make_charac_info(info : VariableInfo):
         if info.variable_type is tuple or info.variable_type is list:
             return (
                 info.variable_type,

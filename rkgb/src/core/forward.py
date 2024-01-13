@@ -100,7 +100,7 @@ class ForwardGraph(base.Graph):
                     param_node.requires_grad = param_value.requires_grad
         self.parameter_nodes = dict_param_str_to_node.values()
         all_param_data_ptrs = VariableInfo.find_all_data_ptr_of_params(original_mod)
-        list_view_on_params_to_unplug = []
+        dict_view_on_params_to_unplug = dict()
         # -> to recognize views over parameters
 
         # Translate each node one by one following the topo-order
@@ -162,16 +162,23 @@ class ForwardGraph(base.Graph):
                         all_param_data_ptrs)
                     self.nodes.append(fn)
                 except ExceptionViewOverParameter as exception_object:
-                    assert len(fn.required_parameter_nodes)==1
-                    parent_param_node = fn.required_parameter_nodes.pop()
+                    if fn.required_parameter_nodes != set():
+                        parent_param_node = fn.required_parameter_nodes.pop()
+                        # TO IMPROVE: in case of torch.expand_as => several
+                        # or torch.add(param1,param2) => should merge the param_nodes
+                    else:
+                        for req_fn in fn.deps:
+                            if req_fn in dict_view_on_params_to_unplug:
+                                parent_param_node = dict_view_on_params_to_unplug[req_fn]
                     parent_param_node.view_targets.append(fn.target)
                     parent_param_node.view_code.append((fn.target,fn.code_ast))
-                    list_view_on_params_to_unplug.append((fn,parent_param_node))
+                    dict_view_on_params_to_unplug[fn] = parent_param_node
+                    # => we will properly unplug it after all nodes have been proceed
                     our_global[fn.target] = exception_object.view_value
                     # We can store it as it takes no memory (as a view over a param)
                 del tmp_local
 
-        self.unplug_view_over_parameters(list_view_on_params_to_unplug)
+        self.unplug_view_over_parameters(dict_view_on_params_to_unplug)
 
         self.fix_missing_edges_for_inplace_operations(dict_forward_nodes)
         # -> Might change self.output_targets (previously inherited)
@@ -336,10 +343,10 @@ class ForwardGraph(base.Graph):
                 "Thus there is nothing to do.")
             raise constants.ExceptionModuleDoesNotReqGrad
 
-    def unplug_view_over_parameters(self,list_view_on_params_to_unplug):
+    def unplug_view_over_parameters(self,dict_view_on_params_to_unplug):
         """ Unplug all views over parameters, 
         and replace them by ParameterNodes """
-        for view_param_fn,parent_param_node in list_view_on_params_to_unplug:
+        for view_param_fn,parent_param_node in dict_view_on_params_to_unplug.items():
             view_param_fn : ForwardNode
             parent_param_node : base.ParameterNode
             for user_fn in view_param_fn.users:
@@ -350,8 +357,8 @@ class ForwardGraph(base.Graph):
                     req_fn.users.add(user_fn)
                 # => to ensure correct topo-order
                 user_fn.required_parameter_nodes.add(parent_param_node)
-                parent_param_node.users.remove(view_param_fn)
                 parent_param_node.users.add(user_fn)
+            parent_param_node.users.remove(view_param_fn)
 
     def fix_missing_edges_for_inplace_operations(self,dict_forward_nodes):
         # example: a = f(x) ; b = inplace(a) ; c = g(a)
