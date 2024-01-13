@@ -422,6 +422,7 @@ class OpSchedule:
         self.time = np.zeros(L)
         self.save_mem = np.zeros(L)
         self.overhead = np.zeros(L)
+        self.interface_mem = np.zeros(L)
 
         def _sum_mem(alive_status_, ignore_list=[]):
             mem = 0
@@ -436,6 +437,7 @@ class OpSchedule:
 
         for i, (op, alive_status) in enumerate(zip(self.op_list, alive_list)):
             self.save_mem[i] = _sum_mem(alive_status, self.interface_names)
+            self.interface_mem[i] = _sum_mem(alive_status) - self.save_mem[i]
             if op.disabled:
                 continue
             if isinstance(op, ComputeOp):
@@ -770,8 +772,13 @@ class OpSchedule:
 
     @property
     def peak_mem(self):
+        return self.get_peak_mem()
+    
+    def get_peak_mem(self, with_interface=False):
+        if with_interface:
+            return max(self.save_mem + self.overhead+ self.interface_mem)
         return max(self.save_mem + self.overhead)
-
+    
     @property
     def simulation_overhead(self):
         all_compute = set(
