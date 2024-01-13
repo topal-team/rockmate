@@ -137,18 +137,18 @@ class ParameterNode(base.ParameterNode):
 # ***********
 
 class ForwardBackwardGraph(base.Graph):
-    input_data_node = None
-    list_output_data_nodes = None
+    input_data_anode = None
+    list_output_data_anodes = None
     loss_computation_node = None
-    list_output_grad_nodes = None
-    input_grad_node = None
+    list_output_grad_anodes = None
+    input_grad_anode = None
     # Note: We no longer have chain/list of K_graph,
     # as we fully moved to hierarchical structures,
     # hence the input_data/grad is simply the ad hoc
     # source node, so it could be removed, but it would
     # require to adapt quite a lot of lines in the compiler.
     # So make it easier for the moment I keep them.
-    # !Warning!: input_grad_node is None if 
+    # !Warning!: input_grad_anode is None if 
     # none of the inputs requires a gradient.
 
     def __init__(self,
@@ -196,10 +196,11 @@ class ForwardBackwardGraph(base.Graph):
                     do_inspection,
                     inspection_device,
                     dict_old_param_node_to_new_param_node)
-            self.make_special_loss_and_io_nodes()
+            self.make_special_loss_and_output_nodes()
             self.store_all_nodes()
             self.make_reciprocal_users_attributes()
             self.computation_nodes = self.get_sorted_nodes_by_following_deps_relation()
+            self.make_special_input_nodes()
             self.set_computation_node_numbers()
 
     # ======= MAIN LOOP ========
@@ -413,14 +414,14 @@ class ForwardBackwardGraph(base.Graph):
 
     # ===================================================
     # == Small methods to generate the last attributes ==
-    def make_special_loss_and_io_nodes(self,
+    def make_special_loss_and_output_nodes(self,
             simplified_graph : SimplifiedGraph):
         # Outputs:
-        self.list_output_data_nodes = [
+        self.list_output_data_anodes = [
             self.dict_data_anodes[output_sn.main_target]
             for output_sn in simplified_graph.output_nodes
         ]
-        self.list_output_grad_nodes = [
+        self.list_output_grad_anodes = [
             self.dict_grad_anodes[output_sn.main_target]
             for output_sn in simplified_graph.output_nodes
         ]
@@ -429,28 +430,52 @@ class ForwardBackwardGraph(base.Graph):
             main_target = "loss",
             is_fwd    = True,
             main_code = ("loss",ast_add_on.make_ast_constant("LOSS")),
-            deps_real = set(self.list_output_data_nodes),
+            deps_real = set(self.list_output_data_anodes),
             forwardbackward_graph = self
         )
         self.loss_computation_node = loss_cnode
         loss_cnode.time = 0
         loss_cnode.mem_overhead = 0
         self.dict_fwd_cnodes[loss_cnode.main_target] = loss_cnode
-        for output_grad_anode in self.list_output_grad_nodes:
+        for output_grad_anode in self.list_output_grad_anodes:
             output_grad_anode.deps.add(loss_cnode)
-        # Inputs:
-        self.input_data_node = ForwardBackwardAllocationNode(
+
+
+    def make_special_input_nodes(self,
+            simplified_graph : SimplifiedGraph):
+        # 1) Input Data Allocation Node
+        input_data_anode = ForwardBackwardAllocationNode(
             main_target = constants.init_target_string,
             allocation_type = "data",
             all_targets = simplified_graph.input_targets,
             forwardbackward_graph=self)
-        self.input_data_node.all_targets = simplified_graph.input_targets
+        input_data_anode.all_targets = simplified_graph.input_targets
+        self.input_data_anode = input_data_anode
+        self.dict_data_anodes[input_data_anode.main_target] = input_data_anode
+        self.dict_nodes[input_data_anode.name] = input_data_anode
+
+        # 2) Users of input_data_cnode
+        input_data_anode.users_real = set(
+            self.dict_fwd_cnodes[sn.main_target]
+            for sn in simplified_graph.init_node.users
+        ) # Not reciprocal !
+
         if simplified_graph.sources_req_grad:
-            self.input_grad_node = ForwardBackwardAllocationNode(
+            # 3) Input Grad Allocation Node
+            input_grad_anode = ForwardBackwardAllocationNode(
                 main_target = constants.init_target_string,
                 allocation_type = "grad",
                 all_targets = simplified_graph.input_targets,
                 forwardbackward_graph=self)
+            self.input_grad_anode = input_grad_anode
+            self.dict_grad_anodes[input_grad_anode.main_target] = input_grad_anode
+            self.dict_nodes[input_grad_anode.name] = input_grad_anode
+
+            # 4) Deps of input_grad_cnode
+            input_grad_anode.deps = set(
+                self.dict_bwd_cnodes[sn.main_target]
+                for sn in simplified_graph.init_node.users
+            ) # Not reciprocal !
 
     def store_all_nodes(self):
         cnodes = self.computation_nodes = (
