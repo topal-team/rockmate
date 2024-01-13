@@ -287,9 +287,13 @@ class InspectorDefault(Inspector):
     def func_fgt_fwd(self):
         for target in self.sn_to_proceed.tensor_targets:
             value = self.tmp_local[target]
+            value_data_ptr = value.data_ptr()
             value.data = torch.zeros(0,device=self.inspection_device)
-            if value._base is not None:
+            if (hasattr(value._base,"data_ptr") 
+            and value._base.data_ptr() == value_data_ptr):
                 value._base.data = torch.empty(0,device=self.inspection_device)
+        if "__11_" in self.sn_to_proceed.mt:
+            print("After :",self.tmp_local["__9_clone"].shape)
 
     # BACKWARD:
     def func_prepare_bwd(self):
