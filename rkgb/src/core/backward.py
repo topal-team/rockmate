@@ -26,6 +26,8 @@ class ForwardBackwardComputationNode(base.Node):
             deps_real = None,
             deps_fake = None,
             deps_through_artifacts=None,
+            required_parameter_nodes_real=None,
+            required_parameter_nodes_fake=None,
             forwardbackward_graph=None):
         super().__init__(main_target,
             parent_structure_with_id_generator=forwardbackward_graph)
@@ -54,6 +56,8 @@ class ForwardBackwardComputationNode(base.Node):
         else:
             self.deps_through_artifacts = set()
             # -> just for the toposort, we don't need the reciprocal attribute (users_..)
+        self.required_parameter_nodes_real = required_parameter_nodes_real or set()
+        self.required_parameter_nodes_fake = required_parameter_nodes_fake or set()
         # - inspection:
         self.time = None
         self.mem_overhead = None
@@ -180,6 +184,7 @@ class ForwardBackwardGraph(base.Graph):
             self.parameter_nodes = [
                 ParameterNode(node_to_clone=param_node)
                 for param_node in simplified_graph.parameter_nodes]
+            # Note: these are backward.ParameterNodes not base.ParameterNodes
             dict_old_param_node_to_new_param_node = dict(
                 zip(simplified_graph.parameter_nodes,self.parameter_nodes))
 
@@ -189,7 +194,8 @@ class ForwardBackwardGraph(base.Graph):
                     simplified_graph,
                     original_mod,
                     do_inspection,
-                    inspection_device)
+                    inspection_device,
+                    dict_old_param_node_to_new_param_node)
             self.make_special_loss_and_io_nodes()
             self.store_all_nodes()
             self.make_reciprocal_users_attributes()
@@ -202,7 +208,8 @@ class ForwardBackwardGraph(base.Graph):
             simplified_graph : SimplifiedGraph,
             original_mod : torch.nn.Module,
             do_inspection,
-            inspection_device):
+            inspection_device,
+            dict_old_param_node_to_new_param_node):
         # 0) Create the execution environment
         our_global = inspection.Inspector.generate_global_env(
             self,inspection_device)
@@ -222,6 +229,10 @@ class ForwardBackwardGraph(base.Graph):
             self.dict_data_anodes[req_target]
             for req_target in sn_deps_targets
         )
+        fwd_cnode_required_param_nodes = set(
+            dict_old_param_node_to_new_param_node[param_node]
+            for param_node in sn_to_proceed.required_parameter_nodes
+        )
         fwd_cnode = ForwardBackwardComputationNode(
             main_target           = sn_to_proceed.main_target,
             simplified_node       = sn_to_proceed,
@@ -236,7 +247,8 @@ class ForwardBackwardGraph(base.Graph):
             deps_through_artifacts = set(
                 self.dict_fwd_cnodes[req_sn.main_target]
                 for req_sn in sn_to_proceed.deps_through_artifacts
-            )
+            ),
+            required_parameter_nodes_real=fwd_cnode_required_param_nodes
         )
         self.dict_fwd_cnodes[sn_to_proceed.main_target] = fwd_cnode
 
