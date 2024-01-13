@@ -863,12 +863,18 @@ class SimplifiedGraph(base.Graph):
         if include_parameter_nodes:
             for param_node in self.parameter_nodes:
                 param_node : base.ParameterNode
+                if param_node.view_targets == []:
+                    render_label = param_node.param_str
+                elif only_function_name:
+                    render_label = "\n".join(
+                        [param_node.param_str]+[param_node.view_targets])
+                else:
+                    render_label = f"{param_node.param_str}\n{param_node.get_code()}"
                 dot.node(
                     param_node.param_str,
-                    param_node.param_str
-                    if param_node.view_targets == []
-                    else f"{param_node.param_str}\n{param_node.get_code()}",
+                    render_label,
                     style = "dashed")
+
         # 2) nodes and edges
         sn : SimplifiedNode
         for sn in self.nodes:
@@ -879,10 +885,11 @@ class SimplifiedGraph(base.Graph):
                 edge(req_sn,sn)
             if include_artifact_edges:
                 for req_sn in sn.deps_through_artifacts:
-                    edge(req_sn,sn,style="dashed")
+                    edge(req_sn,sn,style="dotted")
             if include_parameter_nodes:
                 for req_param in sn.required_parameter_nodes:
                     dot.edge(req_param.param_str,sn.target,style="dashed")
+
         # 3) init node
         if only_function_name: label = "INPUT"
         else: label = "INPUT\n"+self.init_node.get_code()
@@ -894,6 +901,7 @@ class SimplifiedGraph(base.Graph):
                 self.init_node.users.union(
                 self.init_node.users_through_artifacts)):
             edge(self.init_node,user_sn,style="dashed")
+
         # 4) output nodes
         output_node = self.output_nodes[0]
         dot.node("output",
@@ -908,6 +916,7 @@ class SimplifiedGraph(base.Graph):
             base.Graph._call_graphviz_to_render(
                 dot,view,directory,render_format
             )
+
 
     def render_sequentialized(self,
             name=None,

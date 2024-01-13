@@ -542,49 +542,77 @@ class ForwardBackwardGraph(base.Graph):
 
         # 1) Parameter nodes
         if include_parameter_nodes:
-            for param_node in self.parameter_nodes
+            for param_node in self.parameter_nodes:
+                param_node : ParameterNode
+                if param_node.view_targets == []:
+                    render_label = param_node.param_str
+                elif only_function_name:
+                    render_label = "\n".join(
+                        [param_node.param_str]+[param_node.view_targets])
+                else:
+                    render_label = f"{param_node.param_str}\n{param_node.get_code()}"
+                dot.node(
+                    param_node.param_str,
+                    render_label,
+                    color = ForwardBackwardGraph.get_render_color(param_node),
+                    style = "dashed")
+                
+        # 2) Nodes
+        for cnode in self.computation_nodes:
+            cnode : ForwardBackwardComputationNode
+            if cnode.main_target == "loss":
+                dot.node(cnode.name,"LOSS computation",color=color_special)
+            else:
+                if cnode.is_fwd:
+                    render_label = cnode.get_code()
+                else:
+                    render_label = f"backward of {cnode.main_target}"
+                dot.node(
+                    cnode.name,
+                    render_label,
+                    color = ForwardBackwardGraph.get_render_color(cnode),
+                    tooltip = (
+                        f"Time : {cnode.time}\n Memory Overhead : "\
+                        f"{measure.pretty_format_memory(cnode.mem_overhead)}")
+                )
+
+        for anode in self.allocation_nodes:
+            anode : ForwardBackwardAllocationNode
+            dot.node(
+                anode.name,
+                anode.name,
+                color = ForwardBackwardGraph.get_render_color(anode),
+                tooltip = "Memory : "+measure.pretty_format_memory(anode.mem)
+            )
+
+        # 3) edges
+        for cnode in self.computation_nodes:
+            for req_anode in cnode.deps_real:
+                dot.edge(req_anode.name,cnode.name,
+                    color=ForwardBackwardGraph.get_render_color(cnode))
+            for req_anode in cnode.deps_fake:
+                dot.edge(req_anode.name,cnode.name,
+                    color=ForwardBackwardGraph.get_render_color(cnode),
+                    style="dashed")
+
+            if include_artifact_edges:
+                for req_cnode in cnode.deps_through_artifacts:
+                    dot.edge(req_cnode.name,cnode.name,style="dotted")
+            if include_parameter_nodes:
+                for req_param in cnode.required_parameter_nodes_real:
+                    dot.edge(req_param.param_str,cnode.name)
+                for req_param in cnode.required_parameter_nodes_fake:
+                    dot.edge(req_param.param_str,cnode.name,style="dashed")
+
+        for anode in self.allocation_nodes:
+            for req_cnode in anode.deps:
+                dot.edge(req_cnode.name,anode.name,
+                    color=ForwardBackwardGraph.get_render_color(cnode))
+        
+        # 4) 
 
 
 # ==========================
-
-
-# ==========================
-# === printing functions ===
-# ==========================
-
-def aux_print_graph(dot,kg,uniq_num):
-    def uni(tar): return f"_{uniq_num}_{tar}"
-    def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
-    def edge(i1,i2,**kwargs): dot.edge(uni(i1),uni(i2),**kwargs)
-
-    # *** nodes ***
-    def print_kcn(kcn):
-        mt = kcn.main_target
-        if mt == "loss":
-            node(kcn.name,"LOSS KCN",color=color_special)
-        else:
-            lbl = kcn.get_code() if kcn.is_fwd else f"backward of {mt}"
-            node(kcn.name,lbl,color=get_color(kcn),tooltip = (
-                f"Time : {kcn.time}\n"\
-                f"Mem overhead : {measure.MemSize(kcn.mem_overhead)}"))
-    def print_kdn(kdn):
-        node(kdn.name,kdn.name,color=get_color(kdn),
-            tooltip = f"Mem {measure.MemSize(kdn.mem)}")
-
-    for kcn in kg.computation_nodes: print_kcn(kcn)
-    for kdn in kg.allocation_nodes: print_kdn(kdn)
-
-    # *** edges ***
-    for kcn in kg.computation_nodes:
-        for req_kdn in kcn.deps_real:
-            c = get_color(req_kdn)
-            edge(req_kdn.name,kcn.name,color=c)
-        for req_kdn in kcn.deps_fake:
-            c = get_color(req_kdn)
-            edge(req_kdn.name,kcn.name,color=c,style="dashed")
-    for kdn in kg.allocation_nodes:
-        for req_kcn in kdn.deps:
-            edge(req_kcn.name,kdn.name,color=get_color(req_kcn))
 
     # *** io - global relations *** # TO REMOVE = il n'y a plus de list de backward
     kwargs = {"color":color_special , "style":"dashed"}
