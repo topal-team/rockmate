@@ -331,6 +331,7 @@ class Graph(base.Graph):
                     forwardbackward_graph = self
                 )
                 self.dict_phantoms_anodes[sn_to_proceed.main_target] = phantoms_anode
+                bwd_cnode.deps_real.add(phantoms_anode)
                 fwd_cnode.has_phantoms = True
             else:
                 fwd_cnode.has_phantoms = False
