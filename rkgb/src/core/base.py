@@ -156,6 +156,12 @@ class Node():
                 force_special_kwargs=force_special_kwargs
             )
         else:
+            if not (hasattr(self,"main_code") 
+                    and hasattr(self,"inplace_code")
+                    and hasattr(self,"body_code")):
+                raise Exception(
+                    "Not standard `code` attribute(s), "\
+                    "should overwrite `Node.get_code()`")
             mc = self.main_code
             mc = [] if mc is None or mc[1] is None else [mc]
             bc = self.make_body_code_ast()
@@ -401,6 +407,10 @@ class Graph():
                 else:
                     d = degree[req_n]
                 degree[req_n] = d+1
+
+        debug = False
+        if hasattr(req_n,"deps_real"):
+            debug = True
 
         # Explore nodes by increasing lexicographic-order of their n.main_target
         # BUT a node is explored iff all its users are explored => toposort

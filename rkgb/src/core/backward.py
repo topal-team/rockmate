@@ -286,7 +286,7 @@ class ForwardBackwardGraph(base.Graph):
                 for req_target in bwd_real_dependencies
             )
             # - fake deps
-            bwd_cnode_deps_fake = fwd_cnode_deps
+            bwd_cnode_deps_fake = fwd_cnode_deps - bwd_cnode_deps_real
             # - phantoms
             if bool_bwd_requires_fwd_data:
                 bwd_cnode_deps_real.add(data_anode)
@@ -518,7 +518,7 @@ class ForwardBackwardGraph(base.Graph):
         for cnode in self.computation_nodes:
             if not cnode.is_fwd and len(cnode.users) == 0:
                 leaves_cnodes.append(cnode)
-        if len(leaves_cnodes):
+        if len(leaves_cnodes)<2:
             return False,leaves_cnodes[0]
         else:
             root_allonode = ForwardBackwardAllocationNode(
@@ -591,11 +591,10 @@ class ForwardBackwardGraph(base.Graph):
             if cnode.main_target == "loss":
                 dot.node(cnode.name,"LOSS computation",color=color_special)
             else:
-                if cnode.is_fwd:
-                    if only_function_name: render_label = 
+                if cnode.is_fwd and not only_function_name:
                     render_label = cnode.get_code()
                 else:
-                    render_label = f"backward of {cnode.main_target}"
+                    render_label = cnode.main_fct
                 dot.node(
                     cnode.name,
                     render_label,
