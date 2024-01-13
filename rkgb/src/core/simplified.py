@@ -701,12 +701,12 @@ class SimplifiedGraph(base.Graph):
         for sn in self.nodes:
             is_view = (sn.info.is_view
                 or sn.info.is_inplace
-                or sn.main_fct == "getattr") 
+                or sn.main_fct == "getitem") 
             if sn.deps == set() and is_view:
                 self.init_node.insert(sn,
                     strong=True,simplified_graph=self)
-            elif (sn not in self.output_nodes
-            and sn.main_fct != constants.constructor_function_string
+            elif (#sn not in self.output_nodes # TO REMOVE
+                sn.main_fct != constants.constructor_function_string
             and sn.deps != set()
             and is_view):
                 # Normally, all function in list_view_functions are 'is_view'
@@ -878,7 +878,7 @@ class SimplifiedGraph(base.Graph):
         # 2) nodes and edges
         sn : SimplifiedNode
         for sn in self.nodes:
-            if only_function_name: label = sn.main_fct
+            if only_function_name: label = f"{sn.mt} : {sn.main_fct}"
             else: label = sn.get_code()
             dot.node(sn.main_target,label)
             for req_sn in sn.deps:

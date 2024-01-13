@@ -2,30 +2,33 @@
 # ====== P structure =======
 # ==========================
 
-# ** Graph partitioning **
-
-from .utils import *
-from .Stools import S_graph, S_node, copy_S_graph
-from .Ktools import K_C_node, K_D_node
+import warnings
+import math
+import ast
+import torch
+from src.lowlevel import variable_info
+from src.core import base
+from src.core.simplified import SimplifiedGraph, SimplifiedNode
+from src.core.backward import ForwardBackwardComputationNode, ForwardBackwardAllocationNode
 
 
 # *************
 # * P_cluster *
 # *************
 
-class Ano_S_node_Info():
+class Ano_SimplifiedNode_Info():
     ano_id : int = None
     ano_str_code : str = None
     dict_tar_to_ano_nb : dict[str, int] = None
     dict_tar_to_ano_tar : dict[str, str] = None
     dict_cst_to_ano_cst : dict[str, str] = None
     dict_param_to_ano_param : dict[str, str] = None
-    dict_ano_tar_to_basic_info : dict[str, def_info.VariableInfo] = None
-    dict_ano_cst_to_basic_info : dict[str, def_info.VariableInfo] = None
-    dict_ano_param_to_basic_info : dict[str, def_info.VariableInfo] = None
+    dict_ano_tar_to_basic_info : dict[str, variable_info.VariableInfo] = None
+    dict_ano_cst_to_basic_info : dict[str, variable_info.VariableInfo] = None
+    dict_ano_param_to_basic_info : dict[str, variable_info.VariableInfo] = None
 
     # =====================================================================
-    def __init__(self,sn : S_node, sg : S_graph, original_mod : torch.nn.Module):
+    def __init__(self,sn : SimplifiedNode, sg : SimplifiedGraph, original_mod : torch.nn.Module):
         # DO: everything except self.ano_id and self.charac_string
         # -> Similar to Atools_for_S_and_K.Graph_translator.__init__
         # =============================
@@ -87,7 +90,7 @@ class Ano_S_node_Info():
             nb_cst += 1
             acst = f"_cst_{nb_cst}_ano"
             dict_cst_acst[cst_real_name] = acst
-            dict_acst_info[acst] = def_info.VariableInfo(value)
+            dict_acst_info[acst] = variable_info.VariableInfo(value)
 
         # Build ano params + info
         nb_param = 0
@@ -97,7 +100,7 @@ class Ano_S_node_Info():
             nb_param += 1
             aparam = f"self.param_{nb_param}"
             dict_param_aparam[param_full_name] = aparam
-            dict_aparam_info[aparam] = def_info.VariableInfo(param_value)
+            dict_aparam_info[aparam] = variable_info.VariableInfo(param_value)
                 
         # =============================
         # === THIRD: build ano code ===
@@ -114,11 +117,11 @@ class Ano_S_node_Info():
 
     # ============================
     @staticmethod
-    def make_charac_info(info : def_info.VariableInfo):
+    def make_charac_info(info : variable_info.VariableInfo):
         if info.variable_type is tuple or info.variable_type is list:
             return (
                 info.variable_type,
-                [Ano_S_node_Info.make_charac_info(sub) for sub in info.sub_info]
+                [Ano_SimplifiedNode_Info.make_charac_info(sub) for sub in info.sub_info]
             )
         else:
             return (
@@ -134,23 +137,23 @@ class Ano_S_node_Info():
     def make_charac_string(self):
         charac_list = [self.ano_code]
         for atar,info in self.dict_ano_tar_to_basic_info.items():
-            charac_list.append((atar,Ano_S_node_Info.make_charac_info(info)))
+            charac_list.append((atar,Ano_SimplifiedNode_Info.make_charac_info(info)))
         for acst,info in self.dict_ano_cst_to_basic_info.items():
-            charac_list.append((acst,Ano_S_node_Info.make_charac_info(info)))
+            charac_list.append((acst,Ano_SimplifiedNode_Info.make_charac_info(info)))
         for aparam,info in self.dict_ano_param_to_basic_info.items():
-            charac_list.append((aparam,Ano_S_node_Info.make_charac_info(info)))
+            charac_list.append((aparam,Ano_SimplifiedNode_Info.make_charac_info(info)))
         return str(charac_list)
     # ============================
 
 
 class Cluster_translator():
     dict_mt_to_ano_pair : dict[str, tuple[int,int]] = None
-    dict_sn_to_ano_pair : dict[S_node, tuple[int,int]] = None
-    dict_ano_pair_to_sn : dict[tuple[int,int], S_node] = None
-    dict_kcn_to_ano_triplet : dict[K_C_node, tuple[str,int,int]] = None
-    dict_kdn_to_ano_triplet : dict[K_D_node, tuple[str,int,int]] = None
-    dict_ano_triplet_to_kcn : dict[tuple[str,int,int], K_C_node] = None
-    dict_ano_triplet_to_kdn : dict[tuple[str,int,int], K_D_node] = None
+    dict_sn_to_ano_pair : dict[SimplifiedNode, tuple[int,int]] = None
+    dict_ano_pair_to_sn : dict[tuple[int,int], SimplifiedNode] = None
+    dict_kcn_to_ano_triplet : dict[ForwardBackwardComputationNode, tuple[str,int,int]] = None
+    dict_kdn_to_ano_triplet : dict[ForwardBackwardAllocationNode, tuple[str,int,int]] = None
+    dict_ano_triplet_to_kcn : dict[tuple[str,int,int], ForwardBackwardComputationNode] = None
+    dict_ano_triplet_to_kdn : dict[tuple[str,int,int], ForwardBackwardAllocationNode] = None
     dict_name_to_ano_triplet : dict = None
     dict_ano_triplet_to_name : dict = None
     def __init__(self):
@@ -330,7 +333,7 @@ class P_graph(base.Graph):
                 else:
                     pn.sub_cluster = sub_c
 
-    def recompute_edges(self,sg : S_graph):
+    def recompute_edges(self,sg : SimplifiedGraph):
         # NOT OPTIMAL AT ALL -> To improve if to slow
         # find edges_via_artifacts in P_graph
         # Moreover, recomputing edges is not necessary
@@ -515,7 +518,7 @@ class P_cluster():
                         dict_outputs_sent[sn.mt].update(used_targets)
 
         # == check for interfaces between sg.init_node and the cluster ==
-        sg : S_graph = self.p_structure.sg
+        sg : SimplifiedGraph = self.p_structure.sg
         ino = sg.init_node
         for user_sn,used_targets in ino.users.items():
             if user_sn in self.s_nodes:
@@ -611,7 +614,7 @@ class P_cluster():
         dict_outputs_sent = self.dict_output_mt_to_outputs_sent
         charac_list = []
         for sn in self.s_nodes:
-            ano_info : Ano_S_node_Info = dict_mt_to_ano_info[sn.mt]
+            ano_info : Ano_SimplifiedNode_Info = dict_mt_to_ano_info[sn.mt]
             charac_edges = []
             sn_deps = list(sn.deps.items())
             sn_deps.sort(key = lambda c : dict_mt_to_ano_info[c[0].mt].ano_id)
@@ -699,17 +702,17 @@ class P_cluster():
 
 class P_structure():
     main_cluster : P_cluster = None
-    sg : S_graph = None
+    sg : SimplifiedGraph = None
     dict_info : dict = None
     dict_tar_to_ano_tar_id : dict[str, int] = None
-    dict_mt_to_ano_sn_info : dict[str, Ano_S_node_Info] = None
+    dict_mt_to_ano_sn_info : dict[str, Ano_SimplifiedNode_Info] = None
     dict_cluster_charac_string_to_cluster : dict[str, P_cluster] = None
     dict_cluster_ano_charac_string_to_ano_cluster_id : dict[str,int] = None
     dict_ano_cluster_id_to_representee_cluster : dict[int,P_cluster] = None
     nb_clusters : int = None
     nb_unique_clusters : int = None
     min_size_to_trigger_partitioning : int = None
-    def __init__(self,sg : S_graph, min_size_to_trigger_partitioning = 4):
+    def __init__(self,sg : SimplifiedGraph, min_size_to_trigger_partitioning = 4):
         self.sg = sg
         self.dict_info = sg.dict_info
         self.nb_clusters = 0
@@ -719,7 +722,7 @@ class P_structure():
         self.dict_cluster_charac_string_to_cluster = dict()
         self.dict_cluster_ano_charac_string_to_ano_cluster_id = dict()
         self.dict_ano_cluster_id_to_representee_cluster = dict()
-        self.node_unique_id_generator = Node_unique_id_generator()
+        self.node_unique_id_generator = base.Node_unique_id_generator()
         self.min_size_to_trigger_partitioning = min_size_to_trigger_partitioning 
 
     # ==========================================================
@@ -732,7 +735,7 @@ class P_structure():
         dict_charac_info_to_ano_id = dict()
         nb_unique_sns = 0
         for sn in [self.sg.init_node] + self.sg.nodes:
-            ano_sn_info = Ano_S_node_Info(sn,self.sg,original_mod)
+            ano_sn_info = Ano_SimplifiedNode_Info(sn,self.sg,original_mod)
             sn_charac_string = ano_sn_info.make_charac_string()
             if sn_charac_string in dict_sn_charac_string_to_ano_id:
                 ano_sn_info.ano_id \
@@ -746,7 +749,7 @@ class P_structure():
 
         nb_unique_tar = 0
         for tar,info in self.sg.dict_info.items():
-            charac_info = str(Ano_S_node_Info.make_charac_info(info))
+            charac_info = str(Ano_SimplifiedNode_Info.make_charac_info(info))
             if charac_info in dict_charac_info_to_ano_id:
                 dict_tar_to_ano_tar_id[tar] \
                     = dict_charac_info_to_ano_id[charac_info]
@@ -971,7 +974,7 @@ class P_Dynamic_manipulation(): # only contains staticmethod
             else:
                 if pn.sn is None:
                     raise Exception(
-                        f"P_node which is_leaf should have a self.sn : S_node "\
+                        f"P_node which is_leaf should have a self.sn : SimplifiedNode "\
                         f"(except special nodes, but there shouldn't be any "\
                         f"special node here). Here : pn.name : {pn.name}."
                     )
@@ -1262,7 +1265,7 @@ class Partitioner_OLD_bottom_to_top(Partitioner):
         if all_snodes != set(cluster.s_nodes):
             raise Exception(
                 f"BUG in {self.__class__}. When collecting all the "\
-                f"S_nodes at the end, we don't find cluster.s_nodes. We probably "\
+                f"SimplifiedNodes at the end, we don't find cluster.s_nodes. We probably "\
                 f"lost some nodes...\n Original nb of nodes : {len(cluster.s_nodes)}; "\
                 f"Nb of nodes at the end : {len(all_snodes)}"
             )
@@ -1672,7 +1675,7 @@ class Partitioner_bottom_to_top(Partitioner):
         if all_snodes != set(cluster.s_nodes):
             raise Exception(
                 f"BUG in {self.__class__}. When collecting all the "\
-                f"S_nodes at the end, we don't find cluster.s_nodes. We probably "\
+                f"SimplifiedNodes at the end, we don't find cluster.s_nodes. We probably "\
                 f"lost some nodes...\n Original nb of nodes : {len(cluster.s_nodes)}; "\
                 f"Nb of nodes at the end : {len(all_snodes)}"
             )
@@ -1708,7 +1711,7 @@ class Partitioner_seq(Partitioner):
                 first_pn.deps.add(tmp_global_source_pn)
                 tmp_global_source_pn.users.add(first_pn)
 
-        seps_pn = RK_get_1_separators(pg)
+        seps_pn = pg.find_cutting_points()
 
         # -> remove tmp_source
         for first_pn in first_nodes:
@@ -1753,7 +1756,7 @@ class Partitioner_seq(Partitioner):
 
 
 def S_to_P(
-    sg : S_graph,
+    sg : SimplifiedGraph,
     original_mod : torch.nn.Module,
     partitioners = [
         Partitioner(),
@@ -1762,7 +1765,7 @@ def S_to_P(
         Partitioner_seq()
     ],
     min_size_to_trigger_partitioning = 4):
-    sg = copy_S_graph(sg)
+    # sg = copy_SimplifiedGraph(sg)
     sg.discard_all_artifacts()
     p_structure = P_structure(sg,
         min_size_to_trigger_partitioning = min_size_to_trigger_partitioning)
@@ -1806,12 +1809,6 @@ def aux_print_P_cluster_names(pc : P_cluster,name=None):
 
 def print_P_graph(pg : P_graph,name=None,open=True,render_format="svg",dot=None,uniq_num=0):
     # ----- init -----
-    if dot is None:
-        render = True
-        if name is None: name = aux_print_P_graph_name(pg)
-        dot = graphviz.Digraph(name,comment=name)
-    else:
-        render = False
     def uni(tar): return f"_{uniq_num}_{tar}"
     def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
     def edge(i1,i2,**kwargs): dot.edge(uni(i1),uni(i2), **kwargs)
@@ -1847,5 +1844,3 @@ def print_P_graph(pg : P_graph,name=None,open=True,render_format="svg",dot=None,
     for pn in pg.output_nodes:
         edge(pn.name,"outputs",**kwargs)
     # ----- render -----
-    if render:
-        small_fcts.graph_render(dot,open,"P",render_format)

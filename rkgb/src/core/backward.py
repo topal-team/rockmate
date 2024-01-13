@@ -576,7 +576,7 @@ class ForwardBackwardGraph(base.Graph):
                     render_label = param_node.param_str
                 elif only_function_name:
                     render_label = "\n".join(
-                        [param_node.param_str]+[param_node.view_targets])
+                        [param_node.param_str]+param_node.view_targets)
                 else:
                     render_label = f"{param_node.param_str}\n{param_node.get_code()}"
                 dot.node(
@@ -591,8 +591,11 @@ class ForwardBackwardGraph(base.Graph):
             if cnode.main_target == "loss":
                 dot.node(cnode.name,"LOSS computation",color=color_special)
             else:
-                if cnode.is_fwd and not only_function_name:
-                    render_label = cnode.get_code()
+                if cnode.is_fwd:
+                    if only_function_name:
+                        render_label = f"{cnode.mt} : {cnode.main_fct}"
+                    else:
+                        render_label = cnode.get_code()
                 else:
                     render_label = cnode.main_fct
                 dot.node(
