@@ -6,6 +6,7 @@ import warnings
 import math
 import ast
 import torch
+from src.utils.utils import Counter
 from src.lowlevel.variable_info import VariableInfo
 from src.core import base
 from src.core.simplified import SimplifiedGraph, SimplifiedNode
@@ -201,24 +202,22 @@ class PartitionedNode(base.Node):
                 "temporary, during the partitioning."
             )
         if sub_cluster is not None:
-            self.name = sub_cluster.name
+            self.name = "PNode: "+sub_cluster.name
             self.is_leaf = False
         elif sub_graph is not None:
-            self.sub_graph_id = sid = sub_graph.graph_id
-            self.name        = f"sub_graph_{sid}"
-            self.is_leaf     = False
+            self.name = "PNode: "+sub_graph.name
+            self.is_leaf = False
             self.is_protected_from_unwrap = False
         else:
-            self.sub_graph_id = None
-            self.name        = f"Var_{main_target}"
-            self.is_leaf     = True
+            self.name = f"Var_{main_target}"
+            self.is_leaf = True
             self.is_protected_from_unwrap = True
 
         self.deps         = set()
         self.users        = set()
         self.deps_global  = set() # FOR DYNAMIC PARTITIONING
         self.users_global = set() # FOR DYNAMIC PARTITIONING
-        # Global edges contain ALL the deps/users, of any depth
+        # Global edges contain ALL deps/users, of any depth
 
     def get_all_standard_deps(self):
         return self.deps
@@ -244,24 +243,26 @@ class PartitionedNode(base.Node):
 
 
 class PartitionedGraph(base.Graph):
-    name : str = None
-    pn_wrapping_it : PartitionedNode = None # -> pn representing self in an upper graph
+    pn_wrapping_it : PartitionedNode = None
+    # -> pn representing self in an upper graph
     _first_nodes : list[PartitionedNode] = None
-    cluster = None # just for debug + printing
+    # -> in case we precise what are the first_nodes manually
+    # otherwise, they are computed by @property self.first_nodes
+    cluster = None # useful for debugging + printing
     without_artifacts = False
-    def __init__(self,graph_id,p_structure=None,other_pg=None,dict_info=None):
-        if p_structure is None and other_pg is None and dict_info is None:
-            raise Exception(
-                "PartitionedGraph.__init__ needs a dict_info, you can give it "\
-                "a p_structure or an other_pg (since they both have a dict_info)."
-            )
-        other_obj = p_structure if other_pg is None else other_pg
-        super().__init__(other_obj)
-        self.dict_info = other_obj.dict_info if dict_info is None else dict_info
+    def __init__(self,
+            parent_objet = None,
+            is_main_graph = False):
+        super().__init__(parent_objet)
+        self.is_main_graph = is_main_graph
         self.output_nodes = set()
-        # Note: self.nodes contains only the nodes of self
-        self.graph_id = graph_id
-        self.next_sub_graph_id = 1 # for new sub_graphs' id
+        if hasattr(parent_objet,"counter_nb_graphs"):
+            counter : Counter = parent_objet.counter_nb_graphs
+            graph_nb = counter.count()
+            self.counter_nb_graphs = counter
+        else:
+            graph_nb = -1
+        self.name = f"PartitionedGraph {graph_nb}"
 
     @property
     def size(self):
@@ -299,9 +300,6 @@ class PartitionedGraph(base.Graph):
             for inp_pn in input_nodes:
                 first_nodes.update(spn.intersection(inp_pn.users_global))
             return first_nodes
-    @property
-    def is_main_graph(self):
-        return bool(self.graph_id == "0")
 
     def all_p_nodes_inside(self): # FOR DYNAMIC PARTITIONING
         all_p = set(self.nodes)
@@ -309,18 +307,6 @@ class PartitionedGraph(base.Graph):
             if pn.sub_graph is not None:
                 all_p.update(pn.sub_graph.all_p_nodes_inside())
         return all_p
-
-    def make_sub_graph_id(self,new_graph_id):
-        self.graph_id = new_graph_id
-        next_id = 1
-        for pn in self.nodes:
-            if not pn.is_leaf:
-                new_sg_id = f"{new_graph_id}_{next_id}"
-                next_id  += 1
-                pn.sub_graph.make_sub_graph_id(new_sg_id)
-                pn.sub_graph_id = new_sg_id
-                pn.name        = f"sub_graph_{new_sg_id}"
-        self.next_sub_graph_id = next_id
 
     def set_all_protected_to_false(self):
         for pn in self.nodes:
@@ -420,7 +406,7 @@ class PartitionedCluster():
     dict_output_mt_to_outputs_sent = None
 
     def __init__(self,group_s_nodes,p_structure):
-        self.p_structure = p_structure
+        self.p_structure : PartitionedStructure = p_structure
         sg = p_structure.sg
         # == get the toposort for s_nodes ==
         # group_s_nodes is an unordered iterable
@@ -433,9 +419,7 @@ class PartitionedCluster():
             self.original_cluster = ps_dict_charac_to_cluster[charac_string]
             self.name = self.original_cluster.name
         else:
-            cluster_nb \
-                = self.p_structure.nb_clusters \
-                = self.p_structure.nb_clusters +1
+            cluster_nb = self.p_structure.counter_nb_clusters.count()
             self.original_cluster \
                 = ps_dict_charac_to_cluster[charac_string] \
                 = self
@@ -451,7 +435,7 @@ class PartitionedCluster():
     # ======================
     def init_PartitionedGraph(self):
         assert(self.original_cluster is self)
-        pg = PartitionedGraph("0",self.p_structure)
+        pg = PartitionedGraph(parent_objet=self.p_structure)
         pg.cluster = self
         pg.nodes = p_nodes = []
         dict_info = self.p_structure.dict_info
@@ -664,8 +648,7 @@ class PartitionedCluster():
             self.ano_cluster_id \
                 = ano_id \
                 = dict_cluster_to_ano_id[charac_string] \
-                = self.p_structure.nb_unique_clusters \
-                = self.p_structure.nb_unique_clusters + 1
+                = self.p_structure.counter_nb_unique_clusters.count()
             self.representee_cluster \
                 = self.p_structure.dict_ano_cluster_id_to_representee_cluster[ano_id] \
                 = self
@@ -714,14 +697,13 @@ class PartitionedStructure():
     dict_cluster_charac_string_to_cluster : dict[str, PartitionedCluster] = None
     dict_cluster_ano_charac_string_to_ano_cluster_id : dict[str,int] = None
     dict_ano_cluster_id_to_representee_cluster : dict[int,PartitionedCluster] = None
-    nb_clusters : int = None
-    nb_unique_clusters : int = None
     min_size_to_trigger_partitioning : int = None
     def __init__(self,sg : SimplifiedGraph, min_size_to_trigger_partitioning = 4):
         self.sg = sg
         self.dict_info = sg.dict_info
-        self.nb_clusters = 0
-        self.nb_unique_clusters = 0
+        self.counter_nb_graphs = Counter()
+        self.counter_nb_clusters = Counter()
+        self.counter_nb_unique_clusters = Counter
         self.dict_tar_to_ano_tar_id = dict()
         self.dict_mt_to_ano_sn_info = dict()
         self.dict_cluster_charac_string_to_cluster = dict()
@@ -780,7 +762,7 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
     def prepare_dynamic_setup(pg : PartitionedGraph,cluster : PartitionedCluster):
         first_nodes = pg._first_nodes
         pg._first_nodes = None
-        last_wrapping_graph = PartitionedGraph("-1",cluster.p_structure)
+        last_wrapping_graph = PartitionedGraph(parent_objet=cluster.p_structure)
         main_pn = PartitionedNode(
             last_wrapping_graph,
             sub_graph=pg
@@ -820,12 +802,7 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
     # into a new node 'new_pn', adding one level of depth.
     @staticmethod
     def wrap(group : list,main_pg : PartitionedGraph):
-        group_nb = main_pg.next_sub_graph_id
-        main_pg.next_sub_graph_id += 1
-        new_pg = PartitionedGraph(
-            graph_id=f"{main_pg.graph_id}_{group_nb}",
-            other_pg=main_pg
-        )
+        new_pg = PartitionedGraph(parent_objet=main_pg)
         new_pg.nodes = group
         new_pn = PartitionedNode(
             main_graph = main_pg,
@@ -947,7 +924,6 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
         original_lpn = new_pg.nodes
         for sub_pn in original_lpn:
             PartitionedDynamicManipulation.unwrap(sub_pn)
-        main_pg.make_sub_graph_id(main_pg.graph_id)
         return new_pn
     
     # **********
@@ -1304,9 +1280,8 @@ class PartitionerBottomToTop(Partitioner):
         )
 
         _all_options = list(all_options)
-        dict_info = pg.dict_info
         for opt in _all_options:
-            if all(not pn.does_requires_grad(dict_info)
+            if all(not pn.does_requires_grad()
                    for pn in opt.group):
                 all_options.remove(opt)
             elif all(pn.deps_global.issubset(opt.set_group)
@@ -1373,7 +1348,6 @@ class PartitionerBottomToTop(Partitioner):
             previous_size = len(pg.nodes)
             self.round_of_partitioning(pg)
         pg.set_all_protected_to_false()
-        pg.make_sub_graph_id("0")
 
         if len(pg.nodes) == previous_size: 
             warnings.warn(

@@ -4,9 +4,14 @@
 import inspect
 from torch import Tensor
 
-# -> to raise exceptions with lambda functions
-def raise_(s):
-    raise Exception(s)
+class Counter():
+    def __init__(self):
+        self.c = 0
+    def count(self):
+        self.c += 1
+        return self.c
+    def value(self):
+        return self.c
 
 # -> to get all the attrs except special ones
 def all_non_private_attributes(c):
