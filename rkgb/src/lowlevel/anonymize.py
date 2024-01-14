@@ -9,23 +9,24 @@ from src.core.simplified import SimplifiedGraph, SimplifiedNode
 from src.core.backward import ComputationNode, AllocationNode
 
 
-class Ano_SimplifiedNode_Info():
-    ano_id : int = None
+class SimplifiedNodeAnonymizedInfo():
+    ano_id : int = None # will be set at higher level
     ano_str_code : str = None
     dict_tar_to_ano_nb : dict[str, int] = None
     dict_tar_to_ano_tar : dict[str, str] = None
-    dict_cst_to_ano_cst : dict[str, str] = None
-    dict_param_to_ano_param : dict[str, str] = None
-    dict_ano_tar_to_basic_info : dict[str, VariableInfo] = None
-    dict_ano_cst_to_basic_info : dict[str, VariableInfo] = None
-    dict_ano_param_to_basic_info : dict[str, VariableInfo] = None
+    dict_cst_name_to_ano_name : dict[str, str] = None
+    dict_param_name_to_ano_name : dict[str, str] = None
+    dict_ano_tar_to_variable_info : dict[str, VariableInfo] = None
+    dict_ano_cst_to_variable_info : dict[str, VariableInfo] = None
+    dict_ano_param_to_variable_info : dict[str, VariableInfo] = None
 
     # =====================================================================
-    def __init__(self,sn : SimplifiedNode, sg : SimplifiedGraph, original_mod : torch.nn.Module):
-        # DO: everything except self.ano_id and self.charac_string
-        # -> Similar to Atools_for_S_and_K.Graph_translator.__init__
-        # =============================
-        # === FIRST : read the code ===
+    def __init__(self,
+            sn_to_proceed : SimplifiedNode, 
+            simplified_graph : SimplifiedGraph, 
+            original_mod : torch.nn.Module):
+        # = FIRST : read the code and collect all    =
+        # = the variables/constants/params mentioned =
         all_real_vars   = []
         all_real_cst    = []
         all_real_params = []
@@ -53,54 +54,56 @@ class Ano_SimplifiedNode_Info():
             elif hasattr(a,"__iter__"):
                 for sub_a in a: search_through(sub_a)
 
-        search_through(sn.get_code_ast())
+        search_through(sn_to_proceed.get_code_ast())
 
-        # ===============================================
-        # === SECOND : build anonymized tgt/cst/param ===
-        self.dict_tar_to_ano_nb = dict_tar_anb = dict()
-        self.dict_tar_to_ano_tar = dict_tar_atar = dict()
-        self.dict_cst_to_ano_cst = dict_cst_acst = dict()
-        self.dict_param_to_ano_param = dict_param_aparam = dict()
-        self.dict_ano_tar_to_basic_info = dict_atar_info = dict()
-        self.dict_ano_cst_to_basic_info = dict_acst_info = dict()
-        self.dict_ano_param_to_basic_info = dict_aparam_info = dict()
-        # Build ano targets + info
+        # = SECOND : associate a number to 
+        # = each variables/constants/params  
+        # => anonymized name ~ f"__{ano_nb}_ano"
+        self.dict_tar_to_ano_nb = dict()
+        self.dict_tar_to_ano_tar = dict()
+        self.dict_cst_name_to_ano_name = dict()
+        self.dict_param_name_to_ano_name = dict()
+        self.dict_ano_tar_to_variable_info = dict()
+        self.dict_ano_cst_to_variable_info = dict()
+        self.dict_ano_param_to_variable_info = dict()
+        # Associate numbers to *variables*
         all_real_vars = sorted(all_real_vars,key = base.Node.get_num_tar)
         nb_var = 0
         for real_name in all_real_vars:
             nb_var += 1
-            atar = f"__{nb_var}_ano"
-            dict_tar_atar[real_name] = atar
-            dict_tar_anb[real_name] = nb_var
-            dict_atar_info[atar] = sg.dict_info[real_name]
+            anonymized_name = f"__{nb_var}_ano"
+            self.dict_tar_to_ano_tar[real_name] = anonymized_name
+            self.dict_tar_to_ano_nb [real_name] = nb_var
+            self.dict_ano_tar_to_variable_info[anonymized_name] \
+                = simplified_graph.dict_info[real_name]
             # -> We will keep only basic attributes of VariableInfo
 
-        # Build ano constants + info
+        # Associate numbers to *constants*
         all_real_cst = sorted(all_real_cst,key = base.Node.get_num_cst)
         nb_cst = 0
         for cst_real_name in all_real_cst:
-            value = sg.dict_constants[cst_real_name]
+            value = simplified_graph.dict_constants[cst_real_name]
             nb_cst += 1
             acst = f"_cst_{nb_cst}_ano"
-            dict_cst_acst[cst_real_name] = acst
-            dict_acst_info[acst] = VariableInfo(value)
+            self.dict_cst_name_to_ano_name[cst_real_name] = acst
+            self.dict_ano_cst_to_variable_info[acst] = VariableInfo(value)
 
-        # Build ano params + info
+        # Associate numbers to *constants*
         nb_param = 0
         for param_full_name in all_real_params: # strings
             # -> e.g. param_full_name = "self.layer1.weight"
             param_value = eval(param_full_name,{"self":original_mod},{})
             nb_param += 1
             aparam = f"self.param_{nb_param}"
-            dict_param_aparam[param_full_name] = aparam
-            dict_aparam_info[aparam] = VariableInfo(param_value)
+            self.dict_param_name_to_ano_name[param_full_name] = aparam
+            self.dict_ano_param_to_variable_info[aparam] = VariableInfo(param_value)
                 
         # =============================
         # === THIRD: build ano code ===
-        str_code = sn.get_code()
-        for tar,atar in dict_tar_atar.items():
+        code_to_proceed = sn.get_code()
+        for tar,atar in self.dict_tar_to_ano_tar.items():
             str_code = str_code.replace(tar,atar)
-        for cst,acst in dict_cst_acst.items():
+        for cst,acst in self.dict_cst_name_to_ano_name.items():
             str_code = str_code.replace(cst,acst)
         for param,aparam in dict_param_aparam.items():
             str_code = str_code.replace(param,aparam)
@@ -114,7 +117,7 @@ class Ano_SimplifiedNode_Info():
         if info.variable_type is tuple or info.variable_type is list:
             return (
                 info.variable_type,
-                [Ano_SimplifiedNode_Info.make_charac_info(sub) for sub in info.sub_info]
+                [SimplifiedNodeAnonymizedInfo.make_charac_info(sub) for sub in info.sub_info]
             )
         else:
             return (
@@ -129,14 +132,26 @@ class Ano_SimplifiedNode_Info():
     # ============================
     def make_charac_string(self):
         charac_list = [self.ano_code]
-        for atar,info in self.dict_ano_tar_to_basic_info.items():
-            charac_list.append((atar,Ano_SimplifiedNode_Info.make_charac_info(info)))
-        for acst,info in self.dict_ano_cst_to_basic_info.items():
-            charac_list.append((acst,Ano_SimplifiedNode_Info.make_charac_info(info)))
-        for aparam,info in self.dict_ano_param_to_basic_info.items():
-            charac_list.append((aparam,Ano_SimplifiedNode_Info.make_charac_info(info)))
+        for atar,info in self.dict_ano_tar_to_variable_info.items():
+            charac_list.append((atar,SimplifiedNodeAnonymizedInfo.make_charac_info(info)))
+        for acst,info in self.dict_ano_cst_to_variable_info.items():
+            charac_list.append((acst,SimplifiedNodeAnonymizedInfo.make_charac_info(info)))
+        for aparam,info in self.dict_ano_param_to_variable_info.items():
+            charac_list.append((aparam,SimplifiedNodeAnonymizedInfo.make_charac_info(info)))
         return str(charac_list)
     # ============================
+
+
+def build_anonymized_nodes_equivalence_classes(
+        simplified_graph : SimplifiedGraph):
+    """
+    Return:
+        dict_target_to_anonymized_target_id
+        dict_main_target_to_anonymized_node_id
+    """
+    dict_target_to_anonymized_target_id = dict()
+    dict_main_target_to_anonymized_node_id = dict()
+
 
 
 class ClusterTranslator():
