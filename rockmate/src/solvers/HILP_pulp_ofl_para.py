@@ -503,28 +503,13 @@ class ModelPULP:
                 lowBound=0,
                 upBound=1,
             )  # w.grad is alive at the start of step j.
-            if self.grad_mode in ["free"]:
-                for (t,k,w) in self.AliveG:
-                    grad_size = self.parameter_gradient_size[w]
-                    if len(self.param2sub_c[w]) == 1:
-                        self.AliveG[(t,k,w)] = 0
-                        if k == max(self.param2hcn[w]):
-                            self.overhead[k] = [v+grad_size for v in self.overhead[k]]
-                    else:#shared weight
-                        bwd_first = min(x for x in self.param2hcn[w] if x>self.loss_idx)
-                        bwd_last = max(self.param2hcn[w])
-                        if t<bwd_first or t>bwd_last:#assume single bwd
-                            self.AliveG[(t,k,w)] = 0
-                        else:
-                            self.AliveG[(t,k,w)] = 1
-                            if k in self.param2hcn[w] and k>bwd_first:
-                                self.overhead[k] = [v+grad_size for v in self.overhead[k]]
-            elif self.grad_mode in ["accumulate"]:
-                for (t,k,w) in self.AliveG:
-                    self.AliveG[(t,k,w)] = 1
-                    if k == max(self.param2hcn[w]):
-                        self.overhead[k] = [v+grad_size for v in self.overhead[k]]
-                    # TODO: add offload gradient variables for gradient accumulation
+            self.AliveO = RkLpVariable.dicts(
+                "AliveO",
+                [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
+                cat="Continuous",
+                lowBound=0,
+                upBound=1,
+            )  # w.grad is alive at the start of step j.
 
                 # for k, l_w in self.hcn2param.items():
                 #     grad_size = sum(self.parameter_gradient_size[w] for w in l_w)
@@ -560,18 +545,8 @@ class ModelPULP:
                 lowBound=0,
                 upBound=1,
             )
-            for t in range(T):
-                for k in range(T):
-                    for w in range(W):
-                        if k not in self.krange(t):
-                            self.PrfW[t, k, w] = 0
-                            self.OflW[t, k, w] = 0
-                        
-                        # fwd_i, bwd_i = self.param2hcn[w]
-                        fwd_i = min(self.param2hcn[w])
-                        bwd_i = max(self.param2hcn[w])
-                        if k not in self.krange(t) or (t>fwd_i and t<bwd_i):
-                            self.OptC[t, k, w] = 0
+            self.prefill()
+
             self.bandwidthOfl = cpu_optimize_kwargs["bandwidth"]#6 * 1024**2  # byte/ms
             self.bandwidthPrf = cpu_optimize_kwargs["bandwidth"]#6 * 1024**2  # byte/ms
 
@@ -1010,8 +985,7 @@ class ModelPULP:
             for w in range(self.W)
         )
         # if self.cpu_optimize:
-        self.optimizer_states_mem = lpSum(((1-self.sumOptC[w]- 
-                                            self.param_multiplier)*
+        self.optimizer_states_mem = lpSum((self.AliveO[t, k, w]*
                     self.parameter_gradient_size[w] *
                     self.optimizer_states_size)
                     for w in range(self.W))
@@ -1063,15 +1037,60 @@ class ModelPULP:
         for k in range(self.loss_idx):  # only fwd before loss
             self.md += lpSum(self.sumComp[t, k] for t in range(self.T)) == 1
 
-    def add_parameter_constraints(self):
-        self.OflWProg = dict()
-        self.OptCProg = dict()
-        self.UpdWProg = dict()
-        self.PrfWProg = dict()
+    def prefill(self):
+        for t in range(self.T):
+            for k in range(self.T):
+                for w in range(self.W):
+                    if k not in self.krange(t):
+                        self.PrfW[t, k, w] = 0
+                        self.OflW[t, k, w] = 0
+                    
+                    # fwd_i, bwd_i = self.param2hcn[w]
+                    fwd_i = min(self.param2hcn[w])
+                    bwd_i = max(self.param2hcn[w])
+                    if k not in self.krange(t) or (t>fwd_i and t<bwd_i):
+                        self.OptC[t, k, w] = 0
+
         self.sumOptC = dict()
         for w in self.param2hcn:
             self.sumOptC[w] = lpSum(self.OptC[t,k,w] for t in range(self.T) for k in self.krange(t))
 
+        for (t,k,w) in self.AliveO:
+            self.AliveO[(t,k,w)] = (1-self.sumOptC[w]- self.param_multiplier)
+        if self.grad_mode in ["free"]:
+            for (t,k,w) in self.AliveG:
+                grad_size = self.parameter_gradient_size[w]
+                if len(self.param2sub_c[w]) == 1:
+                    self.AliveG[(t,k,w)] = 0
+                    if k == max(self.param2hcn[w]):
+                        self.overhead[k] = [v+grad_size for v in self.overhead[k]]
+                else:#shared weight
+                    bwd_first = min(x for x in self.param2hcn[w] if x>self.loss_idx)
+                    bwd_last = max(self.param2hcn[w])
+                    if t<bwd_first or t>bwd_last:#assume single bwd
+                        self.AliveG[(t,k,w)] = 0
+                    else:
+                        self.AliveG[(t,k,w)] = 1
+                        if k in self.param2hcn[w] and k>bwd_first:
+                            self.overhead[k] = [v+grad_size for v in self.overhead[k]]
+        elif self.grad_mode in ["accumulate"]:
+            for (t,k,w) in self.AliveG:
+                self.AliveG[(t,k,w)] = 1
+                if k == max(self.param2hcn[w]):
+                    self.overhead[k] = [v+grad_size for v in self.overhead[k]]
+                # TODO: add offload gradient variables for gradient accumulation
+
+
+    def add_parameter_constraints(self, 
+                                  with_grad=False,
+                                  with_optimizer_stats=False):
+        # if with_grad, AliveG is a variable
+        # if with_optimizer_states, AliveO is a variable
+        self.OflWProg = dict()
+        self.OptCProg = dict()
+        self.UpdWProg = dict()
+        self.PrfWProg = dict()
+        
         def get_progress(op, t, k, w):
             bwd_i = max(self.param2hcn[w])
             if bwd_i < t:  # after bwd of w
