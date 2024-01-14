@@ -181,31 +181,36 @@ class PartitionedNode(base.Node):
             sub_cluster = None,
             main_target = None,
             sub_graph   = None, # FOR DYNAMIC PARTITIONING
-            sn          = None):
+            simplified_node = None):
+        sub_cluster : PartitionedCluster
+        sub_graph : PartitionedGraph
         super().__init__(other_obj=main_graph)
         self.main_graph  = main_graph
-        self.sub_cluster = sub_c = sub_cluster
-        self.main_target = mt = main_target
-        self.sub_graph   = sub_g = sub_graph
-        self.sn = sn # used for .deps/.user to compute io_targets
-        if int(mt is not None) + int(sub_g is not None) + int(sub_c is not None) != 1:
+        self.sub_cluster = sub_cluster
+        self.main_target = main_target
+        self.sub_graph   = sub_graph
+        self.simplified_node : SimplifiedNode = simplified_node
+        # => used for .deps/.users to compute io_targets
+        if (int(main_target is not None) 
+        + int(sub_graph is not None) 
+        + int(sub_cluster is not None)) != 1: # hand made logical xor
             raise Exception(
                 "A PartitionedNode is usually defined either by a main_target "\
                 "or a sub_cluster, never both.\nFor dynamic partitioning, "\
                 "you can instead giving a sub_graph, but it must be "\
                 "temporary, during the partitioning."
             )
-        if sub_c is not None:
-            self.name = sub_c.name
+        if sub_cluster is not None:
+            self.name = sub_cluster.name
             self.is_leaf = False
-        elif sub_g is not None:
-            self.sub_graph_id = sid = sub_g.graph_id
+        elif sub_graph is not None:
+            self.sub_graph_id = sid = sub_graph.graph_id
             self.name        = f"sub_graph_{sid}"
             self.is_leaf     = False
             self.is_protected_from_unwrap = False
         else:
             self.sub_graph_id = None
-            self.name        = f"Var_{mt}"
+            self.name        = f"Var_{main_target}"
             self.is_leaf     = True
             self.is_protected_from_unwrap = True
 
@@ -349,7 +354,7 @@ class PartitionedGraph(base.Graph):
             for sn in all_related_to_artifacts:
                 for pn in self.nodes:
                     pn : PartitionedNode
-                    if pn.sn is sn:
+                    if pn.simplified_node is sn:
                         dict_where[sn] = pn
                     elif (pn.sub_cluster is not None
                         and sn in pn.sub_cluster.s_nodes):
@@ -371,11 +376,11 @@ class PartitionedGraph(base.Graph):
                 if req_pn.sub_cluster is not None:
                     all_sn_req_pn = req_pn.sub_cluster.s_nodes
                 else:
-                    all_sn_req_pn = [req_pn.sn]
+                    all_sn_req_pn = [req_pn.simplified_node]
                 if user_pn.sub_cluster is not None:
                     all_sn_user_pn = user_pn.sub_cluster.s_nodes
                 else:
-                    all_sn_user_pn = [user_pn.sn]
+                    all_sn_user_pn = [user_pn.simplified_node]
                 bool_keep_edge = False
                 for sn_in_req_pn in all_sn_req_pn:
                     for user_sn in sn_in_req_pn.users:
@@ -972,306 +977,14 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
                 pn.sub_graph = None # comment this if one day want to restart Dynamic
                 all_snodes.update(sub_snodes)
             else:
-                if pn.sn is None:
+                if pn.simplified_node is None:
                     raise Exception(
-                        f"PartitionedNode which is_leaf should have a self.sn : SimplifiedNode "\
+                        f"PartitionedNode which is_leaf should have a self.simplified_node "\
                         f"(except special nodes, but there shouldn't be any "\
                         f"special node here). Here : pn.name : {pn.name}."
                     )
-                all_snodes.add(pn.sn)
+                all_snodes.add(pn.simplified_node)
         return all_snodes
-
-
-
-
-class Partitioner_OLD_bottom_to_top(Partitioner): 
-    # /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\
-    # /!\ NOT DETERMINISTIC AND SOON NO LONGER MAINTAINED /!\
-    # /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\ /!\
-    class Option():
-        def __init__(self,group):
-            self.group = group
-        @property
-        def nb_nodes(self):
-            return len(self.group)
-        @property
-        def nb_subnodes(self):
-            return sum(pn.size for pn in self.group)
-
-    class Config():
-        def __init__(self,
-                max_nodes_for_main_graph = 10,
-                max_nodes_per_sub_graph = 10,
-                min_nodes_per_sub_graph = 3,
-                option_value_fct = None,
-                merge_flow_stop_fct = None,
-                ):
-            self.min_nodes_per_sub_graph = min_nodes_per_sub_graph  
-            self.max_nodes_per_sub_graph = max_nodes_per_sub_graph
-            self.max_nodes_for_main_graph = max_nodes_for_main_graph
-
-            self.option_value_fct = option_value_fct \
-                if option_value_fct is not None \
-                else self.get_default_option_value_fct()
-            self.merge_flow_stop_fct = merge_flow_stop_fct \
-                if merge_flow_stop_fct is not None \
-                else self.get_default_merge_flow_stop_fct()
-
-        def get_default_option_value_fct(self,
-            importance_nb_nodes = 1,
-            importance_nb_subnodes = -1/4,
-            constant_value = 5):
-            def value_fct(option):
-                if option.nb_subnodes > self.max_nodes_per_sub_graph:
-                    return -10
-                else:
-                    val = (option.nb_nodes * importance_nb_nodes
-                        + option.nb_subnodes * importance_nb_subnodes
-                        + constant_value)
-                    val = math.exp(val)
-                    return val
-            return value_fct
-        
-        def get_default_merge_flow_stop_fct(self):
-            def merge_flow_stop_condition(pg,best_option): # 'True' means stop
-                pg : PartitionedGraph
-                tot_nb_nodes = len(pg.nodes)
-                if pg.is_main_graph:
-                    if tot_nb_nodes <= self.max_nodes_for_main_graph: return True
-                else:
-                    if tot_nb_nodes <= self.max_nodes_per_sub_graph: return True
-                if best_option.nb_subnodes > self.max_nodes_per_sub_graph: return True
-                else:
-                    value = self.option_value_fct(best_option)
-                    limit = math.sqrt(tot_nb_nodes) * math.sqrt(self.max_nodes_per_sub_graph)
-                    return value <= limit
-            return merge_flow_stop_condition
-
-    config : Config = None
-    def __init__(self, **kwargs):
-        self.config = self.__class__.Config(**kwargs)
-
-    # === RULE : GROUP SEQUENCE OF NODES TOGETHER ===
-    def rule_group_sequences(self,pg : PartitionedGraph):
-        # ** Find the sequences **
-        tot_nb_seq = 0
-        dict_seq_nb = dict() # name -> a seq nb
-        dict_sequences = dict() # seq nb -> list of nodes in the seq
-        for pn in pg.nodes:
-            if len(pn.users) == 1 and len(list(pn.users)[0].deps) == 1:
-                name = pn.name
-                user_pn = list(pn.users)[0]
-                user_name = user_pn.name
-                if name in dict_seq_nb:
-                    seq_nb = dict_seq_nb[name]
-                    dict_seq_nb[user_name] = seq_nb
-                    dict_sequences[seq_nb].append(user_pn)
-                else:
-                    tot_nb_seq += 1
-                    dict_seq_nb[name] = tot_nb_seq
-                    dict_seq_nb[user_name] = tot_nb_seq
-                    dict_sequences[tot_nb_seq] = [pn,user_pn]
-        # ** split too long sequences **
-        all_sequences = list(dict_sequences.items())
-
-        for seq_nb,sequence in all_sequences:
-            if not pg.does_node_requires_grad(sequence[-1]):
-                del dict_sequences[seq_nb]
-
-        # ** Group each sequence **
-        for seq_nb,sequence in dict_sequences.items():
-            if len(sequence) >= self.config.min_nodes_per_sub_graph:
-                new_pn = PartitionedDynamicManipulation.wrap(sequence,pg)
-
-        pg.make_sub_graph_id(pg.graph_id)
-
-    # === RULE : MERGE NODES WITH A UNIQUE COMMON ANCESTOR ===
-    # the flow of pn are nodes in `to_be_visited` which are descendants of pn
-    def rule_merge_small_flows(self,pg : PartitionedGraph):
-        # === FIRST ===
-        # for each node we need to find where its flow converge back
-        dict_nb_usages = dict([(pn, len(pn.users)) for pn in pg.nodes])
-        to_be_visited = []
-        dict_flow = dict()
-        # for a pn already visited -> its descendants in to_be_visited
-        # if len(flow_size) = 0 => the flow converged
-        # its a generalization of "seen" in cut_based_on_deps
-        dict_total_flow = dict()
-        # when a node is popped out of to_be_visited, 
-        # its removed from dict_flow but dict_total_flow 
-        # is a record of all the nodes which were in the flow
-        # note that a node is in its own total_flow
-        # also, total_flow is a list, whereas the current_flow is a set
-        dict_which_flow = dict()
-        # for a pn in to_be_visited -> all the flows he is part of
-        # ie a list of PartitionedNodes, representing there flow
-        # reciprocal of dict_flow 
-        dict_end_of_flow = dict()
-        # any pn -> where its flow converged back
-        # this is what we want to build
-
-        # ** Add a temporary global source **
-        tmp_global_source_pn = PartitionedNode(main_graph=pg,main_target="tmp_source")
-        tmp_global_source_pn.users = first_nodes = pg.first_nodes
-        for first_pn in first_nodes:
-            first_pn.deps.add(tmp_global_source_pn)
-        dict_nb_usages[tmp_global_source_pn] = len(first_nodes)
-
-        # ** init **
-        for pn in pg.nodes:
-            if len(pn.users) == 0:
-                to_be_visited.append(pn)
-                dict_which_flow[pn] = set()
-
-        # ** search **
-        while to_be_visited != []:
-            pn = to_be_visited.pop()
-            current_flows = dict_which_flow[pn]
-            continuing_flows = set([pn])
-            dict_flow[pn] = set()
-            dict_total_flow[pn] = [pn]
-            # * check if end of flows *
-            for flow_pn in current_flows:
-                flow = dict_flow[flow_pn]
-                flow.remove(pn)
-                # equivalent to "seen.remove(n)" in Rk_get_1_separators
-                if flow == set():
-                    dict_end_of_flow[flow_pn] = pn
-                else:
-                    continuing_flows.add(flow_pn)
-            # * visit pn *
-            for req_pn in pn.deps:
-                # equivalent to seen.add(req_n) :
-                for flow_pn in continuing_flows:
-                    tot_flow = dict_total_flow[flow_pn]
-                    flow     = dict_flow[flow_pn]
-                    flow.add(req_pn)
-                    if (not (req_pn is tmp_global_source_pn)
-                    and not (req_pn in tot_flow)):
-                        tot_flow.append(req_pn)
-                if req_pn in dict_which_flow:
-                    dict_which_flow[req_pn].update(continuing_flows)
-                else:
-                    dict_which_flow[req_pn] = set(continuing_flows)
-                dict_nb_usages[req_pn]-=1
-                if dict_nb_usages[req_pn]==0:
-                    to_be_visited.append(req_pn)
-
-        # ** remove the temporary global source **
-        for first_pn in first_nodes:
-            first_pn.deps.remove(tmp_global_source_pn)
-
-        # === SECOND ===
-        # For each flow we have 4 options :
-        # -> include the source or not
-        # -> include the sink or not
-        # But I will consider only 2 :
-        # -> We always include the source
-        # ATTENTION here sink/source are taken from .deps
-        # relation perspective, e.g. outputs are sources.
-
-        # /!\ Note that its merging here, not grouping /!\
-
-        all_options : set[self.__class__.Option] = set()
-        dict_options_pn_is_part_of = dict()
-        # PartitionedNode -> merge_flow_option set
-        # After each simplification, we actualize all 
-        # the options which use some of the simplified nodes
-
-        # ** init **
-        for source_pn,sink_pn in dict_end_of_flow.items():
-            flow = dict_total_flow[source_pn]
-            flow.reverse()
-            options = [self.__class__.Option(flow)]
-            if (not (sink_pn is tmp_global_source_pn) and len(flow)>2):
-                flow_ = list(flow) ; flow_.remove(sink_pn)
-                options.append(self.__class__.Option(flow_))
-            for opt in options:
-                if len(opt.group) <= 1: continue
-                all_options.add(opt)
-                for pn in opt.group:
-                    if pn in dict_options_pn_is_part_of:
-                        dict_options_pn_is_part_of[pn].add(opt)
-                    else:
-                        dict_options_pn_is_part_of[pn] = set([opt])
-
-        _all_options = set(all_options)
-        dict_info = pg.dict_info
-        for opt in _all_options:
-            set_group = set(opt.group)
-            if all(not pn.does_requires_grad(dict_info)
-                   for pn in opt.group):
-                all_options.remove(opt)
-            elif all(pn.deps.issubset(set_group)
-                     for pn in opt.group):
-                all_options.remove(opt)
-
-        # ** main loop **
-        while all_options != set():
-            best_option = max(all_options,key=self.config.option_value_fct)
-            all_options.remove(best_option)
-            if self.config.merge_flow_stop_fct(pg,best_option):
-                break
-            else:
-                best_group = list(best_option.group)
-                new_pn = PartitionedDynamicManipulation.merge(best_group,pg)
-                updated_opts = set()
-                for pn in best_group:
-                    opts = list(dict_options_pn_is_part_of[pn])
-                    for opt in opts:
-                        if opt not in all_options: continue
-                        group = opt.group
-                        # Case 1: one element of this group has already been replaced
-                        if new_pn in group: 
-                            group.remove(pn)
-                            if len(group) < 2: # too small
-                                all_options.discard(opt)
-                        # Case 2: replace pn by new_pn
-                        else:
-                            group[group.index(pn)] = new_pn
-                        if opt in all_options: updated_opts.add(opt)
-                    del dict_options_pn_is_part_of[pn]
-                dict_options_pn_is_part_of[new_pn] = updated_opts
-
-    def __call__(self, cluster: PartitionedCluster):
-        pg : PartitionedGraph = cluster.init_PartitionedGraph()
-        pg.cluster = cluster
-        if cluster.size < self.config.max_nodes_per_sub_graph:
-            return pg
-        # === Prepare dynamic setup ===
-        PartitionedDynamicManipulation.prepare_dynamic_setup(pg,cluster)
-
-        # === FIRST : Dynamic partitioning ===
-        previous_size = -1
-        while (len(pg.nodes) > self.config.max_nodes_for_main_graph
-            and len(pg.nodes) != previous_size):
-            previous_size = len(pg.nodes)
-            self.rule_group_sequences(pg)
-            self.rule_merge_small_flows(pg)
-            for pn in pg.nodes:
-                pn.is_protected_from_unwrap = True
-        pg.set_all_protected_to_false()
-        pg.make_sub_graph_id("0")
-        if len(pg.nodes) == previous_size: 
-            warnings.warn(
-                f"Partitioning of cluster '{cluster.name}' with "\
-                f"{self.__class__} early stop, because it"\
-                f"shrink more. Thus maybe to big, size : {previous_size}."
-            )
-
-        # === SECOND : freeze ===
-        all_snodes = PartitionedDynamicManipulation.freeze(
-            pg,cluster.p_structure,self.__class__)
-        if all_snodes != set(cluster.s_nodes):
-            raise Exception(
-                f"BUG in {self.__class__}. When collecting all the "\
-                f"SimplifiedNodes at the end, we don't find cluster.s_nodes. We probably "\
-                f"lost some nodes...\n Original nb of nodes : {len(cluster.s_nodes)}; "\
-                f"Nb of nodes at the end : {len(all_snodes)}"
-            )
-        return pg
-
-
 
 
 
@@ -1382,8 +1095,8 @@ class PartitionerBottomToTop(Partitioner):
                 pn for pn in option.group
                 if not pn.users_global.issubset(option.set_group)
             )
-            inputs_mem = sum(pn.mem_out for pn in inputs_pn if pn.sn is not None)
-            outputs_mem = sum(pn.mem_out for pn in outputs_pn if pn.sn is not None)
+            inputs_mem = sum(pn.mem_out for pn in inputs_pn if pn.simplified_node is not None)
+            outputs_mem = sum(pn.mem_out for pn in outputs_pn if pn.simplified_node is not None)
             total_size = sum(pn.total_size for pn in option.group)
             # /!\ NEGATIVE VALUE
             # -> We will take the max -> = the less negative one

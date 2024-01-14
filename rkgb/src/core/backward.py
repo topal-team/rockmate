@@ -146,8 +146,8 @@ class Graph(base.Graph):
     input_grad_anode = None
     # Note: We no longer have chain/list of K_graph,
     # as we fully moved to hierarchical structures,
-    # hence the input_data/grad is simply the ad hoc
-    # source node, so it could be removed, but it would
+    # hence the input_data/grad are trivial ad hoc
+    # source nodes, so they could be removed, but it would
     # require to adapt quite a lot of lines in the compiler.
     # So make it easier for the moment I keep them.
     # !Warning!: input_grad_anode is None if 
