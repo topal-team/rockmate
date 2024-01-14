@@ -137,9 +137,9 @@ class ModelPULP:
         self.grad_mode = grad_mode
         if cpu_optimize_kwargs and accurate_mem:
             self.cpu_optimize = True
-            self.optimizer_states_size = cpu_optimize_kwargs["optimizer_states_size"]#*weight size
+            self.optimizer_states_factor = cpu_optimize_kwargs["optimizer_states_size"]#*weight size
             self.cpu_optimize_speed = cpu_optimize_kwargs["cpu_optimize_speed"]#B/ms
-            self.optimizer_overhead = cpu_optimize_kwargs["optimizer_overhead"]#*weight size
+            self.optimizer_overhead_factor = cpu_optimize_kwargs["optimizer_overhead"]#*weight size
             batch_multiplier = 4
             # self.BatMpl = RkLpVariable("BMpl", lowBound=0, upBound=self.batch_multiplier, cat="Integer")
             # self.param_multiplier = 1-self.BatMpl*1/self.batch_multiplier
@@ -513,12 +513,6 @@ class ModelPULP:
                 upBound=1,
             )  # w.grad is alive at the start of step j.
 
-                # for k, l_w in self.hcn2param.items():
-                #     grad_size = sum(self.parameter_gradient_size[w] for w in l_w)
-                #     # grad_size += max(self.parameter_size[w] for w in l_w)* self.optimizer_overhead
-                #     if k > self.loss_idx:#add params grad size to bwd overhead 
-                #         self.overhead[k] = [v+grad_size for v in self.overhead[k]]
-
             self.OflW = RkLpVariable.dicts(
                 "OflW",
                 [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
@@ -891,7 +885,7 @@ class ModelPULP:
                     )
         for t in range(T):
             for k in self.krange(t):
-                parameter_mem = self.parameter_mem(t, k) if self.with_parameters else 0
+                parameter_mem = self.all_param_mem(t, k) if self.with_parameters else 0
                 j = self.hcn2sub_c[k]
                 self.md += self.U[t, k] >= 0
                 self.md += self.U[t, k] <= (self.peak_budget - parameter_mem)
@@ -979,23 +973,6 @@ class ModelPULP:
                             )
                 if t == self.loss_idx and self.save_budget:
                     self.md += self.U[t, k] <= self.save_budget
-
-    def parameter_mem(self, t, k):
-        mem = lpSum(
-            (self.AliveW[t, k, w] + self.AliveG[t, k, w] + self.PrfW[t, k, w])
-            * self.parameter_size[w]
-            for w in range(self.W)
-        )
-        # if self.cpu_optimize:
-        self.optimizer_states_mem = lpSum((self.AliveO[t, k, w]*
-                    self.parameter_gradient_size[w] *
-                    self.optimizer_states_size)
-                    for w in range(self.W))
-        optimizer_overhead = 0
-        if k > self.loss_idx and k in self.hcn2param:
-            l_w = self.hcn2param[k]
-            optimizer_overhead += sum((1-self.sumOptC[w])*self.parameter_size[w] for w in l_w)* self.optimizer_overhead
-        return mem + self.optimizer_states_mem + optimizer_overhead + self.param_multiplier*self.peak_budget
     
     def krange(self, t):
         if self.single_fwd:
@@ -1031,13 +1008,49 @@ class ModelPULP:
         for k in range(T):
             self.md += self.U[(self.loss_idx, k)] <= self.save_budget
 
-    def add_single_bwd_constraints(self):
-        for k in range(self.loss_idx, self.T):  # only bwd after loss
-            self.md += lpSum(self.sumComp[t, k] for t in range(self.T)) == 1
+    # def add_single_bwd_constraints(self):
+    #     for k in range(self.loss_idx, self.T):  # only bwd after loss
+    #         self.md += lpSum(self.sumComp[t, k] for t in range(self.T)) == 1
 
-    def add_single_fwd_constraints(self):
-        for k in range(self.loss_idx):  # only fwd before loss
-            self.md += lpSum(self.sumComp[t, k] for t in range(self.T)) == 1
+    # def add_single_fwd_constraints(self):
+    #     for k in range(self.loss_idx):  # only fwd before loss
+    #         self.md += lpSum(self.sumComp[t, k] for t in range(self.T)) == 1
+            
+    def all_param_mem(self, t, k):
+        return (self.parameter_mem(t,k) 
+                + self.param_grad_mem(t,k)
+                + self.optimizer_states_mem(t,k)  
+                + self.param_multiplier*self.peak_budget)
+
+    def parameter_mem(self, t, k):
+        parameter_mem = lpSum(
+            (self.AliveW[t, k, w] + self.PrfW[t, k, w])
+            * self.parameter_size[w]
+            for w in range(self.W)
+        )
+        return parameter_mem
+    
+    def param_grad_mem(self, t, k):
+        grad_mem = lpSum(
+            self.AliveG[t, k, w]
+            * self.parameter_size[w]
+            for w in range(self.W)
+        )
+        return grad_mem
+    
+    def optimizer_states_mem(self, t, k):    
+        optimizer_states_mem = lpSum((self.AliveO[t, k, w]*
+                    self.parameter_gradient_size[w] *
+                    self.optimizer_states_factor)
+                    for w in range(self.W))
+        optimizer_overhead = 0
+        if k > self.loss_idx and k in self.hcn2param:
+            l_w = self.hcn2param[k]
+            optimizer_overhead += sum((1-self.sumOptC[w])
+                                      * self.parameter_size[w]
+                                      * self.optimizer_overhead_factor
+                                      for w in l_w)
+        return optimizer_states_mem + optimizer_overhead
 
     def prefill(self):
         for t in range(self.T):
@@ -1301,7 +1314,7 @@ class ModelPULP:
             #if cpu optimize, do not keep w after bwd
         def apply_gpu_optimize(p):
             op = OptimizeOp(name=p,list_params=[p], alloc=Parameter(parameters[p]),
-                            overhead=parameters[p].mem*self.optimizer_overhead)
+                            overhead=parameters[p].mem*self.optimizer_overhead_factor)
             opt_ops.append((bwd_i, bwd_i, op))# optimize after bwd
             del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]), grad=True)))
 
