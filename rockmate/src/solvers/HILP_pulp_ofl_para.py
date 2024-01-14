@@ -131,7 +131,7 @@ class ModelPULP:
         self.with_parameters = accurate_mem
         self.with_grad = accurate_mem
         self.with_optimizer_states = accurate_mem
-        self.gradient_accumulation = 0# if 0, no gradient/optimizer states alive from previous iters
+        self.gradient_accumulation = 1# if 0, no gradient/optimizer states alive from previous iters
         self.single_fwd = accurate_mem#False
         self.single_bwd = accurate_mem
         self.grouping = grouping
@@ -1033,6 +1033,8 @@ class ModelPULP:
     #     for k in range(self.loss_idx):  # only fwd before loss
     #         self.md += lpSum(self.sumComp[t, k] for t in range(self.T)) == 1
 
+    def req_w(self):
+        return 1 - self.param_multiplier
 
     def accumC_grad(self, w):
         #if grad_accumulation, gradient stored on CPU from previous iterations
@@ -1041,7 +1043,13 @@ class ModelPULP:
     def accumC_optimizer_states(self, w):
         #if grad_accumulation, optimizer states stored on CPU from previous iterations
         return self.accumC_grad(w)
-            
+    
+    def instant_opt(self, w):
+        # return the fraction of parameter instantly optimized after bwd
+        if self.gradient_accumulation:
+            return 0
+        return 1-self.sumOptC[w]- self.param_multiplier
+
     def all_param_mem(self, t, k):
         return (self.parameter_mem(t,k) 
                 + self.param_grad_mem(t,k)
@@ -1137,6 +1145,7 @@ class ModelPULP:
         self.OptCProg = dict()
         self.UpdWProg = dict()
         self.PrfWProg = dict()
+        self.PrfGProg = dict()
         
         def get_progress(op, t, k, w):
             bwd_i = max(self.param2hcn[w])
@@ -1180,25 +1189,23 @@ class ModelPULP:
                 #     self.parameter_size[w] / self.cpu_optimize_speed * self.OptC[t, k, w]
                 #     for w in range(self.W)
                 # )
-                if k in self.hcn2param:
-                    for w in self.hcn2param[k]:
-                        self.PrfWProg[t,k,w] = get_progress(self.PrfW, t, k, w)
-                        self.md += self.sumComp[t, k] <= self.PrfWProg[t,k,w] + (1-self.sumOptC[w])
                 for w in range(self.W):
-                    self.OflWProg[(t,k,w)] = get_progress(self.OflW, t, k, w)
-                    self.OflGProg[(t,k,w)] = get_progress(self.OflG, t, k, w)
-                    self.OptCProg[(t,k,w)] = get_progress(self.OptC, t, k, w)
+                    self.PrfWProg[t,k,w] = get_progress(self.PrfW, t, k, w)
+                    self.PrfGProg[t,k,w] = get_progress(self.PrfG, t, k, w)
+                    self.OflWProg[t,k,w] = get_progress(self.OflW, t, k, w)
+                    self.OflGProg[t,k,w] = get_progress(self.OflG, t, k, w)
+                    self.OptCProg[t,k,w] = get_progress(self.OptC, t, k, w)
                     
-                    self.md += self.OflWProg[(t, k, w)] <= 1- self.param_multiplier
-                    self.md += self.OflGProg[(t, k, w)] <= self.accumC_grad(w)
-                    self.md += self.OptCProg[(t, k, w)] <= self.OflGProg[(t, k, w)]
-                    self.md += (self.AliveW[t, k, w] + self.OflWProg[(t, k, w)] 
-                                >= 1- self.param_multiplier - self.sumOptC[w])
-                    self.md += (self.AliveG[t, k, w] + self.OflGProg[(t, k, w)] 
-                                >= self.sumOptC[w])
-                    self.md += (self.AliveW[t_, k_, w] + self.PrfW[(t_, k_, w)] <= 
-                                1 - self.param_multiplier - self.sumOptC[w]# update on GPU
-                                + self.OptCProg[(t, k, w)])
+                    self.md += self.OflWProg[t, k, w] <= self.req_w()
+                    self.md += self.OflGProg[t, k, w] <= self.accumC_grad(w)
+                    self.md += self.OptCProg[t, k, w] <= self.OflGProg[t, k, w]
+                    self.md += (self.AliveW[t, k, w] + self.OflWProg[t, k, w] 
+                                >= self.instant_opt(w))
+                    self.md += (self.AliveG[t, k, w] + self.OflGProg[t, k, w] 
+                                >= self.req_w() - self.instant_opt(w))
+                    self.md += (self.AliveW[t_, k_, w] + self.PrfW[t_, k_, w] <= 
+                                self.req_w() - self.sumOptC[w]# update on GPU
+                                + self.OptCProg[t, k, w])
                     diffW = self.AliveW[t_, k_, w] - self.AliveW[t, k, w]
                     self.md += diffW <= self.PrfW[t, k, w]
 
@@ -1212,9 +1219,11 @@ class ModelPULP:
         for w in self.param2hcn:
             fwd_i = min(self.param2hcn[w])
             bwd_i = max(self.param2hcn[w])
+            self.md += self.PrfWProg[fwd_i,fwd_i,w] >= self.sumOptC[w]
+            self.md += self.req_w() - self.sumOptC[w] <= self.AliveO[bwd_i, bwd_i, w]
             if self.gradient_accumulation:
-                self.md += self.OflGProg[(bwd_i, bwd_i, w)] == self.accumC_grad(w)
-            self.md += 1- self.sumOptC[w] - self.param_multiplier <= self.AliveO[bwd_i, bwd_i, w]
+                self.md += self.OflGProg[bwd_i, bwd_i, w] == self.accumC_grad(w)
+                self.md += self.PrfGProg[bwd_i, bwd_i, w] == self.accumC_grad(w) - self.sumOptC[w]
             t_, k_ = self.next_index(bwd_i, bwd_i)
             # self.md += self.AliveO[t_, k_, w] - self.AliveO[bwd_i, bwd_i, w] <= 1 - self.gradient_accumulation
             # self.md += self.AliveG[t_, k_, w] - self.AliveG[bwd_i, bwd_i, w] <= 1# - self.gradient_accumulation
@@ -1222,7 +1231,7 @@ class ModelPULP:
                 for k in self.param2hcn[w]:
                     if k not in self.krange(t):
                         continue
-                    self.md += self.sumComp[t, k] - self.param_multiplier <= self.AliveW[t, k, w]
+                    self.md += self.sumComp[t, k] -1 <= self.AliveW[t, k, w] - self.req_w()
 
     def solve(self, solver=""):
         # some solvers have no support of 'Time limit reached' status
@@ -1612,6 +1621,8 @@ class ModelPULP:
         ### Handle multiplier
         self.params_vars = [self.AliveW, self.OflWProg, self.OflW, 
                             self.PrfW, self.PrfWProg, self.OptC,
+                            self.AliveG, self.OflGProg, self.OflG,
+                            self.PrfG, self.PrfGProg
                             ]
         if isinstance(self.param_multiplier, float):
             multiplier = self.param_multiplier
