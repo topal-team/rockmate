@@ -535,6 +535,13 @@ class ModelPULP:
                 lowBound=0,
                 upBound=1,
             )
+            self.PrfG = RkLpVariable.dicts(
+                "PrfG",
+                [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
+                cat="Continuous",
+                lowBound=0,
+                upBound=1,
+            )
             self.OptC = RkLpVariable.dicts(
                 "OptC",
                 [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
@@ -562,7 +569,8 @@ class ModelPULP:
         prf_cost = (
             0.01
             * lpSum(
-                self.PrfW[t, k, w] * self.parameter_size[w] / self.bandwidthPrf
+                (self.PrfW[t, k, w] + self.PrfG[t, k, w])
+                * self.parameter_size[w] / self.bandwidthPrf
                 for t in range(T)
                 for k in self.krange(t)
                 for w in range(W)
@@ -573,7 +581,8 @@ class ModelPULP:
         ofl_cost = (
             0.01
             * lpSum(
-                self.OflW[t, k, w] * self.parameter_size[w] / self.bandwidthOfl
+                (self.OflW[t, k, w] + self.OflG[t, k, w])
+                * self.parameter_size[w] / self.bandwidthOfl
                 for t in range(T)
                 for k in self.krange(t)
                 for w in range(W)
@@ -1023,6 +1032,15 @@ class ModelPULP:
     # def add_single_fwd_constraints(self):
     #     for k in range(self.loss_idx):  # only fwd before loss
     #         self.md += lpSum(self.sumComp[t, k] for t in range(self.T)) == 1
+
+
+    def accumC_grad(self, w):
+        #if grad_accumulation, gradient stored on CPU from previous iterations
+        return self.sumOptC[w]
+    
+    def accumC_optimizer_states(self, w):
+        #if grad_accumulation, optimizer states stored on CPU from previous iterations
+        return self.accumC_grad(w)
             
     def all_param_mem(self, t, k):
         return (self.parameter_mem(t,k) 
@@ -1078,14 +1096,18 @@ class ModelPULP:
         for w in self.param2hcn:
             self.sumOptC[w] = lpSum(self.OptC[t,k,w] for t in range(self.T) for k in self.krange(t))
 
+        if not self.gradient_accumulation:
+            for k in self.PrfG:
+                self.PrfG[k] = 0
+
         if not self.with_optimizer_states:
             for (t,k,w) in self.AliveO:
-                self.AliveO[(t,k,w)] = (1-self.sumOptC[w]- self.param_multiplier)
+                self.AliveO[(t,k,w)] = (1-self.accumC_optimizer_states(w)- self.param_multiplier)
         if self.grad_mode in ["free"]:
             for (t,k,w) in self.AliveG:
                 grad_size = self.parameter_gradient_size[w]
                 if len(self.param2sub_c[w]) == 1:
-                    self.AliveG[(t,k,w)] = 0
+                    # self.AliveG[(t,k,w)] = 0
                     if k == max(self.param2hcn[w]):
                         self.overhead[k] = [v+grad_size for v in self.overhead[k]]
                 else:#shared weight
@@ -1168,37 +1190,30 @@ class ModelPULP:
                     self.OptCProg[(t,k,w)] = get_progress(self.OptC, t, k, w)
                     
                     self.md += self.OflWProg[(t, k, w)] <= 1- self.param_multiplier
-                    self.md += self.OflGProg[(t, k, w)] <= 1- self.param_multiplier
+                    self.md += self.OflGProg[(t, k, w)] <= self.accumC_grad(w)
                     self.md += self.OptCProg[(t, k, w)] <= self.OflGProg[(t, k, w)]
                     self.md += (self.AliveW[t, k, w] + self.OflWProg[(t, k, w)] 
                                 >= 1- self.param_multiplier - self.sumOptC[w])
                     self.md += (self.AliveG[t, k, w] + self.OflGProg[(t, k, w)] 
                                 >= self.sumOptC[w])
-                    # self.md += self.AliveW[t, k, w] + self.AliveG[t, k, w] + self.OflWProg[(t, k, w)] >= 1
-                    # self.md += self.AliveG[t, k, w] + self.OflWProg[(t, k, w)] >= self.sumOptC[w]
-                    # self.md += self.AliveG[t, k, w] + self.OptCProg[(t, k, w)] >= self.sumOptC[w]
-
-                    # self.md += self.AliveW[t, k, w] + self.PrfW[(t, k, w)] <= 1
-                    # self.md += self.OflW[t, k, w] <= self.sumComp[t, k] - self.param_multiplier
-                    # self.md += self.PrfW[t, k, w] <= self.sumComp[t, k] - self.param_multiplier
-                    # self.md += self.OptC[t, k, w] <= self.sumComp[t, k] - self.param_multiplier
-
-                    t_, k_ = self.next_index(t, k)
                     self.md += (self.AliveW[t_, k_, w] + self.PrfW[(t_, k_, w)] <= 
-                                self.OptCProg[(t, k, w)] + 1- self.param_multiplier - self.sumOptC[w])
+                                1 - self.param_multiplier - self.sumOptC[w]# update on GPU
+                                + self.OptCProg[(t, k, w)])
                     diffW = self.AliveW[t_, k_, w] - self.AliveW[t, k, w]
-                    # self.md += diffW <= self.sumComp[t, k] - self.param_multiplier
-                    # self.md += -diffW <= self.sumComp[t, k] - self.param_multiplier
                     self.md += diffW <= self.PrfW[t, k, w]
 
                     diffG = self.AliveG[t_, k_, w] - self.AliveG[t, k, w]
-                    self.md += diffG <= 1*(k in self.param2hcn[w] 
+                    self.md += (diffG <= 1*(k in self.param2hcn[w] 
                                            and k>self.loss_idx)#backward operations
+                                           +self.PrfG[t, k, w])
 
                     self.md += self.AliveO[t_, k_, w] - self.AliveO[t, k, w] <= 0#no prefetch now
             
         for w in self.param2hcn:
+            fwd_i = min(self.param2hcn[w])
             bwd_i = max(self.param2hcn[w])
+            if self.gradient_accumulation:
+                self.md += self.OflGProg[(bwd_i, bwd_i, w)] == self.accumC_grad(w)
             self.md += 1- self.sumOptC[w] - self.param_multiplier <= self.AliveO[bwd_i, bwd_i, w]
             t_, k_ = self.next_index(bwd_i, bwd_i)
             # self.md += self.AliveO[t_, k_, w] - self.AliveO[bwd_i, bwd_i, w] <= 1 - self.gradient_accumulation
