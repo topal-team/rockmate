@@ -1147,7 +1147,8 @@ class ModelPULP:
                     for w in range(self.W)
                 )
                 self.md += self.Time[t, k] >= lpSum(
-                    self.parameter_size[w] / self.bandwidthOfl * self.OflW[t, k, w]
+                    self.parameter_size[w] / self.bandwidthOfl 
+                    * (self.OflW[t, k, w]+self.OflG[t, k, w])
                     + self.parameter_size[w]
                     / self.cpu_optimize_speed
                     * self.OptC[t, k, w]
@@ -1167,8 +1168,12 @@ class ModelPULP:
                     self.OptCProg[(t,k,w)] = get_progress(self.OptC, t, k, w)
                     
                     self.md += self.OflWProg[(t, k, w)] <= 1- self.param_multiplier
-                    self.md += self.OptCProg[(t, k, w)] <= self.OflWProg[(t, k, w)]
-                    self.md += self.AliveW[t, k, w] + self.OflWProg[(t, k, w)] >= 1- self.param_multiplier# - self.sumOptC[w]
+                    self.md += self.OflGProg[(t, k, w)] <= 1- self.param_multiplier
+                    self.md += self.OptCProg[(t, k, w)] <= self.OflGProg[(t, k, w)]
+                    self.md += (self.AliveW[t, k, w] + self.OflWProg[(t, k, w)] 
+                                >= 1- self.param_multiplier - self.sumOptC[w])
+                    self.md += (self.AliveG[t, k, w] + self.OflGProg[(t, k, w)] 
+                                >= self.sumOptC[w])
                     # self.md += self.AliveW[t, k, w] + self.AliveG[t, k, w] + self.OflWProg[(t, k, w)] >= 1
                     # self.md += self.AliveG[t, k, w] + self.OflWProg[(t, k, w)] >= self.sumOptC[w]
                     # self.md += self.AliveG[t, k, w] + self.OptCProg[(t, k, w)] >= self.sumOptC[w]
@@ -1343,7 +1348,7 @@ class ModelPULP:
             current_alive_size = sum(parameters[p].mem * a for p, a in Alive.items())
             current_offloaded_size = sum(parameters[p].mem * a for p, a in Offloaded.items())
             next_alive_size = round((self.AliveG[(t_, k_, w)]+self.AliveW[(t_, k_, w)]).value() * parameter_size)
-            next_offloaded_size = round(self.OflWProg[(t_, k_, w)].value() * parameter_size)
+            next_offloaded_size = round((self.OflGProg[(t_, k_, w)]+self.OflWProg[(t_, k_, w)]).value() * parameter_size)
             
             # assert current_alive_size <= round(self.AliveW[(t, k, w)].value() * parameter_size)
 
@@ -1434,7 +1439,7 @@ class ModelPULP:
         else:
             multiplier = self.param_multiplier.value()
         cpu_optimize_size = (sum(self.sumOptC[w_].value() * 
-                                self.parameter_size[w_] 
+                                self.parameter_gradient_size[w_] 
                                 for w_ in range(w, self.W)) / (1-multiplier)
                             - sum(self.cpu_optimized_params.values()))# size by all graphs
         if candidates and cpu_optimize_size>0:
