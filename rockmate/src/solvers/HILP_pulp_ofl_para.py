@@ -129,6 +129,8 @@ class ModelPULP:
         self.feasible = None
         self.solve_time = None
         self.with_parameters = accurate_mem
+        self.with_grad = accurate_mem
+        self.with_optimizer_states = accurate_mem
         self.single_fwd = accurate_mem#False
         self.single_bwd = accurate_mem
         self.grouping = grouping
@@ -1055,8 +1057,9 @@ class ModelPULP:
         for w in self.param2hcn:
             self.sumOptC[w] = lpSum(self.OptC[t,k,w] for t in range(self.T) for k in self.krange(t))
 
-        for (t,k,w) in self.AliveO:
-            self.AliveO[(t,k,w)] = (1-self.sumOptC[w]- self.param_multiplier)
+        if not self.with_optimizer_states:
+            for (t,k,w) in self.AliveO:
+                self.AliveO[(t,k,w)] = (1-self.sumOptC[w]- self.param_multiplier)
         if self.grad_mode in ["free"]:
             for (t,k,w) in self.AliveG:
                 grad_size = self.parameter_gradient_size[w]
@@ -1159,7 +1162,11 @@ class ModelPULP:
                     self.md += diff <= self.sumComp[t, k] - self.param_multiplier
                     self.md += -diff <= self.sumComp[t, k] - self.param_multiplier
                     self.md += diff <= self.PrfW[t, k, w]
+
+                    self.md += self.AliveO[t_, k_, w] - self.AliveO[t, k, w] <= 0#no prefetch now
             for w in self.param2hcn:
+                bwd_i = max(self.param2hcn[w])
+                self.md += 1- self.sumOptC[w] - self.param_multiplier <= self.AliveO[bwd_i, bwd_i, w]
                 for k in self.param2hcn[w]:
                     if k not in self.krange(t):
                         continue
