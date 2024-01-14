@@ -131,6 +131,7 @@ class ModelPULP:
         self.with_parameters = accurate_mem
         self.with_grad = accurate_mem
         self.with_optimizer_states = accurate_mem
+        self.gradient_accumulation = 0# if 0, no gradient/optimizer states alive from previous iters
         self.single_fwd = accurate_mem#False
         self.single_bwd = accurate_mem
         self.grouping = grouping
@@ -515,6 +516,13 @@ class ModelPULP:
 
             self.OflW = RkLpVariable.dicts(
                 "OflW",
+                [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
+                cat="Continuous",
+                lowBound=0,
+                upBound=1,
+            )
+            self.OflG = RkLpVariable.dicts(
+                "OflG",
                 [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
                 cat="Continuous",
                 lowBound=0,
@@ -1103,6 +1111,7 @@ class ModelPULP:
         # if with_grad, AliveG is a variable
         # if with_optimizer_states, AliveO is a variable
         self.OflWProg = dict()
+        self.OflGProg = dict()
         self.OptCProg = dict()
         self.UpdWProg = dict()
         self.PrfWProg = dict()
@@ -1154,6 +1163,7 @@ class ModelPULP:
                         self.md += self.sumComp[t, k] <= self.PrfWProg[t,k,w] + (1-self.sumOptC[w])
                 for w in range(self.W):
                     self.OflWProg[(t,k,w)] = get_progress(self.OflW, t, k, w)
+                    self.OflGProg[(t,k,w)] = get_progress(self.OflG, t, k, w)
                     self.OptCProg[(t,k,w)] = get_progress(self.OptC, t, k, w)
                     
                     self.md += self.OflWProg[(t, k, w)] <= 1- self.param_multiplier
@@ -1164,27 +1174,35 @@ class ModelPULP:
                     # self.md += self.AliveG[t, k, w] + self.OptCProg[(t, k, w)] >= self.sumOptC[w]
 
                     # self.md += self.AliveW[t, k, w] + self.PrfW[(t, k, w)] <= 1
-                    self.md += self.OflW[t, k, w] <= self.sumComp[t, k] - self.param_multiplier
-                    self.md += self.PrfW[t, k, w] <= self.sumComp[t, k] - self.param_multiplier
-                    self.md += self.OptC[t, k, w] <= self.sumComp[t, k] - self.param_multiplier
+                    # self.md += self.OflW[t, k, w] <= self.sumComp[t, k] - self.param_multiplier
+                    # self.md += self.PrfW[t, k, w] <= self.sumComp[t, k] - self.param_multiplier
+                    # self.md += self.OptC[t, k, w] <= self.sumComp[t, k] - self.param_multiplier
 
                     t_, k_ = self.next_index(t, k)
                     self.md += (self.AliveW[t_, k_, w] + self.PrfW[(t_, k_, w)] <= 
                                 self.OptCProg[(t, k, w)] + 1- self.param_multiplier - self.sumOptC[w])
-                    diff = self.AliveW[t_, k_, w] - self.AliveW[t, k, w]
-                    self.md += diff <= self.sumComp[t, k] - self.param_multiplier
-                    self.md += -diff <= self.sumComp[t, k] - self.param_multiplier
-                    self.md += diff <= self.PrfW[t, k, w]
+                    diffW = self.AliveW[t_, k_, w] - self.AliveW[t, k, w]
+                    # self.md += diffW <= self.sumComp[t, k] - self.param_multiplier
+                    # self.md += -diffW <= self.sumComp[t, k] - self.param_multiplier
+                    self.md += diffW <= self.PrfW[t, k, w]
+
+                    diffG = self.AliveG[t_, k_, w] - self.AliveG[t, k, w]
+                    self.md += diffG <= 1*(k in self.param2hcn[w] 
+                                           and k>self.loss_idx)#backward operations
 
                     self.md += self.AliveO[t_, k_, w] - self.AliveO[t, k, w] <= 0#no prefetch now
-            for w in self.param2hcn:
-                bwd_i = max(self.param2hcn[w])
-                self.md += 1- self.sumOptC[w] - self.param_multiplier <= self.AliveO[bwd_i, bwd_i, w]
+            
+        for w in self.param2hcn:
+            bwd_i = max(self.param2hcn[w])
+            self.md += 1- self.sumOptC[w] - self.param_multiplier <= self.AliveO[bwd_i, bwd_i, w]
+            t_, k_ = self.next_index(bwd_i, bwd_i)
+            # self.md += self.AliveO[t_, k_, w] - self.AliveO[bwd_i, bwd_i, w] <= 1 - self.gradient_accumulation
+            # self.md += self.AliveG[t_, k_, w] - self.AliveG[bwd_i, bwd_i, w] <= 1# - self.gradient_accumulation
+            for t in range(self.T):
                 for k in self.param2hcn[w]:
                     if k not in self.krange(t):
                         continue
                     self.md += self.sumComp[t, k] - self.param_multiplier <= self.AliveW[t, k, w]
-            
 
     def solve(self, solver=""):
         # some solvers have no support of 'Time limit reached' status
