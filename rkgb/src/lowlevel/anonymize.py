@@ -9,24 +9,23 @@ from src.core.simplified import SimplifiedGraph, SimplifiedNode
 from src.core.backward import ComputationNode, AllocationNode
 
 
-class SimplifiedNodeAnonymizedInfo():
+class SimplifiedNodeAnonymizationMaterial():
     ano_id : int = None # will be set at higher level
-    ano_str_code : str = None
+    anonymized_code : str = None
     dict_tar_to_ano_nb : dict[str, int] = None
     dict_tar_to_ano_tar : dict[str, str] = None
     dict_cst_name_to_ano_name : dict[str, str] = None
     dict_param_name_to_ano_name : dict[str, str] = None
     dict_ano_tar_to_variable_info : dict[str, VariableInfo] = None
-    dict_ano_cst_to_variable_info : dict[str, VariableInfo] = None
-    dict_ano_param_to_variable_info : dict[str, VariableInfo] = None
+    dict_cst_ano_name_to_variable_info : dict[str, VariableInfo] = None
+    dict_param_ano_name_to_variable_info : dict[str, VariableInfo] = None
 
-    # =====================================================================
     def __init__(self,
             sn_to_proceed : SimplifiedNode, 
             simplified_graph : SimplifiedGraph, 
             original_mod : torch.nn.Module):
-        # = FIRST : read the code and collect all    =
-        # = the variables/constants/params mentioned =
+        # FIRST : read the code and collect all
+        # the variables/constants/params mentioned
         all_real_vars   = []
         all_real_cst    = []
         all_real_params = []
@@ -56,37 +55,37 @@ class SimplifiedNodeAnonymizedInfo():
 
         search_through(sn_to_proceed.get_code_ast())
 
-        # = SECOND : associate a number to 
-        # = each variables/constants/params  
+        # =======
+        # SECOND : associate a number to 
+        # each variables/constants/params  
         # => anonymized name ~ f"__{ano_nb}_ano"
         self.dict_tar_to_ano_nb = dict()
         self.dict_tar_to_ano_tar = dict()
         self.dict_cst_name_to_ano_name = dict()
         self.dict_param_name_to_ano_name = dict()
         self.dict_ano_tar_to_variable_info = dict()
-        self.dict_ano_cst_to_variable_info = dict()
-        self.dict_ano_param_to_variable_info = dict()
+        self.dict_cst_ano_name_to_variable_info = dict()
+        self.dict_param_ano_name_to_variable_info = dict()
         # Associate numbers to *variables*
         all_real_vars = sorted(all_real_vars,key = base.Node.get_num_tar)
         nb_var = 0
         for real_name in all_real_vars:
             nb_var += 1
-            anonymized_name = f"__{nb_var}_ano"
-            self.dict_tar_to_ano_tar[real_name] = anonymized_name
+            ano_tar = f"__{nb_var}_ano"
+            self.dict_tar_to_ano_tar[real_name] = ano_tar
             self.dict_tar_to_ano_nb [real_name] = nb_var
-            self.dict_ano_tar_to_variable_info[anonymized_name] \
+            self.dict_ano_tar_to_variable_info[ano_tar] \
                 = simplified_graph.dict_info[real_name]
-            # -> We will keep only basic attributes of VariableInfo
 
         # Associate numbers to *constants*
-        all_real_cst = sorted(all_real_cst,key = base.Node.get_num_cst)
+        all_real_cst = sorted(all_real_cst,key = base.Node.get_num_tar)
         nb_cst = 0
         for cst_real_name in all_real_cst:
-            value = simplified_graph.dict_constants[cst_real_name]
+            cst_value = simplified_graph.dict_constants[cst_real_name]
             nb_cst += 1
-            acst = f"_cst_{nb_cst}_ano"
-            self.dict_cst_name_to_ano_name[cst_real_name] = acst
-            self.dict_ano_cst_to_variable_info[acst] = VariableInfo(value)
+            ano_name = f"_cst_{nb_cst}_ano"
+            self.dict_cst_name_to_ano_name[cst_real_name] = ano_name
+            self.dict_cst_ano_name_to_variable_info[ano_name] = VariableInfo(cst_value)
 
         # Associate numbers to *constants*
         nb_param = 0
@@ -94,52 +93,67 @@ class SimplifiedNodeAnonymizedInfo():
             # -> e.g. param_full_name = "self.layer1.weight"
             param_value = eval(param_full_name,{"self":original_mod},{})
             nb_param += 1
-            aparam = f"self.param_{nb_param}"
-            self.dict_param_name_to_ano_name[param_full_name] = aparam
-            self.dict_ano_param_to_variable_info[aparam] = VariableInfo(param_value)
+            ano_name = f"self.param_{nb_param}"
+            self.dict_param_name_to_ano_name[param_full_name] = ano_name
+            self.dict_param_ano_name_to_variable_info[ano_name] = VariableInfo(param_value)
                 
-        # =============================
-        # === THIRD: build ano code ===
-        code_to_proceed = sn.get_code()
-        for tar,atar in self.dict_tar_to_ano_tar.items():
-            str_code = str_code.replace(tar,atar)
-        for cst,acst in self.dict_cst_name_to_ano_name.items():
-            str_code = str_code.replace(cst,acst)
-        for param,aparam in dict_param_aparam.items():
-            str_code = str_code.replace(param,aparam)
-        self.ano_code = str_code
+        # =======
+        # THIRD: replace all names by their anonymized version
+        code_to_proceed = sn_to_proceed.get_code()
+        for tar,ano_tar in self.dict_tar_to_ano_tar.items():
+            code_to_proceed = code_to_proceed.replace(tar,ano_tar)
+        for cst_name,ano_name in self.dict_cst_name_to_ano_name.items():
+            code_to_proceed = code_to_proceed.replace(cst_name,ano_name)
+        for param_name,ano_name in self.dict_param_name_to_ano_name.items():
+            code_to_proceed = code_to_proceed.replace(param_name,ano_name)
+        self.anonymized_code = code_to_proceed
     # ============================
 
 
-    # ============================
+
+class AnonymousReprString():
+    """
+    two objects are equivalent up to renaming 
+    <=> they have the same AnonymousReprString
+    a string that contains all the information
+
+    We can do an AnonymousReprString for the following classes:
+    - VariableInfo
+    - SimplifiedNodeAnonymizationMaterial => SimplifiedNode
+    - PartitionedCluster
+    """
     @staticmethod
-    def make_charac_info(info : VariableInfo):
+    def variable_info(info : VariableInfo):
         if info.variable_type is tuple or info.variable_type is list:
-            return (
+            return str((
                 info.variable_type,
-                [SimplifiedNodeAnonymizedInfo.make_charac_info(sub) for sub in info.sub_info]
-            )
+                [AnonymousReprString.variable_info(sub)
+                 for sub in info.sub_info]
+            ))
         else:
-            return (
+            return str((
                 info.variable_type,
                 info.dtype if hasattr(info,"dtype") else None,
                 info.tensor_size if hasattr(info,"tensor_size") else None,
                 info.requires_grad if hasattr(info,"requires_grad") else None,
                 info.memsize if hasattr(info,"memsize") else None,
-            )
-    # ============================
+            ))
+        
+    @staticmethod
+    def simplified_node_anonymization_material(
+            sn_ano_material : SimplifiedNodeAnonymizationMaterial):
+        anonymous_repr = [sn_ano_material.anonymized_code]
+        for ano_tar,info in sn_ano_material.dict_ano_tar_to_variable_info.items():
+            anonymous_repr.append(
+                (ano_tar,AnonymousReprString.variable_info(info)))
+        for cst_ano_name,info in sn_ano_material.dict_cst_ano_name_to_variable_info.items():
+            anonymous_repr.append(
+                (cst_ano_name,AnonymousReprString.variable_info(info)))
+        for param_ano_name,info in sn_ano_material.dict_param_ano_name_to_variable_info.items():
+            anonymous_repr.append(
+                (param_ano_name,AnonymousReprString.variable_info(info)))
+        return str(anonymous_repr)
 
-    # ============================
-    def make_charac_string(self):
-        charac_list = [self.ano_code]
-        for atar,info in self.dict_ano_tar_to_variable_info.items():
-            charac_list.append((atar,SimplifiedNodeAnonymizedInfo.make_charac_info(info)))
-        for acst,info in self.dict_ano_cst_to_variable_info.items():
-            charac_list.append((acst,SimplifiedNodeAnonymizedInfo.make_charac_info(info)))
-        for aparam,info in self.dict_ano_param_to_variable_info.items():
-            charac_list.append((aparam,SimplifiedNodeAnonymizedInfo.make_charac_info(info)))
-        return str(charac_list)
-    # ============================
 
 
 def build_anonymized_nodes_equivalence_classes(
