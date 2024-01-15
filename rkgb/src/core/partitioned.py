@@ -258,24 +258,26 @@ class PartitionedCluster():
     dict_first_mt_to_inputs_used_mt = None
     dict_output_mt_to_outputs_sent = None
 
-    def __init__(self,group_s_nodes,p_structure):
-        self.p_structure : PartitionedStructure = p_structure
-        sg = p_structure.sg
-        # == get the toposort for s_nodes ==
-        # group_s_nodes is an unordered iterable
-        self.s_nodes = [sn for sn in sg.nodes if sn in group_s_nodes]
+    def __init__(self,
+            group_simplified_nodes,
+            partitioned_structure):
+        self.p_structure : PartitionedStructure = partitioned_structure
+        self.s_nodes = base.Node.sort_nodes(group_simplified_nodes)
+        # => Following their ._topological_number = their index in sg.nodes
 
-        # == Check if the exact same cluster already exists ==
-        charac_string = str([sn.get_num() for sn in self.s_nodes])
-        ps_dict_charac_to_cluster = self.p_structure.dict_cluster_charac_string_to_cluster
-        if charac_string in ps_dict_charac_to_cluster:
-            self.original_cluster = ps_dict_charac_to_cluster[charac_string]
+        # As we can use several partitioners at the same time,
+        # it could happen that we already had the exact same cluster
+        # ie the same set of s_nodes. So to be efficient, we store 
+        # a handmade __repr__/__hash__ of each cluster:
+        hash = hash(tuple(self.s_nodes))
+        dict_hash_to_cluster = self.p_structure.dict_cluster_hash_to_cluster
+        if hash in dict_hash_to_cluster:
+            self.original_cluster = dict_hash_to_cluster[hash]
             self.name = self.original_cluster.name
         else:
             cluster_nb = self.p_structure.counter_nb_clusters.count()
-            self.original_cluster \
-                = ps_dict_charac_to_cluster[charac_string] \
-                = self
+            self.original_cluster = self
+            dict_hash_to_cluster[hash] = self
             self.make_io()
             self.make_ano_cluster_id()
             self.name = f"P_Cluster_{cluster_nb}_Ano_id_{self.ano_cluster_id}"
@@ -494,7 +496,7 @@ class PartitionedCluster():
         if charac_string in dict_cluster_to_ano_id:
             self.ano_cluster_id = ano_id = dict_cluster_to_ano_id[charac_string]
             self.representee_cluster \
-                = self.p_structure.dict_ano_cluster_id_to_representee_cluster[ano_id]
+                = self.p_structure.dict_cluster_ano_id_to_representee_cluster[ano_id]
         else:
             self.possible_partitioning = []
             self.partitioners_already_used = []
@@ -503,7 +505,7 @@ class PartitionedCluster():
                 = dict_cluster_to_ano_id[charac_string] \
                 = self.p_structure.counter_nb_unique_clusters.count()
             self.representee_cluster \
-                = self.p_structure.dict_ano_cluster_id_to_representee_cluster[ano_id] \
+                = self.p_structure.dict_cluster_ano_id_to_representee_cluster[ano_id] \
                 = self
     # =============================
 
@@ -545,36 +547,37 @@ class PartitionedStructure():
     main_cluster : PartitionedCluster = None
     sg : SimplifiedGraph = None
     dict_info : dict = None
-    dict_target_anonymous_id : dict[str, int] = None
-    dict_main_target_to_node_anonymous_material : dict[str, anonymize.SimplifiedNodeAnonymizationMaterial] = None
-    dict_cluster_charac_string_to_cluster : dict[str, PartitionedCluster] = None
-    dict_cluster_ano_charac_string_to_ano_cluster_id : dict[str,int] = None
-    dict_ano_cluster_id_to_representee_cluster : dict[int,PartitionedCluster] = None
+    dict_target_ano_id : dict[str, int] = None
+    dict_mt_to_sn_ano_material : dict[str, anonymize.SimplifiedNodeAnonymizationMaterial] = None
+    dict_cluster_hash_to_cluster : dict[str, PartitionedCluster] = None
+    dict_cluster_ano_hash_to_ano_cluster_id : dict[str,int] = None
+    dict_cluster_ano_id_to_representee_cluster : dict[int,PartitionedCluster] = None
     min_size_to_trigger_partitioning : int = 4
     def __init__(self,
             simplified_graph : SimplifiedGraph,
             original_mod : torch.nn.Module,
-            partitioners = [
-                Partitioner(),
-                PartitionerBottomToTop(),
-                PartitionerSequence()
-            ]):
+            partitioners : list[Partitioner]):
+        # 1) Initialize the structure
         self.sg = simplified_graph
         self.dict_info = simplified_graph.dict_info
         self.counter_nb_graphs = Counter()
         self.counter_nb_clusters = Counter()
-        self.counter_nb_unique_clusters = Counter()
-        (   self.dict_target_anonymous_id,
-            self.dict_main_target_to_node_anonymous_material ) \
-                = anonymize.build_anonymous_equivalence_classes(simplified_graph,original_mod)
-        self.dict_cluster_charac_string_to_cluster = dict()
-        self.dict_cluster_ano_charac_string_to_ano_cluster_id = dict()
-        # TODO => Changer où on calcule le cluster_ano_charac_string
-        self.dict_ano_cluster_id_to_representee_cluster = dict()
         self.node_unique_id_generator = base.Node_unique_id_generator()
 
-    def make_graphs_names(self):
-        for cluster in self.dict_ano_cluster_id_to_representee_cluster.values():
+        # - Anonymizing stuff => to recognize equivalent clusters
+        self.counter_nb_unique_clusters = Counter()
+        (self.dict_target_ano_id,
+         self.dict_mt_to_sn_ano_material ) \
+            = anonymize.build_anonymous_equivalence_classes(simplified_graph,original_mod)
+        self.dict_cluster_hash_to_cluster = dict()
+        self.dict_cluster_ano_hash_to_ano_cluster_id = dict()
+        self.dict_cluster_ano_id_to_representee_cluster = dict()
+
+        # 2) 
+        # TODO => Changer où on calcule le cluster_ano_charac_string
+
+    def make_graph_names(self):
+        for cluster in self.dict_cluster_ano_id_to_representee_cluster.values():
             for nb,pg in enumerate(cluster.possible_partitioning):
                 pg.name = f"Possible_pg_{nb}_of_{cluster.name}"
                 
@@ -1287,7 +1290,7 @@ def S_to_P(
     for partitioner in partitioners:
         main_cluster.partition(partitioner)
     main_cluster.make_sub_cluster_original()
-    p_structure.make_graphs_names()
+    p_structure.make_graph_names()
     sg.delete_edges_via_artifacts()
     main_cluster.recompute_all_interfaces_and_edges()
     return p_structure

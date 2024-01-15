@@ -131,8 +131,9 @@ class Node():
         except: return (-1)
     get_num_cst = get_num_tar
     def get_num(self):
-        if hasattr(self,"number"):
-            return self.number # -> for H
+        if hasattr(self,"_topological_number"):
+            return self._topological_number 
+            # -> for SimplifiedNode / (Hierarchical)ComputationNodes
         else:
             return Node.get_num_tar(self.main_target)
 

@@ -17,6 +17,7 @@ from src.core.forward import ForwardNode,ForwardGraph
 # **********
 
 class SimplifiedNode(base.Node):
+    _topological_number = None
     def __init__(self,
             main_target=base.Node.no_target_string,
             code=None,
@@ -416,11 +417,11 @@ class SimplifiedGraph(base.Graph):
             self.make_inputs()
             self.unplug_init_node()
             self.make_dict_output_viewing_code()
+            self.set_node_topological_numbers()
             self.assert_ready()
 
     # ===== BLOCK 1 : CLEAR and CHECK =====
     def clear(self):
-        # self.toposort_nodes()
         self.nodes = self.get_sorted_nodes_by_following_deps_relation()
         if self.init_node in self.nodes: self.nodes.remove(self.init_node)
         self.check_artifact() # TO REMOVE after all tests passed
@@ -622,6 +623,10 @@ class SimplifiedGraph(base.Graph):
             )
             self.dict_output_viewing_code[output_node.mt] = viewing_code
             self.output_targets.append(output_node.mt)
+
+    def set_node_topological_numbers(self):
+        for i,sn in enumerate(self.nodes):
+            sn._topological_number = i
     # ===== END BLOCK 2 : ADJUST ATTRIBUTES AFTER ALL SIMPLIFICATIONS =====
 
 

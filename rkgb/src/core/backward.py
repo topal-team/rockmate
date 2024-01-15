@@ -14,6 +14,7 @@ from src.core.simplified import SimplifiedNode,SimplifiedGraph
 
 
 class ComputationNode(base.Node):
+    _topological_number = None
     def __init__(self,
             main_target=base.Node.no_target_string,
             simplified_node : SimplifiedNode = None,
@@ -203,7 +204,7 @@ class Graph(base.Graph):
             self.make_reciprocal_users_attributes()
             self.computation_nodes = self.get_sorted_nodes_by_following_deps_relation()
             self.make_special_input_nodes(simplified_graph)
-            self.set_computation_node_numbers()
+            self.set_computation_node_topological_numbers()
 
     # ======= MAIN LOOP ========
     def process_and_inspect_node(self,
@@ -505,9 +506,9 @@ class Graph(base.Graph):
         for anode in self.allocation_nodes:
             for req_cnode in anode.deps: req_cnode.users.add(anode)
 
-    def set_computation_node_numbers(self):
+    def set_computation_node_topological_numbers(self):
         for i,cnode in enumerate(self.computation_nodes):
-            setattr(cnode,"_number",i)
+            cnode._topological_number = i
 
     # ****************
     def __iter__(self):
