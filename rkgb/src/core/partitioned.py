@@ -50,8 +50,10 @@ class PartitionedNode(base.Node):
             self.is_leaf = True
             self.is_protected_from_unwrap = True
 
-        self.deps         = set()
-        self.users        = set()
+        self.deps  = set()
+        self.users = set()
+        self.deps_through_artifacts  = set()
+        self.users_through_artifacts = set()
         self.deps_global  = set() # FOR DYNAMIC PARTITIONING
         self.users_global = set() # FOR DYNAMIC PARTITIONING
         # Global edges contain ALL deps/users, of any depth
@@ -96,6 +98,8 @@ class PartitionedGraph(base.Graph):
         super().__init__(parent_objet)
         self.is_main_graph = is_main_graph
         self.output_nodes = set()
+        if parent_objet is None:
+            parent_objet = partitioned_cluster
         if hasattr(parent_objet,"counter_nb_graphs"):
             counter : Counter = parent_objet.counter_nb_graphs
             graph_nb = counter.count()
@@ -111,25 +115,37 @@ class PartitionedGraph(base.Graph):
             self.nodes = []
             dict_info = partitioned_cluster.p_structure.dict_info
             dict_mt_to_pn = dict()
-            for sn in partitioned_cluster.s_nodes:
+            s_nodes = partitioned_cluster.s_nodes
+            for sn in s_nodes:
+                sn : SimplifiedNode
                 pn = PartitionedNode(
                     main_target = sn.mt,
                     main_graph = self,
                     simplified_node = sn)
                 pn.memory_occupied_by_all_outputs = dict_info[sn.mt].memsize
-                p_nodes.append(pn)
+                self.nodes.append(pn)
                 dict_mt_to_pn[sn.mt] = pn
-                for req_sn in sn.deps.keys():
-                    if req_sn in self.s_nodes:
+                for req_sn in sn.deps:
+                    if req_sn in s_nodes:
                         req_pn = dict_mt_to_pn[req_sn.mt]
                         pn.deps.add(req_pn)
                         req_pn.users.add(pn)
-            for pn in p_nodes:
+                for req_sn in sn.deps_through_artifacts:
+                    if req_sn in s_nodes:
+                        req_pn = dict_mt_to_pn[req_sn.mt]
+                        pn.deps_through_artifacts.add(req_pn)
+                        req_pn.users_through_artifacts.add(pn)
+                
+            for pn in self.nodes:
                 pn.deps_global = set(pn.deps)
                 pn.users_global = set(pn.users)
 
-            pg._first_nodes = set([dict_mt_to_pn[first_mt] for first_mt in self.firsts_mt])
-            pg.output_nodes = set([dict_mt_to_pn[out_mt] for out_mt in self.outputs_mt])
+            self._first_nodes = set(
+                [dict_mt_to_pn[first_mt] 
+                for first_mt in partitioned_cluster.firsts_mt])
+            self.output_nodes = set(
+                [dict_mt_to_pn[out_mt] 
+                for out_mt in partitioned_cluster.outputs_mt])
 
     @property
     def size(self):
@@ -259,7 +275,7 @@ class Partitioner():
     def __init__(self):
         self.config : self.__class__.Config = None
     def __call__(self, cluster):
-        return cluster.init_PartitionedGraph()
+        return PartitionedGraph(cluster)
         # raise Exception(
             # "Base class of partitioners. __call__ method "\
             # "must be overwritten by all subclasses")
@@ -293,6 +309,7 @@ class PartitionedCluster():
             group_simplified_nodes,
             partitioned_structure):
         self.p_structure : PartitionedStructure = partitioned_structure
+        self.counter_nb_graphs = partitioned_structure.counter_nb_graphs
         self.s_nodes = base.Node.sort_nodes(group_simplified_nodes)
         # => Following their ._topological_number = their index in sg.nodes
 
@@ -318,36 +335,6 @@ class PartitionedCluster():
         return len(self.s_nodes)
     # ======================
     
-    # ======================
-    def init_PartitionedGraph(self):
-        assert(self.self_or_strictly_equal_cluster is self)
-        pg = PartitionedGraph(parent_objet=self.p_structure)
-        pg.cluster = self
-        pg.nodes = p_nodes = []
-        dict_info = self.p_structure.dict_info
-        dict_mt_to_pn = dict()
-        for sn in self.s_nodes:
-            pn = PartitionedNode(
-                main_graph  = pg,
-                main_target = sn.mt,
-                sn = sn)
-            pn.memory_occupied_by_all_outputs = dict_info[sn.mt].memsize
-            p_nodes.append(pn)
-            dict_mt_to_pn[sn.mt] = pn
-            for req_sn in sn.deps.keys():
-                if req_sn in self.s_nodes:
-                    req_pn = dict_mt_to_pn[req_sn.mt]
-                    pn.deps.add(req_pn)
-                    req_pn.users.add(pn)
-        for pn in p_nodes:
-            pn.deps_global = set(pn.deps)
-            pn.users_global = set(pn.users)
-
-        pg._first_nodes = set([dict_mt_to_pn[first_mt] for first_mt in self.firsts_mt])
-        pg.output_nodes = set([dict_mt_to_pn[out_mt] for out_mt in self.outputs_mt])
-        return pg
-    # =================
-            
     # =================
     def make_io(self):
         # ATTRIBUTEs NEEDED : s_nodes, p_structure
@@ -1208,8 +1195,7 @@ class PartitionerBottomToTop(Partitioner):
 
 
     def __call__(self, cluster: PartitionedCluster):
-        pg : PartitionedGraph = cluster.init_PartitionedGraph()
-        pg.cluster = cluster
+        pg = PartitionedGraph(cluster)
         config = self.config
         if config.is_top_graph_ok(pg): return pg
 
@@ -1259,8 +1245,7 @@ class PartitionerSequence(Partitioner):
         self.config = self.__class__.Config(**kwargs)
 
     def __call__(self, cluster : PartitionedCluster):
-        pg : PartitionedGraph = cluster.init_PartitionedGraph()
-        pg.cluster = cluster
+        pg = PartitionedGraph(cluster)
         dict_info = cluster.p_structure.dict_info
 
         # ** Add a temporary global source before get separators**
