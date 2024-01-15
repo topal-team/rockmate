@@ -156,11 +156,13 @@ class PartitionedGraph(base.Graph):
         for pn in self.nodes:
             pn : PartitionedNode
             if pn.sub_cluster is not None:
-                sub_c = pn.sub_cluster.original_cluster
-                if sub_c is pn.sub_cluster:
-                    sub_c.make_sub_cluster_original()
+                self_or_equal_cluster = pn.sub_cluster.self_or_strictly_equal_cluster
+                if self_or_equal_cluster is not pn.sub_cluster:
+                    # => It's a redundancy of an other cluster
+                    pn.sub_cluster = self_or_equal_cluster
                 else:
-                    pn.sub_cluster = sub_c
+                    # => Fine we continue
+                    self_or_equal_cluster.fix_redundant_clusters()
 
     def recompute_edges(self,sg : SimplifiedGraph):
         # NOT OPTIMAL AT ALL -> To improve if to slow
@@ -244,7 +246,7 @@ class PartitionedCluster():
     firsts_mt = None
     outputs_mt = None
     translator = None
-    original_cluster = None
+    self_or_strictly_equal_cluster = None
     ano_cluster_id = None
     name = None
     representee_cluster = None
@@ -272,11 +274,11 @@ class PartitionedCluster():
         hash = hash(tuple(self.s_nodes))
         dict_hash_to_cluster = self.p_structure.dict_cluster_hash_to_cluster
         if hash in dict_hash_to_cluster:
-            self.original_cluster = dict_hash_to_cluster[hash]
-            self.name = self.original_cluster.name
+            self.self_or_strictly_equal_cluster = dict_hash_to_cluster[hash]
+            self.name = self.self_or_strictly_equal_cluster.name
         else:
             cluster_nb = self.p_structure.counter_nb_clusters.count()
-            self.original_cluster = self
+            self.self_or_strictly_equal_cluster = self
             dict_hash_to_cluster[hash] = self
             self.make_io()
             self.make_ano_cluster_id()
@@ -289,7 +291,7 @@ class PartitionedCluster():
     
     # ======================
     def init_PartitionedGraph(self):
-        assert(self.original_cluster is self)
+        assert(self.self_or_strictly_equal_cluster is self)
         pg = PartitionedGraph(parent_objet=self.p_structure)
         pg.cluster = self
         pg.nodes = p_nodes = []
@@ -510,9 +512,9 @@ class PartitionedCluster():
     # =============================
 
     def partition(self,partitioner : Partitioner):
-        if not (self.original_cluster is self):
-            self.original_cluster.partition(partitioner)
-        elif not (self.representee_cluster is self):
+        if self.self_or_strictly_equal_cluster is not self:
+            self.self_or_strictly_equal_cluster.partition(partitioner)
+        elif self.representee_cluster is not self:
             self.representee_cluster.partition(partitioner)
         elif partitioner in self.partitioners_already_used:
             pass
@@ -779,7 +781,7 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
                 sub_g = pn.sub_graph
                 sub_snodes = PartitionedDynamicManipulation.freeze(sub_g,p_structure,partitioner)
                 sub_c = PartitionedCluster(sub_snodes,p_structure)
-                original_c = sub_c.original_cluster
+                original_c = sub_c.self_or_strictly_equal_cluster
                 if original_c.representee_cluster is original_c:
                     original_c.partitioners_already_used.append(partitioner)
                     original_c.partitionings.append(sub_g)
