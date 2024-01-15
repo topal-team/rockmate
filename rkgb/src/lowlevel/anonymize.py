@@ -3,6 +3,7 @@
 
 import ast
 import torch
+from src.utils.utils import Counter
 from src.core import base
 from src.lowlevel.variable_info import VariableInfo
 from src.core.simplified import SimplifiedGraph, SimplifiedNode
@@ -10,7 +11,7 @@ from src.core.backward import ComputationNode, AllocationNode
 
 
 class SimplifiedNodeAnonymizationMaterial():
-    ano_id : int = None # will be set at higher level
+    anonymous_id : int = None # will be set at higher level
     anonymized_code : str = None
     dict_tar_to_ano_nb : dict[str, int] = None
     dict_tar_to_ano_tar : dict[str, str] = None
@@ -142,29 +143,81 @@ class AnonymousReprString():
     @staticmethod
     def simplified_node_anonymization_material(
             sn_ano_material : SimplifiedNodeAnonymizationMaterial):
-        anonymous_repr = [sn_ano_material.anonymized_code]
+        ano_repr = [sn_ano_material.anonymized_code]
         for ano_tar,info in sn_ano_material.dict_ano_tar_to_variable_info.items():
-            anonymous_repr.append(
+            ano_repr.append(
                 (ano_tar,AnonymousReprString.variable_info(info)))
         for cst_ano_name,info in sn_ano_material.dict_cst_ano_name_to_variable_info.items():
-            anonymous_repr.append(
+            ano_repr.append(
                 (cst_ano_name,AnonymousReprString.variable_info(info)))
         for param_ano_name,info in sn_ano_material.dict_param_ano_name_to_variable_info.items():
-            anonymous_repr.append(
+            ano_repr.append(
                 (param_ano_name,AnonymousReprString.variable_info(info)))
-        return str(anonymous_repr)
+        return str(ano_repr)
+    
+    @staticmethod
+    def get(object):
+        if isinstance(object,VariableInfo):
+            return AnonymousReprString.variable_info(object)
+        elif isinstance(object,SimplifiedNodeAnonymizationMaterial):
+            return AnonymousReprString.simplified_node_anonymization_material(object)
+        else:
+            raise Exception(f"AnonymousReprString unsupported type: {type(object)}")
 
 
 
-def build_anonymized_nodes_equivalence_classes(
-        simplified_graph : SimplifiedGraph):
+def build_anonymized_node_equivalence_classes(
+        sg : SimplifiedGraph,
+        original_mod : torch.nn.Module):
     """
     Return:
-        dict_target_to_anonymized_target_id
-        dict_main_target_to_anonymized_node_id
+     - dict_target_anonymous_id:
+        Two targets have the same ano_id if their 
+        VariableInfo are equal up to anonymization.
+    
+     - dict_main_target_to_node_anonymous_material:
+        Two nodes have the same ano_id if their
+        AnonymizedReprString are equal: ie
+        1) Their codes are equal up anonymization
+        2) All their variables/constants/params have
+        equal VariableInfo, ie equal type, shape, etc
     """
-    dict_target_to_anonymized_target_id = dict()
-    dict_main_target_to_anonymized_node_id = dict()
+    # 1) Build node equivalence classes:
+    # => Assign to each node its anonymous material and an anonymous id
+    dict_main_target_to_node_anonymous_material = dict()
+    dict_sn_ano_repr_string_to_anonymous_id = dict()
+    counter_nb_unique_snodes = Counter()
+    for sn_to_proceed in [sg.init_node] + sg.nodes:
+        sn_ano_material = SimplifiedNodeAnonymizationMaterial(sn_to_proceed,sg,original_mod)
+        sn_ano_repr_string = AnonymousReprString.get(sn_ano_material)
+        if sn_ano_repr_string in dict_sn_ano_repr_string_to_anonymous_id:
+            sn_ano_material.anonymous_id \
+                = dict_sn_ano_repr_string_to_anonymous_id[sn_ano_repr_string]
+        else:
+            sn_ano_material.anonymous_id \
+                = dict_sn_ano_repr_string_to_anonymous_id[sn_ano_repr_string] \
+                = counter_nb_unique_snodes.count()
+        dict_main_target_to_node_anonymous_material[sn_to_proceed.main_target] = sn_ano_material
+
+    # 2) Build target equivalence classes
+    # => Assign to each target an anonymous id
+    dict_target_anonymous_id = dict()
+    dict_info_ano_repr_string_to_anonymous_id = dict()
+    counter_nb_unique_targets = Counter()
+    for target,info in sg.dict_info.items():
+        target_ano_repr_string = AnonymousReprString.get(info)
+        if target_ano_repr_string in dict_info_ano_repr_string_to_anonymous_id:
+            dict_target_anonymous_id[target] \
+                = dict_info_ano_repr_string_to_anonymous_id[target_ano_repr_string]
+        else:
+            dict_target_anonymous_id[target] \
+                = dict_info_ano_repr_string_to_anonymous_id[target_ano_repr_string] \
+                = counter_nb_unique_targets.count()
+    
+    return (
+        dict_target_anonymous_id,
+        dict_main_target_to_node_anonymous_material
+    )
 
 
 
