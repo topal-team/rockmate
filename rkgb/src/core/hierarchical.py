@@ -161,7 +161,7 @@ class H_cluster():
     p_node : PartitionedNode = None
     all_clusters : set = None
     representee_cluster = None # : H_cluster
-    possible_hg : list[H_graph] = None
+    partitionings : list[H_graph] = None
     list_sched = None #: list[Op_sched] LATER 
 
     def __init__(self,name,is_bottom):
@@ -260,15 +260,15 @@ def PartitionedCluster_to_H_cluster(p_cluster : PartitionedCluster, kg : K_graph
         (kdn,hdn) for (hdn,kdn) in translator.dict_name_to_ano_triplet.items()
     )
 
-    # ** possible_hg and representee **
+    # ** partitionings and representee **
     if p_cluster is p_cluster.representee_cluster:
         h_cluster.representee_cluster = h_cluster
-        h_cluster.possible_hg = possible_hg = []
+        h_cluster.partitionings = partitionings = []
         h_cluster.list_sched = []
         for pg in p_cluster.possible_partitioning:
             hg = PartitionedGraph_to_H_graph(pg,h_cluster,kg)
             h_cluster.all_clusters.update(hg.all_clusters)
-            possible_hg.append(hg)
+            partitionings.append(hg)
     else:
         h_cluster.representee_cluster \
             = representee \
@@ -568,11 +568,11 @@ def aux_print_H_graph_name(hg,name=None):
     else: return "Hierarchical_H_graph"
 
 def aux_print_H_cluster_message(hc : H_cluster):
-    possible_hg = hc.representee_cluster.possible_hg
-    return f"{hc.name}, with {len(possible_hg)} possible H_graphs"
+    partitionings = hc.representee_cluster.partitionings
+    return f"{hc.name}, with {len(partitionings)} possible H_graphs"
 def aux_print_H_cluster_names(hc : H_cluster,name=None):
     if name is None: name = hc.name
-    nb_hg = len(hc.representee_cluster.possible_hg)
+    nb_hg = len(hc.representee_cluster.partitionings)
     return [f"H_graph_{i}_of_{name}" for i in range(nb_hg)]
 
 def print_H_graph(hg: H_graph, name=None, open=True, render_format="svg",dot=None,uniq_num=0):

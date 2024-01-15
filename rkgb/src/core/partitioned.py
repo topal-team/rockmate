@@ -152,7 +152,7 @@ class PartitionedGraph(base.Graph):
                 pn.is_protected_from_unwrap = False
                 pn.sub_graph.set_all_protected_to_false()
 
-    def make_sub_cluster_original(self):
+    def fix_redundant_clusters(self):
         for pn in self.nodes:
             pn : PartitionedNode
             if pn.sub_cluster is not None:
@@ -248,7 +248,7 @@ class PartitionedCluster():
     ano_cluster_id = None
     name = None
     representee_cluster = None
-    possible_partitioning = None
+    partitionings = None
     partitioners_already_used = None
     # Tmp attributes :
     first_nodes = None
@@ -498,7 +498,7 @@ class PartitionedCluster():
             self.representee_cluster \
                 = self.p_structure.dict_cluster_ano_id_to_representee_cluster[ano_id]
         else:
-            self.possible_partitioning = []
+            self.partitionings = []
             self.partitioners_already_used = []
             self.ano_cluster_id \
                 = ano_id \
@@ -520,12 +520,12 @@ class PartitionedCluster():
             pass
         else:
             self.partitioners_already_used.append(partitioner)
-            self.possible_partitioning.append(partitioner(self))
+            self.partitionings.append(partitioner(self))
 
-    def make_sub_cluster_original(self):
-        if self.possible_partitioning is not None:
-            for pg in self.possible_partitioning:
-                pg.make_sub_cluster_original()
+    def fix_redundant_clusters(self):
+        if self.partitionings is not None:
+            for pg in self.partitionings:
+                pg.fix_redundant_clusters()
 
     def recompute_all_interfaces_and_edges(self):
         # It's useless to compute translator before
@@ -535,7 +535,7 @@ class PartitionedCluster():
             self.make_io() # recompute interfaces
             self.make_translator()
             if self.representee_cluster is self:
-                for pg in self.possible_partitioning:
+                for pg in self.partitionings:
                     pg.recompute_edges(self.p_structure.sg)
 
 
@@ -573,13 +573,22 @@ class PartitionedStructure():
         self.dict_cluster_ano_hash_to_ano_cluster_id = dict()
         self.dict_cluster_ano_id_to_representee_cluster = dict()
 
-        # 2) 
-        # TODO => Changer où on calcule le cluster_ano_charac_string
+        self.main_cluster = PartitionedCluster(
+            list(simplified_graph.nodes),self)
+
+        # 2) Run the partitioners
+        for partitioner in partitioners:
+            self.main_cluster.partition(partitioner)
+        self.main_cluster.fix_redundant_clusters()
+        self.all_clusters = set(self.dict_cluster_hash_to_cluster.values())
+        self.all_unique_clusters = set(self.dict_cluster_ano_id_to_representee_cluster.values())
+        self.make_graph_names()
+
 
     def make_graph_names(self):
-        for cluster in self.dict_cluster_ano_id_to_representee_cluster.values():
-            for nb,pg in enumerate(cluster.possible_partitioning):
-                pg.name = f"Possible_pg_{nb}_of_{cluster.name}"
+        for cluster in self.all_unique_clusters:
+            for nb,pg in enumerate(cluster.partitionings):
+                pg.name = f"Partitioning n°{nb} of {cluster.name}"
                 
 
 
@@ -773,7 +782,7 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
                 original_c = sub_c.original_cluster
                 if original_c.representee_cluster is original_c:
                     original_c.partitioners_already_used.append(partitioner)
-                    original_c.possible_partitioning.append(sub_g)
+                    original_c.partitionings.append(sub_g)
                 # otherwise -> We won't keep this sub_graph
                 # -> we are only interested in partitioning representee
                 sub_g.cluster = original_c
@@ -1315,7 +1324,7 @@ def aux_print_PartitionedGraph_name(pg,name=None):
     else: return "Partitioned_Forward_PartitionedGraph"
 
 def aux_print_PartitionedCluster_message(pc : PartitionedCluster):
-    possible_pg = pc.representee_cluster.possible_partitioning
+    possible_pg = pc.representee_cluster.partitionings
     return f"{pc.name}, with {len(possible_pg)} possible partitioning"
 def aux_print_PartitionedCluster_names(pc : PartitionedCluster,name=None):
     if name is None: name = pc.name
