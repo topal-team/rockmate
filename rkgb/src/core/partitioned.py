@@ -59,9 +59,9 @@ class PartitionedNode(base.Node):
         # Global edges contain ALL deps/users, of any depth
 
     def get_all_standard_deps(self):
-        return self.deps
+        return self.deps.union(self.deps_through_artifacts)
     def get_all_standard_users(self):
-        return self.users
+        return self.users.union(self.users_through_artifacts)
     
     def does_requires_grad(self):
         if not self.is_leaf:
@@ -159,19 +159,20 @@ class PartitionedGraph(base.Graph):
         if self.pn_wrapping_it is None:
             return set()
         else:
-            pnw = self.pn_wrapping_it
             # deps at level above :
-            input_nodes = set(pnw.deps)
+            wrapping_pn = self.pn_wrapping_it
+            input_nodes = set(wrapping_pn.deps)
             # deps higher :
-            if pnw.main_graph is not None:
-                higher_g = pnw.main_graph
-                if pnw in higher_g.first_nodes:
+            if wrapping_pn.main_graph is not None:
+                higher_g = wrapping_pn.main_graph
+                if wrapping_pn in higher_g.first_nodes:
                     input_nodes.update(
                         higher_g.input_nodes.intersection(
-                        pnw.deps_global
+                        wrapping_pn.deps_global
                         )
                     )
             return input_nodes
+
     @property
     def first_nodes(self): # -> users of at least one input
         if self._first_nodes is not None:
@@ -982,19 +983,21 @@ class PartitionerBottomToTop(Partitioner):
         dict_seq_nb = dict() # name -> a seq nb
         dict_sequences = dict() # seq nb -> list of nodes in the seq
         for pn in pg.nodes:
-            if len(pn.users) == 1 and len(list(pn.users)[0].deps) == 1:
-                name = pn.name
-                user_pn = list(pn.users)[0]
-                user_name = user_pn.name
-                if name in dict_seq_nb:
-                    seq_nb = dict_seq_nb[name]
-                    dict_seq_nb[user_name] = seq_nb
-                    dict_sequences[seq_nb].append(user_pn)
-                else:
-                    tot_nb_seq += 1
-                    dict_seq_nb[name] = tot_nb_seq
-                    dict_seq_nb[user_name] = tot_nb_seq
-                    dict_sequences[tot_nb_seq] = [pn,user_pn]
+            pn : PartitionedNode
+            pn_users = pn.get_all_standard_users()
+            if len(pn_users) == 1:
+                user_pn : PartitionedNode = list(pn_users)[0]
+                if len(user_pn.get_all_standard_deps()) == 1:
+                    user_name = user_pn.name
+                    if pn.name in dict_seq_nb:
+                        seq_nb = dict_seq_nb[pn.name]
+                        dict_seq_nb[user_name] = seq_nb
+                        dict_sequences[seq_nb].append(user_pn)
+                    else:
+                        tot_nb_seq += 1
+                        dict_seq_nb[pn.name] = tot_nb_seq
+                        dict_seq_nb[user_name] = tot_nb_seq
+                        dict_sequences[tot_nb_seq] = [pn,user_pn]
 
         # ** split too long sequences **
         # -> rely on config.max_len_seq
@@ -1022,7 +1025,7 @@ class PartitionerBottomToTop(Partitioner):
     # === SECOND WAY TO FIND OPTIONS : FLOWS ===
     # the flow of a pn are nodes 
     def find_flow_options(self,pg : PartitionedGraph):
-        # === GENERALIZED VERSION OF RK_get_1_separators ===
+        # === GENERALIZED VERSION OF base.Graph.find_cutting_points ===
         # for each node we need to find where its flow converge back
         # -> flow of a pn is defined as nodes in
         # -> `to_be_visited` which are descendants of pn
@@ -1031,7 +1034,9 @@ class PartitionerBottomToTop(Partitioner):
         # relation perspective, e.g. outputs are sources.
         # /!\ Note that its merging here, not grouping /!\
 
-        dict_nb_usages = dict([(pn, len(pn.users)) for pn in pg.nodes])
+        dict_nb_usages = dict(
+            [(pn, len(pn.get_all_standard_users())) 
+             for pn in pg.nodes])
         to_be_visited = []
         dict_flow = dict()
         # for a pn already visited -> its descendants in to_be_visited
@@ -1060,7 +1065,8 @@ class PartitionerBottomToTop(Partitioner):
 
         # ** init **
         for pn in pg.nodes:
-            if len(pn.users) == 0:
+            pn : SimplifiedNode
+            if len(pn.get_all_standard_users()) == 0:
                 to_be_visited.append(pn)
                 dict_which_flow[pn] = set()
 
@@ -1081,7 +1087,7 @@ class PartitionerBottomToTop(Partitioner):
                 else:
                     continuing_flows.add(flow_pn)
             # * visit pn *
-            for req_pn in pn.deps:
+            for req_pn in pn.get_all_standard_deps():
                 # equivalent to seen.add(req_n) :
                 for flow_pn in continuing_flows:
                     tot_flow = dict_total_flow[flow_pn]
@@ -1248,7 +1254,7 @@ class PartitionerSequence(Partitioner):
         pg = PartitionedGraph(cluster)
         dict_info = cluster.p_structure.dict_info
 
-        # ** Add a temporary global source before get separators**
+        # ** Add a temporary global source before find_cutting_points**
         tmp_global_source_pn = PartitionedNode(main_graph=pg,main_target="tmp_source")
         pg.nodes.insert(0,tmp_global_source_pn)
         first_nodes = pg.first_nodes
