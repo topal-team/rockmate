@@ -6,6 +6,7 @@ import warnings
 import math
 import torch
 from src.utils.utils import Counter
+from src.lowlevel import anonymize
 from src.core import base
 from src.core.simplified import SimplifiedGraph, SimplifiedNode
 
@@ -414,8 +415,8 @@ class PartitionedCluster():
     def make_translator(self):
         # ATTRIBUTES NEEDED : s_nodes, p_structure
         # DO : translator
-        dict_mt_to_ano_info = self.p_structure.dict_mt_to_ano_sn_info
-        dict_tar_to_ano_tar_id = self.p_structure.dict_tar_to_ano_tar_id 
+        dict_mt_to_ano_info = self.p_structure.dict_main_target_to_node_anonymous_material
+        dict_target_anonymous_id = self.p_structure.dict_target_anonymous_id 
         self.translator = translator = ClusterTranslator()
         translator.dict_mt_to_ano_pair = dict()
         translator.dict_sn_to_ano_pair = dict()
@@ -440,7 +441,7 @@ class PartitionedCluster():
         for inp_nb,inp_mt in enumerate(inputs_mt):
             assert(inp_mt not in translator.dict_mt_to_ano_pair)
             inputs_sent = self.dict_input_mt_to_inputs_sent[inp_mt]
-            inputs_num = [dict_tar_to_ano_tar_id[inp] for inp in inputs_sent]
+            inputs_num = [dict_target_anonymous_id[inp] for inp in inputs_sent]
             inputs_num.sort()
             translator.dict_mt_to_ano_pair[inp_mt] \
                 = (str(inputs_num),f"input_{inp_nb}")
@@ -450,7 +451,7 @@ class PartitionedCluster():
     def make_ano_cluster_id(self):
         # ATTRIBUTES NEEDED : s_nodes, p_structure, io
         # DO : ano_cluster_id, representee_cluster
-        dict_mt_to_ano_info = self.p_structure.dict_mt_to_ano_sn_info
+        dict_mt_to_ano_info = self.p_structure.dict_main_target_to_node_anonymous_material
         dict_inputs_used = self.dict_first_mt_to_inputs_used
         dict_outputs_sent = self.dict_output_mt_to_outputs_sent
         charac_list = []
@@ -544,60 +545,33 @@ class PartitionedStructure():
     main_cluster : PartitionedCluster = None
     sg : SimplifiedGraph = None
     dict_info : dict = None
-    dict_tar_to_ano_tar_id : dict[str, int] = None
-    dict_mt_to_ano_sn_info : dict[str, Ano_SimplifiedNode_Info] = None
+    dict_target_anonymous_id : dict[str, int] = None
+    dict_main_target_to_node_anonymous_material : dict[str, anonymize.SimplifiedNodeAnonymizationMaterial] = None
     dict_cluster_charac_string_to_cluster : dict[str, PartitionedCluster] = None
     dict_cluster_ano_charac_string_to_ano_cluster_id : dict[str,int] = None
     dict_ano_cluster_id_to_representee_cluster : dict[int,PartitionedCluster] = None
-    min_size_to_trigger_partitioning : int = None
-    def __init__(self,sg : SimplifiedGraph, min_size_to_trigger_partitioning = 4):
-        self.sg = sg
-        self.dict_info = sg.dict_info
+    min_size_to_trigger_partitioning : int = 4
+    def __init__(self,
+            simplified_graph : SimplifiedGraph,
+            original_mod : torch.nn.Module,
+            partitioners = [
+                Partitioner(),
+                PartitionerBottomToTop(),
+                PartitionerSequence()
+            ]):
+        self.sg = simplified_graph
+        self.dict_info = simplified_graph.dict_info
         self.counter_nb_graphs = Counter()
         self.counter_nb_clusters = Counter()
-        self.counter_nb_unique_clusters = Counter
-        self.dict_tar_to_ano_tar_id = dict()
-        self.dict_mt_to_ano_sn_info = dict()
+        self.counter_nb_unique_clusters = Counter()
+        (   self.dict_target_anonymous_id,
+            self.dict_main_target_to_node_anonymous_material ) \
+                = anonymize.build_anonymous_equivalence_classes(simplified_graph,original_mod)
         self.dict_cluster_charac_string_to_cluster = dict()
         self.dict_cluster_ano_charac_string_to_ano_cluster_id = dict()
+        # TODO => Changer où on calcule le cluster_ano_charac_string
         self.dict_ano_cluster_id_to_representee_cluster = dict()
         self.node_unique_id_generator = base.Node_unique_id_generator()
-        self.min_size_to_trigger_partitioning = min_size_to_trigger_partitioning 
-
-    # ==========================================================
-    def make_dict_mt_to_ano_info(self,original_mod : torch.nn.Module):
-        # ATTRIBUTES NEEDED : sg
-        # DO : dict_mt_to_ano_sn_info
-        # -> generate ano_sn_info for all the s_nodes
-        self.dict_sn_charac_string_to_ano_id = dict_sn_charac_string_to_ano_id = dict()
-        self.dict_tar_to_ano_tar_id = dict_tar_to_ano_tar_id = dict()
-        dict_charac_info_to_ano_id = dict()
-        nb_unique_sns = 0
-        for sn in [self.sg.init_node] + self.sg.nodes:
-            ano_sn_info = Ano_SimplifiedNode_Info(sn,self.sg,original_mod)
-            sn_charac_string = ano_sn_info.make_charac_string()
-            if sn_charac_string in dict_sn_charac_string_to_ano_id:
-                ano_sn_info.ano_id \
-                    = dict_sn_charac_string_to_ano_id[sn_charac_string]
-            else:
-                ano_sn_info.ano_id \
-                    = dict_sn_charac_string_to_ano_id[sn_charac_string] \
-                    = nb_unique_sns \
-                    = nb_unique_sns + 1
-            self.dict_mt_to_ano_sn_info[sn.mt] = ano_sn_info
-
-        nb_unique_tar = 0
-        for tar,info in self.sg.dict_info.items():
-            charac_info = str(Ano_SimplifiedNode_Info.make_charac_info(info))
-            if charac_info in dict_charac_info_to_ano_id:
-                dict_tar_to_ano_tar_id[tar] \
-                    = dict_charac_info_to_ano_id[charac_info]
-            else:
-                dict_tar_to_ano_tar_id[tar] \
-                    = dict_charac_info_to_ano_id[charac_info] \
-                    = nb_unique_tar \
-                    = nb_unique_tar +1
-        
 
     def make_graphs_names(self):
         for cluster in self.dict_ano_cluster_id_to_representee_cluster.values():
@@ -1299,7 +1273,6 @@ def S_to_P(
     original_mod : torch.nn.Module,
     partitioners = [
         Partitioner(),
-        Partitioner_OLD_bottom_to_top(),
         PartitionerBottomToTop(),
         PartitionerSequence()
     ],

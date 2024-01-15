@@ -166,7 +166,7 @@ class AnonymousReprString():
 
 
 
-def build_anonymized_node_equivalence_classes(
+def build_anonymous_equivalence_classes(
         sg : SimplifiedGraph,
         original_mod : torch.nn.Module):
     """
