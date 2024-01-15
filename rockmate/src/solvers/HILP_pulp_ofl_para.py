@@ -131,7 +131,7 @@ class ModelPULP:
         self.with_parameters = accurate_mem
         self.with_grad = accurate_mem
         self.with_optimizer_states = accurate_mem
-        self.gradient_accumulation = 1# if 0, no gradient/optimizer states alive from previous iters
+        self.gradient_accumulation = 0# if 0, no gradient/optimizer states alive from previous iters
         self.single_fwd = accurate_mem#False
         self.single_bwd = accurate_mem
         self.grouping = grouping
@@ -1436,7 +1436,7 @@ class ModelPULP:
                     select_paras = list(candidates.keys())
                 else:
                     selector = knapsack(list(candidates.items()))
-                    unselect_paras = selector.select_size(parameter_size - prf_size)
+                    unselect_paras = selector.select_size(sum(candidates.values()) - prf_size)
                     select_paras = [
                         p for p in candidates.keys() if p not in unselect_paras
                     ]
