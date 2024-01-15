@@ -13,7 +13,7 @@ from src.core.simplified import SimplifiedGraph, SimplifiedNode
 
 class PartitionedNode(base.Node):
     is_protected_from_unwrap = None
-    mem_out = None
+    memory_occupied_by_all_outputs = None
     def __init__(self,
             main_graph,
             sub_cluster = None,
@@ -89,8 +89,10 @@ class PartitionedGraph(base.Graph):
     cluster = None # useful for debugging + printing
     without_artifacts = False
     def __init__(self,
+            partitioned_cluster = None,
             parent_objet = None,
             is_main_graph = False):
+        # 1) Initialize simple attributes
         super().__init__(parent_objet)
         self.is_main_graph = is_main_graph
         self.output_nodes = set()
@@ -101,6 +103,33 @@ class PartitionedGraph(base.Graph):
         else:
             graph_nb = -1
         self.name = f"PartitionedGraph {graph_nb}"
+
+        # 2) Real constructor in case we have a partitioned_cluster
+        if partitioned_cluster is not None:
+            partitioned_cluster : PartitionedCluster
+            self.cluster = partitioned_cluster
+            self.nodes = []
+            dict_info = partitioned_cluster.p_structure.dict_info
+            dict_mt_to_pn = dict()
+            for sn in partitioned_cluster.s_nodes:
+                pn = PartitionedNode(
+                    main_target = sn.mt,
+                    main_graph = self,
+                    simplified_node = sn)
+                pn.memory_occupied_by_all_outputs = dict_info[sn.mt].memsize
+                p_nodes.append(pn)
+                dict_mt_to_pn[sn.mt] = pn
+                for req_sn in sn.deps.keys():
+                    if req_sn in self.s_nodes:
+                        req_pn = dict_mt_to_pn[req_sn.mt]
+                        pn.deps.add(req_pn)
+                        req_pn.users.add(pn)
+            for pn in p_nodes:
+                pn.deps_global = set(pn.deps)
+                pn.users_global = set(pn.users)
+
+            pg._first_nodes = set([dict_mt_to_pn[first_mt] for first_mt in self.firsts_mt])
+            pg.output_nodes = set([dict_mt_to_pn[out_mt] for out_mt in self.outputs_mt])
 
     @property
     def size(self):
@@ -302,7 +331,7 @@ class PartitionedCluster():
                 main_graph  = pg,
                 main_target = sn.mt,
                 sn = sn)
-            pn.mem_out = dict_info[sn.mt].memsize
+            pn.memory_occupied_by_all_outputs = dict_info[sn.mt].memsize
             p_nodes.append(pn)
             dict_mt_to_pn[sn.mt] = pn
             for req_sn in sn.deps.keys():
@@ -582,6 +611,9 @@ class PartitionedStructure():
         for partitioner in partitioners:
             self.main_cluster.partition(partitioner)
         self.main_cluster.fix_redundant_clusters()
+        # TODO:
+        self.main_cluster.recompute_all_interfaces_and_edges()
+        #
         self.all_clusters = set(self.dict_cluster_hash_to_cluster.values())
         self.all_unique_clusters = set(self.dict_cluster_ano_id_to_representee_cluster.values())
         self.make_graph_names()
@@ -681,8 +713,10 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
                     pn.users.discard(user_pn)
                     new_pn.users.add(user_pn)
 
-        # ** mem_out **
-        new_pn.mem_out = sum(out_pn.mem_out for out_pn in output_nodes)
+        # ** memory_occupied_by_all_outputs **
+        new_pn.memory_occupied_by_all_outputs = sum(
+            out_pn.memory_occupied_by_all_outputs 
+            for out_pn in output_nodes)
 
         # ** global edges must not include edge to nodes inside new_pn **
         all_p_nodes_inside = new_pg.all_p_nodes_inside()
@@ -891,7 +925,7 @@ class PartitionerBottomToTop(Partitioner):
             not_last_nodes = [
                 pn for pn in option.group if pn.users.issubset(option.group)
             ]
-            tot_mem_internal = sum(pn.mem_out for pn in not_last_nodes)
+            tot_mem_internal = sum(pn.memory_occupied_by_all_outputs for pn in not_last_nodes)
             if len(not_last_nodes)==0:
                 value = 0
             else: 
@@ -911,8 +945,8 @@ class PartitionerBottomToTop(Partitioner):
                 pn for pn in option.group
                 if not pn.users_global.issubset(option.set_group)
             )
-            inputs_mem = sum(pn.mem_out for pn in inputs_pn if pn.simplified_node is not None)
-            outputs_mem = sum(pn.mem_out for pn in outputs_pn if pn.simplified_node is not None)
+            inputs_mem = sum(pn.memory_occupied_by_all_outputs for pn in inputs_pn if pn.simplified_node is not None)
+            outputs_mem = sum(pn.memory_occupied_by_all_outputs for pn in outputs_pn if pn.simplified_node is not None)
             total_size = sum(pn.total_size for pn in option.group)
             # /!\ NEGATIVE VALUE
             # -> We will take the max -> = the less negative one
@@ -1258,12 +1292,12 @@ class PartitionerSequence(Partitioner):
             if last_i - first_i == 1:
                 sn = cluster.s_nodes[last_i]
                 block_pn = PartitionedNode(pg,main_target=sn.mt,sn=sn)
-                block_pn.mem_out = dict_info[sn.mt].memsize
+                block_pn.memory_occupied_by_all_outputs = dict_info[sn.mt].memsize
             else:
                 block_s_nodes = cluster.s_nodes[first_i+1:last_i+1]
                 sub_cluster = PartitionedCluster(block_s_nodes,cluster.p_structure)
                 block_pn = PartitionedNode(pg,sub_cluster=sub_cluster)
-                block_pn.mem_out = dict_info[cluster.s_nodes[last_i].mt].memsize
+                block_pn.memory_occupied_by_all_outputs = dict_info[cluster.s_nodes[last_i].mt].memsize
             p_nodes.append(block_pn)
             if block_nb > 0:
                 prev_pn : PartitionedNode = p_nodes[-2]
@@ -1280,33 +1314,6 @@ class PartitionerSequence(Partitioner):
                 sub_cluster : PartitionedCluster = block_pn.sub_cluster
                 sub_cluster.partition(self.config.sub_partitioner)
         return pg
-
-
-def S_to_P(
-    sg : SimplifiedGraph,
-    original_mod : torch.nn.Module,
-    partitioners = [
-        Partitioner(),
-        PartitionerBottomToTop(),
-        PartitionerSequence()
-    ],
-    min_size_to_trigger_partitioning = 4):
-    # sg = copy_SimplifiedGraph(sg)
-    sg.discard_all_artifacts()
-    p_structure = PartitionedStructure(sg,
-        min_size_to_trigger_partitioning = min_size_to_trigger_partitioning)
-    p_structure.make_dict_mt_to_ano_info(original_mod)
-    p_structure.main_cluster = main_cluster \
-        = PartitionedCluster(list(sg.nodes),p_structure)
-    for partitioner in partitioners:
-        main_cluster.partition(partitioner)
-    main_cluster.make_sub_cluster_original()
-    p_structure.make_graph_names()
-    sg.delete_edges_via_artifacts()
-    main_cluster.recompute_all_interfaces_and_edges()
-    return p_structure
-
-
 
 
 
