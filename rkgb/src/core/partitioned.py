@@ -244,8 +244,8 @@ class PartitionedCluster():
     partitionings = None
     partitioners_already_used = None
     # Tmp attributes :
-    first_nodes = None
-    output_nodes = None
+    first_snodes = None
+    output_snodes = None
     dict_input_mt_to_inputs_sent = None
     dict_first_mt_to_inputs_used = None
     dict_first_mt_to_inputs_used_mt = None
@@ -286,17 +286,16 @@ class PartitionedCluster():
         """
         Build the following attributes related to inputs/outputs:
         self.inputs ; outputs ; inputs_mt ; outputs_mt
-        first_nodes, output_nodes, dict_first_sn_to_inputs_used
+        first_snodes, output_nodes, dict_first_sn_to_inputs_used
         """
-        # TODO TODO TODO : make sure inputs_mt have consistent order: deux graphes equivalent doivent avoir les inputs dans le même order !!
         sg : SimplifiedGraph = self.p_structure.sg
         inputs = set()
         outputs = set()
         inputs_mt = []
         firsts_mt = []
         outputs_mt = []
-        first_nodes = []
-        output_nodes = []
+        first_snodes = []
+        output_snodes = []
         self.dict_input_mt_to_targets_sent = dict_inputs_sent = dict()
         self.dict_first_mt_to_targets_used = dict_inputs_used = dict()
         self.dict_first_mt_to_mt_used = dict_inputs_used_mt = dict()
@@ -309,7 +308,7 @@ class PartitionedCluster():
                     inputs.update(used_targets)
                     if sn_to_proceed.mt not in firsts_mt:
                         firsts_mt.append(sn_to_proceed.mt)
-                        first_nodes.append(sn_to_proceed)
+                        first_snodes.append(sn_to_proceed)
                         dict_inputs_used[sn_to_proceed.mt] = set(used_targets)
                         dict_inputs_used_mt[sn_to_proceed.mt] = set([req_sn.mt])
                     else:
@@ -326,7 +325,7 @@ class PartitionedCluster():
                     outputs.update(used_targets)
                     if sn_to_proceed.mt not in outputs_mt:
                         outputs_mt.append(sn_to_proceed.mt)
-                        output_nodes.append(sn_to_proceed)
+                        output_snodes.append(sn_to_proceed)
                         dict_outputs_sent[sn_to_proceed.mt] = set(used_targets)
                     else:
                         dict_outputs_sent[sn_to_proceed.mt].update(used_targets)
@@ -344,7 +343,7 @@ class PartitionedCluster():
                     dict_inputs_sent[init_node.mt].update(used_targets)
                 if user_sn.mt not in firsts_mt:
                     firsts_mt.append(user_sn.mt)
-                    first_nodes.append(user_sn)
+                    first_snodes.append(user_sn)
                     dict_inputs_used[user_sn.mt] = set(used_targets)
                     dict_inputs_used_mt[user_sn.mt] = set([init_node.mt])
                 else:
@@ -354,36 +353,26 @@ class PartitionedCluster():
         # == check if cluster contains sg.output_nodes ==
         for output_node in sg.output_nodes:
             if output_node in self.s_nodes:
-                output_targets = all_output_targets.intersection(output_node.all_targets)
-        if sg.wrapper_output_node is None: # sg has only one output_node
-            out_node = sg.output_nodes[0]
-            if out_node in self.s_nodes:
-                outputs.update(sg.outputs)
-                if out_node.mt not in outputs_mt:
-                    outputs_mt.append(out_node.mt)
-                    output_nodes.append(out_node)
-                    dict_outputs_sent[out_node.mt] = set(sg.outputs)
+                output_targets = sg.dict_output_mt_to_targets_sent[output_node.mt]
+                outputs.update(output_targets)
+                if output_node.mt not in outputs_mt:
+                    outputs_mt.append(output_node.mt)
+                    output_snodes.append(output_node)
+                    dict_outputs_sent[output_node.mt] = set(output_targets)
                 else:
-                    dict_outputs_sent[out_node.mt].update(set(sg.outputs))
-        else:
-            for out_node in sg.output_nodes:
-                if out_node in self.s_nodes:
-                    out_targets = sg.wrapper_output_node.deps[out_node]
-                    outputs.update(out_targets)
-                    if out_node.mt not in outputs_mt:
-                        outputs_mt.append(out_node.mt)
-                        output_nodes.append(out_node)
-                        dict_outputs_sent[out_node.mt] = set(out_targets)
-                    else:
-                        dict_outputs_sent[out_node.mt].update(out_targets)
+                    dict_outputs_sent[output_node.mt].update(output_targets)
 
         self.inputs = list(inputs) ; self.inputs.sort(key=base.Node.get_num_tar)
         self.outputs = list(outputs) ; self.outputs.sort(key=base.Node.get_num_tar)
-        self.firsts_mt = firsts_mt ; firsts_mt.sort(key=base.Node.get_num_tar)
-        self.inputs_mt = inputs_mt ; inputs_mt.sort(key=base.Node.get_num_tar)
-        self.outputs_mt = outputs_mt ; outputs_mt.sort(key=base.Node.get_num_tar)
-        self.first_nodes = first_nodes ; first_nodes.sort(key=base.Node.get_num)
-        self.output_nodes = output_nodes ; output_nodes.sort(key=base.Node.get_num)
+        self.first_snodes = first_snodes ; first_snodes.sort(key=base.Node.get_num)
+        self.output_snodes = output_snodes ; output_snodes.sort(key=base.Node.get_num)
+        self.firsts_mt = [first_sn.mt for first_sn in first_snodes]
+        self.outputs_mt = [output_sn.mt for output_sn in output_snodes]
+        self.inputs_mt = inputs_mt # => to sort latter
+        # get_num_tar isn't fully accurate for anonymized graph recognition
+        # so it's better to rely on get_num, except for inputs_mt.
+        # inputs' topo-number, and so position, should impact 
+        # graph recognition, instead we check the targets sent by input_nodes
     # =========================
     
 
@@ -415,7 +404,7 @@ class PartitionedCluster():
                     charac_used_targets
                 ))
             charac_inputs = []
-            if sn in self.first_nodes:
+            if sn in self.first_snodes:
                 for input_used in dict_inputs_used[sn.mt]:
                     charac_inputs.append(self.inputs.index(input_used))
             charac_outputs = []
