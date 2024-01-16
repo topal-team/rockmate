@@ -147,6 +147,7 @@ class PartitionedGraph(base.Graph):
                 [dict_mt_to_pn[out_mt] 
                 for out_mt in partitioned_cluster.outputs_mt])
 
+
     @property
     def size(self):
         return len(self.nodes)
@@ -192,7 +193,7 @@ class PartitionedGraph(base.Graph):
                 all_p.update(pn.sub_graph.all_p_nodes_inside())
         return all_p
 
-    def set_all_protected_to_false(self):
+    def set_all_protected_to_false(self): # FOR DYNAMIC PARTITIONING
         for pn in self.nodes:
             if not pn.is_leaf:
                 pn.is_protected_from_unwrap = False
@@ -210,63 +211,6 @@ class PartitionedGraph(base.Graph):
                     # => Fine we continue
                     self_or_equal_cluster.fix_redundant_clusters()
 
-    def recompute_edges(self,sg : SimplifiedGraph):
-        # NOT OPTIMAL AT ALL -> To improve if to slow
-        # find edges_via_artifacts in PartitionedGraph
-        # Moreover, recomputing edges is not necessary
-        # it's just that it's cleaner to have an accurate PartitionedGraph
-        # at the end
-        if not self.without_artifacts:
-            self.without_artifacts = True
-            all_related_to_artifacts = set().union(
-                set(e[0] for e in sg.edges_via_artifacts),
-                set(e[1] for e in sg.edges_via_artifacts),
-            )
-            dict_where = dict()
-            for sn in all_related_to_artifacts:
-                for pn in self.nodes:
-                    pn : PartitionedNode
-                    if pn.simplified_node is sn:
-                        dict_where[sn] = pn
-                    elif (pn.sub_cluster is not None
-                        and sn in pn.sub_cluster.s_nodes):
-                        dict_where[sn] = pn
-            
-            # search edges we might have to delete
-            suspicious_edges : set[tuple[PartitionedNode,PartitionedNode]] = set()
-            for (req_sn,user_sn,_) in sg.edges_via_artifacts:
-                if req_sn in dict_where and user_sn in dict_where:
-                    req_pn = dict_where[req_sn]
-                    user_pn = dict_where[user_sn]
-                    if req_pn is not user_pn:
-                        suspicious_edges.add((req_pn,user_pn))
-
-            # for suspicious edges, we need to see if there is any
-            # S edge from one to the other (all artifact edges have
-            # been deleted, that's why we need to recompute P edges)
-            for req_pn,user_pn in suspicious_edges:
-                if req_pn.sub_cluster is not None:
-                    all_sn_req_pn = req_pn.sub_cluster.s_nodes
-                else:
-                    all_sn_req_pn = [req_pn.simplified_node]
-                if user_pn.sub_cluster is not None:
-                    all_sn_user_pn = user_pn.sub_cluster.s_nodes
-                else:
-                    all_sn_user_pn = [user_pn.simplified_node]
-                bool_keep_edge = False
-                for sn_in_req_pn in all_sn_req_pn:
-                    for user_sn in sn_in_req_pn.users:
-                        if user_sn in all_sn_user_pn:
-                            bool_keep_edge = True
-                if not bool_keep_edge:
-                    req_pn.users.remove(user_pn)
-                    user_pn.deps.remove(req_pn)
-
-            # recursive call
-            for pn in self.nodes:
-                if pn.sub_cluster is not None:
-                    pn.sub_cluster.recompute_all_interfaces_and_edges()
-        
 
 
 class Partitioner():
@@ -280,6 +224,7 @@ class Partitioner():
         # raise Exception(
             # "Base class of partitioners. __call__ method "\
             # "must be overwritten by all subclasses")
+
 
 
 
@@ -546,19 +491,6 @@ class PartitionedCluster():
             for pg in self.partitionings:
                 pg.fix_redundant_clusters()
 
-    def recompute_all_interfaces_and_edges(self):
-        # It's useless to compute translator before
-        # so we do it only now, and it help us know
-        # if we already run this method on self
-        if self.translator is None:
-            self.make_io() # recompute interfaces
-            self.make_translator()
-            if self.representee_cluster is self:
-                for pg in self.partitionings:
-                    pg.recompute_edges(self.p_structure.sg)
-
-
-
 
 
 
@@ -599,9 +531,6 @@ class PartitionedStructure():
         for partitioner in partitioners:
             self.main_cluster.partition(partitioner)
         self.main_cluster.fix_redundant_clusters()
-        # TODO:
-        self.main_cluster.recompute_all_interfaces_and_edges()
-        #
         self.all_clusters = set(self.dict_cluster_hash_to_cluster.values())
         self.all_unique_clusters = set(self.dict_cluster_ano_id_to_representee_cluster.values())
         self.make_graph_names()
