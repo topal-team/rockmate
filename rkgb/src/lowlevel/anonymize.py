@@ -231,32 +231,27 @@ class ClusterTranslator():
     def __init__(self,partitioned_cluster):
         self.dict_to_ano = dict()
         self.dict_from_ano = dict()
-        # Build the sn <-> ano_pair translation
-        dict_target_ano_id = partitioned_cluster.p_structure.dict_target_ano_id
-        dict_mt_to_sn_ano_material = partitioned_cluster.p_structure.dict_mt_to_sn_ano_material
+        # Take care of anonymizing targets and SimplifiedNode
+        # Computation/Allocation nodes will be done latter
 
         # As we assume equivalent graphs
         # In particular they have equivalent topological order
         for index,sn in enumerate(partitioned_cluster.s_nodes):
             self.dict_to_ano[sn.main_target] = index
+            self.dict_from_ano[index] = sn.main_target
             ano = ("sn",index)
             self.dict_to_ano[sn] = ano
             self.dict_from_ano[ano] = sn
 
-        # We need to be able to translate inputs' names
-        # but unlike s_nodes we cannot assume any order
-        # in self.inputs_mt as it doesn't matter to
-        # determine equivalency.
-        # Instead, for each input node we look at what 
-        # targets we use from it. And we then use 
-        # dict_target_ano_id to get an an
-        inputs_mt = list(self.inputs_mt) 
-        inputs_mt.sort(key = base.Node.get_num_tar)
-        for index,inp_mt in enumerate(inputs_mt):
-            inputs_sent = self.dict_input_mt_to_inputs_sent[inp_mt]
-            inputs_num = [dict_target_ano_id[inp] for inp in inputs_sent]
-            inputs_num.sort()
-            translator.dict_mt_to_ano_pair[inp_mt] \
-                = (str(inputs_num),f"input_{inp_nb}")
+        # We assume self.inputs_mt is a properly sorted list
+        # such that equivalent graphs have equal inputs_mt order
+        # up to anonymization
+        for index,input_mt in enumerate(partitioned_cluster.inputs_mt):
+            ano = ("input",index)
+            self.dict_to_ano[input_mt] = ano
+            self.dict_from_ano[ano] = input_mt
             
-    def to_ano()
+    def to_ano(self,object):
+        return self.dict_to_ano[object]
+    def from_ano(self,ano):
+        return self.dict_from_ano[ano]

@@ -379,41 +379,6 @@ class PartitionedCluster():
         self.output_nodes = output_nodes ; output_nodes.sort(key=base.Node.get_num)
     # =========================
     
-    # =========================
-    def make_translator(self):
-        # ATTRIBUTES NEEDED : s_nodes, p_structure
-        # DO : translator
-        dict_mt_to_ano_info = self.p_structure.dict_mt_to_sn_ano_material
-        dict_target_ano_id = self.p_structure.dict_target_ano_id 
-        self.translator = translator = ClusterTranslator()
-        translator.dict_mt_to_ano_pair = dict()
-        translator.dict_sn_to_ano_pair = dict()
-        translator.dict_ano_pair_to_sn = dict()
-        dict_ano_id_to_nb_seen = dict()
-
-        for sn in self.s_nodes:
-            ano_id = dict_mt_to_ano_info[sn.mt].ano_id
-            if ano_id not in dict_ano_id_to_nb_seen:
-                dict_ano_id_to_nb_seen[ano_id] = placement = 1
-            else:
-                dict_ano_id_to_nb_seen[ano_id] = placement \
-                    = dict_ano_id_to_nb_seen[ano_id]+1
-            pair = (ano_id,placement)
-            translator.dict_mt_to_ano_pair[sn.mt] = pair
-            translator.dict_sn_to_ano_pair[sn] = pair
-            translator.dict_ano_pair_to_sn[pair] = sn
-
-        # Experimental
-        inputs_mt = list(self.inputs_mt) 
-        inputs_mt.sort(key = base.Node.get_num_tar)
-        for inp_nb,inp_mt in enumerate(inputs_mt):
-            assert(inp_mt not in translator.dict_mt_to_ano_pair)
-            inputs_sent = self.dict_input_mt_to_inputs_sent[inp_mt]
-            inputs_num = [dict_target_ano_id[inp] for inp in inputs_sent]
-            inputs_num.sort()
-            translator.dict_mt_to_ano_pair[inp_mt] \
-                = (str(inputs_num),f"input_{inp_nb}")
-    # =============================
 
     # =============================
     def make_ano_cluster_id(self):
@@ -543,7 +508,7 @@ class PartitionedStructure():
 
         # For anonymizing stuff: build a translator for each graph
         for cluster in self.all_clusters:
-            anonymize.ClusterTranslator(cluster)
+            cluster.translator = anonymize.ClusterTranslator(cluster)
                 
 
 
