@@ -774,10 +774,19 @@ class OpSchedule:
     def peak_mem(self):
         return self.get_peak_mem()
     
-    def get_peak_mem(self, with_interface=False):
+    def get_peak_mem(self, with_interface=False, act_multiplier=1):
+        if act_multiplier==1:
+            save_mem = self.save_mem
+        else:
+            save_mem = []
+            for i,alive_status in enumerate(self.alive_list):
+                save_mem.append(sum(self.dict_alloc[a].mem*alive_status[a]
+                                    *(act_multiplier if "parameter" not in a else 1)
+                                    for a in alive_status))
+            overhead = self.overhead*act_multiplier
         if with_interface:
-            return max(self.save_mem + self.overhead+ self.interface_mem)
-        return max(self.save_mem + self.overhead)
+            return max(np.array(save_mem) + overhead+ self.interface_mem)
+        return max(np.array(save_mem) + overhead)
     
     @property
     def simulation_overhead(self):
