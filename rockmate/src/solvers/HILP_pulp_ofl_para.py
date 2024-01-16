@@ -1467,7 +1467,9 @@ class ModelPULP:
                     Alive[p] = 1
                     if (t > bwd_i and t < min(early_fwd + [self.T + 1])) or t < fwd_i:
                         # cpu optimize only if prefetch before fwd
-                        cpu_optimize_candidates[p] = 1
+                        if parameters[p].info.requires_grad:
+                            # only trainable parameters will be optimize candidate
+                            cpu_optimize_candidates[p] = 1
         
         candidates = {
                     p: parameters[p].mem * a for p, a in cpu_optimize_candidates.items() if a >0
