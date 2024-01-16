@@ -616,12 +616,15 @@ class SimplifiedGraph(base.Graph):
         """
         self.output_targets = []
         self.dict_output_viewing_code = dict()
+        self.dict_output_mt_to_sent_targets = dict()
         for output_node in self.output_nodes:
             body_code = output_node.make_body_code_ast()
             viewing_code = ast_add_on.make_ast_list_assign(
                 body_code,force_special_kwargs=True
             )
             self.dict_output_viewing_code[output_node.mt] = viewing_code
+            self.dict_output_mt_to_sent_targets[output_node.mt] \
+                = set(output_node.all_targets).intersection(self.original_mod_output_targets)
             self.output_targets.append(output_node.mt)
 
     def set_node_topological_numbers(self):

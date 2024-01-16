@@ -272,7 +272,7 @@ class PartitionedCluster():
             cluster_nb = self.p_structure.counter_nb_clusters.count()
             self.self_or_strictly_equal_cluster = self
             dict_hash_to_cluster[hash] = self
-            self.make_io()
+            self.compute_interfaces()
             self.make_ano_cluster_id()
             self.name = f"P_Cluster_{cluster_nb}_Ano_id_{self.ano_cluster_id}"
 
@@ -282,12 +282,14 @@ class PartitionedCluster():
     # ======================
     
     # =================
-    def make_io(self):
+    def compute_interfaces(self):
+        """
+        Build the following attributes related to inputs/outputs:
+        self.inputs ; outputs ; inputs_mt ; outputs_mt
+        first_nodes, output_nodes, dict_first_sn_to_inputs_used
+        """
         # TODO TODO TODO : make sure inputs_mt have consistent order: deux graphes equivalent doivent avoir les inputs dans le même order !!
-
-        # ATTRIBUTEs NEEDED : s_nodes, p_structure
-        # DO: inputs, outputs, inputs_mt, outputs_mt
-        # DO TMP: first_nodes, output_nodes, dict_first_sn_to_inputs_used
+        sg : SimplifiedGraph = self.p_structure.sg
         inputs = set()
         outputs = set()
         inputs_mt = []
@@ -295,59 +297,64 @@ class PartitionedCluster():
         outputs_mt = []
         first_nodes = []
         output_nodes = []
-        self.dict_input_mt_to_inputs_sent = dict_inputs_sent = dict()
-        self.dict_first_mt_to_inputs_used = dict_inputs_used = dict()
-        self.dict_first_mt_to_inputs_used_mt = dict_inputs_used_mt = dict()
-        self.dict_output_mt_to_outputs_sent = dict_outputs_sent = dict()
+        self.dict_input_mt_to_targets_sent = dict_inputs_sent = dict()
+        self.dict_first_mt_to_targets_used = dict_inputs_used = dict()
+        self.dict_first_mt_to_mt_used = dict_inputs_used_mt = dict()
+        self.dict_output_mt_to_targets_sent = dict_outputs_sent = dict()
         # == for each sn, check its interfaces outside the cluster ==
-        for sn in self.s_nodes:
-            for req_sn,used_targets in sn.deps.items():
-                if not (req_sn in self.s_nodes):
+        for sn_to_proceed in self.s_nodes:
+            for req_sn in sn_to_proceed.deps:
+                used_targets = sg.dict_of_labels_on_edges[(req_sn,sn_to_proceed)]
+                if req_sn not in self.s_nodes:
                     inputs.update(used_targets)
-                    if sn.mt not in firsts_mt:
-                        firsts_mt.append(sn.mt)
-                        first_nodes.append(sn)
-                        dict_inputs_used[sn.mt] = set(used_targets)
-                        dict_inputs_used_mt[sn.mt] = set([req_sn.mt])
+                    if sn_to_proceed.mt not in firsts_mt:
+                        firsts_mt.append(sn_to_proceed.mt)
+                        first_nodes.append(sn_to_proceed)
+                        dict_inputs_used[sn_to_proceed.mt] = set(used_targets)
+                        dict_inputs_used_mt[sn_to_proceed.mt] = set([req_sn.mt])
                     else:
-                        dict_inputs_used[sn.mt].update(used_targets)
-                        dict_inputs_used_mt[sn.mt].add(req_sn.mt)
+                        dict_inputs_used[sn_to_proceed.mt].update(used_targets)
+                        dict_inputs_used_mt[sn_to_proceed.mt].add(req_sn.mt)
                     if req_sn.mt not in inputs_mt:
                         inputs_mt.append(req_sn.mt)
                         dict_inputs_sent[req_sn.mt] = set(used_targets)
                     else:
                         dict_inputs_sent[req_sn.mt].update(used_targets)
-            for user_sn,used_targets in sn.users.items():
+            for user_sn,used_targets in sn_to_proceed.users:
+                used_targets = sg.dict_of_labels_on_edges[(sn_to_proceed,user_sn)]
                 if not (user_sn in self.s_nodes):
                     outputs.update(used_targets)
-                    if sn.mt not in outputs_mt:
-                        outputs_mt.append(sn.mt)
-                        output_nodes.append(sn)
-                        dict_outputs_sent[sn.mt] = set(used_targets)
+                    if sn_to_proceed.mt not in outputs_mt:
+                        outputs_mt.append(sn_to_proceed.mt)
+                        output_nodes.append(sn_to_proceed)
+                        dict_outputs_sent[sn_to_proceed.mt] = set(used_targets)
                     else:
-                        dict_outputs_sent[sn.mt].update(used_targets)
+                        dict_outputs_sent[sn_to_proceed.mt].update(used_targets)
 
         # == check for interfaces between sg.init_node and the cluster ==
-        sg : SimplifiedGraph = self.p_structure.sg
-        ino = sg.init_node
-        for user_sn,used_targets in ino.users.items():
+        init_node = sg.init_node
+        for user_sn in init_node.users:
             if user_sn in self.s_nodes:
+                used_targets = sg.dict_of_labels_on_edges[(init_node,user_sn)]
                 inputs.update(used_targets)
-                if ino.mt not in inputs_mt:
-                    inputs_mt.append(ino.mt)
-                    dict_inputs_sent[ino.mt] = set(used_targets)
+                if init_node.mt not in inputs_mt:
+                    inputs_mt.append(init_node.mt)
+                    dict_inputs_sent[init_node.mt] = set(used_targets)
                 else:
-                    dict_inputs_sent[ino.mt].update(used_targets)
+                    dict_inputs_sent[init_node.mt].update(used_targets)
                 if user_sn.mt not in firsts_mt:
                     firsts_mt.append(user_sn.mt)
                     first_nodes.append(user_sn)
                     dict_inputs_used[user_sn.mt] = set(used_targets)
-                    dict_inputs_used_mt[user_sn.mt] = set([ino.mt])
+                    dict_inputs_used_mt[user_sn.mt] = set([init_node.mt])
                 else:
                     dict_inputs_used[user_sn.mt].update(used_targets)
-                    dict_inputs_used_mt[user_sn.mt].add(ino.mt)
+                    dict_inputs_used_mt[user_sn.mt].add(init_node.mt)
 
         # == check if cluster contains sg.output_nodes ==
+        for output_node in sg.output_nodes:
+            if output_node in self.s_nodes:
+                output_targets = all_output_targets.intersection(output_node.all_targets)
         if sg.wrapper_output_node is None: # sg has only one output_node
             out_node = sg.output_nodes[0]
             if out_node in self.s_nodes:
@@ -385,8 +392,8 @@ class PartitionedCluster():
         # ATTRIBUTES NEEDED : s_nodes, p_structure, io
         # DO : ano_cluster_id, representee_cluster
         dict_mt_to_ano_info = self.p_structure.dict_mt_to_sn_ano_material
-        dict_inputs_used = self.dict_first_mt_to_inputs_used
-        dict_outputs_sent = self.dict_output_mt_to_outputs_sent
+        dict_inputs_used = self.dict_first_mt_to_targets_used
+        dict_outputs_sent = self.dict_output_mt_to_targets_sent
         charac_list = []
         for sn in self.s_nodes:
             ano_info : Ano_SimplifiedNode_Info = dict_mt_to_ano_info[sn.mt]
@@ -505,7 +512,6 @@ class PartitionedStructure():
         for cluster in self.all_unique_clusters:
             for nb,pg in enumerate(cluster.partitionings):
                 pg.name = f"Partitioning n°{nb} of {cluster.name}"
-
         # For anonymizing stuff: build a translator for each graph
         for cluster in self.all_clusters:
             cluster.translator = anonymize.ClusterTranslator(cluster)
@@ -534,7 +540,7 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
             inp_pn.users = set([main_pn])
         main_pn.deps = set(inputs_pn)
         for fst_node in first_nodes:
-            inputs_used = cluster.dict_first_mt_to_inputs_used_mt[fst_node.mt]
+            inputs_used = cluster.dict_first_mt_to_mt_used[fst_node.mt]
             for inp_mt in inputs_used:
                 inp_pn = dict_input_mt_to_pn[inp_mt]
                 fst_node.deps_global.add(inp_pn)

@@ -299,6 +299,8 @@ class Graph():
         self.output_targets = []
         self.original_mod_input_targets = []
         self.original_mod_output_targets = []
+        self.dict_output_viewing_code = dict()
+        self.dict_output_mt_to_sent_targets = dict()
         self.sources_req_grad = None
         self.dict_constants = dict()
         self.dict_info : dict[str,variable_info.VariableInfo] = dict()
@@ -346,10 +348,12 @@ class Graph():
             "output_targets",
             "original_mod_input_targets",
             "original_mod_output_targets",
+            "dict_output_viewing_code",
+            "dict_output_mt_to_sent_targets",
             "sources_req_grad",
             "dict_constants",
             "dict_info",
-            "dict_rand"
+            "dict_rand",
         ]:
             setattr(self,attr,copy.copy(getattr(other_graph,attr)))
     # ===============================
