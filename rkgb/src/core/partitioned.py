@@ -283,6 +283,8 @@ class PartitionedCluster():
     
     # =================
     def make_io(self):
+        # TODO TODO TODO : make sure inputs_mt have consistent order: deux graphes equivalent doivent avoir les inputs dans le même order !!
+
         # ATTRIBUTEs NEEDED : s_nodes, p_structure
         # DO: inputs, outputs, inputs_mt, outputs_mt
         # DO TMP: first_nodes, output_nodes, dict_first_sn_to_inputs_used
@@ -381,8 +383,8 @@ class PartitionedCluster():
     def make_translator(self):
         # ATTRIBUTES NEEDED : s_nodes, p_structure
         # DO : translator
-        dict_mt_to_ano_info = self.p_structure.dict_main_target_to_node_anonymous_material
-        dict_target_anonymous_id = self.p_structure.dict_target_anonymous_id 
+        dict_mt_to_ano_info = self.p_structure.dict_mt_to_sn_ano_material
+        dict_target_ano_id = self.p_structure.dict_target_ano_id 
         self.translator = translator = ClusterTranslator()
         translator.dict_mt_to_ano_pair = dict()
         translator.dict_sn_to_ano_pair = dict()
@@ -407,7 +409,7 @@ class PartitionedCluster():
         for inp_nb,inp_mt in enumerate(inputs_mt):
             assert(inp_mt not in translator.dict_mt_to_ano_pair)
             inputs_sent = self.dict_input_mt_to_inputs_sent[inp_mt]
-            inputs_num = [dict_target_anonymous_id[inp] for inp in inputs_sent]
+            inputs_num = [dict_target_ano_id[inp] for inp in inputs_sent]
             inputs_num.sort()
             translator.dict_mt_to_ano_pair[inp_mt] \
                 = (str(inputs_num),f"input_{inp_nb}")
@@ -417,7 +419,7 @@ class PartitionedCluster():
     def make_ano_cluster_id(self):
         # ATTRIBUTES NEEDED : s_nodes, p_structure, io
         # DO : ano_cluster_id, representee_cluster
-        dict_mt_to_ano_info = self.p_structure.dict_main_target_to_node_anonymous_material
+        dict_mt_to_ano_info = self.p_structure.dict_mt_to_sn_ano_material
         dict_inputs_used = self.dict_first_mt_to_inputs_used
         dict_outputs_sent = self.dict_output_mt_to_outputs_sent
         charac_list = []
@@ -533,15 +535,16 @@ class PartitionedStructure():
         self.main_cluster.fix_redundant_clusters()
         self.all_clusters = set(self.dict_cluster_hash_to_cluster.values())
         self.all_unique_clusters = set(self.dict_cluster_ano_id_to_representee_cluster.values())
-        self.make_graph_names()
 
-
-    def make_graph_names(self):
+        # Give clean names to graphs
         for cluster in self.all_unique_clusters:
             for nb,pg in enumerate(cluster.partitionings):
                 pg.name = f"Partitioning n°{nb} of {cluster.name}"
-                
 
+        # For anonymizing stuff: build a translator for each graph
+        for cluster in self.all_clusters:
+            anonymize.ClusterTranslator(cluster)
+                
 
 
 

@@ -222,14 +222,41 @@ def build_anonymous_equivalence_classes(
 
 
 class ClusterTranslator():
-    dict_mt_to_ano_pair : dict[str, tuple[int,int]] = None
-    dict_sn_to_ano_pair : dict[SimplifiedNode, tuple[int,int]] = None
-    dict_ano_pair_to_sn : dict[tuple[int,int], SimplifiedNode] = None
-    dict_kcn_to_ano_triplet : dict[ComputationNode, tuple[str,int,int]] = None
-    dict_kdn_to_ano_triplet : dict[AllocationNode, tuple[str,int,int]] = None
-    dict_ano_triplet_to_kcn : dict[tuple[str,int,int], ComputationNode] = None
-    dict_ano_triplet_to_kdn : dict[tuple[str,int,int], AllocationNode] = None
-    dict_name_to_ano_triplet : dict = None
-    dict_ano_triplet_to_name : dict = None
-    def __init__(self):
-        pass
+    """
+    Translate SimplifiedNode/target/ComputationNode/AllocationNode/Node's name
+    to an anonymized object, and then reverse translate.
+    The idea is to translate with the Translator of one cluster 
+    and then reverse translate for an equivalent cluster.
+    """
+    def __init__(self,partitioned_cluster):
+        self.dict_to_ano = dict()
+        self.dict_from_ano = dict()
+        # Build the sn <-> ano_pair translation
+        dict_target_ano_id = partitioned_cluster.p_structure.dict_target_ano_id
+        dict_mt_to_sn_ano_material = partitioned_cluster.p_structure.dict_mt_to_sn_ano_material
+
+        # As we assume equivalent graphs
+        # In particular they have equivalent topological order
+        for index,sn in enumerate(partitioned_cluster.s_nodes):
+            self.dict_to_ano[sn.main_target] = index
+            ano = ("sn",index)
+            self.dict_to_ano[sn] = ano
+            self.dict_from_ano[ano] = sn
+
+        # We need to be able to translate inputs' names
+        # but unlike s_nodes we cannot assume any order
+        # in self.inputs_mt as it doesn't matter to
+        # determine equivalency.
+        # Instead, for each input node we look at what 
+        # targets we use from it. And we then use 
+        # dict_target_ano_id to get an an
+        inputs_mt = list(self.inputs_mt) 
+        inputs_mt.sort(key = base.Node.get_num_tar)
+        for index,inp_mt in enumerate(inputs_mt):
+            inputs_sent = self.dict_input_mt_to_inputs_sent[inp_mt]
+            inputs_num = [dict_target_ano_id[inp] for inp in inputs_sent]
+            inputs_num.sort()
+            translator.dict_mt_to_ano_pair[inp_mt] \
+                = (str(inputs_num),f"input_{inp_nb}")
+            
+    def to_ano()
