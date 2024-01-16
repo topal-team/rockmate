@@ -175,7 +175,7 @@ def build_anonymous_equivalence_classes(
         Two targets have the same ano_id if their 
         VariableInfo are equal up to anonymization.
     
-     - dict_mt_to_node_ano_material:
+     - dict_mt_to_sn_ano_material:
         Two nodes have the same ano_id if their
         AnonymizedHash are equal: ie
         1) Their codes are equal up anonymization
@@ -218,6 +218,37 @@ def build_anonymous_equivalence_classes(
         dict_target_ano_id,
         dict_mt_to_sn_ano_material
     )
+
+
+
+def sort_inputs_mt(partitioned_cluster,input_snodes):
+    sg = partitioned_cluster.sg
+    # To use at the very end of cluster.compute_interfaces()
+    # We sort inputs_mt based on the targets the sent
+    # There is no optimal order => we just want to be sure
+    # to equivalent clusters to have equivalent orders
+    dict_input_mt_to_repr = dict()
+    inputs_mt = []
+    for input_sn in input_snodes:
+        inputs_mt.append(input_sn.mt)
+        repr = []
+        users_with_index = [
+            (user_sn,partitioned_cluster.first_snodes.index(user_sn))
+            for user_sn in partitioned_cluster.dict_input_sn_to_users[input_sn]
+        ]
+        users_with_index = sorted(users_with_index,key = lambda c : c[1])
+        for user_sn,user_index in users_with_index:
+            user_ano_material : SimplifiedNodeAnonymizationMaterial \
+                = partitioned_cluster.dict_mt_to_sn_ano_material[user_sn.mt]
+            targets_used = sg.dict_of_labels_on_edges[(input_sn,user_sn)]
+            targets_numbers = sorted(
+                user_ano_material.dict_tar_to_ano_nb[tar]
+                for tar in targets_used)
+            repr.append((user_index,targets_numbers))
+        dict_input_mt_to_repr[input_sn.mt] = str(repr)
+    return sorted(inputs_mt, 
+        key = lambda input_mt : dict_input_mt_to_repr[input_mt])
+
 
 
 

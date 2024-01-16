@@ -246,10 +246,10 @@ class PartitionedCluster():
     # Tmp attributes :
     first_snodes = None
     output_snodes = None
-    dict_input_mt_to_inputs_sent = None
-    dict_first_mt_to_inputs_used = None
-    dict_first_mt_to_inputs_used_mt = None
-    dict_output_mt_to_outputs_sent = None
+    dict_input_sn_to_users = None
+    dict_first_mt_to_targets_used = None
+    dict_first_mt_to_targets_used_mt = None
+    dict_output_mt_to_targets_sent = None
 
     def __init__(self,
             group_simplified_nodes,
@@ -286,7 +286,7 @@ class PartitionedCluster():
         """
         Build the following attributes related to inputs/outputs:
         self.inputs ; outputs ; inputs_mt ; outputs_mt
-        first_snodes, output_nodes, dict_first_sn_to_inputs_used
+        first_snodes, output_nodes, dict_first_sn_to_targets_used
         """
         sg : SimplifiedGraph = self.p_structure.sg
         inputs = set()
@@ -294,9 +294,10 @@ class PartitionedCluster():
         inputs_mt = []
         firsts_mt = []
         outputs_mt = []
+        input_snodes = []
         first_snodes = []
         output_snodes = []
-        self.dict_input_mt_to_targets_sent = dict_inputs_sent = dict()
+        self.dict_input_sn_to_users = dict_inputs_users = dict
         self.dict_first_mt_to_targets_used = dict_inputs_used = dict()
         self.dict_first_mt_to_mt_used = dict_inputs_used_mt = dict()
         self.dict_output_mt_to_targets_sent = dict_outputs_sent = dict()
@@ -316,9 +317,10 @@ class PartitionedCluster():
                         dict_inputs_used_mt[sn_to_proceed.mt].add(req_sn.mt)
                     if req_sn.mt not in inputs_mt:
                         inputs_mt.append(req_sn.mt)
-                        dict_inputs_sent[req_sn.mt] = set(used_targets)
+                        input_snodes.append(req_sn)
+                        dict_inputs_users[req_sn] = [sn_to_proceed]
                     else:
-                        dict_inputs_sent[req_sn.mt].update(used_targets)
+                        dict_inputs_users[req_sn].append(sn_to_proceed)
             for user_sn,used_targets in sn_to_proceed.users:
                 used_targets = sg.dict_of_labels_on_edges[(sn_to_proceed,user_sn)]
                 if not (user_sn in self.s_nodes):
@@ -338,9 +340,10 @@ class PartitionedCluster():
                 inputs.update(used_targets)
                 if init_node.mt not in inputs_mt:
                     inputs_mt.append(init_node.mt)
-                    dict_inputs_sent[init_node.mt] = set(used_targets)
+                    input_snodes.append(init_node)
+                    dict_inputs_users[init_node] = [user_sn]
                 else:
-                    dict_inputs_sent[init_node.mt].update(used_targets)
+                    dict_inputs_users[init_node].append(user_sn)
                 if user_sn.mt not in firsts_mt:
                     firsts_mt.append(user_sn.mt)
                     first_snodes.append(user_sn)
@@ -368,7 +371,7 @@ class PartitionedCluster():
         self.output_snodes = output_snodes ; output_snodes.sort(key=base.Node.get_num)
         self.firsts_mt = [first_sn.mt for first_sn in first_snodes]
         self.outputs_mt = [output_sn.mt for output_sn in output_snodes]
-        self.inputs_mt = inputs_mt # => to sort latter
+        self.inputs_mt = anonymize.sort_inputs_mt(self,input_snodes)
         # get_num_tar isn't fully accurate for anonymized graph recognition
         # so it's better to rely on get_num, except for inputs_mt.
         # inputs' topo-number, and so position, should impact 
