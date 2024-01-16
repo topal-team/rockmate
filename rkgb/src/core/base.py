@@ -300,7 +300,7 @@ class Graph():
         self.original_mod_input_targets = []
         self.original_mod_output_targets = []
         self.dict_output_viewing_code = dict()
-        self.dict_output_mt_to_sent_targets = dict()
+        self.dict_output_mt_to_targets_sent = dict()
         self.sources_req_grad = None
         self.dict_constants = dict()
         self.dict_info : dict[str,variable_info.VariableInfo] = dict()
@@ -349,7 +349,7 @@ class Graph():
             "original_mod_input_targets",
             "original_mod_output_targets",
             "dict_output_viewing_code",
-            "dict_output_mt_to_sent_targets",
+            "dict_output_mt_to_targets_sent",
             "sources_req_grad",
             "dict_constants",
             "dict_info",
