@@ -144,8 +144,8 @@ class ModelPULP:
             batch_multiplier = 4
             # self.BatMpl = RkLpVariable("BMpl", lowBound=0, upBound=self.batch_multiplier, cat="Integer")
             # self.param_multiplier = 1-self.BatMpl*1/self.batch_multiplier
-            # self.param_multiplier = RkLpVariable("BMpl", lowBound=0, upBound=1-1/batch_multiplier, cat="Continuous")
-            self.param_multiplier = 0.
+            self.param_multiplier = RkLpVariable("BMpl", lowBound=0, upBound=1-1/batch_multiplier, cat="Continuous")
+            # self.param_multiplier = 0.
 
         #############################
         self.hgraph = hgraph
@@ -556,6 +556,7 @@ class ModelPULP:
                 lowBound=0,
                 upBound=1,
             )
+            self.param_grad_mem = {(t,k):0 for t in range(T) for k in self.krange(t)}
             self.prefill()
 
             self.bandwidthOfl = cpu_optimize_kwargs["bandwidth"]#6 * 1024**2  # byte/ms
@@ -1055,11 +1056,11 @@ class ModelPULP:
     def max_OflGProg(self, t, k, w):
         return (self.OflGProg[t, k, w]+self.OflWProg[t, k, w]*(self.grad_mode=="free"))
 
-    def all_param_mem(self, t, k):
+    def all_param_mem(self, t, k, with_multiplier=True):
         return (self.parameter_mem(t,k) 
-                + self.param_grad_mem(t,k)
+                + self.param_grad_mem[t,k]
                 + self.optimizer_states_mem(t,k)  
-                + self.param_multiplier*self.peak_budget)
+                + self.param_multiplier*self.peak_budget*with_multiplier)
 
     def parameter_mem(self, t, k):
         parameter_mem = lpSum(
@@ -1069,15 +1070,15 @@ class ModelPULP:
         )
         return parameter_mem
     
-    def param_grad_mem(self, t, k):
-        grad_mem = lpSum(
-            self.AliveG[t, k, w]
-            * self.parameter_gradient_size[w]
-            for w in range(self.W)
-        )
-        return grad_mem
+    # def param_grad_mem(self, t, k):
+    #     grad_mem = lpSum(
+    #         self.AliveG[t, k, w]
+    #         * self.parameter_gradient_size[w]
+    #         for w in range(self.W)
+    #     )
+    #     return grad_mem
     
-    def optimizer_states_mem(self, t, k):    
+    def optimizer_states_mem(self, t, k, with_overhead=True):    
         optimizer_states_mem = lpSum((self.AliveO[t, k, w]*
                     self.parameter_gradient_size[w] *
                     self.optimizer_states_factor)
@@ -1085,15 +1086,15 @@ class ModelPULP:
         optimizer_overhead = 0
         if k > self.loss_idx and k in self.hcn2param:
             l_w = self.hcn2param[k]
-            optimizer_overhead += sum((1-self.sumOptC[w])
+            optimizer_overhead += sum((self.req_w()-self.sumOptC[w])
                                       * self.parameter_gradient_size[w]
                                       * self.optimizer_overhead_factor
                                       for w in l_w)
-        return optimizer_states_mem + optimizer_overhead
+        return optimizer_states_mem + optimizer_overhead*with_overhead
 
     def prefill(self):
         for t in range(self.T):
-            for k in range(self.T):
+            for k in range(self.T):                
                 for w in range(self.W):
                     if k not in self.krange(t):
                         self.PrfW[t, k, w] = 0
@@ -1125,7 +1126,8 @@ class ModelPULP:
                 if len(self.param2sub_c[w]) == 1:
                     self.AliveG[(t,k,w)] = 0
                     if k == max(self.param2hcn[w]):
-                        self.overhead[k] = [v+grad_size for v in self.overhead[k]]
+                        # self.overhead[k] = [v+grad_size for v in self.overhead[k]]
+                        self.param_grad_mem[t,k] += grad_size * self.req_w()
                 else:#shared weight
                     bwd_first = min(x for x in self.param2hcn[w] if x>self.loss_idx)
                     bwd_last = max(self.param2hcn[w])
@@ -1134,12 +1136,13 @@ class ModelPULP:
                     else:
                         self.AliveG[(t,k,w)] = 1
                         if k in self.param2hcn[w] and k>bwd_first:
-                            self.overhead[k] = [v+grad_size for v in self.overhead[k]]
+                            # self.overhead[k] = [v+grad_size for v in self.overhead[k]]
+                            self.param_grad_mem[t,k] += grad_size * self.req_w()
         elif self.grad_mode in ["accumulate"]:
             for (t,k,w) in self.AliveG:
                 self.AliveG[(t,k,w)] = 1
-                if k == max(self.param2hcn[w]):
-                    self.overhead[k] = [v+grad_size for v in self.overhead[k]]
+                # if k == max(self.param2hcn[w]):
+                #     self.overhead[k] = [v+grad_size for v in self.overhead[k]]
                 # TODO: add offload gradient variables for gradient accumulation
 
 
@@ -1197,6 +1200,11 @@ class ModelPULP:
                 #     self.parameter_size[w] / self.cpu_optimize_speed * self.OptC[t, k, w]
                 #     for w in range(self.W)
                 # )
+                self.param_grad_mem[t,k] += lpSum(
+                                self.AliveG[t, k, w]
+                                * self.parameter_gradient_size[w]
+                                for w in range(self.W)
+                            )
                 for w in range(self.W):
                     self.PrfWProg[t,k,w] = get_progress(self.PrfW, t, k, w)
                     self.PrfGProg[t,k,w] = get_progress(self.PrfG, t, k, w)
@@ -1204,6 +1212,7 @@ class ModelPULP:
                     self.OflGProg[t,k,w] = get_progress(self.OflG, t, k, w)
                     self.OptCProg[t,k,w] = get_progress(self.OptC, t, k, w)
                     
+                    self.md += (self.AliveW[t, k, w] <= self.req_w())
                     self.md += self.OflWProg[t, k, w] <= self.req_w()
                     self.md += self.OflGProg[t, k, w] <= self.accumC_grad(w)
                     self.md += self.OptCProg[t, k, w] <= self.max_OflGProg(t,k,w)
@@ -1630,7 +1639,7 @@ class ModelPULP:
         self.params_vars = [self.AliveW, self.OflWProg, self.OflW, 
                             self.PrfW, self.PrfWProg, self.OptC,
                             self.AliveG, self.OflGProg, self.OflG,
-                            self.PrfG, self.PrfGProg
+                            self.PrfG, self.PrfGProg, self.AliveO
                             ]
         if isinstance(self.param_multiplier, float):
             multiplier = self.param_multiplier
@@ -1639,6 +1648,7 @@ class ModelPULP:
         for p in self.params_vars:
             for k,v in p.items():
                 p[k] = v*1/ (1-multiplier)
+                pass
 
         self.ofl_ops = []
         self.prf_ops = []
