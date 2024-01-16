@@ -130,7 +130,7 @@ class ModelPULP:
         self.solve_time = None
         self.with_parameters = accurate_mem
         self.with_grad = accurate_mem
-        self.with_optimizer_states = accurate_mem
+        self.with_optimizer_states = 0#accurate_mem
         self.gradient_accumulation = 0# if 0, no gradient/optimizer states alive from previous iters
         self.single_fwd = accurate_mem#False
         self.single_bwd = accurate_mem
@@ -1048,7 +1048,12 @@ class ModelPULP:
         # return the fraction of parameter instantly optimized after bwd
         if self.gradient_accumulation:
             return 0
+        if self.grad_mode =="free":
+            return self.req_w()
         return 1-self.sumOptC[w]- self.param_multiplier
+    
+    def max_OflGProg(self, t, k, w):
+        return (self.OflGProg[t, k, w]+self.OflWProg[t, k, w]*(self.grad_mode=="free"))
 
     def all_param_mem(self, t, k):
         return (self.parameter_mem(t,k) 
@@ -1112,10 +1117,13 @@ class ModelPULP:
             for (t,k,w) in self.AliveO:
                 self.AliveO[(t,k,w)] = (1-self.accumC_optimizer_states(w)- self.param_multiplier)
         if self.grad_mode in ["free"]:
+            # If gradient is freed ASAP, OflG will be merged into OflW
+            for (t,k,w) in self.OflG:
+                self.OflG[(t,k,w)] = 0
             for (t,k,w) in self.AliveG:
                 grad_size = self.parameter_gradient_size[w]
                 if len(self.param2sub_c[w]) == 1:
-                    # self.AliveG[(t,k,w)] = 0
+                    self.AliveG[(t,k,w)] = 0
                     if k == max(self.param2hcn[w]):
                         self.overhead[k] = [v+grad_size for v in self.overhead[k]]
                 else:#shared weight
@@ -1198,8 +1206,8 @@ class ModelPULP:
                     
                     self.md += self.OflWProg[t, k, w] <= self.req_w()
                     self.md += self.OflGProg[t, k, w] <= self.accumC_grad(w)
-                    self.md += self.OptCProg[t, k, w] <= self.OflGProg[t, k, w]
-                    self.md += (self.AliveW[t, k, w] + self.OflWProg[t, k, w] 
+                    self.md += self.OptCProg[t, k, w] <= self.max_OflGProg(t,k,w)
+                    self.md += (self.AliveW[t, k, w] + self.OflWProg[t, k, w]
                                 >= self.instant_opt(w))
                     self.md += (self.AliveG[t, k, w] + self.OflGProg[t, k, w] 
                                 >= self.req_w() - self.instant_opt(w))
