@@ -10,6 +10,13 @@ timer = irotor.make_timer(torch.device("cuda"))
 
 from models.GPT import  GPT2
 
+def find_op(rkmod, op_name, op_code=None, fct=None):
+    for i, op in enumerate(rkmod.op_sched.op_list):
+        if op_name in op.name or (
+            hasattr(op,"kcn") and op_code and op_code in op.kcn.get_code()):
+            print(i,op)
+            if fct:
+                fct(op)
 
 def pop_ops(step):
     ops = []
@@ -88,11 +95,23 @@ def save_mem(rkmod):
     optim_size_all = 0
     for k,optimizer in rkmod.compiler.storage.ld["optimizers"].items():#["minors"]
         optim_size = 0
-        for v in optimizer.state:
-            if isinstance(v, torch.Tensor) and "cuda" in str(v.device):
-                optim_size += v.numel()*v.element_size()
+        for k,v in optimizer.state.items():
+            if not v:
+                p_size= m_size=v_size=0
+                continue
+            else:
+                if isinstance(k, torch.Tensor) and "cuda" in str(k.device):
+                    p_size = k.numel()*k.element_size()
+                # if isinstance(v["exp_avg"], torch.Tensor) and "cuda" in str(v["exp_avg"].device):
+                    m_size = v["exp_avg"].numel()*v["exp_avg"].element_size()
+                # if isinstance(v["exp_avg_sq"], torch.Tensor) and "cuda" in str(v["exp_avg_sq"].device):
+                    v_size = v["exp_avg_sq"].numel()*v["exp_avg_sq"].element_size()
+                else:
+                    # print(k,v)
+                    continue
+            optim_size = m_size+v_size#+p_size#not with parameter itself
         if optim_size:
-            print(k, optim_size)
+            # print(optim_size, p_size, m_size, v_size)
             optim_size_all += optim_size
     return param_size, act_size, optim_size_all
 
@@ -275,25 +294,27 @@ def analyze_mem(rkmod, print_status=False, with_grad=True):
                 for eidx_d, (k_, i_) in enumerate(md.delete_list)
                 if k == k_
             )
-            mem[t, k] += md.parameter_mem(t, k).value()
-            if isinstance(md.param_multiplier, float):
-                mem[t, k] = mem[t, k]/(1-md.param_multiplier)
-            else:
-                mem[t, k] = mem[t, k]/(1-md.param_multiplier.value())
+            act_multiplier = 1/((1-md.param_multiplier) 
+                              if isinstance(md.param_multiplier, float) 
+                              else (1-md.param_multiplier.value()))
+            
+            mem[t, k] *= act_multiplier
+            mem[t, k] += md.all_param_mem(t, k, with_multiplier=False).value()
 
             # for w in range(md.W):
             #     # mem[t,k] += 1*((md.AliveW[t,k,w]+md.PrfW[t,k,w]).value()>0)*md.parameter_size[w]
             #     mem[t,k] += (md.AliveW[t,k,w]+md.PrfW[t,k,w]).value()*md.parameter_size[w]
 
     max_t, max_k = max(mem, key=mem.get)
-    max_i = np.argmax(rkmod.op_sched.save_mem + rkmod.op_sched.overhead)
+    max_i = np.argmax(rkmod.op_sched.save_mem + rkmod.op_sched.interface_mem + rkmod.op_sched.overhead)
     grad_size = 0#max(md.parameter_size)
     optimizer_states_mem = rkmod.op_sched.optimizer_states_size()*rkmod.gd['cpu_optimize_stats']['optimizer_states_size']
+    optimizer_states_mem += sum([p.numel()*p.element_size() for p in rkmod.minor_parameters])*rkmod.gd['cpu_optimize_stats']['optimizer_states_size']
     print(
         f"solution peak memory {(max(mem.values()) + with_grad*grad_size)/1024**2:.0f}MB at {max_t, max_k}"
     )
     print(
-        f"op_sched peak memory {(rkmod.op_sched.peak_mem + optimizer_states_mem +with_grad*grad_size)/1024**2:.0f}MB"
+        f"op_sched peak memory {(rkmod.op_sched.get_peak_mem(with_interface=True, act_multiplier=act_multiplier) + optimizer_states_mem +with_grad*grad_size)/1024**2:.0f}MB"
     )
     return (max_i, max_t, max_k)
 
@@ -453,7 +474,7 @@ def print_sched(rkmod):
             for o in range(md.nR[k]):
                 if md.Comp[t, k, o].value() > 0.9:
                     for w in range(W):
-                        if md.AliveW[(t, k, w)].value() < 1 or k in md.parameter2hcn[w]:
+                        if md.AliveW[(t, k, w)].value() < 1 or k in md.param2hcn[w]:
                             print(
                                 f"\t{md.AliveW[(t,k,w)].value():.2%} of layer {w} is alive"
                             )
@@ -467,6 +488,10 @@ def print_sched(rkmod):
                             print(
                                 f"\tOffload {md.OflW[(t,k,w)].value():.2%} of layer {w}"
                             )
+                        if md.OflG[(t, k, w)].value() > 0:
+                            print(
+                                f"\tOffload grad {md.OflW[(t,k,w)].value():.2%} of layer {w}"
+                            )
                             # ofl_list.append(OflOp(md.hgraph.list_hdn[md.create_list[e][1]].kdn, 1, after=op_list[-1]))
 
                         # src = md.create_list[e][0]
@@ -478,6 +503,10 @@ def print_sched(rkmod):
                         if md.PrfW[(t, k, w)].value() > 0:
                             print(
                                 f"\tPrefetch {md.PrfW[(t,k,w)].value():.2%} of layer {w}"
+                            )
+                        if md.PrfG[(t, k, w)].value() > 0:
+                            print(
+                                f"\tPrefetch grad {md.PrfW[(t,k,w)].value():.2%} of layer {w}"
                             )
 
                     # if md.PrfEnd[i,j,e].value()>0:
