@@ -1072,7 +1072,7 @@ class ModelPULP:
     def param_grad_mem(self, t, k):
         grad_mem = lpSum(
             self.AliveG[t, k, w]
-            * self.parameter_size[w]
+            * self.parameter_gradient_size[w]
             for w in range(self.W)
         )
         return grad_mem
@@ -1086,7 +1086,7 @@ class ModelPULP:
         if k > self.loss_idx and k in self.hcn2param:
             l_w = self.hcn2param[k]
             optimizer_overhead += sum((1-self.sumOptC[w])
-                                      * self.parameter_size[w]
+                                      * self.parameter_gradient_size[w]
                                       * self.optimizer_overhead_factor
                                       for w in l_w)
         return optimizer_states_mem + optimizer_overhead
