@@ -145,7 +145,7 @@ class ModelPULP:
             # self.BatMpl = RkLpVariable("BMpl", lowBound=0, upBound=self.batch_multiplier, cat="Integer")
             # self.param_multiplier = 1-self.BatMpl*1/self.batch_multiplier
             self.param_multiplier = RkLpVariable("BMpl", lowBound=0, upBound=1-1/batch_multiplier, cat="Continuous")
-            # self.param_multiplier = 0.
+            self.param_multiplier = 0.
 
         #############################
         self.hgraph = hgraph
@@ -464,33 +464,29 @@ class ModelPULP:
             return params2sub_c, parameters
         
         if self.with_parameters:
-            self.param2sub_c, self.parameters = get_parameter_cluster(self.sub_clusters)
+            # self.param2sub_c, self.parameters = get_parameter_cluster(self.sub_clusters)
+            # self.param2hcn = {w:[] for w in range(W)}
+            # self.hcn2param = {}# is no param for hcn[k], k not in hcn2param
+            # for w,l_c in self.param2sub_c.items():
+            #     for c in l_c:
+            #         for k in self.sub_c2hcn[c]:
+            #             if k in self.hcn2param:
+            #                 self.hcn2param[k].append(w)
+            #             else:
+            #                 self.hcn2param[k] = [w]
+            #             self.param2hcn[w].append(k)
+
+            self.param2hcn, self.parameters = get_parameter_cluster(self.hgraph.list_hcn)
+            self.hcn2param = {t:[] for t in range(self.T)}
+
+            for p,hcn_s in self.param2hcn.items():
+                for hcn in hcn_s:
+                    self.hcn2param[hcn].append(p)
+
             self.parameter_size = [sum(kdn.mem for kdn in p)/self.gcd for p in self.parameters]
             self.parameter_gradient_size = [sum(kdn.mem for kdn in p if kdn.info.requires_grad
                                                 )/self.gcd for p in self.parameters]
             self.W = W = len(self.parameters)
-            self.param2hcn = {w:[] for w in range(W)}
-            self.hcn2param = {}# is no param for hcn[k], k not in hcn2param
-            # for w in range(W):
-                # sub_cluster = self.sub_clusters[w]
-                # if hasattr(sub_cluster, "list_kdn_parameters"):
-                #     self.parameter_size.append(
-                #         sum(kdn.mem for kdn in sub_cluster.list_kdn_parameters)
-                #         / self.gcd
-                #     )
-                # else:
-                #     self.parameter_size.append(0)
-                # self.param2sub_c = {w: [w] for w in range(W)}
-                #self.param2hcn = {w: self.sub_c2hcn[w] for w in range(W)}
-            for w,l_c in self.param2sub_c.items():
-                for c in l_c:
-                    for k in self.sub_c2hcn[c]:
-                        if k in self.hcn2param:
-                            self.hcn2param[k].append(w)
-                        else:
-                            self.hcn2param[k] = [w]
-                        self.param2hcn[w].append(k)
-
 
             self.AliveW = RkLpVariable.dicts(
                 "AliveW",
@@ -602,7 +598,7 @@ class ModelPULP:
         for t in range(T):
             for k in self.krange(t):
                 # if k==self.loss_idx:continue
-                if self.with_parameters and k in self.hcn2param:
+                if self.with_parameters:# and k in self.hcn2param:
                     # w = self.hcn2param[k] if k != self.loss_idx else None
                     ofl_time = lpSum(
                         self.parameter_size[w] / self.bandwidthOfl * self.OflW[t, k, w]
@@ -1084,7 +1080,7 @@ class ModelPULP:
                     self.optimizer_states_factor)
                     for w in range(self.W))
         optimizer_overhead = 0
-        if k > self.loss_idx and k in self.hcn2param:
+        if k > self.loss_idx:# and k in self.hcn2param:
             l_w = self.hcn2param[k]
             optimizer_overhead += sum((self.req_w()-self.sumOptC[w])
                                       * self.parameter_gradient_size[w]
@@ -1123,7 +1119,7 @@ class ModelPULP:
                 self.OflG[(t,k,w)] = 0
             for (t,k,w) in self.AliveG:
                 grad_size = self.parameter_gradient_size[w]
-                if len(self.param2sub_c[w]) == 1:
+                if len(self.param2hcn[w]) <= 2:
                     self.AliveG[(t,k,w)] = 0
                     if k == max(self.param2hcn[w]):
                         # self.overhead[k] = [v+grad_size for v in self.overhead[k]]
@@ -1131,7 +1127,7 @@ class ModelPULP:
                 else:#shared weight
                     bwd_first = min(x for x in self.param2hcn[w] if x>self.loss_idx)
                     bwd_last = max(self.param2hcn[w])
-                    if t<bwd_first or t>bwd_last:#assume single bwd
+                    if t<=bwd_first or t>bwd_last:#assume single bwd
                         self.AliveG[(t,k,w)] = 0
                     else:
                         self.AliveG[(t,k,w)] = 1

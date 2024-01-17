@@ -377,7 +377,13 @@ def add_parameter_node(h_cluster, original_mod, minor_size=1024*1024):
     setattr(h_cluster, "list_kdn_parameters", list_kdn_parameters)
     for hcn in h_cluster.possible_hg[0].list_hcn:
         sub_cluster = hcn.sub_cluster
-        if sub_cluster is None:
+        if sub_cluster is None:# no_grad hcn
+            list_kdn_parameters = []
+            for op in hcn.ff_op_list:
+                for kdn in h_cluster.list_kdn_parameters:
+                    if op.kcn in kdn.users_real:
+                        list_kdn_parameters.append(kdn)
+            setattr(hcn, "list_kdn_parameters", list_kdn_parameters)
             continue
         if not hasattr(sub_cluster, "list_kcn"):
             setattr(sub_cluster, "list_kdn_parameters", [])
@@ -387,6 +393,7 @@ def add_parameter_node(h_cluster, original_mod, minor_size=1024*1024):
                 if kcn in kdn.users_real:
                     list_kdn_parameters.append(kdn)
         setattr(sub_cluster, "list_kdn_parameters", list_kdn_parameters)
+        setattr(hcn, "list_kdn_parameters", list_kdn_parameters)
     return list_kdn_parameters
 
 
