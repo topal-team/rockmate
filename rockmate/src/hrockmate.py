@@ -182,6 +182,11 @@ class HRockmate(torch.nn.Module):
                     ],
                 )
 
+        self.minor_parameters = []
+        for n, p in self.original_mod.named_parameters():
+            if n not in [kdn.main_target for kdn in self.rkgb_res.H_cluster.list_kdn_parameters]:
+                self.minor_parameters.append(p)
+
     def solver_recursive(self, list_solvers=None, only_preprocess=False):
         list_solvers = list_solvers or self.list_solvers
         self.preprocess()
@@ -265,11 +270,6 @@ class HRockmate(torch.nn.Module):
         self.bwd_fct_list = self.fct_list[loss_idx:]
         l = [self.compiler.fct_del_var(v) for v in self.output.tensor_targets]
         self.bwd_fct_list.append(l)
-        self.minor_parameters = []
-        for n, p in self.original_mod.named_parameters():
-            if n not in [kdn.main_target for kdn in self.rkgb_res.H_cluster.list_kdn_parameters]:
-                self.minor_parameters.append(p)
-                # p.data = p.data.to("cuda")
         
         if self.minor_parameters:
             def optimize():
