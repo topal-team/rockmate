@@ -156,11 +156,82 @@ class AnonymousHash():
         return str(ano_repr)
     
     @staticmethod
+    def partitioned_cluster(p_cluster):
+        sg = p_cluster.sg
+        sg_edges_labels = sg.dict_of_labels_on_edges
+        dict_target_ano_id = p_cluster.p_structure.dict_target_ano_id
+        dict_mt_to_sn_ano_material = p_cluster.p_structure.dict_mt_to_sn_ano_material
+        hash_list = []
+        # == Process each node one by one ==
+        for sn_to_proceed in p_cluster.s_nodes:
+            sn_ano_material : SimplifiedNodeAnonymizationMaterial \
+                = dict_mt_to_sn_ano_material[sn_to_proceed.mt]
+            # 1) Write dependency edges: who sn depends on and what it uses from it
+            hash_edges = []
+            for req_sn in sn_to_proceed.deps:
+                if req_sn not in p_cluster.s_nodes: continue
+                hash_used_targets = []
+                for used_target in sg_edges_labels[(req_sn,sn_to_proceed)]:
+                    hash_used_targets.append((
+                        sn_ano_material.dict_tar_to_ano_nb[used_target], # => its ano_nb in sn_to_proceed's code
+                        req_sn.all_targets.index(used_target))) # => its index in req_sn
+                hash_used_targets.sort(key = lambda c : c[0]) # ie target's ano_nb in sn_to_proceed's code
+                hash_edges.append((
+                    p_cluster.s_nodes.index(req_sn), # who sn depends on 
+                    hash_used_targets # what targets it uses from it
+                ))
+            hash_edges.sort(key = lambda c : c[0]) # ie s_nodes.index(req_sn)
+
+            # 2) In case sn_to_proceed is a first node of the cluster
+            # => hash its interactions with input nodes
+            hash_inputs = []
+            if sn_to_proceed in p_cluster.first_snodes:
+                for req_input_sn in p_cluster.dict_first_sn_to_required_inputs_sn[sn_to_proceed]:
+                    hash_used_targets = []
+                    for used_target in sg_edges_labels[(req_input_sn,sn_to_proceed)]:
+                        hash_used_targets.append((
+                            sn_ano_material.dict_tar_to_ano_nb[used_target], # => its ano_nb in sn_to_proceed's code
+                            dict_target_ano_id[used_target] # => target's equivalence class: based on its VariableInfo
+                        ))
+                    hash_used_targets.sort(key = lambda c : c[0]) # ie target's ano_nb in sn_to_proceed's code
+                    hash_inputs.append((
+                        p_cluster.input_snodes.index(req_input_sn),
+                        hash_used_targets
+                    ))
+                hash_inputs.sort(key = lambda c : c[0])
+                # Note: we don't rely on req_input_sn's equivalence class
+                # instead we look at the targets we use and their types
+                # ie VariableInfo equivalence class;
+
+            # 3) In case its an output node of the cluster
+            # => hash which targets are returned
+            hash_outputs = []
+            if sn_to_proceed in p_cluster.output_snodes:
+                for sent_target in p_cluster.dict_output_mt_to_targets_sent[sn_to_proceed.mt]:
+                    hash_outputs.append(sn_to_proceed.all_targets.index(sent_target))
+                hash_outputs.sort()
+                # => Simply return all outputs' index
+
+            # 4) The final hash of sn_to_proceed:
+            hash_list.append((
+                sn_ano_material.anonymous_id,
+                hash_edges,
+                hash_inputs,
+                hash_outputs
+            ))
+
+        return str(hash_list)
+
+
+    
+    @staticmethod
     def get(object):
         if isinstance(object,VariableInfo):
             return AnonymousHash.variable_info(object)
         elif isinstance(object,SimplifiedNodeAnonymizationMaterial):
             return AnonymousHash.simplified_node_anonymization_material(object)
+        elif type(object).__name__ == "PartitionedCluster":
+            return AnonymousHash.partitioned_cluster(object)
         else:
             raise Exception(f"AnonymousHash unsupported type: {type(object)}")
 
@@ -227,10 +298,8 @@ def sort_inputs_mt(partitioned_cluster,input_snodes):
     # We sort inputs_mt based on the targets the sent
     # There is no optimal order => we just want to be sure
     # to equivalent clusters to have equivalent orders
-    dict_input_mt_to_repr = dict()
-    inputs_mt = []
+    dict_input_sn_to_repr = dict()
     for input_sn in input_snodes:
-        inputs_mt.append(input_sn.mt)
         repr = []
         users_with_index = [
             (user_sn,partitioned_cluster.first_snodes.index(user_sn))
@@ -245,9 +314,9 @@ def sort_inputs_mt(partitioned_cluster,input_snodes):
                 user_ano_material.dict_tar_to_ano_nb[tar]
                 for tar in targets_used)
             repr.append((user_index,targets_numbers))
-        dict_input_mt_to_repr[input_sn.mt] = str(repr)
-    return sorted(inputs_mt, 
-        key = lambda input_mt : dict_input_mt_to_repr[input_mt])
+        dict_input_sn_to_repr[input_sn] = str(repr)
+    return sorted(input_snodes, 
+        key = lambda input_sn : dict_input_sn_to_repr[input_sn])
 
 
 
