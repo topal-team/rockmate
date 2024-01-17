@@ -261,7 +261,6 @@ class PartitionedGraph(base.Graph):
         # 1) nodes and edges
         pn : PartitionedNode
         for pn in self.nodes:
-            print(pn.name)
             if pn.is_leaf:
                 if only_function_name:
                     code = pn.sn.main_fct
@@ -273,7 +272,6 @@ class PartitionedGraph(base.Graph):
                 label = f"{pn.name}\nCluster size: {pn.size}"
                 dot.node(pn.name,label,color=color_sub_graph)
             for req_pn in pn.deps:
-                print("deps between : "+req_pn.name+"end"+pn.name)
                 dot.edge(req_pn.name,pn.name,color=color_edge)
             if include_artifact_edges:
                 for req_pn in pn.deps_through_artifacts:
@@ -358,6 +356,7 @@ class PartitionedCluster():
             self.name = self.self_or_strictly_equal_cluster.name
         else:
             cluster_nb = self.p_structure.counter_nb_clusters.count()
+            self.cluster_nb = cluster_nb
             self.self_or_strictly_equal_cluster = self
             dict_hash_to_cluster[cluster_hash] = self
             self.compute_interfaces()
@@ -594,6 +593,7 @@ class PartitionedStructure():
         self.main_cluster.fix_redundant_clusters()
         self.all_clusters = set(self.dict_cluster_hash_to_cluster.values())
         self.all_unique_clusters = set(self.dict_cluster_ano_id_to_representee_cluster.values())
+        self.dict_cluster_nb_to_cluster = dict((c.cluster_nb,c) for c in self.all_clusters)
 
         # Give clean names to graphs
         for cluster in self.all_unique_clusters:
