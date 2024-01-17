@@ -269,7 +269,7 @@ class HRockmate(torch.nn.Module):
         for n, p in self.original_mod.named_parameters():
             if n not in [kdn.main_target for kdn in self.rkgb_res.H_cluster.list_kdn_parameters]:
                 self.minor_parameters.append(p)
-                p.data = p.data.to("cuda")
+                # p.data = p.data.to("cuda")
         
         if self.minor_parameters:
             def optimize():
@@ -315,44 +315,39 @@ class HRockmate(torch.nn.Module):
                                                     device=torch.device("cpu"),
                                                     pin_memory=True)
                 
-        for k, v in self.op_sched.dict_alloc.items():
-            if isinstance(v, Activation):
-                continue
-                # self.storage.ld[v.kdn.main_target] = torch.empty(
-                #     0,
-                #     device=self.gd["device"],
-                #     requires_grad=v.kdn.info.requires_grad,
-                # )
-            if isinstance(v, Parameter):
-                if v.grad:continue
-                # target = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
-                target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
-                storage.ld["cpu_"+k] = torch.empty_like(target, 
-                                                    dtype=target.dtype, 
-                                                    device=torch.device("cpu"),
-                                                    pin_memory=True)
+        for p in self.minor_parameters:
+            p.data = p.data.to("cuda")
+        for k,v in self.op_sched.dict_alloc_param.items():
+            if v.grad:continue
+            target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
+            storage.ld["cpu_"+k] = torch.empty_like(target, 
+                                                dtype=target.dtype, 
+                                                device=torch.device("cpu"),
+                                                pin_memory=True)
+            storage.ld["cpu_"+k].copy_(target.data)
+            storage.ld["cpu_"+k].grad = torch.empty_like(storage.ld["cpu_"+k], pin_memory=True)
+            storage.ld[k] = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
+
+        # for k, v in self.op_sched.dict_alloc.items():
+        #     if isinstance(v, Activation):
+        #         continue
                 
-                # storage.ld["cpu_"+k].copy_(self.gd["original_mod"].get_parameter(k.removesuffix(" parameter")).data)
-                storage.ld["cpu_"+k].copy_(self.gd["self"].get_parameter(k.removesuffix(" parameter")).data)
-                storage.ld["cpu_"+k].grad = torch.empty_like(storage.ld["cpu_"+k], pin_memory=True)
-                # storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
-                storage.ld[k] = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
-                # storage.ld[k].grad = torch.empty_like(storage.ld[k], device="cuda")
-                # storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
-                # self.storage.shapes[v.kdn.main_target] = self.gd[k].shape
-                # self.storage.dtypes[v.kdn.main_target] = self.gd[k].dtypes
-            elif isinstance(v, Buffer):
-                storage.ld[k] = torch.empty(0, device=self.gd["device"])
-                # shape = round(v.mem / v.itemsize)
-                # print(k, v.mem)
-                # if "offload" in k or "prefetch" in k:
-                #     continue
-                # storage.ld["cpu_" + k] = torch.empty(shape, 
-                #                                     dtype=v.dtype, 
-                #                                     device=torch.device("cpu"),
-                #                                     pin_memory=True)
-            else:
-                print(f"Unrecognized type {type(v)}")
+        #     if isinstance(v, Parameter):
+        #         if v.grad:continue
+        #         target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
+        #         storage.ld["cpu_"+k] = torch.empty_like(target, 
+        #                                             dtype=target.dtype, 
+        #                                             device=torch.device("cpu"),
+        #                                             pin_memory=True)
+        #         storage.ld["cpu_"+k].copy_(self.gd["self"].get_parameter(k.removesuffix(" parameter")).data)
+        #         storage.ld["cpu_"+k].grad = torch.empty_like(storage.ld["cpu_"+k], pin_memory=True)
+        #         storage.ld[k] = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
+                
+        #     elif isinstance(v, Buffer):
+        #         storage.ld[k] = torch.empty(0, device=self.gd["device"])
+                
+        #     else:
+        #         print(f"Unrecognized type {type(v)}")
         
         storage.ld["optimizers"] = {}
         for op in self.op_sched.op_list:
@@ -374,12 +369,21 @@ class HRockmate(torch.nn.Module):
                 if isinstance(op, OptimizeOp):continue#first iteration no need to optimize
                 self._exec(l)
         
-    def restore_exec(self):
+    def restore_exec(self, keep_grad=False):
         self.zero_grad()
         for l in self.restore_fct_list:
             self._exec(l)
         for p in self.minor_parameters:
             p.data = p.data.to("cpu")
+
+        for k,v in self.op_sched.dict_alloc_param.items():
+            if v.grad:continue
+            target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
+            target.data = self.compiler.storage.ld["cpu_"+k].data
+            if keep_grad:
+                target.grad = self.compiler.storage.ld["cpu_"+k].grad
+
+        self.compiler.storage = None
         torch.cuda.synchronize()
 
     def define_autograd_Function(self):

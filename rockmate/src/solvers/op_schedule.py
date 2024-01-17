@@ -404,6 +404,9 @@ class OpSchedule:
                 )# add parameter grad allocation
                 self.list_alloc.extend(self.create_buffer_list())
         self.dict_alloc = {alloc.name: alloc for alloc in self.list_alloc}
+        self.dict_alloc_param = {alloc.name: alloc 
+                                 for alloc in self.list_alloc
+                                 if isinstance(alloc, Parameter)}
         self.all_interfaces = [
             kdn for inter in self.interfaces.values() for kdn in inter
         ]  # all interface KDN's
