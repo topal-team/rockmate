@@ -26,12 +26,35 @@ class LoraLinear(nn.Module):
         res = torch.matmul(x, self.v)
         res = torch.matmul(res, self.u)
         return self.linear(x)+res
+    
+# class LoraEmbedding(nn.Module):
+#     def __init__(self, linear, num_adapters=10, *args, **kwargs) -> None:
+#         super().__init__(*args, **kwargs)
+#         self.linear = linear
+#         self.linear.weight.requires_grad = False
+#         self.linear.bias.requires_grad = False
+#         u = nn.Parameter(torch.randn(self.linear.weight.shape[0], num_adapters).T)
+#         v = nn.Parameter(torch.randn(num_adapters, self.linear.weight.shape[1]).T)
+#         self.register_parameter("u", u)
+#         self.register_parameter("v", v)
 
-def manual_lora(model:nn.Module, module_names, num_adapters=10):
-    for module_name in module_names:
+#     def forward(self, x):
+#         res = torch.matmul(x, self.v)
+#         res = torch.matmul(res, self.u)
+#         return self.linear(x)+res
+
+def manual_lora(model:nn.Module, target_modules, num_adapters=10, freeze_all=True):
+    if freeze_all:
+        for p in model.parameters():
+            p.requires_grad = False
+    for module_name in target_modules:
         module = model.get_submodule(module_name)
-        assert isinstance(module, nn.Linear)
-        new_module = LoraLinear(module, num_adapters=num_adapters)
+        if isinstance(module, nn.Linear):
+            new_module = LoraLinear(module, num_adapters=num_adapters)
+        # elif isinstance(module, nn.Embedding):
+        #     new_module = LoraEmbedding(module, num_adapters=num_adapters)
+        else:
+            raise TypeError(f"manual lora does not work with {type(module)}")
         # setattr(model, module_name, new_module)
 
         atoms: List[str] = module_name.split(".")
