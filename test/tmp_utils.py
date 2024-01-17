@@ -42,7 +42,8 @@ def manual_lora(model:nn.Module, module_names, num_adapters=10):
                 raise AttributeError(mod._get_name() + " has no "
                                         "attribute `" + item + "`")
             if getattr(mod, item) == module:
-                setattr(mod, item, new_module)
+                # setattr(mod, item, new_module)
+                mod.add_module(item, new_module)
                 break
 
             mod = getattr(mod, item)
