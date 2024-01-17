@@ -54,8 +54,11 @@ class PartitionedNode(base.Node):
         self.users = set()
         self.deps_through_artifacts  = set()
         self.users_through_artifacts = set()
-        self.deps_global  = set() # FOR DYNAMIC PARTITIONING
-        self.users_global = set() # FOR DYNAMIC PARTITIONING
+        # FOR DYNAMIC PARTITIONING
+        self.deps_global  = set() 
+        self.users_global = set()
+        self.deps_through_artifacts_global = set()
+        self.users_through_artifacts_global = set()
         # Global edges contain ALL deps/users, of any depth
 
     def get_all_standard_deps(self):
@@ -139,6 +142,8 @@ class PartitionedGraph(base.Graph):
             for pn in self.nodes:
                 pn.deps_global = set(pn.deps)
                 pn.users_global = set(pn.users)
+                pn.deps_through_artifacts_global = set(pn.deps_through_artifacts)
+                pn.users_through_artifacts_global = set(pn.users_through_artifacts)
 
             self._first_nodes = set(
                 [dict_mt_to_pn[first_mt] 
@@ -429,7 +434,7 @@ class PartitionedStructure():
     dict_cluster_hash_to_cluster : dict[str, PartitionedCluster] = None
     dict_cluster_ano_hash_to_ano_cluster_id : dict[str,int] = None
     dict_cluster_ano_id_to_representee_cluster : dict[int,PartitionedCluster] = None
-    min_size_to_trigger_partitioning : int = 4
+    min_size_to_trigger_partitioning = 4
     def __init__(self,
             simplified_graph : SimplifiedGraph,
             original_mod : torch.nn.Module,
@@ -475,116 +480,140 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
 
     @staticmethod
     def prepare_dynamic_setup(pg : PartitionedGraph,cluster : PartitionedCluster):
-        first_nodes = pg._first_nodes
-        pg._first_nodes = None
+        """
+        In this setup, we assume pg is the highest level graph / standalone.
+        But we need global relations : inputs received and outputs sent.
+        Therefore we create a last_wrapping_graph, of which sg
+        will be a sub_graph. With some fresh input nodes in
+        last_wrapping_graph connected to pg's wrapping node.
+        And one "sink" node at the end of last_wrapping_graph
+        to serve as the user of pg's outputs.
+        """
         last_wrapping_graph = PartitionedGraph(parent_objet=cluster.p_structure)
-        main_pn = PartitionedNode(
+        pg_wrapping_pn = PartitionedNode(
             last_wrapping_graph,
             sub_graph=pg
-        )
-        # ** inputs **
+        ) # => The node representing pg as a sub part of last_wrapping_graph
+        # 1) Inputs:
         inputs_pn = []
         dict_input_mt_to_pn = dict()
+        # Create the fresh input nodes in last_wrapping_graph
         for inp_mt in cluster.inputs_mt:
             inp_pn = PartitionedNode(last_wrapping_graph,main_target=inp_mt)
             inputs_pn.append(inp_pn)
             dict_input_mt_to_pn[inp_mt] = inp_pn
-            inp_pn.users = set([main_pn])
-        main_pn.deps = set(inputs_pn)
+            inp_pn.users = set([pg_wrapping_pn])
+        pg_wrapping_pn.deps = set(inputs_pn)
+        # Connect pg's first_nodes to these new input_nodes via global deps/users
+        first_nodes = pg._first_nodes
         for fst_node in first_nodes:
             req_inputs_mt = cluster.dict_first_mt_to_required_inputs_mt[fst_node.mt]
             for req_inp_mt in req_inputs_mt:
                 req_inp_pn = dict_input_mt_to_pn[req_inp_mt]
                 fst_node.deps_global.add(req_inp_pn)
                 req_inp_pn.users_global.add(fst_node)
-        # ** outputs **
+        pg._first_nodes = None
+        # As the graph will dynamically evolve, we will recompute pg.first_nodes
+        # when needed, whereas _first_nodes were the fixed original ones
+
+        # 2) Outputs:
         sink_pn = PartitionedNode(
             last_wrapping_graph,
-            main_target = "last_wrapping_graph_output_node_sink"
+            main_target = "last_wrapping_graph_sink"
         )
-        main_pn.users = set([sink_pn])
+        pg_wrapping_pn.users = set([sink_pn])
         for out_pn in pg.output_nodes:
             out_pn.users_global.add(sink_pn)
             sink_pn.deps_global.add(out_pn)
 
-        pg.pn_wrapping_it = main_pn
-        last_wrapping_graph.nodes = inputs_pn + [main_pn,sink_pn]
+        pg.pn_wrapping_it = pg_wrapping_pn
+        last_wrapping_graph.nodes = inputs_pn + [pg_wrapping_pn,sink_pn]
 
     # ********
     # * WRAP *
     # ********
-    # wrap a 'group' of nodes, currently living in 'main_pg'
-    # into a new node 'new_pn', adding one level of depth.
     @staticmethod
     def wrap(group : list,main_pg : PartitionedGraph):
+        """
+        wrap a 'group' of nodes, currently living in 'main_pg',
+        in a new sub graph 'new_pg', adding one level of depth.
+        'new_pg' is represented by 'new_pg_wrapping_pn' in 'main_pg'
+        """
         new_pg = PartitionedGraph(parent_objet=main_pg)
         new_pg.nodes = group
-        new_pn = PartitionedNode(
+        new_pg_wrapping_pn = PartitionedNode(
             main_graph = main_pg,
             sub_graph  = new_pg,
         )
-        new_pg.pn_wrapping_it = new_pn
+        new_pg.pn_wrapping_it = new_pg_wrapping_pn
         set_group = set(group)
         new_pg.output_nodes = output_nodes = set()
-        for pn in group:
-            # ** link new_pn with global edges **
-            new_pn.deps_global.update(pn.deps_global)
-            new_pn.users_global.update(pn.users_global)
+        for pn_in_group in group:
+            # ** link new_pg_wrapping_pn with global edges **
+            new_pg_wrapping_pn.deps_global.update(pn_in_group.deps_global)
+            new_pg_wrapping_pn.users_global.update(pn_in_group.users_global)
+            new_pg_wrapping_pn.deps_through_artifacts_global.update(pn_in_group.deps_through_artifacts_global)
+            new_pg_wrapping_pn.users_through_artifacts_global.update(pn_in_group.users_through_artifacts_global)
             # -> remove edges to inside at the end
             # -> reciprocal at the end
 
-            # -> change pn.main_graph
-            pn.main_graph = new_pg
+            # -> change pn_in_group.main_graph
+            pn_in_group.main_graph = new_pg
 
-            # ** inputs ** 
-            if not pn.deps.issubset(set_group):
-                deps_outside = pn.deps - set_group
-                for req_pn in deps_outside:
-                    req_pn.users.discard(pn)
-                    req_pn.users.add(new_pn)
-                    pn.deps.discard(req_pn)
-                    new_pn.deps.add(req_pn)
+            # Deps outside the group are now considered as inputs
+            deps_outside = pn_in_group.deps - set_group
+            for req_pn in deps_outside:
+                req_pn.users.discard(pn_in_group)
+                req_pn.users.add(new_pg_wrapping_pn)
+                pn_in_group.deps.discard(req_pn)
+                new_pg_wrapping_pn.deps.add(req_pn)
             
             # ** outputs **
-            if (pn in main_pg.output_nodes
-            or (not pn.users.issubset(set_group))):
-                output_nodes.add(pn)
-                user_outside = pn.users - set_group
+            if (pn_in_group in main_pg.output_nodes
+            or (not pn_in_group.users.issubset(set_group))):
+                output_nodes.add(pn_in_group)
+                user_outside = pn_in_group.users - set_group
                 for user_pn in user_outside:
-                    user_pn.deps.discard(pn)
-                    user_pn.deps.add(new_pn)
-                    pn.users.discard(user_pn)
-                    new_pn.users.add(user_pn)
+                    user_pn.deps.discard(pn_in_group)
+                    user_pn.deps.add(new_pg_wrapping_pn)
+                    pn_in_group.users.discard(user_pn)
+                    new_pg_wrapping_pn.users.add(user_pn)
 
         # ** memory_occupied_by_all_outputs **
-        new_pn.memory_occupied_by_all_outputs = sum(
+        new_pg_wrapping_pn.memory_occupied_by_all_outputs = sum(
             out_pn.memory_occupied_by_all_outputs 
             for out_pn in output_nodes)
 
-        # ** global edges must not include edge to nodes inside new_pn **
+        # ** global edges must not include edge to nodes inside new_pg_wrapping_pn **
         all_p_nodes_inside = new_pg.all_p_nodes_inside()
-        new_pn.deps_global -= all_p_nodes_inside
-        new_pn.users_global -= all_p_nodes_inside
+        new_pg_wrapping_pn.deps_global -= all_p_nodes_inside
+        new_pg_wrapping_pn.users_global -= all_p_nodes_inside
+        new_pg_wrapping_pn.deps_through_artifacts_global -= all_p_nodes_inside
+        new_pg_wrapping_pn.users_through_artifacts_global -= all_p_nodes_inside
 
         # ** reciprocal global edges **
-        for req_g_pn in new_pn.deps_global:
-            req_g_pn.users_global.add(new_pn)
-        for user_g_pn in new_pn.users_global:
-            user_g_pn.deps_global.add(new_pn)
+        for req_global_pn in new_pg_wrapping_pn.deps_global:
+            req_global_pn.users_global.add(new_pg_wrapping_pn)
+        for user_global_pn in new_pg_wrapping_pn.users_global:
+            user_global_pn.deps_global.add(new_pg_wrapping_pn)
+        for artifact_req_global_pn in new_pg_wrapping_pn.deps_through_artifacts_global:
+            artifact_req_global_pn.users_through_artifacts_global.add(new_pg_wrapping_pn)
+        for artifact_user_global_pn in new_pg_wrapping_pn.users_through_artifacts_global:
+            artifact_user_global_pn.deps_through_artifacts_global.add(new_pg_wrapping_pn)
         
         # ** update main_pg.nodes **
         main_lpn = main_pg.nodes
-        main_lpn[main_lpn.index(group[0])] = new_pn
+        main_lpn[main_lpn.index(group[0])] = new_pg_wrapping_pn
         for pn in group[1:]:
             main_lpn.remove(pn)
 
         # ** update main_pg outputs **
         main_out = main_pg.output_nodes
         if not main_out.isdisjoint(set_group):
-            main_out.add(new_pn)
+            main_out.add(new_pg_wrapping_pn)
         main_pg.output_nodes -= set_group
 
-        return new_pn
+        return new_pg_wrapping_pn
 
 
     # **********
