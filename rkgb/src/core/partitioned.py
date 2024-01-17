@@ -39,14 +39,14 @@ class PartitionedNode(base.Node):
                 "temporary, during the partitioning."
             )
         if sub_cluster is not None:
-            self.name = "PNode: "+sub_cluster.name
+            self.name = f"PNode({sub_cluster.name})"
             self.is_leaf = False
         elif sub_graph is not None:
-            self.name = "PNode: "+sub_graph.name
+            self.name = f"PNode({sub_graph.name})"
             self.is_leaf = False
             self.is_protected_from_unwrap = False
         else:
-            self.name = f"Var_{main_target}"
+            self.name = f"BottomNode({main_target})"
             self.is_leaf = True
             self.is_protected_from_unwrap = True
 
@@ -237,6 +237,66 @@ class PartitionedGraph(base.Graph):
         for out_node in self.output_nodes:
             out_node.users.add(fresh_root)
         return fresh_root
+    
+    def __str__(self):
+        return (
+            f"{self.name}:\nGraph composed of {self.size} top level nodes,\n"\
+            f"containing a total of {self.total_size} basic nodes.")
+    
+    def render(self,
+            name=None,
+            view=True,
+            only_function_name=False,
+            include_artifact_edges=True,
+            directory=base.Graph.default_render_directory,
+            render_format=base.Graph.default_render_format,
+            render=True,
+            dot=None):
+        name = self._get_render_name(name)
+        dot = base.Graph._get_graphviz_dot(name,dot)
+        color_leaf = "blue"
+        color_edge = color_leaf
+        color_sub_graph = "blueviolet"
+        color_special   = "green"
+        # 1) nodes and edges
+        pn : PartitionedNode
+        for pn in self.nodes:
+            print(pn.name)
+            if pn.is_leaf:
+                if only_function_name:
+                    code = pn.sn.main_fct
+                else:
+                    code = pn.sn.get_code()
+                label = f"{pn.name}\n{code}"
+                dot.node(pn.name,label,color=color_leaf)
+            else:
+                label = f"{pn.name}\nCluster size: {pn.size}"
+                dot.node(pn.name,label,color=color_sub_graph)
+            for req_pn in pn.deps:
+                print("deps between : "+req_pn.name+"end"+pn.name)
+                dot.edge(req_pn.name,pn.name,color=color_edge)
+            if include_artifact_edges:
+                for req_pn in pn.deps_through_artifacts:
+                    dot.edge(req_pn.name,pn.name,color=color_edge,style="dotted")
+        
+        # 2) inputs
+        first_nodes = list(self.first_nodes)
+        kwargs = dict(color = color_special,style="dashed")
+        if first_nodes != []:
+            label = "INPUTS:\n"+"\n".join(self.cluster.inputs_mt)
+            dot.node("inputs",label,**kwargs)
+            for first_pn in first_nodes:
+                dot.edge("inputs",first_pn.name,**kwargs)
+
+        # 3) outputs
+        label = "OUTPUTS:\n"+"\n".join(self.cluster.outputs_mt)
+        dot.node("outputs",label,**kwargs)
+        for output_pn in self.output_nodes:
+            dot.edge(output_pn.name,"outputs",**kwargs)
+        if render:
+            base.Graph._call_graphviz_to_render(
+                dot,view,directory,render_format
+            )
 
 
 
@@ -444,6 +504,54 @@ class PartitionedCluster():
             for pg in self.partitionings:
                 pg.fix_redundant_clusters()
 
+    
+    def __repr__(self):
+        return self.name
+
+    def __str__(self):
+        cluster = self.representee_cluster
+        s = f"{self.name}:\nCluster containing a total of {self.size} basic nodes,\n"
+        nb_partitionings = len(cluster.partitionings)
+        if nb_partitionings == 0:
+            return s+"Without any partitioning ~ PartitionedGraph"
+        elif nb_partitionings == 1:
+            pg = cluster.partitionings[0]
+            return s+ f"With one partitioning, which has {pg.size} top level nodes."
+        else:
+            return s + f"with {nb_partitionings} possible partitionings."
+        
+    def render(self,
+            name=None,
+            view=True,
+            only_function_name=False,
+            include_artifact_edges=True,
+            directory=base.Graph.default_render_directory,
+            render_format=base.Graph.default_render_format,
+            render=True,
+            dot=None):
+        cluster = self.representee_cluster
+        if len(cluster.partitionings) == 0:
+            print("Sorry your cluster doesn't have any partitioning, "\
+                  "ie corresponding PartitionedGraph: use cluster.partition()")
+        if cluster is not self:
+            print(
+                f"Warning : your cluster has some equivalent ones, "\
+                f"{cluster.name} is the representee of the equivalent class, "\
+                f"so we render its graphs")
+        for i,pg in enumerate(cluster.partitionings):
+            if name is not None:
+                graph_name = f"{i}-th partitioning of {name}"
+            else:
+                graph_name = None
+            pg.render(graph_name,
+                view,
+                only_function_name,
+                include_artifact_edges,
+                directory,
+                render_format,
+                render,
+                dot)
+
 
 
 
@@ -494,6 +602,25 @@ class PartitionedStructure():
         # For anonymizing stuff: build a translator for each graph
         for cluster in self.all_clusters:
             cluster.translator = anonymize.ClusterTranslator(cluster)
+
+    def __str__(self):
+        return "PartitionedStructure whose main cluster is:\n"+str(self.main_cluster)
+    
+    def render(self,
+            name=None,
+            view=True,
+            only_function_name=False,
+            include_artifact_edges=True,
+            directory=base.Graph.default_render_directory,
+            render_format=base.Graph.default_render_format,
+            render=True,
+            dot=None):
+        self.main_cluster.render(
+            name,view,only_function_name,
+            include_artifact_edges,
+            directory,render_format,
+            render,dot
+        )
                 
 
 
@@ -1061,7 +1188,7 @@ class PartitionerBottomToTop(Partitioner):
 
         _all_options = list(all_options)
         for opt in _all_options:
-            if all(not pn.does_require_grad()
+            if not any(pn.does_require_grad()
                    for pn in opt.group):
                 all_options.remove(opt)
             elif all(pn.deps_global.issubset(opt.set_group)
@@ -1217,66 +1344,3 @@ class PartitionerSequence(Partitioner):
                 sub_cluster : PartitionedCluster = block_pn.sub_cluster
                 sub_cluster.partition(self.config.sub_partitioner)
         return pg
-
-
-
-# ==========================
-# === printing functions ===
-# ==========================
-
-color_leaf     = "blue"
-color_sub_graph = "blueviolet"
-color_special  = "green"
-color_edge     = color_leaf
-
-def aux_print_PartitionedGraph_message(pg : PartitionedGraph):
-    return f"PartitionedGraph - Partitioned forward graph : of size {len(pg.nodes)}"
-def aux_print_PartitionedGraph_name(pg,name=None):
-    if name is not None: return name
-    else: return "Partitioned_Forward_PartitionedGraph"
-
-def aux_print_PartitionedCluster_message(pc : PartitionedCluster):
-    possible_pg = pc.representee_cluster.partitionings
-    return f"{pc.name}, with {len(possible_pg)} possible partitioning"
-def aux_print_PartitionedCluster_names(pc : PartitionedCluster,name=None):
-    if name is None: name = pc.name
-    parti_used = pc.representee_cluster.partitioners_already_used
-    return [f"PartitionedGraph_{i}_via_{type(parti)}_of_{name}" for i,parti in enumerate(parti_used)]
-
-def print_PartitionedGraph(pg : PartitionedGraph,name=None,open=True,render_format="svg",dot=None,uniq_num=0):
-    # ----- init -----
-    def uni(tar): return f"_{uniq_num}_{tar}"
-    def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
-    def edge(i1,i2,**kwargs): dot.edge(uni(i1),uni(i2), **kwargs)
-    # ----- Core -----
-    cluster : PartitionedCluster = pg.cluster
-    for pn in pg.nodes:
-        if pn.is_leaf:
-            node(pn.name,pn.name,color=color_leaf)
-        else:
-            node(
-                pn.name,
-                f"{pn.name}\nCluster size: {pn.size}",
-                color=color_sub_graph)
-        for req_pn in pn.deps:
-            edge(req_pn.name,pn.name,color=color_edge)
-    
-    # -> input
-    first_nodes = list(pg.first_nodes)
-    kwargs = dict(color = color_edge,style="dashed")
-    if first_nodes != []:
-        node(
-            "inputs",
-            f"INPUTS:\n"+"\n".join(cluster.inputs_mt),
-            color=color_special, style="dashed")
-        for pn in first_nodes:
-            edge("inputs",pn.name,**kwargs)
-
-    # -> output
-    node(
-        "outputs",
-        f"OUTPUTS:\n"+"\n".join(cluster.outputs_mt),
-        color=color_special, style="dashed")
-    for pn in pg.output_nodes:
-        edge(pn.name,"outputs",**kwargs)
-    # ----- render -----
