@@ -197,6 +197,12 @@ class PartitionedGraph(base.Graph):
             if pn.sub_graph is not None:
                 all_p.update(pn.sub_graph.all_p_nodes_inside())
         return all_p
+    
+    def derive_local_artifact_edges_from_global(self):  # FOR DYNAMIC PARTITIONING
+        local_nodes = set(self.nodes)
+        for pn in self.nodes:
+            pn.deps_through_artifacts = pn.deps_through_artifacts_global.intersection(local_nodes)
+            pn.users_through_artifacts = pn.users_through_artifacts_global.intersection(local_nodes)
 
     def set_all_protected_to_false(self): # FOR DYNAMIC PARTITIONING
         for pn in self.nodes:
@@ -1031,6 +1037,7 @@ class PartitionerBottomToTop(Partitioner):
         config = self.config
         for pn in pg.nodes:
             pn.is_protected_from_unwrap = True
+        pg.derive_local_artifact_edges_from_global()
         all_options = (
                 self.find_seq_options(pg)
             +   self.find_flow_options(pg)
