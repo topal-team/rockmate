@@ -325,15 +325,18 @@ class HRockmate(torch.nn.Module):
                 # )
             if isinstance(v, Parameter):
                 if v.grad:continue
-                target = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
+                # target = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
+                target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
                 storage.ld["cpu_"+k] = torch.empty_like(target, 
                                                     dtype=target.dtype, 
                                                     device=torch.device("cpu"),
                                                     pin_memory=True)
                 
-                storage.ld["cpu_"+k].copy_(self.gd["original_mod"].get_parameter(k.removesuffix(" parameter")).data)
+                # storage.ld["cpu_"+k].copy_(self.gd["original_mod"].get_parameter(k.removesuffix(" parameter")).data)
+                storage.ld["cpu_"+k].copy_(self.gd["self"].get_parameter(k.removesuffix(" parameter")).data)
                 storage.ld["cpu_"+k].grad = torch.empty_like(storage.ld["cpu_"+k], pin_memory=True)
-                storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
+                # storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
+                storage.ld[k] = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
                 # storage.ld[k].grad = torch.empty_like(storage.ld[k], device="cuda")
                 # storage.ld[k] = self.gd["original_mod"].get_parameter(k.removesuffix(" parameter"))
                 # self.storage.shapes[v.kdn.main_target] = self.gd[k].shape
@@ -404,7 +407,7 @@ class HRockmate(torch.nn.Module):
         #  Because it only sees the inputs and outputs, and we
         # take care of all the intermediate evaluations, therefore
         # autograd doesn't realize there are some params which
-        # require_grad for instance.)
+        # requires_grad for instance.)
 
         #  Rem 2:
         # Normally Autograd.Function's backward method returns inputs' grad,

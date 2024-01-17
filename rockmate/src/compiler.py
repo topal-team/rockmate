@@ -50,7 +50,8 @@ def make_gd(device,
     return {
         **globals(),
         **dict_constants,
-        "original_mod": nn_mod,
+        # "original_mod": nn_mod,
+        "self": nn_mod,
         "device": device,
         "torch": torch,
         "meta": torch.ones(1).to(device),
@@ -194,9 +195,10 @@ class Compiler:
 
                 function_list.append(
                     self.fct_run_forward_no_grad(
-                        main_code.replace("self.", "original_mod.").replace(
-                            "self[", "original_mod["
-                        ),
+                        main_code
+                        # .replace("self.", "original_mod.").replace(
+                        #     "self[", "original_mod["
+                        # ),
                     )
                 )
             else:
@@ -215,9 +217,11 @@ class Compiler:
                 # print(kn, no_save_list)
                 function_list.append(
                     self.fct_run_forward_with_grad(
-                        main_code.replace("self.", "original_mod.").replace(
-                            "self[", "original_mod["
-                        ),
+                        main_code
+                        # .replace("self.", "original_mod.").replace(
+                        #     "self[", "original_mod["
+                        # ),
+                        ,
                         no_save_list=no_save_list,
                     )
                 )
@@ -225,9 +229,10 @@ class Compiler:
             # these in-place operations can be applied to views and not directly to the original tensor
             function_list.append(
                 self.fct_run_forward_with_grad(
-                    inplace_code.replace("self.", "original_mod.").replace(
-                        "self[", "original_mod["
-                    ),
+                    inplace_code
+                    # .replace("self.", "original_mod.").replace(
+                    #     "self[", "original_mod["
+                    # ),
                 )
             )
 
@@ -249,9 +254,10 @@ class Compiler:
             # add body_code functions in the list
             function_list.append(
                 self.fct_run_forward_with_grad(
-                    body_code.replace("self.", "original_mod.").replace(
-                        "self[", "original_mod["
-                    ),
+                    body_code
+                    # .replace("self.", "original_mod.").replace(
+                    #     "self[", "original_mod["
+                    # ),
                 )
             )
 
@@ -781,10 +787,6 @@ class Compiler:
         return mapping
     
     def fct_optimize(self, op):
-        # for i in [15,16,17,18]:
-        # if f"cpu_" in op.name:
-        #     def optimize():pass
-        #     return optimize
         del_grad = op.list_params if "cpu" in op.name else []
         def optimize():
             # torch.cuda.synchronize()
