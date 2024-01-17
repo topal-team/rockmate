@@ -381,62 +381,21 @@ class PartitionedCluster():
 
     # =============================
     def make_ano_cluster_id(self):
-        # ATTRIBUTES NEEDED : s_nodes, p_structure, io
-        # DO : ano_cluster_id, representee_cluster
-        dict_mt_to_ano_info = self.p_structure.dict_mt_to_sn_ano_material
-        dict_inputs_used = self.dict_first_mt_to_targets_used
-        dict_outputs_sent = self.dict_output_mt_to_targets_sent
-        charac_list = []
-        for sn in self.s_nodes:
-            ano_info : Ano_SimplifiedNode_Info = dict_mt_to_ano_info[sn.mt]
-            charac_edges = []
-            sn_deps = list(sn.deps.items())
-            sn_deps.sort(key = lambda c : dict_mt_to_ano_info[c[0].mt].ano_id)
-            for req_sn,used_targets in sn_deps:
-                if req_sn not in self.s_nodes: continue
-                charac_used_targets = []
-                sort_key = lambda tar : ano_info.dict_tar_to_ano_nb[tar]
-                used_targets = list(used_targets)
-                used_targets.sort(key=sort_key)
-                for used_target in used_targets:
-                    charac_used_targets.append(
-                        req_sn.all_targets.index(used_target)
-                    )
-                charac_edges.append((
-                    dict_mt_to_ano_info[req_sn.mt].ano_id, # TO CHANGE : take index in self.s_nodes instead
-                    charac_used_targets
-                ))
-            charac_inputs = []
-            if sn in self.first_snodes:
-                for input_used in dict_inputs_used[sn.mt]:
-                    charac_inputs.append(self.inputs.index(input_used))
-            charac_outputs = []
-            if sn in self.output_snodes:
-                for output_used in dict_outputs_sent[sn.mt]:
-                    charac_outputs.append(self.outputs.index(output_used))
-            charac_list.append((
-                ano_info.ano_id,
-                charac_edges,
-                charac_inputs,
-                charac_outputs
-            ))
-        charac_string = str(charac_list)
-        dict_cluster_to_ano_id = \
-            self.p_structure.dict_cluster_ano_charac_string_to_ano_cluster_id
-        if charac_string in dict_cluster_to_ano_id:
-            self.ano_cluster_id = ano_id = dict_cluster_to_ano_id[charac_string]
-            self.representee_cluster \
-                = self.p_structure.dict_cluster_ano_id_to_representee_cluster[ano_id]
+        ano_hash = anonymize.AnonymousHash(self)
+        dict_ano_hash_to_ano_id = self.p_structure.dict_cluster_ano_hash_to_ano_cluster_id
+        dict_ano_id_to_representee_cluster = self.p_structure.dict_cluster_ano_id_to_representee_cluster
+        if ano_hash in dict_ano_hash_to_ano_id:
+            ano_id = dict_ano_hash_to_ano_id[ano_hash]
+            self.ano_cluster_id = ano_id
+            self.representee_cluster = dict_ano_id_to_representee_cluster[ano_id]
         else:
             self.partitionings = []
             self.partitioners_already_used = []
-            self.ano_cluster_id \
-                = ano_id \
-                = dict_cluster_to_ano_id[charac_string] \
-                = self.p_structure.counter_nb_unique_clusters.count()
-            self.representee_cluster \
-                = self.p_structure.dict_cluster_ano_id_to_representee_cluster[ano_id] \
-                = self
+            ano_id = self.p_structure.counter_nb_unique_clusters.count()
+            self.ano_cluster_id = ano_id
+            dict_ano_hash_to_ano_id[ano_hash] = ano_id
+            self.representee_cluster = self
+            dict_ano_id_to_representee_cluster[ano_id] = self
     # =============================
 
     def partition(self,partitioner : Partitioner):
