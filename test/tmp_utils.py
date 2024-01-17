@@ -5,32 +5,52 @@ from rockmate.solvers.op_schedule import *
 from rockmate.solvers.main import add_parameter_node
 from copy import deepcopy
 from rkgb.utils import irotor
+from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 
 timer = irotor.make_timer(torch.device("cuda"))
 
 from models.GPT import  GPT2
 
-
 class LoraLinear(nn.Module):
-    def __init__(self, original_mod, num_adapters=10, *args, **kwargs) -> None:
+    def __init__(self, linear, num_adapters=10, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.original_mod = original_mod
-        self.original_mod.weight.requires_grad = False
-        self.original_mod.bias.requires_grad = False
-        self.u = nn.Parameter(torch.randn(self.original_mod.weight.shape[0], num_adapters))
-        self.v = nn.Parameter(torch.randn(num_adapters, self.original_mod.weight.shape[1]))
+        self.linear = linear
+        self.linear.weight.requires_grad = False
+        self.linear.bias.requires_grad = False
+        u = nn.Parameter(torch.randn(self.linear.weight.shape[0], num_adapters).T)
+        v = nn.Parameter(torch.randn(num_adapters, self.linear.weight.shape[1]).T)
+        self.register_parameter("u", u)
+        self.register_parameter("v", v)
 
     def forward(self, x):
-        res = torch.matmul(x, self.v.T)
-        res = torch.matmul(res, self.u.T)
-        return self.original_mod(x)+res
+        res = torch.matmul(x, self.v)
+        res = torch.matmul(res, self.u)
+        return self.linear(x)+res
 
-def manual_lora(model:nn.Module, module_name, num_adapters=10):
-    module = model.get_submodule(module_name)
-    # print(model.get_submodule(module_name).weight.requires_grad)
-    assert isinstance(module, nn.Linear)
-    new_module = LoraLinear(module, num_adapters=num_adapters)
-    setattr(model, module_name, new_module)
+def manual_lora(model:nn.Module, module_names, num_adapters=10):
+    for module_name in module_names:
+        module = model.get_submodule(module_name)
+        assert isinstance(module, nn.Linear)
+        new_module = LoraLinear(module, num_adapters=num_adapters)
+        # setattr(model, module_name, new_module)
+
+        atoms: List[str] = module_name.split(".")
+        mod: torch.nn.Module = model
+
+        for item in atoms:
+            if not hasattr(mod, item):
+                raise AttributeError(mod._get_name() + " has no "
+                                        "attribute `" + item + "`")
+            if getattr(mod, item) == module:
+                setattr(mod, item, new_module)
+                break
+
+            mod = getattr(mod, item)
+            if not isinstance(mod, torch.nn.Module):
+                raise AttributeError("`" + item + "` is not "
+                                        "an nn.Module")
+
+
 
 
 def find_op(rkmod, op_name, op_code=None, fct=None):
