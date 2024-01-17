@@ -43,11 +43,11 @@ class H_C_node(base.Node):
     def get_all_standard_users(self):
         return set().union(
             *[hdn.users for hdn in self.users])
-    def does_requires_grad(self):
+    def does_require_grad(self):
         if not self.is_leaf:
             return True
         else:
-            return self.whole_computation_node.does_requires_grad()
+            return self.whole_computation_node.does_require_grad()
 
 
 # ************

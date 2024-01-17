@@ -66,11 +66,13 @@ class PartitionedNode(base.Node):
     def get_all_standard_users(self):
         return self.users.union(self.users_through_artifacts)
     
-    def does_requires_grad(self):
+    def does_require_grad(self):
         if not self.is_leaf:
             return True
+        elif self.simplified_node is not None:
+            return self.simplified_node.does_require_grad()
         else:
-            return self.simplified_node.does_requires_grad()
+            return False
 
     @property
     def size(self):
@@ -234,6 +236,7 @@ class PartitionedGraph(base.Graph):
         fresh_root.deps = set(self.output_nodes)
         for out_node in self.output_nodes:
             out_node.users.add(fresh_root)
+        return fresh_root
 
 
 
@@ -1058,7 +1061,7 @@ class PartitionerBottomToTop(Partitioner):
 
         _all_options = list(all_options)
         for opt in _all_options:
-            if all(not pn.does_requires_grad()
+            if all(not pn.does_require_grad()
                    for pn in opt.group):
                 all_options.remove(opt)
             elif all(pn.deps_global.issubset(opt.set_group)

@@ -205,7 +205,7 @@ class Node():
     # =====================
     # === requires_grad ===
     # -> For any type of node
-    def does_requires_grad(self):
+    def does_require_grad(self):
         return (
             self.info is not None
             and hasattr(self.info,"requires_grad")
@@ -461,7 +461,7 @@ class Graph():
             to_be_visited.remove(n)
             seen.remove(n)
             if seen==set():
-                if n.does_requires_grad():
+                if n.does_require_grad():
                     separators.append(n)
             for req_n in n.get_all_standard_deps():
                 seen.add(req_n)
