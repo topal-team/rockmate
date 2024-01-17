@@ -592,14 +592,14 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
         new_pg_wrapping_pn.users_through_artifacts_global -= all_p_nodes_inside
 
         # ** reciprocal global edges **
-        for req_global_pn in new_pg_wrapping_pn.deps_global:
-            req_global_pn.users_global.add(new_pg_wrapping_pn)
-        for user_global_pn in new_pg_wrapping_pn.users_global:
-            user_global_pn.deps_global.add(new_pg_wrapping_pn)
-        for artifact_req_global_pn in new_pg_wrapping_pn.deps_through_artifacts_global:
-            artifact_req_global_pn.users_through_artifacts_global.add(new_pg_wrapping_pn)
-        for artifact_user_global_pn in new_pg_wrapping_pn.users_through_artifacts_global:
-            artifact_user_global_pn.deps_through_artifacts_global.add(new_pg_wrapping_pn)
+        for global_req_pn in new_pg_wrapping_pn.deps_global:
+            global_req_pn.users_global.add(new_pg_wrapping_pn)
+        for global_user_pn in new_pg_wrapping_pn.users_global:
+            global_user_pn.deps_global.add(new_pg_wrapping_pn)
+        for artifact_global_req_pn in new_pg_wrapping_pn.deps_through_artifacts_global:
+            artifact_global_req_pn.users_through_artifacts_global.add(new_pg_wrapping_pn)
+        for artifact_global_user_pn in new_pg_wrapping_pn.users_through_artifacts_global:
+            artifact_global_user_pn.deps_through_artifacts_global.add(new_pg_wrapping_pn)
         
         # ** update main_pg.nodes **
         main_lpn = main_pg.nodes
@@ -621,22 +621,28 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
     # **********
     # unwrap 'pn' in its main graph
     @staticmethod
-    def unwrap(pn : PartitionedNode):
-        pg      : PartitionedGraph = pn.sub_graph
-        main_pg : PartitionedGraph = pn.main_graph
-        if pn.is_protected_from_unwrap: return ()
+    def unwrap(pn_to_unwrap : PartitionedNode):
+        pg      : PartitionedGraph = pn_to_unwrap.sub_graph
+        main_pg : PartitionedGraph = pn_to_unwrap.main_graph
+        if pn_to_unwrap.is_protected_from_unwrap: return ()
         group = list(pg.nodes)
 
-        # ** unplug pn/pg **
+        # 1) unplug pn_to_unwrap/pg
         # -> global edges
-        for req_g_pn in pn.deps_global: req_g_pn.users_global.remove(pn)
-        for user_g_pn in pn.users_global: user_g_pn.deps_global.remove(pn)
-        # not global edges will be overwritten anyway
+        for global_req_pn in pn_to_unwrap.deps_global:
+            global_req_pn.users_global.remove(pn_to_unwrap)
+        for global_user_pn in pn_to_unwrap.users_global:
+            global_user_pn.deps_global.remove(pn_to_unwrap)
+        for artifact_global_req_pn in pn_to_unwrap.deps_through_artifacts_global:
+            artifact_global_req_pn.users_through_artifacts_global.remove(pn_to_unwrap)
+        for artifact_global_user_pn in pn_to_unwrap.users_through_artifacts_global:
+            artifact_global_user_pn.deps_through_artifacts_global.remove(pn_to_unwrap)
+        # local edges (ie non global ones) will be overwritten anyway
 
         # ** plug back the group **
         # -> fix main_pg.nodes
         main_lpn = main_pg.nodes
-        i = main_lpn.index(pn)
+        i = main_lpn.index(pn_to_unwrap)
         main_pg.nodes = main_lpn[:i] + group + main_lpn[i+1:]    
         # -> fix sub_pn.main_graph
         for sub_pn in group:
@@ -644,15 +650,15 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
         # -> use the property : deps = deps_global inter nodes 
         main_spn = set(main_pg.nodes)
         all_p_nodes_inside = main_pg.all_p_nodes_inside()
-        to_update = group + list(pn.deps) + list(pn.users)
+        to_update = group + list(pn_to_unwrap.deps) + list(pn_to_unwrap.users)
         for sub_pn in to_update:
             sub_pn.deps  = sub_pn.deps_global.intersection(main_spn)
             sub_pn.users = sub_pn.users_global.intersection(main_spn)
             if not sub_pn.users_global.issubset(all_p_nodes_inside):
                 main_pg.output_nodes.add(sub_pn)
 
-        if pn in main_pg.output_nodes:
-            main_pg.output_nodes.remove(pn)
+        if pn_to_unwrap in main_pg.output_nodes:
+            main_pg.output_nodes.remove(pn_to_unwrap)
         return ()
 
 
