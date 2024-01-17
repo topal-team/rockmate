@@ -303,7 +303,7 @@ def sort_inputs_mt(partitioned_cluster,input_snodes):
         repr = []
         users_with_index = [
             (user_sn,partitioned_cluster.first_snodes.index(user_sn))
-            for user_sn in partitioned_cluster.dict_input_sn_to_users[input_sn]
+            for user_sn in partitioned_cluster.dict_input_sn_to_users_sn[input_sn]
         ]
         users_with_index = sorted(users_with_index,key = lambda c : c[1])
         for user_sn,user_index in users_with_index:

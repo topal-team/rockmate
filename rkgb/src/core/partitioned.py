@@ -244,11 +244,12 @@ class PartitionedCluster():
     partitionings = None
     partitioners_already_used = None
     # Tmp attributes :
+    input_snodes = None
     first_snodes = None
     output_snodes = None
-    dict_input_sn_to_users = None
-    dict_first_mt_to_targets_used = None
-    dict_first_mt_to_targets_used_mt = None
+    dict_input_sn_to_users_sn = None
+    dict_first_sn_to_required_inputs_sn = None
+    dict_first_mt_to_required_inputs_mt = None
     dict_output_mt_to_targets_sent = None
 
     def __init__(self,
@@ -491,11 +492,11 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
             inp_pn.users = set([main_pn])
         main_pn.deps = set(inputs_pn)
         for fst_node in first_nodes:
-            inputs_used = cluster.dict_first_mt_to_mt_used[fst_node.mt]
-            for inp_mt in inputs_used:
-                inp_pn = dict_input_mt_to_pn[inp_mt]
-                fst_node.deps_global.add(inp_pn)
-                inp_pn.users_global.add(fst_node)
+            req_inputs_mt = cluster.dict_first_mt_to_required_inputs_mt[fst_node.mt]
+            for req_inp_mt in req_inputs_mt:
+                req_inp_pn = dict_input_mt_to_pn[req_inp_mt]
+                fst_node.deps_global.add(req_inp_pn)
+                req_inp_pn.users_global.add(fst_node)
         # ** outputs **
         sink_pn = PartitionedNode(
             last_wrapping_graph,
