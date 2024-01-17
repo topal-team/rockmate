@@ -414,10 +414,6 @@ class Graph():
                     d = degree[req_n]
                 degree[req_n] = d+1
 
-        debug = False
-        if hasattr(req_n,"deps_real"):
-            debug = True
-
         # Explore nodes by increasing lexicographic-order of their n.main_target
         # BUT a node is explored iff all its users are explored => toposort
         sorted_list = []
@@ -476,7 +472,10 @@ class Graph():
                 dict_nb_usages[req_n]-=1
                 if dict_nb_usages[req_n]==0:
                     to_be_visited.append(req_n)
+
         separators.reverse()
+        if separators[-1] is not self.nodes[-1]:
+            separators.append(self.nodes[-1])
 
         if is_it_a_tmp_fresh_root:
             self.remove_temporary_global_root_node(root_node)

@@ -86,6 +86,7 @@ class PartitionedNode(base.Node):
 
 
 class PartitionedGraph(base.Graph):
+    node_class = PartitionedNode
     pn_wrapping_it : PartitionedNode = None
     # -> pn representing self in an upper graph
     _first_nodes : list[PartitionedNode] = None
@@ -1151,25 +1152,24 @@ class PartitionerSequence(Partitioner):
         pg = PartitionedGraph(cluster)
         dict_info = cluster.p_structure.dict_info
 
-        # ** Add a temporary global source before find_cutting_points**
-        tmp_global_source_pn = PartitionedNode(main_graph=pg,main_target="tmp_source")
-        pg.nodes.insert(0,tmp_global_source_pn)
+        # To call base.Graph.find_cutting_points we first need
+        # to add a sink to the .deps relation. An equivalent
+        # of sg.init_node, without any deps, one clear first node.
+        tmp_sink_pn = PartitionedNode(main_graph=pg,main_target="tmp_sink")
+        pg.nodes.insert(0,tmp_sink_pn)
         first_nodes = pg.first_nodes
         for first_pn in first_nodes:
             if first_pn.deps == set():
-                first_pn.deps.add(tmp_global_source_pn)
-                tmp_global_source_pn.users.add(first_pn)
+                first_pn.deps.add(tmp_sink_pn)
+                tmp_sink_pn.users.add(first_pn)
 
         seps_pn = pg.find_cutting_points()
 
-        # -> remove tmp_source
+        # Remove the temporary sink
         for first_pn in first_nodes:
-            first_pn.deps.discard(tmp_global_source_pn)
-        pg.nodes.remove(tmp_global_source_pn)
+            first_pn.deps.discard(tmp_sink_pn)
+        pg.nodes.remove(tmp_sink_pn)
 
-        # -> multiple output_nodes
-        if not (seps_pn[-1] is pg.nodes[-1]):
-            seps_pn.append(pg.nodes[-1])
         seps_mt = [sep.mt for sep in seps_pn]
         seps_sn = [sn for sn in cluster.s_nodes if sn.mt in seps_mt]
         seps_index = [-1]+[cluster.s_nodes.index(sep) for sep in seps_sn]

@@ -818,25 +818,21 @@ class SimplifiedGraph(base.Graph):
                 init_node_users_in_this_context = init_node.users
             init_node.users = init_node_users_in_this_context
             # 1) re-plug init_node 
-            # 2) find cutting points 
-            # 3) unplug init_node
             for user_sn in init_node_users_in_this_context:
                 user_sn.deps.add(init_node)
             self.nodes.insert(0,init_node)
+            # 2) find cutting points 
             cutting_points = self.find_cutting_points()
+            # 3) unplug init_node
             self.nodes.remove(init_node)
             for user_sn in init_node.users:
                 user_sn.deps.remove(init_node)
             # 4) cut self.nodes in blocks following cutting_points 
             list_blocks = []
-            current_block = []
-            for sn in self.nodes:
-                current_block.append(sn)
-                if sn is cutting_points[0]:
-                    cutting_points.pop(0)
-                    list_blocks.append(current_block)
-                    current_block = []
-            if current_block != []: list_blocks.append(current_block)
+            for i in range(len(cutting_points)-1):
+                start = self.nodes.index(cutting_points[i])
+                end = self.nodes.index(cutting_points[i+1])
+                list_blocks.append(self.nodes[start:end+1])
             init_node.users = init_node_users_beside_this_context
             self.sequentialized_list_of_blocks_of_nodes = list_blocks
             self.is_sequentialization_aggressive = aggressive
