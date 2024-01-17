@@ -113,9 +113,9 @@ class PartitionedGraph(base.Graph):
         self.name = f"PartitionedGraph {graph_nb}"
 
         # 2) Real constructor in case we have a partitioned_cluster
+        self.cluster = partitioned_cluster
         if partitioned_cluster is not None:
             partitioned_cluster : PartitionedCluster
-            self.cluster = partitioned_cluster
             self.nodes = []
             dict_info = partitioned_cluster.p_structure.dict_info
             dict_mt_to_pn = dict()
@@ -222,6 +222,18 @@ class PartitionedGraph(base.Graph):
                 else:
                     # => Fine we continue
                     self_or_equal_cluster.fix_redundant_clusters()
+
+    def make_temporary_global_root_node_to_deps_relation(self):
+        # Overwrite base.Graph's method:
+        if len(self.output_nodes) == 0:
+            raise Exception(
+                f"{self} doesn't have a single output node so we "\
+                f"fail to create a root node to deps relation and "\
+                f"trace deps (either to sort or find_cutting_points)")
+        fresh_root = PartitionedNode(self,main_target="tmp_root_node_to_deps_relation")
+        fresh_root.deps = set(self.output_nodes)
+        for out_node in self.output_nodes:
+            out_node.users.add(fresh_root)
 
 
 
