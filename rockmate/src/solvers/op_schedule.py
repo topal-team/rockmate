@@ -777,6 +777,7 @@ class OpSchedule:
     def get_peak_mem(self, with_interface=False, act_multiplier=1):
         if act_multiplier==1:
             save_mem = self.save_mem
+            overhead = self.overhead
         else:
             save_mem = []
             for i,alive_status in enumerate(self.alive_list):
