@@ -22,7 +22,7 @@ class PartitionedNode(base.Node):
             simplified_node = None):
         sub_cluster : PartitionedCluster
         sub_graph : PartitionedGraph
-        super().__init__(other_obj=main_graph)
+        super().__init__(parent_structure_with_id_generator=main_graph)
         self.main_graph  = main_graph
         self.sub_cluster = sub_cluster
         self.main_target = main_target
@@ -275,15 +275,15 @@ class PartitionedCluster():
         # it could happen that we already had the exact same cluster
         # ie the same set of s_nodes. So to be efficient, we store 
         # a handmade __repr__/__hash__ of each cluster:
-        hash = hash(tuple(self.s_nodes))
+        cluster_hash = hash(tuple(self.s_nodes))
         dict_hash_to_cluster = self.p_structure.dict_cluster_hash_to_cluster
-        if hash in dict_hash_to_cluster:
-            self.self_or_strictly_equal_cluster = dict_hash_to_cluster[hash]
+        if cluster_hash in dict_hash_to_cluster:
+            self.self_or_strictly_equal_cluster = dict_hash_to_cluster[cluster_hash]
             self.name = self.self_or_strictly_equal_cluster.name
         else:
             cluster_nb = self.p_structure.counter_nb_clusters.count()
             self.self_or_strictly_equal_cluster = self
-            dict_hash_to_cluster[hash] = self
+            dict_hash_to_cluster[cluster_hash] = self
             self.compute_interfaces()
             self.make_ano_cluster_id()
             self.name = f"P_Cluster_{cluster_nb}_Ano_id_{self.ano_cluster_id}"
@@ -309,7 +309,7 @@ class PartitionedCluster():
         input_snodes = []
         first_snodes = []
         output_snodes = []
-        self.dict_input_sn_to_users_sn = dict_input_sn_to_users_sn = dict
+        self.dict_input_sn_to_users_sn = dict_input_sn_to_users_sn = dict()
         self.dict_first_sn_to_required_inputs_sn = dict_first_sn_to_req_inputs_sn = dict()
         self.dict_output_mt_to_targets_sent = dict_outputs_sent = dict()
         # == for each sn, check its interfaces outside the cluster ==
@@ -330,7 +330,7 @@ class PartitionedCluster():
                         dict_input_sn_to_users_sn[req_sn] = [sn_to_proceed]
                     else:
                         dict_input_sn_to_users_sn[req_sn].append(sn_to_proceed)
-            for user_sn,used_targets in sn_to_proceed.users:
+            for user_sn in sn_to_proceed.users:
                 used_targets = sg.dict_of_labels_on_edges[(sn_to_proceed,user_sn)]
                 if not (user_sn in self.s_nodes):
                     outputs.update(used_targets)
@@ -393,7 +393,7 @@ class PartitionedCluster():
 
     # =============================
     def make_ano_cluster_id(self):
-        ano_hash = anonymize.AnonymousHash(self)
+        ano_hash = anonymize.AnonymousHash.hash(self)
         dict_ano_hash_to_ano_id = self.p_structure.dict_cluster_ano_hash_to_ano_cluster_id
         dict_ano_id_to_representee_cluster = self.p_structure.dict_cluster_ano_id_to_representee_cluster
         if ano_hash in dict_ano_hash_to_ano_id:
@@ -747,7 +747,7 @@ class PartitionerBottomToTop(Partitioner):
 
         def is_seq(self):
             # self.group must be in the correct order
-            if not all(pn.is_protected_from_unwrap for pn in self.group):
+            if any((not pn.is_protected_from_unwrap) for pn in self.group):
                 return False
             return self.__class__.utils_is_seq(self.group)
         

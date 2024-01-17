@@ -176,6 +176,8 @@ class ForwardGraph(base.Graph):
                     # => we will properly unplug it after all nodes have been proceed
                     our_global[fn.target] = exception_object.view_value
                     # We can store it as it takes no memory (as a view over a param)
+                    self.dict_info[fn.target] = VariableInfo(exception_object.view_value)
+                    # => In partitioned.py we need VariableInfo of all targets
                 del tmp_local
 
         self.unplug_view_over_parameters(dict_view_on_params_to_unplug)

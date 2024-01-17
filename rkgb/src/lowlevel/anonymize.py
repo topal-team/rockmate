@@ -157,7 +157,7 @@ class AnonymousHash():
     
     @staticmethod
     def partitioned_cluster(p_cluster):
-        sg = p_cluster.sg
+        sg = p_cluster.p_structure.sg
         sg_edges_labels = sg.dict_of_labels_on_edges
         dict_target_ano_id = p_cluster.p_structure.dict_target_ano_id
         dict_mt_to_sn_ano_material = p_cluster.p_structure.dict_mt_to_sn_ano_material
@@ -225,7 +225,7 @@ class AnonymousHash():
 
     
     @staticmethod
-    def get(object):
+    def hash(object):
         if isinstance(object,VariableInfo):
             return AnonymousHash.variable_info(object)
         elif isinstance(object,SimplifiedNodeAnonymizationMaterial):
@@ -260,7 +260,7 @@ def build_anonymous_equivalence_classes(
     counter_nb_unique_snodes = Counter()
     for sn_to_proceed in [sg.init_node] + sg.nodes:
         sn_ano_material = SimplifiedNodeAnonymizationMaterial(sn_to_proceed,sg,original_mod)
-        sn_ano_hash = AnonymousHash.get(sn_ano_material)
+        sn_ano_hash = AnonymousHash.hash(sn_ano_material)
         if sn_ano_hash in dict_sn_ano_hash_to_sn_ano_id:
             sn_ano_material.anonymous_id \
                 = dict_sn_ano_hash_to_sn_ano_id[sn_ano_hash]
@@ -276,7 +276,7 @@ def build_anonymous_equivalence_classes(
     dict_info_ano_hash_to_tar_ano_id = dict()
     counter_nb_unique_targets = Counter()
     for target,info in sg.dict_info.items():
-        target_ano_hash = AnonymousHash.get(info)
+        target_ano_hash = AnonymousHash.hash(info)
         if target_ano_hash in dict_info_ano_hash_to_tar_ano_id:
             dict_target_ano_id[target] \
                 = dict_info_ano_hash_to_tar_ano_id[target_ano_hash]
@@ -292,8 +292,9 @@ def build_anonymous_equivalence_classes(
 
 
 
-def sort_inputs_mt(partitioned_cluster,input_snodes):
-    sg = partitioned_cluster.sg
+def sort_inputs_mt(p_cluster,input_snodes):
+    sg = p_cluster.p_structure.sg
+    dict_mt_to_sn_ano_material = p_cluster.p_structure.dict_mt_to_sn_ano_material
     # To use at the very end of cluster.compute_interfaces()
     # We sort inputs_mt based on the targets the sent
     # There is no optimal order => we just want to be sure
@@ -302,13 +303,13 @@ def sort_inputs_mt(partitioned_cluster,input_snodes):
     for input_sn in input_snodes:
         repr = []
         users_with_index = [
-            (user_sn,partitioned_cluster.first_snodes.index(user_sn))
-            for user_sn in partitioned_cluster.dict_input_sn_to_users_sn[input_sn]
+            (user_sn,p_cluster.first_snodes.index(user_sn))
+            for user_sn in p_cluster.dict_input_sn_to_users_sn[input_sn]
         ]
         users_with_index = sorted(users_with_index,key = lambda c : c[1])
         for user_sn,user_index in users_with_index:
             user_ano_material : SimplifiedNodeAnonymizationMaterial \
-                = partitioned_cluster.dict_mt_to_sn_ano_material[user_sn.mt]
+                = dict_mt_to_sn_ano_material[user_sn.mt]
             targets_used = sg.dict_of_labels_on_edges[(input_sn,user_sn)]
             targets_numbers = sorted(
                 user_ano_material.dict_tar_to_ano_nb[tar]
