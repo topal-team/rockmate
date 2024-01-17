@@ -407,12 +407,9 @@ class RawGraph(base.Graph):
 
     # Overwrite base.Graph methods => used to sort nodes by following 'deps'
     def make_temporary_global_root_node_to_deps_relation(self):
-        if len(self.output_nodes)==1:
-            return False,self.output_nodes[0]
-        else:
-            fresh_root = RawNode()
-            fresh_root.deps = set(self.output_nodes)
-            return True,fresh_root
+        fresh_root = RawNode()
+        fresh_root.deps = set(self.output_nodes)
+        return fresh_root
     def remove_temporary_global_root_node(self, fresh_root):
         ()
 

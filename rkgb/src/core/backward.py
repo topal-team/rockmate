@@ -528,7 +528,7 @@ class Graph(base.Graph):
             fresh_cnode_root = ComputationNode(
                 deps_real=set([root_allonode]),
                 forwardbackward_graph=self)
-            return True,fresh_cnode_root
+            return fresh_cnode_root
     def remove_temporary_global_root_node(self,fresh_root):
         # We don't need the users relation, as we only use this
         # root_node to toposort; hence nothing to unplug

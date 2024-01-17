@@ -368,23 +368,23 @@ class Graph():
 
 
     def make_temporary_global_root_node_to_deps_relation(self):
-        """return bool * Node
-        True <=> it's a fresh node (=> it must be removed after)
-        Note : In backward.py and hierarchical.py cases, 
-        we are interested by ComputationNodes
         """
-        if len(self.output_nodes)==1:
-            return False,self.output_nodes[0]
-        else:
-            fresh_root = self.node_class()
-            if not hasattr(fresh_root,"deps") or not hasattr(fresh_root,"users"):
-                raise Exception(
-                    f"{type(self).__name__} should overwrite the method: "\
-                    f"`make_temporary_global_root_node_to_deps_relation`.")
-            fresh_root.deps = set(self.output_nodes)
-            for out_node in self.output_nodes:
-                out_node.users.add(fresh_root)
-            return True,fresh_root
+        Create a fresh root node to deps relation:
+        ie one clear node where to start to tracing the deps relation 
+        
+        Overwritten in raw.py: in which there is no '.users'
+        Overwritten in backward.py and hierarchical.py:
+        in which we are interested by ComputationNodes
+        """
+        fresh_root = self.node_class()
+        if not hasattr(fresh_root,"deps") or not hasattr(fresh_root,"users"):
+            raise Exception(
+                f"{type(self).__name__} should overwrite the method: "\
+                f"`make_temporary_global_root_node_to_deps_relation`.")
+        fresh_root.deps = set(self.output_nodes)
+        for out_node in self.output_nodes:
+            out_node.users.add(fresh_root)
+        return fresh_root
     def remove_temporary_global_root_node(self,fresh_root):
         for out_node in self.output_nodes:
             out_node.users.discard(fresh_root)
@@ -394,8 +394,7 @@ class Graph():
         Note : In backward.py and hierarchical.py cases, 
         we are interested by ComputationNodes
         """
-        is_it_a_tmp_fresh_root , root_node \
-            = self.make_temporary_global_root_node_to_deps_relation()
+        root_node = self.make_temporary_global_root_node_to_deps_relation()
         # /!\ root_node is the source of .deps relation 
         # /!\ => e.g. the output node of the graph
 
@@ -432,12 +431,10 @@ class Graph():
                 else:
                     degree[req_n] = d-1
 
-        if is_it_a_tmp_fresh_root:
-            self.remove_temporary_global_root_node(root_node)
-            sorted_list.remove(root_node)
+        self.remove_temporary_global_root_node(root_node)
+        sorted_list.remove(root_node)
 
-        # return from first to last
-        return sorted_list[::-1]
+        return sorted_list[::-1] # from first to last
 
 
     def find_cutting_points(self):
@@ -450,8 +447,7 @@ class Graph():
         and that Fe/Be make no sense.
         Thus a cutting point must requires_grad.
         """
-        is_it_a_tmp_fresh_root , root_node \
-            = self.make_temporary_global_root_node_to_deps_relation()
+        root_node = self.make_temporary_global_root_node_to_deps_relation()
         # root_node is the source of .deps relation => e.g. output_node
         to_be_visited = [root_node]
         seen = set(to_be_visited)
@@ -476,9 +472,7 @@ class Graph():
         separators.reverse()
         if separators[-1] is not self.nodes[-1]:
             separators.append(self.nodes[-1])
-
-        if is_it_a_tmp_fresh_root:
-            self.remove_temporary_global_root_node(root_node)
+        self.remove_temporary_global_root_node(root_node)
         return separators
 
 
