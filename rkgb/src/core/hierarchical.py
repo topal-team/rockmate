@@ -182,7 +182,7 @@ class HierarchicalCluster():
     list_anodes : list[AllocationNode] = None
     loss_cnode : ComputationNode = None
     loss_idx : int = None
-    dict_kn : dict = None
+    dict_nodes : dict = None
     interfaces : dict[str, set[AllocationNode]]
     translator : anonymize.ClusterTranslator = None
     p_cluster : PartitionedCluster = None
@@ -246,7 +246,7 @@ class HierarchicalCluster():
             self.list_anodes = list(all_anodes)
 
             # 5) useful attributes
-            self.make_dict_kn()
+            self.make_dict_nodes()
             self.interfaces = {
                 "input_data_anodes" : input_data_anodes,
                 "output_data_anodes" : {data_anode},
@@ -318,7 +318,10 @@ class HierarchicalCluster():
                     self.loss_cnode.users.add(output_grad)
 
             self.list_anodes = list(all_anodes)
-            self.make_dict_kn()
+            self.make_dict_nodes()
+            # 5) Translator
+            self.translator = p_cluster.translator
+            self.translator.enrich_with_cnodes_and_anodes(self)
 
 
 
@@ -327,8 +330,8 @@ class HierarchicalCluster():
 
 
 
-    def make_dict_kn(self):
-        self.dict_kn = dict(
+    def make_dict_nodes(self):
+        self.dict_nodes = dict(
             [(anode.name,anode) for anode in self.list_anodes]
           + [(cnode.name,cnode) for cnode in self.list_cnodes]
         )
@@ -456,7 +459,7 @@ def PartitionedCluster_to_HierarchicalCluster(p_cluster : PartitionedCluster, kg
             loss_cnode.users.add(output_grad)
 
     h_cluster.list_anode = list(set_anode)
-    h_cluster.make_dict_kn()
+    h_cluster.make_dict_nodes()
 
     # ** translator **
     h_cluster.translator = translator = p_cluster.translator
@@ -465,7 +468,7 @@ def PartitionedCluster_to_HierarchicalCluster(p_cluster : PartitionedCluster, kg
     dict_anode_to_ano = translator.dict_anode_to_ano_triplet = dict()
     dict_ano_to_cnode = translator.dict_ano_triplet_to_cnode = dict()
     dict_ano_to_anode = translator.dict_ano_triplet_to_anode = dict()
-    for cnode in h_cluster.list_cnode:
+    for cnode in h_cluster.list_cnodes:
         if cnode is loss_cnode:
             ano_triplet = ("loss",0,0)
         else:

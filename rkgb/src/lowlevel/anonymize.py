@@ -351,6 +351,32 @@ class ClusterTranslator():
             ano = ("input",index)
             self.dict_to_ano[input_mt] = ano
             self.dict_from_ano[ano] = input_mt
+
+    def enrich_with_cnodes_and_anodes(self,hierarchical_cluster):
+        # 1) Computation Nodes
+        for cnode in hierarchical_cluster.list_cnodes:
+            if cnode is hierarchical_cluster.loss_cnode:
+                ano = ("cnode","loss")
+            else:
+                mt_ano = self.dict_to_ano[cnode.mt]
+                ano = ("cnode",cnode.is_fwd,mt_ano)
+            self.dict_to_ano[cnode] = ano
+            self.dict_from_ano[ano] = cnode
+
+        # 2) Allocation Nodes
+        for anode in hierarchical_cluster.list_anodes:
+            mt_ano = self.dict_to_ano[anode.mt]
+            ano = ("anode",anode.allocation_type,mt_ano)
+            self.dict_to_ano[cnode] = ano
+            self.dict_from_ano[ano] = cnode
+
+        # 3) Node names
+        for node_name,node in hierarchical_cluster.dict_nodes.items():
+            node_ano = self.dict_to_ano[node]
+            ano = ("name",)+node_ano
+            self.dict_to_ano[node_name] = ano
+            self.dict_from_ano[ano] = node_name
+    
             
     def to_ano(self,object):
         return self.dict_to_ano[object]

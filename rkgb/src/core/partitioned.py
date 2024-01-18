@@ -322,7 +322,7 @@ class PartitionedCluster():
     inputs_mt = None
     firsts_mt = None
     outputs_mt = None
-    translator = None
+    translator : anonymize.ClusterTranslator = None
     self_or_strictly_equal_cluster = None
     ano_cluster_id = None
     name = None
