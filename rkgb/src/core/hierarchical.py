@@ -3,37 +3,39 @@
 # ==========================
 
 from src.lowlevel import constants
+from src.lowlevel.variable_info import VariableInfo
 from src.lowlevel import anonymize
+from src.core import base
 from src.core import backward
 from src.core.partitioned import PartitionedStructure, PartitionedCluster, PartitionedGraph, PartitionedNode
 
-from src.core import base
-
 # ************
-# * H_C_node *
+# * HierarchicalComputationNode *
 # ************
-class H_C_node(base.Node):
+class HierarchicalComputationNode(base.Node):
     def __init__(self,
             name,
-            main_target = None, 
+            main_target = None,
+            info : VariableInfo = None,
             sub_cluster = None,
             is_fwd = True,
-            number = -1):
+            _topological_number = -1):
         super().__init__(main_target)
         self.name = name  # e.g. Fwd_1
+        self.info = info
         self.sub_cluster = sub_cluster
         self.is_fwd = is_fwd
         self.is_leaf = bool(main_target is None)
         self.deps = set()  # HDN set
         self.users = set()  # HDN set
         self.deps_through_artifacts = set()  # HCN set
-        self.number = number
-        # About self.number :
+        self._topological_number = _topological_number
+        # About self._topological_number :
         # When toposorting list_hcn we want to respect as much as possible
         # the original order, so list_hcn toposort consists of:
         # -> inverse Breath First Search (as any toposort)
         # -> if equal, then choose the one which comes first in list_kcn.
-        # And that's what self.number is used for: base.Node.get_num
+        # And that's what self._topological_number is used for: base.Node.get_num
         # (for D, S and K nodes we can get the number from main_target,
         # but some H_nodes don't have a main_target).
 
@@ -48,19 +50,20 @@ class H_C_node(base.Node):
         if not self.is_leaf:
             return True
         else:
-            return self.whole_computation_node.does_require_grad()
+            assert self.info is not None
+            return self.info.requires_grad
 
 
 # ************
-# * H_D_node *
+# * HierarchicalAllocationNode *
 # ************
-class H_D_node(base.Node):
+class HierarchicalAllocationNode(base.Node):
     kdn : backward.AllocationNode = None
     main_target : str = None
     name : str = None
     is_data : bool = None
-    deps : set[H_C_node] = None
-    users : set[H_C_node] = None
+    deps : set[HierarchicalComputationNode] = None
+    users : set[HierarchicalComputationNode] = None
     def __init__(self,kdn : backward.AllocationNode = None):
         self.deps = set()
         self.users = set()
@@ -69,7 +72,7 @@ class H_D_node(base.Node):
         else:
             super().__init__(kdn.mt)
             self.kdn = kdn
-            self.name = H_D_node.make_name_from_kdn(kdn)
+            self.name = HierarchicalAllocationNode.make_name_from_kdn(kdn)
             self.mem = kdn.mem
             if kdn.allocation_type == "data":
                 self.is_data = True
@@ -122,7 +125,7 @@ class H_graph(base.Graph):
     def sort_list_hcn(self):
         # -> similar to backward.Graph.sort_list_kcn
         l1 = list(self.list_hcn)
-        root_hcn = H_C_node("")
+        root_hcn = HierarchicalComputationNode("")
         root_hcn.deps = set(self.inputs_hdn_grad) # Not enough
         # -> Not enough, some hdn_grad aren't returned
         # -> We need all the root of the 'deps' relation
@@ -131,7 +134,7 @@ class H_graph(base.Graph):
             if not hcn.is_fwd:
                 if len(hcn.get_all_standard_users())==0:
                     leaves_hcn.add(hcn)
-        root_hdn = H_D_node()
+        root_hdn = HierarchicalAllocationNode()
         root_hdn.deps = leaves_hcn
         root_hcn.deps.add(root_hdn)
         self.list_hcn = l = RK_sort_based_on_deps(root_hcn)
@@ -342,9 +345,9 @@ def PartitionedGraph_to_H_graph(
     dict_mt_to_hdn_data = dict()
     dict_mt_to_hdn_grad = dict()
 
-    dict_hdn_to_kdn : dict[H_D_node, backward.AllocationNode] = dict()
+    dict_hdn_to_kdn : dict[HierarchicalAllocationNode, backward.AllocationNode] = dict()
     #  A hdn represents exactly one kdn
-    dict_kcn_to_hcn : dict[backward.ComputationNode, H_C_node] = dict()
+    dict_kcn_to_hcn : dict[backward.ComputationNode, HierarchicalComputationNode] = dict()
     #  At a fixed level of depth, a kcn can be found in only one hcn
     #  -> These two dict make it super easy to build edges
 
@@ -357,7 +360,7 @@ def PartitionedGraph_to_H_graph(
             mt = pn.mt
             # ** HCN_fwd **
             kcn_fwd = kg.dict_KCN_fwd[mt]
-            hcn_fwd = H_C_node(
+            hcn_fwd = HierarchicalComputationNode(
                 kcn_fwd.name,
                 main_target = mt,
                 sub_cluster = sub_cluster, # = None if no grad
@@ -368,14 +371,14 @@ def PartitionedGraph_to_H_graph(
             # ** HDN_data **
             if mt not in dict_mt_to_hdn_data: # interfaces of sub clusters overlap
                 kdn_data = kg.dict_KDN_data[mt]
-                hdn_data = H_D_node(kdn_data)
+                hdn_data = HierarchicalAllocationNode(kdn_data)
                 dict_hdn_to_kdn[hdn_data] = kdn_data
                 dict_mt_to_hdn_data[mt] = hdn_data
             
             if mt in kg.dict_KCN_bwd:
                 # ** HCN_bwd **
                 kcn_bwd = kg.dict_KCN_bwd[mt]
-                hcn_bwd = H_C_node(
+                hcn_bwd = HierarchicalComputationNode(
                     kcn_bwd.name,
                     main_target = mt,
                     sub_cluster = sub_cluster,
@@ -386,7 +389,7 @@ def PartitionedGraph_to_H_graph(
                 # ** HDN_grad **
                 if mt not in dict_mt_to_hdn_grad: # interfaces of sub clusters overlap
                     kdn_grad = kg.dict_KDN_grad[mt]
-                    hdn_grad = H_D_node(kdn_grad)
+                    hdn_grad = HierarchicalAllocationNode(kdn_grad)
                     dict_hdn_to_kdn[hdn_grad] = kdn_grad
                     dict_mt_to_hdn_grad[mt] = hdn_grad
 
@@ -401,12 +404,12 @@ def PartitionedGraph_to_H_graph(
                     hcn_fwd_num = min(hcn_fwd_num,kcn._number)
                 else:
                     hcn_bwd_num = max(hcn_bwd_num,kcn._number)
-            hcn_fwd = H_C_node(
+            hcn_fwd = HierarchicalComputationNode(
                 f"fwd_{pn.name}",
                 sub_cluster = sub_cluster,
                 is_fwd = True,
                 number = hcn_fwd_num)
-            hcn_bwd = H_C_node(
+            hcn_bwd = HierarchicalComputationNode(
                 f"bwd_{pn.name}",
                 sub_cluster = sub_cluster,
                 is_fwd = False,
@@ -417,7 +420,7 @@ def PartitionedGraph_to_H_graph(
             # ** HDNs **
             all_interfaces = sub_cluster.all_interfaces
             for kdn in all_interfaces:
-                hdn = H_D_node(kdn)
+                hdn = HierarchicalAllocationNode(kdn)
                 if hdn.is_data:
                     if kdn.mt not in dict_mt_to_hdn_data:
                         dict_hdn_to_kdn[hdn] = kdn
@@ -428,22 +431,22 @@ def PartitionedGraph_to_H_graph(
                         dict_mt_to_hdn_grad[hdn.mt] = hdn
 
     # ** loss_hcn **
-    hg.loss_hcn = loss_hcn = H_C_node(
+    hg.loss_hcn = loss_hcn = HierarchicalComputationNode(
         f"Loss_hcn_of_{hg.name}",
         main_target = "loss"
         )
     
-    # ** missing H_D_nodes -> inputs of bottom sub nodes**
+    # ** missing HierarchicalAllocationNodes -> inputs of bottom sub nodes**
     for inp_mt in h_cluster.p_cluster.inputs_mt:
         if inp_mt not in dict_mt_to_hdn_data:
             kdn_data = kg.dict_KDN_data[inp_mt]
-            hdn_data = H_D_node(kdn_data)
+            hdn_data = HierarchicalAllocationNode(kdn_data)
             dict_hdn_to_kdn[hdn_data] = kdn_data
             dict_mt_to_hdn_data[hdn_data.mt] = kdn_data
             if inp_mt in kg.dict_KDN_grad:
                 kdn_grad = kg.dict_KDN_grad[inp_mt]
                 if kdn_grad in h_cluster.all_interfaces:
-                    hdn_grad = H_D_node(kdn_grad)
+                    hdn_grad = HierarchicalAllocationNode(kdn_grad)
                     dict_hdn_to_kdn[hdn_grad] = kdn_grad
                     dict_mt_to_hdn_grad[hdn_grad.mt] = kdn_grad
     
@@ -509,6 +512,13 @@ def P_and_K_to_H(ps : PartitionedStructure, kg : backward.Graph):
 
 
 
+
+
+
+
+
+
+
 # =================
 # = Utils to test =
 def nb_clusters(main_cluster : H_cluster):
@@ -552,7 +562,7 @@ color_edge = "black"
 def get_color(hn):
     if hn.main_target == "loss":
         return color_special
-    elif isinstance(hn, H_D_node):
+    elif isinstance(hn, HierarchicalAllocationNode):
         return color_hdn
     elif hn.is_fwd:
         return color_hcn_fwd
@@ -562,7 +572,7 @@ def get_color(hn):
 def aux_print_H_graph_message(hg : H_graph):
     return (
         f"H_graph - Hierarchical forward+backward graph, "\
-        f"{len(hg.list_hcn)} H_C_nodes; {len(hg.list_hdn)} H_D_nodes"
+        f"{len(hg.list_hcn)} HierarchicalComputationNodes; {len(hg.list_hdn)} HierarchicalAllocationNodes"
     )
 def aux_print_H_graph_name(hg,name=None):
     if name is not None: return name
