@@ -210,8 +210,10 @@ class HierarchicalCluster():
             assert(target_to_proceed in fb_graph.dict_bwd_cnodes)
             self.is_bottom = True
             self.p_node = p_node
+            self.main_target = target_to_proceed
             self.representee_cluster = self
             self.name = f"BottomHCluster({target_to_proceed})"
+
             # Warning: A bottom cluster is composed of ComputationNodes
             # and AllocationNodes from backward.py; not Hierarchical ones
             # 1) target_to_proceed's nodes
@@ -219,12 +221,14 @@ class HierarchicalCluster():
             grad_anode = fb_graph.dict_grad_anodes[target_to_proceed]
             fwd_cnode = fb_graph.dict_fwd_cnodes[target_to_proceed]
             bwd_cnode = fb_graph.dict_bwd_cnodes[target_to_proceed]
+
             # 2) Loss Computation Node
             self.loss_cnode = ComputationNode("loss")
             self.loss_cnode.deps_real = {data_anode}
             self.loss_cnode.users = {grad_anode}
             self.list_cnodes = [fwd_cnode,self.loss_cnode,bwd_cnode]
             self.loss_idx = 1
+
             # 3) Additional AllocationNodes: deps/users and phantoms
             all_anodes = set([data_anode,grad_anode])
             if target_to_proceed in fb_graph.dict_phantoms_anodes:
@@ -233,12 +237,14 @@ class HierarchicalCluster():
             input_grad_anodes = set(bwd_cnode.users)
             all_anodes.update(input_data_anodes)
             all_anodes.update(input_grad_anodes)
+
             # 4) In case user of global source node
             if fwd_cnode in fb_graph.source_data_anode.users_real:
                 input_data_anodes.add(fb_graph.source_data_anode)
             if fb_graph.source_grad_anode in bwd_cnode.users:
                 input_grad_anodes.add(fb_graph.source_grad_anode)
             self.list_anodes = list(all_anodes)
+
             # 5) useful attributes
             self.make_dict_kn()
             self.interfaces = {
@@ -252,7 +258,68 @@ class HierarchicalCluster():
         # ==========================================================
         # ====== SECOND H_CLUSTER CONSTRUCTOR: FROM P_CLUSTER ======
         else:
-            pass
+            self.is_bottom = False
+            self.p_cluster = p_cluster
+            p_cluster.h_cluster = self
+            self.cluster_nb = p_cluster.cluster_nb
+            self.ano_cluster_id = p_cluster.ano_cluster_id
+            self.name = f"H_Cluster_{self.cluster_nb}_Ano_id_{self.ano_cluster_id}"
+
+            all_main_targets_contained = set(sn.main_target for sn in p_cluster.s_nodes)
+            # 1) Collect all the ComputationNodes
+            # Reminder we are talking about backward.py's nodes
+            # not HierarchicalComputationNodes
+            self.list_cnodes = []
+            self.loss_cnode = ComputationNode("loss")
+            # Note: we collect them in the topological order
+            for cnode in fb_graph.computation_nodes:
+                if cnode.main_target in all_main_targets_contained:
+                    self.list_cnodes.append(cnode)
+                elif cnode == fb_graph.loss_cnode:
+                    self.loss_idx = len(self.list_cnodes)
+                    self.list_cnodes.append(self.loss_cnode)
+                    # => We substitute the original Loss Node by the new one
+
+            # 2) AllocationNodes
+            all_anodes = set(
+                anode for anode in fb_graph.allocation_nodes
+                if anode.main_target in all_main_targets_contained)
+            self.interfaces = dict()
+            self.interfaces["input_data_anodes" ] = input_data_anodes  = set()
+            self.interfaces["output_data_anodes"] = output_data_anodes = set()
+            self.interfaces["output_grad_anodes"] = output_grad_anodes = set()
+            self.interfaces["input_grad_anodes" ] = input_grad_anodes  = set()
+
+            # 3) Inputs
+            for input_mt in p_cluster.inputs_mt:
+                # Input data
+                input_data = fb_graph.dict_data_anodes[input_mt]
+                input_data_anodes.add(input_data)
+                all_anodes.add(input_data)
+                # Input grad
+                if input_mt in fb_graph.dict_grad_anodes:
+                    input_grad = fb_graph.dict_grad_anodes[input_mt]
+                    input_grad_anodes.add(input_grad)
+                    all_anodes.add(input_grad)
+
+            # 4) Outputs
+            # => We plug the new fresh Loss_cnode to outputs'data/grad
+            # but we don't pollute output nodes (as they belong to fb_graph)
+            # => not reciprocal edges
+            for output_mt in p_cluster.outputs_mt:
+                output_data = fb_graph.dict_data_anodes[output_mt]
+                output_data_anodes.add(output_data)
+                self.loss_cnode.deps_real.add(output_data)
+                # output_data/grad_anode is already in all_anodes
+                # as output_mt is in all_main_targets_contained
+                if output_mt in fb_graph.dict_grad_anodes:
+                    output_grad = fb_graph.dict_grad_anodes[output_mt]
+                    output_grad_anodes.add(output_grad)
+                    self.loss_cnode.users.add(output_grad)
+
+            self.list_anodes = list(all_anodes)
+            self.make_dict_kn()
+
 
 
 
@@ -440,51 +507,6 @@ def PartitionedCluster_to_HierarchicalCluster(p_cluster : PartitionedCluster, kg
         
 
     return h_cluster
-
-
-def PartitionedNode_to_HierarchicalCluster(pn : PartitionedNode, kg : ForwardAndBackwardGraph):
-    if pn.sub_cluster is not None:
-        return PartitionedCluster_to_HierarchicalCluster(pn.sub_cluster, kg)
-    elif pn.mt not in kg.dict_cnode_bwd:
-        return None
-    else:
-        h_cluster = HierarchicalCluster(f"H_Cluster_bottom_{pn.mt}",True)
-        h_cluster.p_node = pn
-        h_cluster.list_sched = []
-        h_cluster.representee_cluster = h_cluster
-        loss_cnode = h_cluster.loss_cnode
-        mt = pn.mt
-        # -- list_cnode part --
-        cnode_fwd : ComputationNode = kg.dict_cnode_fwd[mt]
-        cnode_bwd : ComputationNode = kg.dict_cnode_bwd[mt]
-        anode_data = kg.dict_anode_data[mt]
-        anode_grad = kg.dict_anode_grad[mt]
-        loss_cnode.deps_real = set([anode_data])
-        loss_cnode.users = set([anode_grad])
-        h_cluster.list_cnode = [cnode_fwd,loss_cnode,cnode_bwd]
-        h_cluster.loss_idx = 1
-
-        # -- list_anode part --
-        set_anode = set([anode_data,anode_grad])
-        if mt in kg.dict_anode_phantoms:
-            set_anode.add(kg.dict_anode_phantoms[mt])
-        inputs_data = set(
-            req_anode for req_anode \
-            in (cnode_fwd.deps_global - cnode_fwd.deps_fake))
-        inputs_grad = set(user_anode for user_anode in cnode_bwd.users_global)
-        set_anode.update(inputs_data)
-        set_anode.update(inputs_grad)
-        h_cluster.list_anode = list(set_anode)
-        h_cluster.make_dict_kn()
-
-        h_cluster.interfaces = {
-            "input_data_anodes"  : inputs_data,
-            "output_data_anodes" : set([anode_data]),
-            "output_grad_anodes" : set([anode_grad]),
-            "input_grad_anodes"  : inputs_grad
-        }
-
-        return h_cluster
 
 
 

@@ -337,6 +337,8 @@ class PartitionedCluster():
     dict_first_sn_to_required_inputs_sn = None
     dict_first_mt_to_required_inputs_mt = None
     dict_output_mt_to_targets_sent = None
+    # Latter :
+    h_cluster = None
 
     def __init__(self,
             group_simplified_nodes,
