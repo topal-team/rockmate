@@ -28,9 +28,8 @@ class ComputationNode(base.Node):
             deps_through_artifacts=None,
             required_parameter_nodes_real=None,
             required_parameter_nodes_fake=None,
-            forwardbackward_graph=None):
-        super().__init__(main_target,
-            parent_structure_with_id_generator=forwardbackward_graph)
+            graph=None):
+        super().__init__(main_target,parent_structure_with_id_generator=graph)
         # - basic attributes:
         self.name = f"FWD[{main_target}]" if is_fwd else f"BWD[{main_target}]"
         self.is_fwd = is_fwd
@@ -52,11 +51,8 @@ class ComputationNode(base.Node):
         self.deps_fake = deps_fake or set()
         self.users     = set()
         # => all: AllocationNode sets
-        if deps_through_artifacts: # ComputationNode set
-            self.deps_through_artifacts = deps_through_artifacts
-        else:
-            self.deps_through_artifacts = set()
-            # -> just for the toposort, we don't need the reciprocal attribute (users_..)
+        self.deps_through_artifacts = deps_through_artifacts or set()
+        # -> just for the toposort, we don't need the reciprocal attribute (users_..)
         self.required_parameter_nodes_real = required_parameter_nodes_real or set()
         self.required_parameter_nodes_fake = required_parameter_nodes_fake or set()
         # - inspection:
@@ -85,10 +81,9 @@ class AllocationNode(base.Node):
             simplified_node = None,
             info      = None,
             deps      = None,
-            forwardbackward_graph = None):
+            graph = None):
         # ** informative **
-        super().__init__(main_target,
-            parent_structure_with_id_generator=forwardbackward_graph)
+        super().__init__(main_target,parent_structure_with_id_generator=graph)
         self.allocation_type = allocation_type # data, grad or phantoms
         # inherits target attributes from simplified_node:
         if simplified_node is not None:
@@ -235,12 +230,12 @@ class Graph(base.Graph):
             for param_node in sn_to_proceed.required_parameter_nodes
         )
         fwd_cnode = ComputationNode(
-            main_target           = sn_to_proceed.main_target,
-            simplified_node       = sn_to_proceed,
-            forwardbackward_graph = self,
-            is_fwd       = True,
-            is_rand      = sn_to_proceed.is_rand,
-            info         = sn_to_proceed.info,
+            main_target     = sn_to_proceed.main_target,
+            simplified_node = sn_to_proceed,
+            graph   = self,
+            is_fwd  = True,
+            is_rand = sn_to_proceed.is_rand,
+            info    = sn_to_proceed.info,
             main_code    = sn_to_proceed.main_code,
             inplace_code = sn_to_proceed.inplace_code,
             body_code    = sn_to_proceed.body_code,
@@ -261,7 +256,7 @@ class Graph(base.Graph):
             simplified_node = sn_to_proceed,
             info = sn_to_proceed.info,
             deps = set([fwd_cnode]),
-            forwardbackward_graph = self)
+            graph = self)
         self.dict_data_anodes[sn_to_proceed.main_target] = data_anode
 
         # ======================================
@@ -314,7 +309,7 @@ class Graph(base.Graph):
                 deps_fake = bwd_cnode_deps_fake,
                 required_parameter_nodes_real=bwd_cnode_required_param_nodes_real,
                 required_parameter_nodes_fake=bwd_cnode_required_param_nodes_fake,
-                forwardbackward_graph = self
+                graph = self
             )
             self.dict_bwd_cnodes[sn_to_proceed.main_target] = bwd_cnode
 
@@ -326,7 +321,7 @@ class Graph(base.Graph):
                     simplified_node = sn_to_proceed,
                     info = sn_to_proceed.info,
                     deps = set([fwd_cnode]),
-                    forwardbackward_graph = self
+                    graph = self
                 )
                 self.dict_phantoms_anodes[sn_to_proceed.main_target] = phantoms_anode
                 bwd_cnode.deps_real.add(phantoms_anode)
@@ -340,7 +335,7 @@ class Graph(base.Graph):
                 allocation_type = "grad",
                 simplified_node = sn_to_proceed,
                 info = sn_to_proceed.info,
-                forwardbackward_graph = self
+                graph = self
             )
             self.dict_grad_anodes[sn_to_proceed.main_target] = grad_anode
             bwd_cnode.deps_real.add(grad_anode)
@@ -434,7 +429,7 @@ class Graph(base.Graph):
             is_fwd    = True,
             main_code = ("loss",ast_add_on.make_ast_constant("LOSS")),
             deps_real = set(self.list_output_data_anodes),
-            forwardbackward_graph = self
+            graph = self
         )
         self.loss_computation_node = loss_cnode
         loss_cnode.time = 0
@@ -450,7 +445,7 @@ class Graph(base.Graph):
         input_data_anode = AllocationNode(
             main_target = constants.init_target_string,
             allocation_type = "data",
-            forwardbackward_graph=self)
+            graph = self)
         input_data_anode.all_targets = simplified_graph.input_targets
         self.input_data_anode = input_data_anode
         self.dict_data_anodes[input_data_anode.main_target] = input_data_anode
@@ -467,7 +462,7 @@ class Graph(base.Graph):
             input_grad_anode = AllocationNode(
                 main_target = constants.init_target_string,
                 allocation_type = "grad",
-                forwardbackward_graph=self)
+                graph = self)
             input_grad_anode.all_targets = simplified_graph.input_targets,
             self.input_grad_anode = input_grad_anode
             self.dict_grad_anodes[input_grad_anode.main_target] = input_grad_anode
@@ -522,10 +517,10 @@ class Graph(base.Graph):
         else:
             root_allonode = AllocationNode(
                 deps=leaves_cnodes,
-                forwardbackward_graph=self)
+                graph=self)
             fresh_cnode_root = ComputationNode(
                 deps_real=set([root_allonode]),
-                forwardbackward_graph=self)
+                graph=self)
             return fresh_cnode_root
     def remove_temporary_global_root_node(self,fresh_root):
         # We don't need the users relation, as we only use this

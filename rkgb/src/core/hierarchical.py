@@ -16,11 +16,13 @@ class HierarchicalComputationNode(base.Node):
     def __init__(self,
             name,
             main_target = None,
-            info : VariableInfo = None,
+            info : VariableInfo = None, # TO REMOVE USELESS ??
             sub_cluster = None,
             is_fwd = True,
-            _topological_number = -1):
-        super().__init__(main_target)
+            _topological_number = -1,
+            hierarchical_graph = None):
+        super().__init__(main_target,
+            parent_structure_with_id_generator=hierarchical_graph)
         self.name = name  # e.g. Fwd_1
         self.info = info
         self.sub_cluster = sub_cluster
@@ -46,12 +48,12 @@ class HierarchicalComputationNode(base.Node):
     def get_all_standard_users(self):
         return set().union(
             *[han.users for han in self.users])
-    def does_require_grad(self): # TO REMOVE USELESS ???
-        if not self.is_leaf:
-            return True
-        else:
-            assert self.info is not None
-            return self.info.requires_grad
+    # def does_require_grad(self): # TO REMOVE USELESS ???
+        # if not self.is_leaf:
+            # return True
+        # else:
+            # assert self.info is not None
+            # return self.info.requires_grad
 
 
 # ************
@@ -80,7 +82,9 @@ class HierarchicalAllocationNode(base.Node):
                 self.is_data = False
             else:
                 assert(anode.allocation_type == "phantoms")
-                raise Exception("An HAN cannot represent a backward.anode of type 'phantoms'")
+                raise Exception(
+                    "A Hierarchical Allocation Node cannot represent "\
+                    "a backward.anode of type 'phantoms'")
 
     def get_all_standard_deps(self):
         return set().union(
@@ -91,7 +95,23 @@ class HierarchicalAllocationNode(base.Node):
         
     @staticmethod
     def make_name_from_anode(anode):
-        return f"{anode.allocation_type}_{anode.mt}"
+        return f"Hierarchical_{anode.allocation_type}_{anode.mt}"
+
+
+class HierarchicalParameterNode(base.ParameterNode):
+    """
+    Sub class base.ParameterNode, to add .users_real/fake 
+    just as backward.ParameterNode does; but it's clearer
+    to have two different classes, 
+    """
+    def __init__(self,original_param_node : backward.ParameterNode):
+        super().__init__(node_to_clone=original_param_node)
+        del self.users
+        self.users_real = set()
+        self.users_fake = set()
+        self.original_param_node = original_param_node
+
+
 
 
 # ***********

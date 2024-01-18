@@ -263,9 +263,9 @@ class PartitionedGraph(base.Graph):
         for pn in self.nodes:
             if pn.is_leaf:
                 if only_function_name:
-                    code = pn.sn.main_fct
+                    code = pn.simplified_node.main_fct
                 else:
-                    code = pn.sn.get_code()
+                    code = pn.simplified_node.get_code()
                 label = f"{pn.name}\n{code}"
                 dot.node(pn.name,label,color=color_leaf)
             else:
@@ -648,7 +648,7 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
         dict_input_mt_to_pn = dict()
         # Create the fresh input nodes in last_wrapping_graph
         for inp_mt in cluster.inputs_mt:
-            inp_pn = PartitionedNode(last_wrapping_graph,main_target=inp_mt)
+            inp_pn = PartitionedNode(last_wrapping_graph,main_target="InputInLastWrappingGraph "+inp_mt)
             inputs_pn.append(inp_pn)
             dict_input_mt_to_pn[inp_mt] = inp_pn
             inp_pn.users = set([pg_wrapping_pn])

@@ -129,6 +129,8 @@ class VariableInfo():
         all_data_ptrs = set()
         for param in original_mod.parameters():
             all_data_ptrs.update(VariableInfo.get_all_data_ptrs(param))
+        for param in original_mod.buffers():
+            all_data_ptrs.update(VariableInfo.get_all_data_ptrs(param))
         return all_data_ptrs
 
 
