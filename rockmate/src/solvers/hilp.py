@@ -244,16 +244,16 @@ class HILP(Solver):
                             f"Solve Hgraph {hg.name} with {len(hg.list_hcn)} nodes takes {md.solve_time:03f}s, used {psutil.virtual_memory().used}B memory"
                         )
                     loss_idx = md.loss_idx
-                    if solver_name[0] == "gurobi":
-                        time_mem = (
-                            md.md.getObjective().getValue(),  # time
-                            md.U[(loss_idx, loss_idx)].getValue(),  # save_mem
-                        )
-                    else:
-                        time_mem = (
-                            md.md.objective.value(),
-                            md.U[(loss_idx, loss_idx)].value(),  # save_mem
-                        )
+                    # if solver_name[0] == "gurobi":
+                    #     time_mem = (
+                    #         md.md.getObjective().getValue(),  # time
+                    #         md.U[(loss_idx, loss_idx)].getValue(),  # save_mem
+                    #     )
+                    # else:
+                    time_mem = (
+                        md.md.objective.value(),
+                        md.U[(loss_idx, loss_idx)].value(),  # save_mem
+                    )
                     if not time_mem in sols:
                         # start = time.time()
 
