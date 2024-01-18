@@ -323,6 +323,36 @@ class HierarchicalCluster():
             self.translator = p_cluster.translator
             self.translator.enrich_with_cnodes_and_anodes(self)
 
+            # 6) Partitionings
+            if p_cluster is p_cluster.representee_cluster:
+                self.representee_cluster = self
+                self.partitionings = []
+                for pg in p_cluster.partitionings:
+                    self.partitionings.append(
+                        HierarchicalGraph(self,pg,fb_graph)
+                    )
+            else:
+                # Not representee of its equivalent class
+                p_representee = p_cluster.representee_cluster
+                if p_representee.h_cluster is not None:
+                    self.representee_cluster = p_representee.h_cluster
+                else:
+                    h_representee = HierarchicalCluster(fb_graph,p_cluster = p_representee)
+                    self.representee_cluster = h_representee
+                    # 7) It's important to have equivalent list_anodes order
+                    assert(len(h_representee.list_anodes) == len(self.list_anodes))
+                    old_self_list_anodes = self.list_anodes
+                    representee_anonymized_list_anodes = [
+                        h_representee.translator.to_ano(anode) # translate
+                        for anode in h_representee.list_anodes
+                    ]
+                    self.list_anodes = [
+                        self.translator.from_ano(ano) # reverse translate
+                        for ano in representee_anonymized_list_anodes
+                    ]
+                    assert(set(old_self_list_anodes) == set(self.list_anodes))
+
+
 
 
 
@@ -409,109 +439,6 @@ class HierarchicalStructure():
         print(f"- A total of {len(biggest_hg.list_HCNs)} allocations")
 
         
-
-
-def PartitionedCluster_to_HierarchicalCluster(p_cluster : PartitionedCluster, kg : ForwardAndBackwardGraph):
-    if hasattr(p_cluster,"h_cluster"): return p_cluster.h_cluster
-    h_cluster = HierarchicalCluster(p_cluster.name.replace("P","H"),False)
-    h_cluster.p_cluster = p_cluster
-    p_cluster.h_cluster = h_cluster
-    all_computation_mt = set(sn.mt for sn in p_cluster.s_nodes)
-
-    # Collect list_cnode and add the fresh loss_cnode along the way
-    loss_cnode = h_cluster.loss_cnode
-    list_cnode = h_cluster.list_cnode = []
-    for cnode in kg.list_cnode:
-        if cnode.mt in all_computation_mt:
-            list_cnode.append(cnode)
-        if cnode == kg.loss_cnode:
-            h_cluster.loss_idx = len(list_cnode)
-            list_cnode.append(loss_cnode)
-
-    set_anode = set(anode for anode in kg.list_anode if anode.mt in all_computation_mt)
-    # `set` because we need to add the inputs_anode
-
-    h_cluster.interfaces = interfaces = dict()
-    interfaces["input_data_anodes" ] = input_data_anodes  = set()
-    interfaces["output_data_anodes"] = output_data_anodes = set()
-    interfaces["input_grad_anodes" ] = input_grad_anodes  = set()
-    interfaces["output_grad_anodes"] = output_grad_anodes = set()
-
-    # ** inputs **
-    for input_mt in p_cluster.inputs_mt:
-        input_data = kg.dict_anode_data[input_mt]
-        input_data_anodes.add(input_data)
-        set_anode.add(input_data)
-        if input_mt in kg.dict_anode_grad:
-            input_grad = kg.dict_anode_grad[input_mt]
-            if input_grad.deps_global != set():
-                input_grad_anodes.add(input_grad)
-                set_anode.add(input_grad)
-
-    # ** outputs **
-    for output_mt in p_cluster.outputs_mt:
-        output_data = kg.dict_anode_data[output_mt]
-        output_data_anodes.add(output_data)
-        loss_cnode.deps_real.add(output_data)
-        if output_mt in kg.dict_anode_grad:   
-            output_grad = kg.dict_anode_grad[output_mt]
-            output_grad_anodes.add(output_grad)
-            loss_cnode.users.add(output_grad)
-
-    h_cluster.list_anode = list(set_anode)
-    h_cluster.make_dict_nodes()
-
-    # ** translator **
-    h_cluster.translator = translator = p_cluster.translator
-    dict_mt_to_ano = translator.dict_mt_to_ano_pair
-    dict_cnode_to_ano = translator.dict_cnode_to_ano_triplet = dict()
-    dict_anode_to_ano = translator.dict_anode_to_ano_triplet = dict()
-    dict_ano_to_cnode = translator.dict_ano_triplet_to_cnode = dict()
-    dict_ano_to_anode = translator.dict_ano_triplet_to_anode = dict()
-    for cnode in h_cluster.list_cnodes:
-        if cnode is loss_cnode:
-            ano_triplet = ("loss",0,0)
-        else:
-            ano_pair = dict_mt_to_ano[cnode.mt]
-            ano_triplet = ("fwd" if cnode.is_fwd else "bwd",) + ano_pair
-        dict_cnode_to_ano[cnode] = ano_triplet
-        dict_ano_to_cnode[ano_triplet] = cnode
-    for anode in h_cluster.list_anode:
-        ano_pair = dict_mt_to_ano[anode.mt]
-        ano_triplet = (anode.allocation_type,) + ano_pair
-        dict_anode_to_ano[anode] = ano_triplet
-        dict_ano_to_anode[ano_triplet] = anode
-    translator.dict_name_to_ano_triplet = dict(
-        [(kn.name,ano) for (kn,ano) in dict_cnode_to_ano.items()]
-    +   [(kn.name,ano) for (kn,ano) in dict_anode_to_ano.items()]
-    )
-    translator.dict_ano_triplet_to_name = dict(
-        (anode,han) for (han,anode) in translator.dict_name_to_ano_triplet.items()
-    )
-
-    # ** partitionings and representee **
-    if p_cluster is p_cluster.representee_cluster:
-        h_cluster.representee_cluster = h_cluster
-        h_cluster.partitionings = partitionings = []
-        h_cluster.list_sched = []
-        for pg in p_cluster.possible_partitioning:
-            hg = PartitionedGraph_to_HierarchicalGraph(pg,h_cluster,kg)
-            partitionings.append(hg)
-    else:
-        h_cluster.representee_cluster \
-            = representee \
-            = PartitionedCluster_to_HierarchicalCluster(p_cluster.representee_cluster,kg)
-        # === make list_anode order match ===
-        assert(len(representee.list_anode) == len(h_cluster.list_anode))
-        old_list = h_cluster.list_anode
-        ano_list_anode = [representee.translator.dict_anode_to_ano_triplet[anode] for anode in representee.list_anode]
-        h_cluster.list_anode = [h_cluster.translator.dict_ano_triplet_to_anode[ano] for ano in ano_list_anode]
-        assert(set(old_list) == set(h_cluster.list_anode))
-        
-
-    return h_cluster
-
-
 
 
 def PartitionedGraph_to_HierarchicalGraph(
