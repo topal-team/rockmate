@@ -132,7 +132,7 @@ class ParameterNode(base.ParameterNode):
 # * Graph *
 # ***********
 
-class Graph(base.Graph):
+class ForwardAndBackwardGraph(base.Graph):
     input_data_anode = None
     list_output_data_anodes = None
     loss_computation_node = None
@@ -171,7 +171,7 @@ class Graph(base.Graph):
             if original_mod is None or inspection_device is None: 
                 raise Exception(
                     "You need to pass original_mod and inspection_device"\
-                    "to Graph.__init__ (or let "\
+                    "to ForwardAndBackwardGraph.__init__ (or let "\
                     "`simplified_graph` to None to get an empty graph")
             self.inherit_base_attributes(simplified_graph)
             self.init_code = simplified_graph.init_node.get_code_ast()
@@ -574,7 +574,7 @@ class Graph(base.Graph):
                 dot.node(
                     param_node.param_str,
                     render_label,
-                    color = Graph.get_render_color(param_node),
+                    color = self.__class__.get_render_color(param_node),
                     style = "dashed")
                 
         # 2) Nodes
@@ -593,7 +593,7 @@ class Graph(base.Graph):
                 dot.node(
                     cnode.name,
                     render_label,
-                    color = Graph.get_render_color(cnode),
+                    color = self.__class__.get_render_color(cnode),
                     tooltip = (
                         f"Time : {cnode.time}\n Memory Overhead : "\
                         f"{measure.pretty_format_memory(cnode.mem_overhead)}")
@@ -604,7 +604,7 @@ class Graph(base.Graph):
             dot.node(
                 anode.name,
                 anode.name,
-                color = Graph.get_render_color(anode),
+                color = self.__class__.get_render_color(anode),
                 tooltip = "Memory : "+measure.pretty_format_memory(anode.mem)
             )
 
@@ -612,10 +612,10 @@ class Graph(base.Graph):
         for cnode in self.computation_nodes:
             for req_anode in cnode.deps_real:
                 dot.edge(req_anode.name,cnode.name,
-                    color=Graph.get_render_color(cnode))
+                    color=self.__class__.get_render_color(cnode))
             for req_anode in cnode.deps_fake:
                 dot.edge(req_anode.name,cnode.name,
-                    color=Graph.get_render_color(cnode),
+                    color=self.__class__.get_render_color(cnode),
                     style="dashed")
 
             if include_artifact_edges:
@@ -630,7 +630,7 @@ class Graph(base.Graph):
         for anode in self.allocation_nodes:
             for req_cnode in anode.deps:
                 dot.edge(req_cnode.name,anode.name,
-                    color=Graph.get_render_color(cnode))
+                    color=self.__class__.get_render_color(cnode))
         
         # 4) Input_data/grad_cnode
         kwargs = {"color":color_special , "style":"dashed"}

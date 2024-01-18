@@ -6,7 +6,8 @@ from src.lowlevel import constants
 from src.lowlevel.variable_info import VariableInfo
 from src.lowlevel import anonymize
 from src.core import base
-from src.core import backward
+from src.core.backward import ForwardAndBackwardGraph, ComputationNode, AllocationNode
+from src.core.backward import ParameterNode as bwdParameterNode
 from src.core.partitioned import PartitionedStructure, PartitionedCluster, PartitionedGraph, PartitionedNode
 
 # ************
@@ -60,13 +61,13 @@ class HierarchicalComputationNode(base.Node):
 # * HierarchicalAllocationNode *
 # ************
 class HierarchicalAllocationNode(base.Node):
-    anode : backward.AllocationNode = None
+    anode : AllocationNode = None
     main_target : str = None
     name : str = None
     is_data : bool = None
     deps : set[HierarchicalComputationNode] = None
     users : set[HierarchicalComputationNode] = None
-    def __init__(self,anode : backward.AllocationNode = None):
+    def __init__(self,anode : AllocationNode = None):
         self.deps = set()
         self.users = set()
         if anode is None:
@@ -104,7 +105,7 @@ class HierarchicalParameterNode(base.ParameterNode):
     just as backward.ParameterNode does; but it's clearer
     to have two different classes, 
     """
-    def __init__(self,original_param_node : backward.ParameterNode):
+    def __init__(self,original_param_node : bwdParameterNode):
         super().__init__(node_to_clone=original_param_node)
         del self.users
         self.users_real = set()
@@ -118,8 +119,8 @@ class HierarchicalParameterNode(base.ParameterNode):
 # * HierarchicalGraph *
 # ***********
 class HierarchicalGraph(base.Graph):
-    def __init__(self, name, h_cluster = None, other_obj = None):
-        super().__init__(other_obj)
+    def __init__(self, name, h_cluster = None):
+        super().__init__()
         # /!\ All the HCN's and HAN's should be in the same level. /!\ 
         self.name = name
         self.dict_nodes = dict()  #  name -> HN
@@ -175,39 +176,63 @@ class HierarchicalGraph(base.Graph):
 # *************
 class HierarchicalCluster():
     is_bottom : bool = None
-    list_cnode : list[backward.ComputationNode] = None
-    list_anode : list[backward.AllocationNode] = None
-    loss_cnode : backward.ComputationNode = None
+    list_cnodes : list[ComputationNode] = None
+    list_anodes : list[AllocationNode] = None
+    loss_cnode : ComputationNode = None
     loss_idx : int = None
     dict_kn : dict = None
-    interfaces : dict[str, set[backward.AllocationNode]]
+    interfaces : dict[str, set[AllocationNode]]
     translator : anonymize.ClusterTranslator = None
     p_cluster : PartitionedCluster = None
     p_node : PartitionedNode = None
-    all_clusters : set = None
     representee_cluster = None # : HierarchicalCluster
     partitionings : list[HierarchicalGraph] = None
     list_sched = None #: list[Op_sched] LATER 
 
     def __init__(self,name,is_bottom):
         self.name = name
-        self.loss_cnode = backward.ComputationNode("loss")
+        self.loss_cnode = ComputationNode("loss")
         self.is_bottom = is_bottom
-        self.all_clusters = set([self])
 
     def make_dict_kn(self):
-        # ATTRIBUTES NEEDED: list_cnode, list_anode
         self.dict_kn = dict(
-            [(anode.name,anode) for anode in self.list_anode]
-          + [(cnode.name,cnode) for cnode in self.list_cnode]
+            [(anode.name,anode) for anode in self.list_anodes]
+          + [(cnode.name,cnode) for cnode in self.list_cnodes]
         )
 
     @property
     def all_interfaces(self):
         return set().union(*self.interfaces.values())
+    
 
 
-def PartitionedCluster_to_HierarchicalCluster(p_cluster : PartitionedCluster, kg : backward.Graph):
+
+class HierarchicalStructure():
+    def __init__(self,
+            partitioned_structure : PartitionedStructure,
+            forward_and_backward_graph : ForwardAndBackwardGraph):
+        self.dict_info = partitioned_structure.dict_info
+        # Build all the clusters:
+        self.main_cluster = HierarchicalCluster(
+            p_cluster = partitioned_structure.main_cluster,
+            fb_graph = forward_and_backward_graph)
+        # Useful attributes :
+        self.dict_cluster_nb_to_cluster = dict(
+            (cluster_nb,p_cluster.h_cluster)
+            for (cluster_nb,p_cluster)
+            in partitioned_structure.dict_cluster_nb_to_cluster.items()
+        )
+        self.all_clusters = set(
+            p_cluster.h_cluster 
+            for p_cluster in partitioned_structure.all_clusters)
+        self.all_unique_clusters = set(
+            p_cluster.h_cluster 
+            for p_cluster in partitioned_structure.all_unique_clusters)
+        
+        
+
+
+def PartitionedCluster_to_HierarchicalCluster(p_cluster : PartitionedCluster, kg : ForwardAndBackwardGraph):
     if hasattr(p_cluster,"h_cluster"): return p_cluster.h_cluster
     h_cluster = HierarchicalCluster(p_cluster.name.replace("P","H"),False)
     h_cluster.p_cluster = p_cluster
@@ -292,7 +317,6 @@ def PartitionedCluster_to_HierarchicalCluster(p_cluster : PartitionedCluster, kg
         h_cluster.list_sched = []
         for pg in p_cluster.possible_partitioning:
             hg = PartitionedGraph_to_HierarchicalGraph(pg,h_cluster,kg)
-            h_cluster.all_clusters.update(hg.all_clusters)
             partitionings.append(hg)
     else:
         h_cluster.representee_cluster \
@@ -309,7 +333,7 @@ def PartitionedCluster_to_HierarchicalCluster(p_cluster : PartitionedCluster, kg
     return h_cluster
 
 
-def PartitionedNode_to_HierarchicalCluster(pn : PartitionedNode, kg : backward.Graph):
+def PartitionedNode_to_HierarchicalCluster(pn : PartitionedNode, kg : ForwardAndBackwardGraph):
     if pn.sub_cluster is not None:
         return PartitionedCluster_to_HierarchicalCluster(pn.sub_cluster, kg)
     elif pn.mt not in kg.dict_cnode_bwd:
@@ -322,8 +346,8 @@ def PartitionedNode_to_HierarchicalCluster(pn : PartitionedNode, kg : backward.G
         loss_cnode = h_cluster.loss_cnode
         mt = pn.mt
         # -- list_cnode part --
-        cnode_fwd : backward.ComputationNode = kg.dict_cnode_fwd[mt]
-        cnode_bwd : backward.ComputationNode = kg.dict_cnode_bwd[mt]
+        cnode_fwd : ComputationNode = kg.dict_cnode_fwd[mt]
+        cnode_bwd : ComputationNode = kg.dict_cnode_bwd[mt]
         anode_data = kg.dict_anode_data[mt]
         anode_grad = kg.dict_anode_grad[mt]
         loss_cnode.deps_real = set([anode_data])
@@ -359,23 +383,21 @@ def PartitionedNode_to_HierarchicalCluster(pn : PartitionedNode, kg : backward.G
 def PartitionedGraph_to_HierarchicalGraph(
         pg : PartitionedGraph, 
         h_cluster : HierarchicalCluster,
-        kg : backward.Graph):
+        kg : ForwardAndBackwardGraph):
     hg = HierarchicalGraph(pg.name.replace("pg","hg"),h_cluster)
 
     # -> Useful for interfaces
     dict_mt_to_han_data = dict()
     dict_mt_to_han_grad = dict()
 
-    dict_han_to_anode : dict[HierarchicalAllocationNode, backward.AllocationNode] = dict()
+    dict_han_to_anode : dict[HierarchicalAllocationNode, AllocationNode] = dict()
     #  A han represents exactly one anode
-    dict_cnode_to_hcn : dict[backward.ComputationNode, HierarchicalComputationNode] = dict()
+    dict_cnode_to_hcn : dict[ComputationNode, HierarchicalComputationNode] = dict()
     #  At a fixed level of depth, a cnode can be found in only one hcn
     #  -> These two dict make it super easy to build edges
 
     for pn in pg.nodes:
         sub_cluster = PartitionedNode_to_HierarchicalCluster(pn,kg)
-        if sub_cluster is not None:
-            hg.all_clusters.update(sub_cluster.all_clusters)
         if pn.is_leaf:
             # === Bottom level ===
             mt = pn.mt
@@ -527,12 +549,6 @@ def PartitionedGraph_to_HierarchicalGraph(
 
     hg.list_HCNs = hg.get_sorted_nodes_by_following_deps_relation()
     return hg
-
-
-def P_and_K_to_H(ps : PartitionedStructure, kg : backward.Graph):
-    kg.make_cnodes_number()
-    return PartitionedCluster_to_HierarchicalCluster(ps.main_cluster,kg)
-
 
 
 
