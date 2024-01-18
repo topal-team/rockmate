@@ -502,26 +502,24 @@ class Graph(base.Graph):
         for i,cnode in enumerate(self.computation_nodes):
             cnode._topological_number = i
 
-    # ****************
+    # **********************************
+    # == OVERWRITE base.Graph METHODS ==
     def __iter__(self):
         return iter(self.computation_nodes)
 
     def make_temporary_global_root_node_to_deps_relation(self):
         # OVERWRITE base.Graph METHOD
-        leaves_cnodes = []
+        leaf_cnodes = []
         for cnode in self.computation_nodes:
             if not cnode.is_fwd and len(cnode.users) == 0:
-                leaves_cnodes.append(cnode)
-        if len(leaves_cnodes)<2:
-            return False,leaves_cnodes[0]
-        else:
-            root_allonode = AllocationNode(
-                deps=leaves_cnodes,
-                graph=self)
-            fresh_cnode_root = ComputationNode(
-                deps_real=set([root_allonode]),
-                graph=self)
-            return fresh_cnode_root
+                leaf_cnodes.append(cnode)
+        root_anode = AllocationNode(
+            deps=leaf_cnodes,
+            graph=self)
+        fresh_root_cnode = ComputationNode(
+            deps_real=set([root_anode]),
+            graph=self)
+        return fresh_root_cnode
     def remove_temporary_global_root_node(self,fresh_root):
         # We don't need the users relation, as we only use this
         # root_node to toposort; hence nothing to unplug

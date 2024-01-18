@@ -122,13 +122,13 @@ class HierarchicalGraph(base.Graph):
         super().__init__(other_obj)
         # /!\ All the HCN's and HAN's should be in the same level. /!\ 
         self.name = name
-        self.dict_hn = dict()  #  name -> HN
-        self.list_hcn = []  #  toposorted
-        self.list_han = []  #  including interface HANs
-        self.inputs_han_data = set()  # HAN set -> inputs' data
-        self.outputs_han_data = set()  # HAN set -> outputs' data
-        self.outputs_han_grad = set()  # HAN set -> outputs' grad
-        self.inputs_han_grad = set()  # HAN set -> inputs' grad
+        self.dict_nodes = dict()  #  name -> HN
+        self.list_HCNs = []  #  toposorted
+        self.list_HANs = []  #  including interface HANs
+        self.input_data_HANs = set()  # HAN set -> inputs' data
+        self.output_data_HANs = set()  # HAN set -> outputs' data
+        self.output_grad_HANs = set()  # HAN set -> outputs' grad
+        self.input_grad_HANs = set()  # HAN set -> inputs' grad
         self.loss_hcn = None
         if h_cluster is not None:
             self.cluster = h_cluster
@@ -138,35 +138,36 @@ class HierarchicalGraph(base.Graph):
             self.all_clusters = set()
 
     def make_users(self):
-        for hn in self.dict_hn.values():
+        for hn in self.dict_nodes.values():
             for req_hn in hn.deps:
                 req_hn.users.add(hn)
 
-    def sort_list_hcn(self):
-        # -> similar to backward.Graph.sort_list_cnode
-        l1 = list(self.list_hcn)
-        root_hcn = HierarchicalComputationNode("")
-        root_hcn.deps = set(self.inputs_han_grad) # Not enough
-        # -> Not enough, some han_grad aren't returned
-        # -> We need all the root of the 'deps' relation
-        leaves_hcn = set()
-        for hcn in self.list_hcn:
+    # **********************************
+    # == OVERWRITE base.Graph METHODS ==
+    def __iter__(self):
+        return iter(self.list_HCNs)
+    
+    def make_temporary_global_root_node_to_deps_relation(self):
+        # OVERWRITE base.Graph METHOD
+        fresh_root_hcn = HierarchicalComputationNode("")
+        fresh_root_hcn.deps = set(self.input_grad_HANs)
+        # -> Not enough, some han_grad are missing
+        # -> We need all the roots of the 'deps' relation
+        leaf_hcns = set()
+        for hcn in self.list_HCNs:
             if not hcn.is_fwd:
                 if len(hcn.get_all_standard_users())==0:
-                    leaves_hcn.add(hcn)
+                    leaf_hcns.add(hcn)
         root_han = HierarchicalAllocationNode()
-        root_han.deps = leaves_hcn
-        root_hcn.deps.add(root_han)
-        self.list_hcn = l = RK_sort_based_on_deps(root_hcn)
-        l.remove(root_hcn)
-        if set(l1) != set(l):
-            print([hcn.name for hcn in l1 if hcn not in l])
-            raise Exception(
-                "Problem with H_nodes edges, set(list_hcn) "\
-                "has changed after RK_sort_based_on_deps.\n"\
-                "Which means some edges outside the graph "\
-                "or some missing edges inside."
-            )
+        root_han.deps = leaf_hcns
+        fresh_root_hcn.deps.add(root_han)
+        return fresh_root_hcn
+    
+    def remove_temporary_global_root_node(self, fresh_root):
+        # We don't need the users relation, as we only use this
+        # root_node to toposort; hence nothing to unplug
+        pass
+
 
 
 # *************
@@ -476,17 +477,17 @@ def PartitionedGraph_to_HierarchicalGraph(
     hg.list_han = list(dict_han_to_anode.keys())
     hg.list_hcn = list(dict_cnode_to_hcn.values())
     hg.list_hcn.append(loss_hcn)
-    hg.dict_hn = dict(
+    hg.dict_nodes = dict(
         [(han.name,han) for han in hg.list_han]
       + [(hcn.name,hcn) for hcn in hg.list_hcn]
     )
 
     # ** interfaces **
     dict_anode_to_han = dict((anode,han) for (han,anode) in dict_han_to_anode.items())
-    hg.inputs_han_data = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["inputs_anode_data"])
-    hg.outputs_han_data = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["outputs_anode_data"])
-    hg.inputs_han_grad = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["inputs_anode_grad"])
-    hg.outputs_han_grad = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["outputs_anode_grad"])
+    hg.input_data_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["inputs_anode_data"])
+    hg.output_data_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["outputs_anode_data"])
+    hg.input_grad_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["inputs_anode_grad"])
+    hg.output_grad_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["outputs_anode_grad"])
     
     
     # === Build the edges ===
@@ -507,10 +508,10 @@ def PartitionedGraph_to_HierarchicalGraph(
                         hcn.deps.add(han)
 
     # -> loss edges
-    for han in hg.outputs_han_data:
+    for han in hg.output_data_HANs:
         han.users.add(loss_hcn)
         loss_hcn.deps.add(han)
-    for han in hg.outputs_han_grad:
+    for han in hg.output_grad_HANs:
         han.deps.add(loss_hcn)
         loss_hcn.users.add(han)
 
@@ -524,7 +525,7 @@ def PartitionedGraph_to_HierarchicalGraph(
                         req_via_art_hcn
                     )
 
-    hg.sort_list_hcn()
+    hg.list_HCNs = hg.get_sorted_nodes_by_following_deps_relation()
     return hg
 
 

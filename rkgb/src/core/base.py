@@ -394,14 +394,14 @@ class Graph():
         Note : In backward.py and hierarchical.py cases, 
         we are interested by ComputationNodes
         """
-        root_node = self.make_temporary_global_root_node_to_deps_relation()
-        # /!\ root_node is the source of .deps relation 
+        fresh_root_node = self.make_temporary_global_root_node_to_deps_relation()
+        # /!\ fresh_root_node is the source of .deps relation 
         # /!\ => e.g. the output node of the graph
 
         # Compute incoming degree (= len(users) (not len(deps)))
         degree = dict()
-        degree[root_node] = 0
-        to_visit = [root_node]
+        degree[fresh_root_node] = 0
+        to_visit = [fresh_root_node]
         while to_visit != []:
             n = to_visit.pop()
             for req_n in n.get_all_standard_deps():
@@ -416,7 +416,7 @@ class Graph():
         # Explore nodes by increasing lexicographic-order of their n.main_target
         # BUT a node is explored iff all its users are explored => toposort
         sorted_list = []
-        to_explore = set([root_node]) # TO CHANGE: to a max heap structure
+        to_explore = set([fresh_root_node]) # TO CHANGE: to a max heap structure
         while to_explore: # not empty
             n = max(to_explore,key=lambda n : n.get_num())
             to_explore.discard(n)
@@ -431,8 +431,8 @@ class Graph():
                 else:
                     degree[req_n] = d-1
 
-        self.remove_temporary_global_root_node(root_node)
-        sorted_list.remove(root_node)
+        self.remove_temporary_global_root_node(fresh_root_node)
+        sorted_list.remove(fresh_root_node)
 
         return sorted_list[::-1] # from first to last
 
@@ -447,9 +447,9 @@ class Graph():
         and that Fe/Be make no sense.
         Thus a cutting point must requires_grad.
         """
-        root_node = self.make_temporary_global_root_node_to_deps_relation()
-        # root_node is the source of .deps relation => e.g. output_node
-        to_be_visited = [root_node]
+        fresh_root_node = self.make_temporary_global_root_node_to_deps_relation()
+        # fresh_root_node is the source of .deps relation => e.g. output_node
+        to_be_visited = [fresh_root_node]
         seen = set(to_be_visited)
         dict_nb_usages = dict(
             [(m,len(m.get_all_standard_users())) 
@@ -472,7 +472,7 @@ class Graph():
         separators.reverse()
         if separators[-1] is not self.nodes[-1]:
             separators.append(self.nodes[-1])
-        self.remove_temporary_global_root_node(root_node)
+        self.remove_temporary_global_root_node(fresh_root_node)
         return separators
 
 
