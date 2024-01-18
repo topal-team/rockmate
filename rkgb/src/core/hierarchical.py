@@ -176,6 +176,8 @@ class HierarchicalGraph(base.Graph):
 # *************
 class HierarchicalCluster():
     is_bottom : bool = None
+    # Warning: A bottom cluster is composed of ComputationNodes
+    # and AllocationNodes from backward.py; not Hierarchical ones
     list_cnodes : list[ComputationNode] = None
     list_anodes : list[AllocationNode] = None
     loss_cnode : ComputationNode = None
@@ -187,12 +189,76 @@ class HierarchicalCluster():
     p_node : PartitionedNode = None
     representee_cluster = None # : HierarchicalCluster
     partitionings : list[HierarchicalGraph] = None
-    list_sched = None #: list[Op_sched] LATER 
+    list_schedules = None #: list[Op_sched] LATER 
 
-    def __init__(self,name,is_bottom):
-        self.name = name
-        self.loss_cnode = ComputationNode("loss")
-        self.is_bottom = is_bottom
+    def __init__(self,
+            fb_graph : ForwardAndBackwardGraph,
+            p_cluster : PartitionedCluster = None,
+            p_node : PartitionedNode = None):
+        """ Two constructors: one from PartitionedNode the other from PartitionedCluster
+        """
+        if (p_cluster is None) == (p_node is None):
+            raise Exception(
+                "HierarchicalCluster.__init__ takes either a PartitionedCluster "\
+                "or a PartitionedNode (one or the other, not both)")
+        if p_node is not None and p_node.sub_cluster is not None:
+            p_cluster = p_node.sub_cluster
+        # ======================================================
+        # ====== FIRST H_CLUSTER CONSTRUCTOR: FROM P_NODE ======
+        if p_node is not None:
+            target_to_proceed = p_node.main_target
+            assert(target_to_proceed in fb_graph.dict_bwd_cnodes)
+            self.is_bottom = True
+            self.p_node = p_node
+            self.representee_cluster = self
+            self.name = f"BottomHCluster({target_to_proceed})"
+            # Warning: A bottom cluster is composed of ComputationNodes
+            # and AllocationNodes from backward.py; not Hierarchical ones
+            # 1) target_to_proceed's nodes
+            data_anode = fb_graph.dict_data_anodes[target_to_proceed]
+            grad_anode = fb_graph.dict_grad_anodes[target_to_proceed]
+            fwd_cnode = fb_graph.dict_fwd_cnodes[target_to_proceed]
+            bwd_cnode = fb_graph.dict_bwd_cnodes[target_to_proceed]
+            # 2) Loss Computation Node
+            self.loss_cnode = ComputationNode("loss")
+            self.loss_cnode.deps_real = {data_anode}
+            self.loss_cnode.users = {grad_anode}
+            self.list_cnodes = [fwd_cnode,self.loss_cnode,bwd_cnode]
+            self.loss_idx = 1
+            # 3) Additional AllocationNodes: deps/users and phantoms
+            all_anodes = set([data_anode,grad_anode])
+            if target_to_proceed in fb_graph.dict_phantoms_anodes:
+                all_anodes.add(fb_graph.dict_phantoms_anodes[target_to_proceed])
+            input_data_anodes = set(fwd_cnode.deps_real)
+            input_grad_anodes = set(bwd_cnode.users)
+            all_anodes.update(input_data_anodes)
+            all_anodes.update(input_grad_anodes)
+            # 4) In case user of global source node
+            if fwd_cnode in fb_graph.source_data_anode.users_real:
+                input_data_anodes.add(fb_graph.source_data_anode)
+            if fb_graph.source_grad_anode in bwd_cnode.users:
+                input_grad_anodes.add(fb_graph.source_grad_anode)
+            self.list_anodes = list(all_anodes)
+            # 5) useful attributes
+            self.make_dict_kn()
+            self.interfaces = {
+                "input_data_anodes" : input_data_anodes,
+                "output_data_anodes" : {data_anode},
+                "output_grad_anodes" : {grad_anode},
+                "input_grad_anodes"  : input_grad_anodes
+            }
+
+
+        # ==========================================================
+        # ====== SECOND H_CLUSTER CONSTRUCTOR: FROM P_CLUSTER ======
+        else:
+            pass
+
+
+
+
+
+
 
     def make_dict_kn(self):
         self.dict_kn = dict(
@@ -231,6 +297,13 @@ class HierarchicalStructure():
         self.all_unique_graphs = set().union(
             *[set(h_cluster.partitionings) 
             for h_cluster in self.all_unique_clusters])
+        self.all_bottom_clusters = set()
+        for hg in self.all_unique_graphs:
+            for hcn in hg.list_HCNs:
+                if hcn.sub_cluster is not None and hcn.sub_cluster.is_bottom:
+                    self.all_bottom_clusters.add(hcn.sub_cluster)
+        for cluster in self.all_unique_clusters: cluster.list_schedules = []
+        for cluster in self.all_bottom_clusters: cluster.list_schedules = []
         
 
     # ***************************************************
@@ -289,30 +362,30 @@ def PartitionedCluster_to_HierarchicalCluster(p_cluster : PartitionedCluster, kg
     # `set` because we need to add the inputs_anode
 
     h_cluster.interfaces = interfaces = dict()
-    interfaces["inputs_anode_data" ] = inputs_anode_data  = set()
-    interfaces["outputs_anode_data"] = outputs_anode_data = set()
-    interfaces["inputs_anode_grad" ] = inputs_anode_grad  = set()
-    interfaces["outputs_anode_grad"] = outputs_anode_grad = set()
+    interfaces["input_data_anodes" ] = input_data_anodes  = set()
+    interfaces["output_data_anodes"] = output_data_anodes = set()
+    interfaces["input_grad_anodes" ] = input_grad_anodes  = set()
+    interfaces["output_grad_anodes"] = output_grad_anodes = set()
 
     # ** inputs **
     for input_mt in p_cluster.inputs_mt:
         input_data = kg.dict_anode_data[input_mt]
-        inputs_anode_data.add(input_data)
+        input_data_anodes.add(input_data)
         set_anode.add(input_data)
         if input_mt in kg.dict_anode_grad:
             input_grad = kg.dict_anode_grad[input_mt]
             if input_grad.deps_global != set():
-                inputs_anode_grad.add(input_grad)
+                input_grad_anodes.add(input_grad)
                 set_anode.add(input_grad)
 
     # ** outputs **
     for output_mt in p_cluster.outputs_mt:
         output_data = kg.dict_anode_data[output_mt]
-        outputs_anode_data.add(output_data)
+        output_data_anodes.add(output_data)
         loss_cnode.deps_real.add(output_data)
         if output_mt in kg.dict_anode_grad:   
             output_grad = kg.dict_anode_grad[output_mt]
-            outputs_anode_grad.add(output_grad)
+            output_grad_anodes.add(output_grad)
             loss_cnode.users.add(output_grad)
 
     h_cluster.list_anode = list(set_anode)
@@ -405,10 +478,10 @@ def PartitionedNode_to_HierarchicalCluster(pn : PartitionedNode, kg : ForwardAnd
         h_cluster.make_dict_kn()
 
         h_cluster.interfaces = {
-            "inputs_anode_data"  : inputs_data,
-            "outputs_anode_data" : set([anode_data]),
-            "outputs_anode_grad" : set([anode_grad]),
-            "inputs_anode_grad"  : inputs_grad
+            "input_data_anodes"  : inputs_data,
+            "output_data_anodes" : set([anode_data]),
+            "output_grad_anodes" : set([anode_grad]),
+            "input_grad_anodes"  : inputs_grad
         }
 
         return h_cluster
@@ -542,10 +615,10 @@ def PartitionedGraph_to_HierarchicalGraph(
 
     # ** interfaces **
     dict_anode_to_han = dict((anode,han) for (han,anode) in dict_han_to_anode.items())
-    hg.input_data_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["inputs_anode_data"])
-    hg.output_data_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["outputs_anode_data"])
-    hg.input_grad_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["inputs_anode_grad"])
-    hg.output_grad_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["outputs_anode_grad"])
+    hg.input_data_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["input_data_anodes"])
+    hg.output_data_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["output_data_anodes"])
+    hg.input_grad_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["input_grad_anodes"])
+    hg.output_grad_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["output_grad_anodes"])
     
     
     # === Build the edges ===

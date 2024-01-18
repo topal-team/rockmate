@@ -133,18 +133,18 @@ class ParameterNode(base.ParameterNode):
 # ***********
 
 class ForwardAndBackwardGraph(base.Graph):
-    input_data_anode = None
-    list_output_data_anodes = None
-    loss_computation_node = None
-    list_output_grad_anodes = None
-    input_grad_anode = None
+    source_data_anode : AllocationNode = None
+    list_output_data_anodes : list[AllocationNode] = None
+    loss_computation_node : ComputationNode = None
+    list_output_grad_anodes : list[AllocationNode] = None
+    source_grad_anode : AllocationNode = None
     # Note: We no longer have chain/list of K_graph,
     # as we fully moved to hierarchical structures,
-    # hence the input_data/grad are trivial ad hoc
+    # hence the source_data/grad are trivial ad hoc
     # source nodes, so they could be removed, but it would
     # require to adapt quite a lot of lines in the compiler.
     # So make it easier for the moment I keep them.
-    # !Warning!: input_grad_anode is None if 
+    # !Warning!: source_grad_anode is None if 
     # none of the inputs requires a gradient.
 
     def __init__(self,
@@ -442,34 +442,34 @@ class ForwardAndBackwardGraph(base.Graph):
     def make_special_input_nodes(self,
             simplified_graph : SimplifiedGraph):
         # 1) Input Data Allocation Node
-        input_data_anode = AllocationNode(
+        source_data_anode = AllocationNode(
             main_target = constants.init_target_string,
             allocation_type = "data",
             graph = self)
-        input_data_anode.all_targets = simplified_graph.input_targets
-        self.input_data_anode = input_data_anode
-        self.dict_data_anodes[input_data_anode.main_target] = input_data_anode
-        self.dict_nodes[input_data_anode.name] = input_data_anode
+        source_data_anode.all_targets = simplified_graph.input_targets
+        self.source_data_anode = source_data_anode
+        self.dict_data_anodes[source_data_anode.main_target] = source_data_anode
+        self.dict_nodes[source_data_anode.name] = source_data_anode
 
-        # 2) Users of input_data_anode
-        input_data_anode.users_real = set(
+        # 2) Users of source_data_anode
+        source_data_anode.users_real = set(
             self.dict_fwd_cnodes[sn.main_target]
             for sn in simplified_graph.init_node.users
         ) # Not reciprocal !
 
         if simplified_graph.sources_req_grad:
             # 3) Input Grad Allocation Node
-            input_grad_anode = AllocationNode(
+            source_grad_anode = AllocationNode(
                 main_target = constants.init_target_string,
                 allocation_type = "grad",
                 graph = self)
-            input_grad_anode.all_targets = simplified_graph.input_targets,
-            self.input_grad_anode = input_grad_anode
-            self.dict_grad_anodes[input_grad_anode.main_target] = input_grad_anode
-            self.dict_nodes[input_grad_anode.name] = input_grad_anode
+            source_grad_anode.all_targets = simplified_graph.input_targets,
+            self.source_grad_anode = source_grad_anode
+            self.dict_grad_anodes[source_grad_anode.main_target] = source_grad_anode
+            self.dict_nodes[source_grad_anode.name] = source_grad_anode
 
-            # 4) Deps of input_grad_cnode
-            input_grad_anode.deps = set(
+            # 4) Deps of source_grad_cnode
+            source_grad_anode.deps = set(
                 self.dict_bwd_cnodes[sn.main_target]
                 for sn in simplified_graph.init_node.users
             ) # Not reciprocal !
@@ -632,18 +632,18 @@ class ForwardAndBackwardGraph(base.Graph):
                 dot.edge(req_cnode.name,anode.name,
                     color=self.__class__.get_render_color(cnode))
         
-        # 4) Input_data/grad_cnode
+        # 4) source_data/grad_cnode
         kwargs = {"color":color_special , "style":"dashed"}
-        input_data = self.input_data_anode
-        if input_data.users_real != set():
-            dot.node(input_data.name,input_data.name,**kwargs)
-            for user_anode in input_data.users_real:
-                dot.edge(input_data.name,user_anode.name,**kwargs)
-        input_grad = self.input_grad_anode
-        if input_grad is not None:
-            dot.node(input_grad.name,input_grad.name,**kwargs)
-            for req_anode in input_grad.deps:
-                dot.edge(req_anode.name,input_grad.name,**kwargs)
+        source_data = self.source_data_anode
+        if source_data.users_real != set():
+            dot.node(source_data.name,source_data.name,**kwargs)
+            for user_anode in source_data.users_real:
+                dot.edge(source_data.name,user_anode.name,**kwargs)
+        source_grad = self.source_grad_anode
+        if source_grad is not None:
+            dot.node(source_grad.name,source_grad.name,**kwargs)
+            for req_anode in source_grad.deps:
+                dot.edge(req_anode.name,source_grad.name,**kwargs)
 
         if render:
             base.Graph._call_graphviz_to_render(
