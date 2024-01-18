@@ -228,7 +228,43 @@ class HierarchicalStructure():
         self.all_unique_clusters = set(
             p_cluster.h_cluster 
             for p_cluster in partitioned_structure.all_unique_clusters)
+        self.all_unique_graphs = set().union(
+            *[set(h_cluster.partitionings) 
+            for h_cluster in self.all_unique_clusters])
         
+
+    # ***************************************************
+    # == Methods to get some insights of the structure ==
+    def biggest_sub_graph(self):
+        return max(
+            self.all_unique_graphs,
+            key = lambda hg : len(hg.list_HCNs)
+        )
+    
+    def max_depth(self):
+        def explore(cluster : HierarchicalCluster,depth):
+            max_depth = depth
+            if cluster.representee_cluster is cluster:
+                for hg in cluster.partitionings:
+                    for hn in hg.nodes:
+                        if hn.sub_cluster is not None:
+                            max_depth = max(max_depth,
+                                explore(hn.sub_cluster,depth+1))
+            return max_depth
+        return explore(self.main_cluster,0)
+    
+    def get_insights_of_the_structure(self):
+        print("Insights of the Hierarchical Structure :")
+        print(f"- A total of {len(self.all_clusters)} clusters")
+        print(f"- with {len(self.all_unique_clusters)} unique clusters")
+        print(f"- A maximum depth of {self.max_depth()} "\
+              "(0 means there is no partitioning, i.e. a flat structure)")
+        biggest_hg = self.biggest_sub_graph()
+        print("The biggest sub graph has:")
+        print(f"- A total of {len(biggest_hg.list_HCNs)} computations")
+        print(f"- {len([hcn for hcn in biggest_hg.list_HCNs if hcn.is_fwd])} of which are forward computations")
+        print(f"- A total of {len(biggest_hg.list_HCNs)} allocations")
+
         
 
 
@@ -555,36 +591,6 @@ def PartitionedGraph_to_HierarchicalGraph(
 
 
 
-
-
-
-# =================
-# = Utils to test =
-def nb_clusters(main_cluster : HierarchicalCluster):
-    nb = 0
-    nb_unique = 0
-    biggest = -1
-    for c in main_cluster.all_clusters:
-        if "bottom" in c.name: continue
-        nb += 1
-        if c.representee_cluster is c:
-            nb_unique += 1
-            if c is not main_cluster:
-                for hg in c.p_cluster.possible_partitioning:
-                    biggest = max(len(hg.nodes),biggest)
-
-    max_depths = 0
-    def explore(c,depth):
-        nonlocal max_depths
-        max_depths = max(max_depths,depth)
-        if c.representee_cluster is c:
-            for pg in c.possible_partitioning:
-                for pn in pg.nodes:
-                    pn : PartitionedNode
-                    if pn.sub_cluster is not None:
-                        explore(pn.sub_cluster,depth+1)
-    explore(main_cluster.p_cluster,0)
-    return nb,nb_unique,biggest,max_depths
 
 
 # ==========================
