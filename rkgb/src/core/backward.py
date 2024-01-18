@@ -2,8 +2,6 @@
 # ====== K structure =======
 # ==========================
 
-import warnings
-import ast
 import torch
 from src.lowlevel import ast_add_on
 from src.lowlevel import constants

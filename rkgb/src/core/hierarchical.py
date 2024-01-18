@@ -2,9 +2,10 @@
 # ====== H structure =======
 # ==========================
 
-from .utils import *
-from .Ptools import PartitionedStructure, PartitionedCluster, PartitionedGraph, PartitionedNode, ClusterTranslator 
-from .Ktools import K_graph, K_C_node, K_D_node
+from src.lowlevel import constants
+from src.lowlevel import anonymize
+from src.core import backward
+from src.core.partitioned import PartitionedStructure, PartitionedCluster, PartitionedGraph, PartitionedNode
 
 from src.core import base
 
@@ -54,13 +55,13 @@ class H_C_node(base.Node):
 # * H_D_node *
 # ************
 class H_D_node(base.Node):
-    kdn : K_D_node = None
+    kdn : backward.AllocationNode = None
     main_target : str = None
     name : str = None
     is_data : bool = None
     deps : set[H_C_node] = None
     users : set[H_C_node] = None
-    def __init__(self,kdn : K_D_node = None):
+    def __init__(self,kdn : backward.AllocationNode = None):
         self.deps = set()
         self.users = set()
         if kdn is None:
@@ -119,7 +120,7 @@ class H_graph(base.Graph):
                 req_hn.users.add(hn)
 
     def sort_list_hcn(self):
-        # -> similar to K_graph.sort_list_kcn
+        # -> similar to backward.Graph.sort_list_kcn
         l1 = list(self.list_hcn)
         root_hcn = H_C_node("")
         root_hcn.deps = set(self.inputs_hdn_grad) # Not enough
@@ -150,13 +151,13 @@ class H_graph(base.Graph):
 # *************
 class H_cluster():
     is_bottom : bool = None
-    list_kcn : list[K_C_node] = None
-    list_kdn : list[K_D_node] = None
-    loss_kcn : K_C_node = None
+    list_kcn : list[backward.ComputationNode] = None
+    list_kdn : list[backward.AllocationNode] = None
+    loss_kcn : backward.ComputationNode = None
     loss_idx : int = None
     dict_kn : dict = None
-    interfaces : dict[str, set[K_D_node]]
-    translator : ClusterTranslator = None
+    interfaces : dict[str, set[backward.AllocationNode]]
+    translator : anonymize.ClusterTranslator = None
     p_cluster : PartitionedCluster = None
     p_node : PartitionedNode = None
     all_clusters : set = None
@@ -166,7 +167,7 @@ class H_cluster():
 
     def __init__(self,name,is_bottom):
         self.name = name
-        self.loss_kcn = K_C_node("loss")
+        self.loss_kcn = backward.ComputationNode("loss")
         self.is_bottom = is_bottom
         self.all_clusters = set([self])
 
@@ -182,7 +183,7 @@ class H_cluster():
         return set().union(*self.interfaces.values())
 
 
-def PartitionedCluster_to_H_cluster(p_cluster : PartitionedCluster, kg : K_graph):
+def PartitionedCluster_to_H_cluster(p_cluster : PartitionedCluster, kg : backward.Graph):
     if hasattr(p_cluster,"h_cluster"): return p_cluster.h_cluster
     h_cluster = H_cluster(p_cluster.name.replace("P","H"),False)
     h_cluster.p_cluster = p_cluster
@@ -284,7 +285,7 @@ def PartitionedCluster_to_H_cluster(p_cluster : PartitionedCluster, kg : K_graph
     return h_cluster
 
 
-def PartitionedNode_to_H_cluster(pn : PartitionedNode, kg : K_graph):
+def PartitionedNode_to_H_cluster(pn : PartitionedNode, kg : backward.Graph):
     if pn.sub_cluster is not None:
         return PartitionedCluster_to_H_cluster(pn.sub_cluster, kg)
     elif pn.mt not in kg.dict_KCN_bwd:
@@ -297,8 +298,8 @@ def PartitionedNode_to_H_cluster(pn : PartitionedNode, kg : K_graph):
         loss_kcn = h_cluster.loss_kcn
         mt = pn.mt
         # -- list_kcn part --
-        kcn_fwd : K_C_node = kg.dict_KCN_fwd[mt]
-        kcn_bwd : K_C_node = kg.dict_KCN_bwd[mt]
+        kcn_fwd : backward.ComputationNode = kg.dict_KCN_fwd[mt]
+        kcn_bwd : backward.ComputationNode = kg.dict_KCN_bwd[mt]
         kdn_data = kg.dict_KDN_data[mt]
         kdn_grad = kg.dict_KDN_grad[mt]
         loss_kcn.deps_real = set([kdn_data])
@@ -334,16 +335,16 @@ def PartitionedNode_to_H_cluster(pn : PartitionedNode, kg : K_graph):
 def PartitionedGraph_to_H_graph(
         pg : PartitionedGraph, 
         h_cluster : H_cluster,
-        kg : K_graph):
+        kg : backward.Graph):
     hg = H_graph(pg.name.replace("pg","hg"),h_cluster)
 
     # -> Useful for interfaces
     dict_mt_to_hdn_data = dict()
     dict_mt_to_hdn_grad = dict()
 
-    dict_hdn_to_kdn : dict[H_D_node, K_D_node] = dict()
+    dict_hdn_to_kdn : dict[H_D_node, backward.AllocationNode] = dict()
     #  A hdn represents exactly one kdn
-    dict_kcn_to_hcn : dict[K_C_node, H_C_node] = dict()
+    dict_kcn_to_hcn : dict[backward.ComputationNode, H_C_node] = dict()
     #  At a fixed level of depth, a kcn can be found in only one hcn
     #  -> These two dict make it super easy to build edges
 
@@ -502,7 +503,7 @@ def PartitionedGraph_to_H_graph(
     return hg
 
 
-def P_and_K_to_H(ps : PartitionedStructure, kg : K_graph):
+def P_and_K_to_H(ps : PartitionedStructure, kg : backward.Graph):
     kg.make_kcns_number()
     return PartitionedCluster_to_H_cluster(ps.main_cluster,kg)
 
