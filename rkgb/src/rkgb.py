@@ -1,406 +1,139 @@
-from .utils import *
-from . import Btools
-from . import Dtools
-from . import Stools
-from . import Ktools
-from . import Atools_for_S_and_K
-from . import Ptools
-from . import Htools
-import time
+from rkgb.lowlevel import preprocess_device
+from rkgb.lowlevel import preprocess_samples
+from rkgb.core.raw import RawGraph
+from rkgb.core.forward import ForwardGraph
+from rkgb.core.simplified import SimplifiedGraph
+from rkgb.core.backward import ForwardAndBackwardGraph
+from rkgb.core import partitioned
+from rkgb.core.hierarchical import HierarchicalStructure
 
-# ==========================
-# ====== OUTPUT CLASS ======
-# ==========================
 
-class rkGB_res():
-    def __init__(self,bg,dg,sg,kg,ps,hc,list_sg,list_kg,cc,list_ano_S):
-        self.B_graph = bg
-        self.D_graph = dg
-        self.S_graph = sg
-        self.K_graph = kg
-        self.PartitionedStructure = ps
-        self.H_cluster = hc
-        self.S_graph_list = list_sg
-        self.K_graph_list = list_kg
-        self.equivalent_classes = cc
-        self.list_ano_S = list_ano_S
-    
+
+class Result():
+    raw_graph = None
+    forward_graph = None
+    simplified_graph = None
+    forward_and_backward_graph = None
+    partitioned_structure = None
+    hierarchical_structure = None
+    def __init__(self,
+            model,model_args,model_kwargs=None,
+            wanted_graphs = {"R","F","S","FB","P","H"},
+            inspection_device = None,
+            use_jit_instead_of_dynamo = False,
+            jit_impose_device = True,
+            partitioners = None,
+            ):
+        self.original_mod = model
+        self.inspection_device = inspection_device
+        self.use_jit_instead_of_dynamo = use_jit_instead_of_dynamo
+        self.jit_impose_device = jit_impose_device
+        self.partitioners = partitioners
+
+        # 0) See what we want
+        bool_h = "H" in wanted_graphs
+        bool_p = ("P" in wanted_graphs) or bool_h
+        bool_fb = ("FB" in wanted_graphs) or bool_h
+        bool_s = ("S" in wanted_graphs) or bool_fb
+        bool_f = ("F" in wanted_graphs) or bool_s
+        bool_r = ("R" in wanted_graphs) or bool_f
+        
+        # 1) device and inputs
+        self.example_inputs = preprocess_samples.ExampleInputs(model,model_args,model_kwargs)
+        self.current_device = preprocess_device.get_device_and_check_all_same_device(model,self.example_inputs)
+
+        # 2) Build everything
+        if bool_r: self.build_raw()
+        if bool_f: self.build_forward()
+        if bool_s: self.build_simplified()
+        if bool_fb: self.build_forward_and_backward()
+        if bool_p: self.build_partitioned()
+        if bool_h: self.build_hierarchical()
+
+    def build_raw(self):
+        if self.raw_graph is None:
+            self.raw_graph = RawGraph(
+                self.original_mod,
+                self.example_inputs,
+                use_jit_instead_of_dynamo=self.use_jit_instead_of_dynamo,
+                jit_impose_device=self.jit_impose_device)
+            
+    def build_forward(self):
+        if self.forward_graph is None:
+            self.build_raw()
+            self.forward_graph = ForwardGraph(
+                self.raw_graph,
+                self.original_mod,
+                self.example_inputs,
+                self.current_device)
+            
+    def build_simplified(self):
+        if self.simplified_graph is None:
+            self.build_forward()
+            self.simplified_graph = SimplifiedGraph(
+                self.forward_graph,
+                self.original_mod,
+                self.current_device)
+
+    def build_forward_and_backward(self):
+        if self.forward_and_backward_graph is None:
+            self.build_simplified()
+            if self.inspection_device is None:
+                self.inspection_device = self.current_device
+            self.forward_and_backward_graph = ForwardAndBackwardGraph(
+                self.simplified_graph,
+                self.original_mod,
+                self.inspection_device)
+
+    def build_partitioned(self,partitioners = None):
+        partitioners = partitioners or self.partitioners
+        if self.partitioned_structure is None or partitioners is not None:
+            self.build_simplified()
+            if partitioners is None:
+                partitioners = [partitioned.PartitionerBottomToTop()]
+            self.partitioned_structure = partitioned.PartitionedStructure(
+                self.simplified_graph,
+                self.original_mod,
+                partitioners)
+            
+    def build_hierarchical(self,partitioners = None):
+        if self.hierarchical_structure is None or partitioners is not None:
+            self.build_forward_and_backward()
+            self.build_partitioned(partitioners)
+            self.hierarchical_structure = HierarchicalStructure(
+                self.partitioned_structure,
+                self.forward_and_backward_graph)
+
     @property
-    def B(self):
-        return self.B_graph
+    def R(self):
+        return self.raw_graph
     @property
-    def D(self):
-        return self.D_graph
+    def F(self):
+        return self.forward_graph
     @property
     def S(self):
-        return self.S_graph
+        return self.simplified_graph
     @property
-    def K(self):
-        return self.K_graph
-    @property
-    def Sl(self):
-        return self.S_graph_list
-    @property
-    def Kl(self):
-        return self.K_graph_list
+    def FB(self):
+        return self.forward_and_backward_graph
     @property
     def Ps(self):
-        return self.PartitionedStructure
+        return self.partitioned_structure
     @property
     def Pc(self):
-        if hasattr("main_cluster",self.PartitionedStructure):
-            return self.PartitionedStructure.main_cluster
+        if hasattr(self.partitioned_structure,"main_cluster"):
+            return self.partitioned_structure.main_cluster
         else:
             return None
     @property
+    def Hs(self):
+        return self.hierarchical_structure
+    @property
     def Hc(self):
-        return self.H_cluster
-    @property
-    def cc(self):
-        return self.equivalent_classes
-    @property
-    def ano_Sl(self):
-        return self.list_ano_S
-
-# ==========================
-
-
-
-# ==========================
-# ===== Main function ======
-# ==========================
-
-def make_all_graphs(model,
-    model_inputs,
-    model_kwargs=None,
-    wanted_graphs = {"B","D","S","K","P","H","Sl","Kl"},
-    partitioners = [
-        Ptools.PartitionerBottomToTop(),
-        #Ptools.PartitionerSequence()
-    ],
-    verbose=False,
-    impose_device=True,
-    check_device_is_cuda = True,
-    print_time_rkgb=False):
-    r"""
-    ***** this function returns an objet with attributes *****
-     -> .B_graph, .D_graph, .S_graph and .K_graph of the whole module
-     -> .S_graph_list and .K_graph_list of the sequentialized module
-     -> .PartitionedStructure, .H_cluster
-    on which you can use : rkgb.print
-
-    ***** args *****
-     -> model must be a torch.nn.Module
-    /!\ Some errors occur because of jit.trace /!\
-    -> model_inputs :
-        args of 'model', it can either be a simple
-        variable or an iterable of variables.
-    -> model_kwargs :
-        optional dictionary in case you want to
-        call 'model' with kwargs
-    """
-    bool_list_kg = "Kl" in wanted_graphs
-    bool_list_sg = ("Sl" in wanted_graphs) or bool_list_kg
-    bool_hg = "H" in wanted_graphs
-    bool_pg = ("P" in wanted_graphs) or bool_hg
-    bool_kg = ("K" in wanted_graphs) or bool_hg or bool_list_kg
-    bool_sg = ("S" in wanted_graphs) or bool_kg or bool_list_sg or bool_pg
-    bool_dg = ("D" in wanted_graphs) or bool_sg
-    bool_bg = ("B" in wanted_graphs) or bool_dg
-
-    # check inputs
-    constants.ref_verbose[0] = verbose
-    dict_inputs = make_inputs(model,model_inputs,model_kwargs)
-
-    # check device
-    things_not_on_cuda = []
-    if bool_kg and check_device_is_cuda:
-        for (key,inp) in dict_inputs.items():
-            if not isinstance(inp,torch.Tensor):
-                print(f"Warning : {key} has type {type(inp)}")
-            elif not inp.is_cuda:
-                things_not_on_cuda.append(key)
-        b = False
-        for p in model.parameters():
-            if not p.is_cuda: b=True
-        if b: things_not_on_cuda.append("the model")
-    print_cuda_warning_msg(things_not_on_cuda)
-    device = small_fcts.get_device_and_check_all_same_device(
-        model,dict_inputs)
-
-    # -- protect original module from impact on eval mode --
-    # -> save running stats
-    saved_running_stats = dict()
-    for m in model.modules():
-        for batch_fct in constants.list_batch_fct:
-            if isinstance(m,batch_fct):
-                r_mean = m.running_mean
-                r_var  = m.running_var
-                saved_running_stats[m] = (
-                    r_mean.clone() if r_mean is not None else None,
-                    r_var.clone() if r_var is not None else None,
-                )
-
-    # -- measure time in each part --
-    last_time = time.time()
-    def print_time(where):
-        nonlocal last_time
-        if print_time_rkgb:
-            print(f"Time passed in {where} : {time.time()-last_time}")
-            last_time = time.time()
-
-
-    # ============
-    # === CORE ===
-    # -- whole module --
-    bg = Btools.make_B(model,dict_inputs,impose_device=impose_device,device=device) if bool_bg else None
-    print_time("make_B")
-    dg = Dtools.B_to_D(bg,model,dict_inputs,device=device) if bool_dg else None
-    print_time("B_to_D")
-    sg = Stools.D_to_S(dg,model=model,device=device) if bool_sg else None
-    print_time("D_to_S")
-    kg = Ktools.S_to_K(sg,model,device=device) if bool_kg else None
-    print_time("S_to_K")
-    # -- sequentialized --
-    list_sg = Stools.cut(sg) if bool_list_sg else None
-    print_time("S_cut")
-    if bool_list_kg:
-        cc,list_kg,list_ano_S = Atools_for_S_and_K.S_list_to_K_list_eco(
-            list_sg,kg,model,device=device)
-    else: list_kg = None ; cc = None ; list_ano_S = None
-    print_time("S_list_to_K_list via Atools")
-    # -- hierarchical --
-    ps = Ptools.S_to_P(sg,model,partitioners) if bool_pg else None
-    print_time("S_to_P")
-    hc = Htools.P_and_K_to_H(ps,kg) if bool_hg else None
-    print_time("P_and_K_to_H")
-
-    # -- restore running_stats --
-    for (m,(r_mean,r_var)) in saved_running_stats.items():
-        m.running_mean = r_mean
-        m.running_var  = r_var
-
-    return rkGB_res(bg,dg,sg,kg,ps,hc,list_sg,list_kg,cc,list_ano_S)
-
-
-
-def make_late_partitioning(res : rkGB_res, model, partitioners):
-    assert(res.S is not None)
-    assert(res.K is not None)
-    res.PartitionedStructure = ps = Ptools.S_to_P(res.S,model,partitioners)
-    res.H_cluster = Htools.P_and_K_to_H(ps,res.K)
-
-# ==========================
-
-
-
-# ==========================
-# === printing functions ===
-# ==========================
-
-def RK_print(*args,
-        name=None,
-        open=True,
-        render_format="svg",
-        **kwargs):
-    r"""Overwrite python default print function,
-    Render rk-GB graphs using Graphviz.
-    - Given a rk-GB graph, this function creates a .gv file, 
-      then external Graphviz's dot tool renders it, as a .pdf or .svg file.
-      The result is stored in "graphviz_dir" sub-directory.
-    - Given a list of rk-GB graphs, render all graphs next to each other in a single file.
-    - Given a `rkGB_res`, render all the graphs in separate files.
-    - Given a cluster, render all the possible partitioning in separate files.
-    - Given a PartitionedStructure, render main_cluster.
-    - For any other object, call python default print.
-
-    Note: /!\ You need external Graphviz tool to generate the pdf/svg /!\
-    -> On Ubuntu : sudo apt-get install graphviz
-
-    kwargs:
-        - name : str | list[str] | tuple[str] = None:
-            To name .gv and .pdf file(s).
-            By default named after the type of the graph.
-        - render_format : str = "svg":
-            Render format wanted for the generated file
-        - open : bool = True:
-            To automatically open the file with the default reader.
-    """
-
-    # === Names ===
-    if not has_graphviz:
-        raise Exception("RK_print requires graphviz installed. Please install the [draw] variant of rockmate:\n pip install rockmate[draw]")
-
-    except_msg = (
-        "Unsupported type for kwarg `name`.\n"\
-        "Can be None, a string, a list or tuple of strings")
-    if name is None:
-        names = []
-    elif isinstance(name,str):
-        names = [name]
-    elif isinstance(name,list) or isinstance(name,tuple):
-        names = list(name)
-        for s in name:
-            if not isinstance(s,str):
-                raise Exception(except_msg)
-    else:
-        raise Exception(except_msg)
-    def get_name(name):
-        if name is None:
-            if names == []:
-                return None
-            else:
-                n = names.pop(0)
-                return n
-                # return names.pop(0)
-        else: return name
-    # ===============
-
-    graphs_to_render = []
-    filtered_args = []
-    def process_arg(arg,to_render,indent=0,pre_msg="",post_msg="",name=None):
-        msg = pre_msg + " "*indent
-        if isinstance(arg,Btools.B_graph):
-            msg += f"B_graph cannot be rendered, just raw edges"
-        elif isinstance(arg,Dtools.D_graph):
-            msg += Dtools.aux_print_D_graph_message(arg)
-            name = Dtools.aux_print_D_graph_name(arg,get_name(name))
-            to_render.append((name,arg,Dtools.print_D_graph))
-        elif isinstance(arg,Stools.S_graph):
-            msg += Stools.aux_print_S_graph_message(arg)
-            name = Stools.aux_print_S_graph_name(arg,get_name(name))
-            to_render.append((name,arg,Stools.print_S_graph))
-        elif isinstance(arg,Ktools.K_graph):
-            msg += Ktools.aux_print_K_graph_message(arg)
-            name = Ktools.aux_print_K_graph_name(arg,get_name(name))
-            to_render.append((name,arg,Ktools.print_K_graph))
-        elif isinstance(arg,Ptools.PartitionedGraph):
-            msg += Ptools.aux_print_PartitionedGraph_message(arg)
-            name = Ptools.aux_print_PartitionedGraph_name(arg,get_name(name))
-            to_render.append((name,arg,Ptools.print_PartitionedGraph))
-        elif isinstance(arg,Htools.H_graph):
-            msg += Htools.aux_print_H_graph_message(arg)
-            name = Htools.aux_print_H_graph_name(arg,get_name(name))
-            to_render.append((name,arg,Htools.print_H_graph))
-        elif isinstance(arg,Stools.S_graph_list):
-            msg += Stools.aux_print_S_graph_list_message(arg)
-            name = Stools.aux_print_S_graph_list_name(arg,get_name(name))
-            to_render.append((name,arg,Stools.print_S_graph_list))
-        elif isinstance(arg,Ktools.K_graph_list):
-            msg += Ktools.aux_print_K_graph_list_message(arg)
-            name = Ktools.aux_print_K_graph_list_name(arg,get_name(name))
-            to_render.append((name,arg,Ktools.print_K_graph_list))
-        elif ((isinstance(arg,list) or isinstance(arg,tuple))
-                and len(arg) != 1
-                and all(isinstance(a,base.Graph) for a in arg)):
-            msg += f"List of {len(arg)} RK graphs:\n"
-            sub_msgs = []
-            list_sub = []
-            for a in arg:
-                sub_msgs.append(
-                    process_arg(a,list_sub,
-                        indent=2,pre_msg="",post_msg="",name="Empty")
-                )
-            name = get_name(name)
-            name = name if name is not None else f"List_of_{len(arg)}_base.Graphs"
-            to_render.append((name,[c[1] for c in list_sub],[c[2] for c in list_sub]))
-            msg += "\n".join(sub_msgs)
-        elif isinstance(arg,Ptools.PartitionedCluster):
-            msg += Ptools.aux_print_PartitionedCluster_message(arg)+"\n"
-            names[:0] = Ptools.aux_print_PartitionedCluster_names(arg,get_name(name))
-            sub_msgs = []
-            for pg in arg.representee_cluster.possible_partitioning:
-                sub_msgs.append(process_arg(pg,to_render,2))
-            msg += "\n".join(sub_msgs)
-        elif isinstance(arg,Htools.H_cluster):
-            msg += Htools.aux_print_H_cluster_message(arg)+"\n"
-            names[:0] = Htools.aux_print_H_cluster_names(arg,get_name(name))
-            sub_msgs = []
-            for pg in arg.representee_cluster.possible_hg:
-                sub_msgs.append(process_arg(pg,to_render,2))
-            msg += "\n".join(sub_msgs)
-        elif isinstance(arg,Ptools.PartitionedStructure):
-            msg += "PartitionedStructure's main cluster :\n"
-            msg += process_arg(arg.main_cluster,to_render)
-        elif isinstance(arg,rkGB_res):
-            msg += "rkGB_res : all graphs\n"
-            sub_msgs = []
-            for at in [
-                "B_graph",
-                "D_graph",
-                "S_graph",
-                "K_graph",
-                "S_graph_list",
-                "K_graph_list",
-                "PartitionedStructure",
-                "H_cluster"]:
-                if getattr(arg,at) is None: continue
-                sub_msgs.append(
-                    process_arg(getattr(arg,at),to_render,0,"="*3+"\n","\n")
-                )
-            msg += "\n".join(sub_msgs)
+        if hasattr(self.hierarchical_structure,"main_cluster"):
+            return self.hierarchical_structure.main_cluster
         else:
-            return arg
-        return msg + post_msg
-
-    for arg in args:
-        msg = process_arg(arg,graphs_to_render,0,"="*10+"\n","\n"+"="*10)
-        filtered_args.append(msg)
-
-    print(*filtered_args, **kwargs)
-
-    if len(graphs_to_render) != 0:
-        print("*** START TO RENDER ***")
-    for name,obj,print_fct in graphs_to_render:
-        if not isinstance(print_fct,list):
-            print_fct(obj,name=name,open=open,render_format=render_format)
-        else:
-            dot = graphviz.Digraph(name,comment=name)
-            for i,fct in enumerate(print_fct):
-                fct(obj[i],dot=dot,uniq_num=i)
-            small_fcts.graph_render(dot,open,"various",render_format)
-
+            return None
 
 # ==========================
 
-# ===================
-# == TO TEST rk-GB ==
-# ===================
-
-def test_rkgb(module, model_inputs, **kwargs):
-    rkgb_res = make_all_graphs(module, model_inputs, **kwargs)
-    list_kg = rkgb_res.K_graph_list
-    kg = rkgb_res.K_graph
-    print("Generated all the graphs !\n")
-    print(f"Equiv classes are : {rkgb_res.equivalent_classes}")
-    print(
-        f"So we have only {len(rkgb_res.equivalent_classes)} "
-        f"blocks to solve ILP on, instead of {len(list_kg)}\n"
-    )
-    print("CONCERNING K_graph_list :")
-    list_nb_kcn = [len(kg.list_kcn) for kg in list_kg]
-    list_nb_kdn = [len(kg.list_kdn) for kg in list_kg]
-    tot_nb_kcn = sum(list_nb_kcn)
-    tot_nb_kdn = sum(list_nb_kdn)
-    str_list_nb_kcn = "+".join(str(i) for i in list_nb_kcn)
-    str_list_nb_kdn = "+".join(str(i) for i in list_nb_kdn)
-    print(
-        f"{len(list_kg)} K_graphs in seq, with :\n"
-        f"{str_list_nb_kcn} = {tot_nb_kcn} Comp nodes\n"
-        f"{str_list_nb_kdn} = {tot_nb_kdn} Data nodes\n"
-        f"=> total of {tot_nb_kcn + tot_nb_kdn} nodes\n"
-    )
-    print("CONCERNING phantoms impossible to restore :")
-    nb_ips = 0
-    for kcn in kg.list_kcn:
-        deps_ips = kcn.deps_impossible_to_restore
-        if len(deps_ips) != 0:
-            nb_ips += 1
-            print(
-                f"{kcn.main_target}'s phantoms must be "
-                f"protected, because deps_impossible_to_restore :"
-            )
-            for kdn, ph_name in deps_ips:
-                print(f"deps on {kdn} through {ph_name}")
-    print(f"Total nb of special phantoms :  {nb_ips}")
-    return rkgb_res
