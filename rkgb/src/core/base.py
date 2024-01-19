@@ -249,7 +249,7 @@ class ParameterNode():
                     "param_str","param_name",
                     "view_targets","view_code",
                     "requires_grad","is_buffer",
-                    "unique_id"]:
+                    "unique_id","info","mem"]:
                 setattr(self,attr,copy.deepcopy(getattr(node_to_clone,attr)))
         else:
             assert param_str[:4] == "self"
@@ -257,7 +257,9 @@ class ParameterNode():
             self.param_name = param_str[5:].replace('[','.').replace(']','')
             self.view_targets = []
             self.view_code = []
+            self.info = None
             self.requires_grad = None
+            self.mem = None
             self.is_buffer = None
             self.unique_id = Node_unique_id_generator\
                 .get_unique_id_one_way_or_the_other(

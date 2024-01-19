@@ -97,7 +97,9 @@ class ForwardGraph(base.Graph):
                     except:
                         param_value = original_mod.get_buffer(param_name)
                         param_node.is_buffer = True
-                    param_node.requires_grad = param_value.requires_grad
+                    param_node.info = param_info = VariableInfo(param_value)
+                    param_node.requires_grad = param_info.requires_grad
+                    param_node.mem = param_info.memsize
         self.parameter_nodes = dict_param_str_to_node.values()
         all_param_data_ptrs = VariableInfo.find_all_data_ptr_of_params(original_mod)
         dict_view_on_params_to_unplug = dict()
