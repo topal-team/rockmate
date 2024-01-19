@@ -16,7 +16,7 @@ from .HILP_gurobi import ModelGurobi
 from .HILP_pulp_ofl_para import ModelPULP
 from .rotor_solver import seq_builder, solve_dp_functional
 from .op_schedule import OpSchedule
-from rkgb.utils.global_vars import solver_name
+# from rkgb.utils.global_vars import solver_name
 import psutil
 
 
@@ -62,7 +62,7 @@ class HILP(Solver):
 
     def __init__(self, config=None, ilp_solver=None):
         super().__init__(config)
-        self.ilp_solver = ilp_solver or solver_name[0]
+        self.ilp_solver = ilp_solver# or solver_name[0]
         # if self.ilp_solver == "gurobi":
         #     self.model_ilp = ModelGurobi
         #     print("Using GUROBI to solve ILP")
