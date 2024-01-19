@@ -64,11 +64,15 @@ def H_cluster_method_translate_op_list(self, op_list):
     translated_op_list = deepcopy(op_list)
     for op in translated_op_list:
         if isinstance(op, DeleteOp):
-            ana_kn = translator_re.dict_name_to_ano_triplet[op.target.name]
-            op.target = Activation(translator.dict_ano_triplet_to_kdn[ana_kn])
+            # ana_kn = translator_re.dict_name_to_ano_triplet[op.target.name]
+            # op.target = Activation(translator.dict_ano_triplet_to_kdn[ana_kn])
+            ana_kn = translator_re.to_ano(op.target.kdn)
+            op.target = Activation(translator.from_ano(ana_kn))
         else:
-            ana_kn = translator_re.dict_name_to_ano_triplet[op.kcn.name]
-            op.kcn = translator.dict_ano_triplet_to_kcn[ana_kn]
+            # ana_kn = translator_re.dict_name_to_ano_triplet[op.kcn.name]
+            # op.kcn = translator.dict_ano_triplet_to_kcn[ana_kn]
+            ana_kn = translator_re.to_ano(op.kcn)
+            op.kcn = translator.from_ano(ana_kn)
             op.name = op.kcn.name
     return translated_op_list
 
@@ -142,7 +146,7 @@ def get_cluster_budget(
     #             sizes.append(hcn.sub_cluster.list_schedules[0].mem)
     # sizes += [hdn.mem for hdn in hg.list_hdn]
     sizes = [kdn.mem for kdn in cluster.list_anodes]
-    overheads = [kcn.overhead for kcn in cluster.list_cnodes if kcn.overhead]
+    overheads = [cnode.mem_overhead for cnode in cluster.list_cnodes if cnode.mem_overhead]
 
     # overheads = [hcn.sub_cluster.ff_overhead for hcn in hg.list_HCNs] + [
     #     op_sched.bwd_overhead for op_sched in hg.list_schedules
@@ -247,7 +251,7 @@ def preprocess(cluster: HierarchicalCluster, protect_names=[]):
                         kcn = cluster.dict_nodes[hcn.name]
                         ff_op_list = [ComputeOp(kcn, fast_forward=True)]
                         hcn.ff_time = kcn.time
-                        hcn.ff_overhead = kcn.overhead
+                        hcn.ff_overhead = kcn.mem_overhead
                     else:  # loss node
                         ff_op_list = []
                         hcn.ff_time = 0
