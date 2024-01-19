@@ -338,7 +338,7 @@ class Compiler:
         function_list.append(self.fct_del_tensor_data(kn.main_target))
         if kn.info is not None and kn.info.requires_grad:
             function_list.append(self.fct_del_tensor_data(f"_{kn.main_target}"))
-        if kn.includes_base:
+        if kn.has_attribute__base:
             function_list.append(self.fct_del_tensor_base(kn.main_target))
         for v in kn.tensor_targets:
             function_list.append(self.fct_del_tensor_data(v))
@@ -352,10 +352,10 @@ class Compiler:
         return [self.fct_del_tensor_grad(target)]
 
     def get_del_parameter(self, alloc, i):
-        return [self.fct_del_tensor_data(alloc.name)]
+        return [self.fct_del_tensor_data(alloc.param_name)]
 
     def get_del_buffer(self, alloc, i):
-        return [self.fct_del_tensor_data(alloc.name)]
+        return [self.fct_del_tensor_data(alloc.param_name)]
 
     def get_mapping(self, sources, targets, i, copy=False):
         return [self.fct_mapping(sources=sources, targets=targets, copy=copy)]
@@ -365,8 +365,8 @@ class Compiler:
         if isinstance(alloc, Parameter) or isinstance(alloc, Buffer):
             function_list.append(
                 self.fct_mem_alloc(
-                    alloc.name,
-                    shape=alloc.info.tsize
+                    alloc.param_name,
+                    shape=alloc.info.tensor_size
                     if isinstance(alloc, Parameter)
                     else alloc.size,
                     dtype=alloc.dtype,
@@ -380,7 +380,7 @@ class Compiler:
         else:
             function_list.append(
                 self.fct_mem_alloc(
-                    alloc.name,
+                    alloc.param_name,
                     shape=alloc.size,
                     dtype=alloc.dtype,
                     gd=False,
@@ -391,19 +391,19 @@ class Compiler:
     def get_prefetch(self, op: PrefetchOp, before_idx=None, after_idx=None):
         function_list = []
         # function_list.append(self.fct_mem_alloc(kn.main_target))
-        function_list.append(self.fct_prefetch(op.target.name, after_idx=after_idx, indices=op.indices))
+        function_list.append(self.fct_prefetch(op.target.param_name, after_idx=after_idx, indices=op.indices))
         return function_list
 
     def get_offload(self, op: OffloadOp, before_idx=None, after_idx=None):
         function_list = []
-        function_list.append(self.fct_offload(op.target.name, after_idx=after_idx, indices=op.indices, grad=op.grad))
+        function_list.append(self.fct_offload(op.target.param_name, after_idx=after_idx, indices=op.indices, grad=op.grad))
         return function_list
     
     def compile_all_prefetch(self):
         fct_list = []
         for p in self.parameters:
             fct_list.append(self.fct_mem_alloc(p, 
-                                               shape=self.parameters[p].info.tsize,
+                                               shape=self.parameters[p].info.tensor_size,
                                                dtype=self.parameters[p].dtype, ))
             fct_list.append(self.fct_prefetch(p))
         return fct_list
@@ -516,9 +516,9 @@ class Compiler:
                             fct_list.append([])
                     elif isinstance(op.target, Parameter):
                         if op.grad:
-                            fct_list.append(self.get_del_grad(op.target.kdn.name, i))
+                            fct_list.append(self.get_del_grad(op.target.pnode.param_name, i))
                         else:
-                            fct_list.append(self.get_del_parameter(op.target.kdn, i))
+                            fct_list.append(self.get_del_parameter(op.target.pnode, i))
                     elif isinstance(op.target, Buffer):
                         fct_list.append(self.get_del_buffer(op.target, i))
                     else:
@@ -747,7 +747,7 @@ class Compiler:
             targets_name = {}
             start = 0
             for target in targets:
-                shape = target.info.tsize if isinstance(target, Parameter) else -1
+                shape = target.info.tensor_size if isinstance(target, Parameter) else -1
                 size = target.size
                 targets_name[target.name] = (start, start + size, shape)
                 start += size

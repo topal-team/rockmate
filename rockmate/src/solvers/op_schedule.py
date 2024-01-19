@@ -88,7 +88,10 @@ class Parameter(Allocation):
                 setattr(result, k, deepcopy(v, memo))
 
         return result
-
+    
+    @property
+    def param_name(self):
+        return self.pnode.param_name
 
 class Buffer(Allocation):
     def __init__(self, name, mem=0, info=dict(), dtype=torch.float32, size=None):
