@@ -456,16 +456,16 @@ class SimplifiedGraph(base.Graph):
         # ie main_targets are tensors, except if artifact -> sizes
         for sn in self.nodes:
             sn_info = sn.info
-            if not (sn_info.variable_type in [torch.Tensor,torch.Size]):
+            if sn_info.variable_type is not torch.Tensor:
                 raise Exception(
                   f"After simplifications there should be only "\
-                  f"tensors and sizes, but {sn_info.variable_type} "\
+                  f"tensors, but {sn_info.variable_type} "\
                   f"found for {sn.main_target}.")
-            if sn_info.variable_type==torch.Size and not sn.is_artifact:
-                raise Exception(
-                  f"After simplifications, all remaining "\
-                  f"\"size\" should be \"artifacts\", but "\
-                  f"{sn.main_target} isn't an artifact")
+            # if sn_info.variable_type==torch.Size and not sn.is_artifact:
+                # raise Exception(
+                #   f"After simplifications, all remaining "\
+                #   f"\"size\" should be \"artifacts\", but "\
+                #   f"{sn.main_target} isn't an artifact")
     # ===== END BLOCK 1 : CLEAR and CHECK =====
 
 
