@@ -207,14 +207,14 @@ class RawGraph(base.Graph):
             and isinstance(dict_inputs[arg],torch.Tensor))
         )
         assert(len(dynamo_signature.user_inputs)==len(self.input_targets))
-        for dynamo_input_name, input_real_name in zip(
+        for dynamo_input_name, real_input_name in zip(
                 dynamo_signature.user_inputs,
                 self.input_targets):
             dict_dynamo_name_to_correct_ast[dynamo_input_name] \
-                = ast.Name(input_real_name)
+                = ast.Name(real_input_name)
             dict_dynamo_name_to_raw_node[dynamo_input_name] \
                 = RawNode(
-                    target=input_real_name,
+                    target=real_input_name,
                     code_ast=ast_add_on.make_ast_constant("INPUT"),
                     fct="INPUT",
                     is_input=True,

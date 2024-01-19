@@ -31,7 +31,7 @@ class SimplifiedNodeAnonymizationMaterial():
         all_real_cst    = []
         all_real_params = []
         def handle_str(real_str):
-            if (real_str[:2] == "__"
+            if ((real_str[:2] == "__" or real_str in simplified_graph.original_mod_input_targets)
             and not real_str in all_real_vars):
                 all_real_vars.append(real_str)
             elif (real_str[:5] == "self."
