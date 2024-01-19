@@ -9,16 +9,24 @@ from datetime import datetime
 import warnings
 
 import rkgb
-from rkgb.main import make_inputs, make_all_graphs, make_late_partitioning
-from rkgb.utils import print_debug, np, irotor
-from rkgb.utils.global_vars import (
-    ref_verbose,
-    solver_name,
-    ExceptionModuleDoesNotReqGrad,
-)
-from rkgb.utils.small_fcts import get_device
-from rkgb.utils.ast_add_on import ast_to_str
-from rkgb import Ptools
+# from rkgb.main import make_inputs, make_all_graphs, make_late_partitioning
+# from rkgb.utils import print_debug, np, irotor
+# from rkgb.utils.global_vars import (
+#     ref_verbose,
+#     solver_name,
+#     ExceptionModuleDoesNotReqGrad,
+# )
+# from rkgb.utils.small_fcts import get_device
+# from rkgb.utils.ast_add_on import ast_to_str
+# from rkgb import Ptools
+
+# TODO: make_all_graphs, make_late_partitioning
+
+from rkgb.lowlevel.preprocess_samples import ExampleInputs
+from rkgb.lowlevel.measure import tensor_memory_size
+from rkgb.lowlevel.constants import ref_verbose, ExceptionModuleDoesNotReqGrad
+from rkgb.lowlevel.ast_add_on import ast_to_str
+from rkgb.core.partitioned import PartitionerBottomToTop, PartitionerSequence, Partitioner
 
 from .solvers.main import preprocess, solve_recursive, get_cpu_optimize_stats
 from .solvers.op_schedule import *
@@ -54,21 +62,21 @@ class HRockmate(torch.nn.Module):
         gpu_optim = torch.optim.Adam,
         optim_kwargs = {},
         # [
-        #    Ptools.Partitioner(),
-        #    Ptools.Partitioner_bottom_to_top(),
-        #    Ptools.Partitioner_seq(),
+        #    Partitioner,
+        #    PartitionerBottomToTop(),
+        #    PartitionerSequence(),
         # ],
     ):
         super().__init__()
         ref_verbose[0] = verbose
-        solver_name[0] = ilp_solver
+        # solver_name[0] = ilp_solver
         default_time_limit[0] = ilp_time_limit
         list_solvers = list_solvers or [HILP(ilp_solver=ilp_solver)]
 
-        self.device = get_device()
+        self.device = torch.device("cuda")# Not obtaining from model
         object.__setattr__(self, "original_mod", original_mod)
         self.exec_with_record_mem = False
-        dict_inputs = make_inputs(original_mod, model_inputs, model_kwargs)
+        dict_inputs = ExampleInputs(original_mod, model_inputs, model_kwargs)
         self.named_para_shape = dict()
         for n, p in original_mod.named_parameters():
             self.named_para_shape[n] = p.shape
@@ -82,16 +90,16 @@ class HRockmate(torch.nn.Module):
                 elif isinstance(solver, RK_checkmate):
                     can_use_checkmate = True
             partitioners = [
-                Ptools.Partitioner_bottom_to_top(can_use_rotor=can_use_rotor)
+                PartitionerBottomToTop(can_use_rotor=can_use_rotor)
             ]
             if can_use_rotor:
-                partitioners.append(Ptools.Partitioner_seq())
+                partitioners.append(PartitionerSequence())
             if can_use_checkmate:
-                partitioners.append(Ptools.Partitioner())
+                partitioners.append(Partitioner)
 
         # ensure HILP config match partitioner config
         for partitioner in partitioners:
-            if isinstance(partitioner, Ptools.Partitioner_bottom_to_top):
+            if isinstance(partitioner, PartitionerBottomToTop):
                 for solver in list_solvers:
                     if isinstance(solver, HILP):
                         solver.config.nb_total_nodes = max(
@@ -120,7 +128,7 @@ class HRockmate(torch.nn.Module):
             if len(self.rkgb_res.S_graph.nodes) <= max_size_S_graph_for_no_partitioning:
                 # -> No partitioning !
                 make_late_partitioning(
-                    self.rkgb_res, original_mod, partitioners=[Ptools.Partitioner()]
+                    self.rkgb_res, original_mod, partitioners=[Partitioner]
                 )
                 list_solvers = [
                     HILP(
@@ -550,7 +558,7 @@ class HRockmate(torch.nn.Module):
 
                 #  * record_mem stuff *
                 if RkMod.exec_with_record_mem:
-                    RkMod.output_size = irotor.tensorMsize(
+                    RkMod.output_size = tensor_memory_size(
                         storage.ld[RkMod.output.main_target]
                     )
                     loss_idx = len(RkMod.allo_mem)
@@ -607,7 +615,7 @@ class HRockmate(torch.nn.Module):
                     "define_autograd_Function"
                 )
             # -> Send the inputs to Function.forward via the buffer (Rem 1)
-            self.dict_inputs_buffer = dict_inputs = make_inputs(
+            self.dict_inputs_buffer = dict_inputs = ExampleInputs(
                 self.original_mod, args, kwargs
             )
             # -> Pass the inputs which req grad to prepare their backward (Rem 1)
