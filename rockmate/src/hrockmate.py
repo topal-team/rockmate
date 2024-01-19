@@ -30,9 +30,10 @@ from rkgb.core.partitioned import PartitionerBottomToTop, PartitionerSequence, P
 
 from .solvers.main import preprocess, solve_recursive, get_cpu_optimize_stats
 from .solvers.op_schedule import *
-from .solvers import RK_rotor, HILP, TwRemat, RK_checkmate
+# from .solvers import RK_rotor, HILP, TwRemat, RK_checkmate
+from .solvers import HILP
 from .solvers.hilp import default_time_limit
-from .solvers.HILP_gurobi import *
+# from .solvers.HILP_gurobi import *
 from .compiler import Compiler, RK_Storage, make_gd
 
 
@@ -76,7 +77,7 @@ class HRockmate(torch.nn.Module):
         self.device = torch.device("cuda")# Not obtaining from model
         object.__setattr__(self, "original_mod", original_mod)
         self.exec_with_record_mem = False
-        dict_inputs = ExampleInputs(original_mod, model_inputs, model_kwargs)
+        # dict_inputs = ExampleInputs(original_mod, model_inputs, model_kwargs)
         self.named_para_shape = dict()
         for n, p in original_mod.named_parameters():
             self.named_para_shape[n] = p.shape
@@ -84,11 +85,11 @@ class HRockmate(torch.nn.Module):
             partitioners = []
             can_use_rotor = False
             can_use_checkmate = False
-            for solver in list_solvers:
-                if isinstance(solver, RK_rotor):
-                    can_use_rotor = True
-                elif isinstance(solver, RK_checkmate):
-                    can_use_checkmate = True
+            # for solver in list_solvers:
+            #     if isinstance(solver, RK_rotor):
+            #         can_use_rotor = True
+            #     elif isinstance(solver, RK_checkmate):
+            #         can_use_checkmate = True
             partitioners = [
                 PartitionerBottomToTop(can_use_rotor=can_use_rotor)
             ]
@@ -115,21 +116,29 @@ class HRockmate(torch.nn.Module):
         # -- use gkGB --
         try:
             if rkgb_res is None:
-                self.rkgb_res = make_all_graphs(
+                # self.rkgb_res = make_all_graphs(
+                #     original_mod,
+                #     dict_inputs,
+                #     verbose=verbose,
+                #     wanted_graphs={"K"},
+                #     partitioners=partitioners,
+                #     check_device_is_gpu=False
+                # )
+                self.rkgb_res = rkgb.rkgb.Result(
                     original_mod,
-                    dict_inputs,
-                    verbose=verbose,
-                    wanted_graphs={"K"},
+                    # dict_inputs,
+                    model_args=model_inputs,
+                    model_kwargs=model_kwargs,
+                    # verbose=verbose,
+                    wanted_graphs={"FB"},
                     partitioners=partitioners,
-                    check_device_is_gpu=False
+                    # check_device_is_gpu=False
                 )
             else:
                 self.rkgb_res = rkgb_res
-            if len(self.rkgb_res.S_graph.nodes) <= max_size_S_graph_for_no_partitioning:
+            if len(self.rkgb_res.simplified_graph.nodes) <= max_size_S_graph_for_no_partitioning:
                 # -> No partitioning !
-                make_late_partitioning(
-                    self.rkgb_res, original_mod, partitioners=[Partitioner]
-                )
+                self.rkgb_res.build_hierarchical(partitioners)
                 list_solvers = [
                     HILP(
                         HILP.Config(
@@ -139,24 +148,22 @@ class HRockmate(torch.nn.Module):
                     )
                 ]
             else:
-                make_late_partitioning(
-                    self.rkgb_res, original_mod, partitioners=partitioners
-                )
+                self.rkgb_res.build_hierarchical(partitioners)
             self.partitioners = partitioners
             self.list_solvers = list_solvers
-            self.dict_constants = self.rkgb_res.K_graph.dict_constants
-            self.init_code = ast_to_str(self.rkgb_res.K_graph.init_code)
+            self.dict_constants = self.rkgb_res.forward_and_backward_graph.dict_constants
+            self.init_code = ast_to_str(self.rkgb_res.forward_and_backward_graph.init_code)
             self.dict_output_viewing_code = dict(
                 (out_mt, ast_to_str(view_code))
                 for (
                     out_mt,
                     view_code,
-                ) in self.rkgb_res.K_graph.dict_output_viewing_code.items()
+                ) in self.rkgb_res.forward_and_backward_graph.dict_output_viewing_code.items()
             )
-            self.outputs_wrapping_code = ast_to_str(
-                self.rkgb_res.K_graph.outputs_wrapping_code
-            )
-            self.output = self.rkgb_res.K_graph.list_outputs_kdn_data[0]
+            # self.outputs_wrapping_code = ast_to_str(
+            #     self.rkgb_res.K_graph.outputs_wrapping_code
+            # )
+            self.output = self.rkgb_res.forward_and_backward_graph.list_output_data_anodes[0]
             self.budget = budget
             p = list(original_mod.parameters())[0]
             cpu_optimize_stats = get_cpu_optimize_stats(p, 
@@ -179,7 +186,7 @@ class HRockmate(torch.nn.Module):
             self.module_does_not_req_grad = True
 
     def preprocess(self):
-        for cluster in self.rkgb_res.H_cluster.all_clusters:
+        for cluster in self.rkgb_res.hierarchical_structure.all_clusters:
             if not cluster.is_bottom:
                 preprocess(
                     cluster,
@@ -195,7 +202,7 @@ class HRockmate(torch.nn.Module):
         self.preprocess()
 
         solve_recursive(
-            self.rkgb_res.H_cluster, list_solvers=list_solvers, skip_self=True
+            self.rkgb_res.hierarchical_cluster, list_solvers=list_solvers, skip_self=True
         )
 
     def solve_sched(self, budget=None, list_solvers=None, rec=True):
@@ -210,10 +217,10 @@ class HRockmate(torch.nn.Module):
         for solver in list_solvers:
             if isinstance(solver, HILP):
                 hilp_solver = True
-            if isinstance(solver, RK_rotor):
-                rotor_solver = True
-            if isinstance(solver, RK_checkmate):
-                checkmate_solver = True
+            # if isinstance(solver, RK_rotor):
+            #     rotor_solver = True
+            # if isinstance(solver, RK_checkmate):
+            #     checkmate_solver = True
 
         for solver in list_solvers:
             if isinstance(solver, HILP):
@@ -225,17 +232,17 @@ class HRockmate(torch.nn.Module):
         if (
             True
             in [
-                isinstance(solver, HILP) or isinstance(solver, RK_rotor)
+                isinstance(solver, HILP)# or isinstance(solver, RK_rotor)
                 for solver in list_solvers
             ]
             and rec
         ):
             self.solver_recursive()
-        elif (
-            True in [isinstance(solver, RK_checkmate) for solver in list_solvers]
-            and rec
-        ):
-            self.preprocess()
+        # elif (
+        #     True in [isinstance(solver, RK_checkmate) for solver in list_solvers]
+        #     and rec
+        # ):
+        #     self.preprocess()
 
         list_solutions = []
         for solver in list_solvers:
@@ -244,14 +251,14 @@ class HRockmate(torch.nn.Module):
                 solver.config.cpu_optimize_kwargs = self.gd["cpu_optimize_stats"]
                 # print("temporarily changing total_nodes for top level hilp")
                 list_solutions.extend(
-                    solver(self.rkgb_res.H_cluster, [budget], accurate_mem=True)
+                    solver(self.rkgb_res.hierarchical_cluster, [budget], accurate_mem=True)
                 )
                 solver.config.solve_top_level = False  # in case further usage
 
             else:
-                list_solutions.extend(solver(self.rkgb_res.H_cluster, [budget]))
+                list_solutions.extend(solver(self.rkgb_res.hierarchical_cluster, [budget]))
 
-        self.rkgb_res.H_cluster.list_sched.extend(list_solutions)
+        self.rkgb_res.hierarchical_cluster.list_schedules.extend(list_solutions)
         if not list_solutions:
             warnings.warn("no feasible schedule is found")
         else:
@@ -275,7 +282,7 @@ class HRockmate(torch.nn.Module):
         self.bwd_fct_list.append(l)
         self.minor_parameters = []
         for n, p in self.original_mod.named_parameters():
-            if n not in [kdn.main_target for kdn in self.rkgb_res.H_cluster.list_kdn_parameters]:
+            if n not in [kdn.param_name for kdn in self.rkgb_res.hierarchical_cluster.parameter_nodes]:
                 self.minor_parameters.append(p)
                 # p.data = p.data.to("cuda")
         
@@ -702,7 +709,7 @@ class HRockmate(torch.nn.Module):
         self.original_mod.zero_grad(set_to_none=set_to_none)
 
     def print_sched_results(self):
-        t = sum(kcn.time for kcn in self.rkgb_res.H_cluster.list_kcn if kcn.time)
+        t = sum(kcn.time for kcn in self.rkgb_res.hierarchical_cluster.list_cnodes if kcn.time)
         print(f"Original module iter time {t}")
         t = sum(step.time for step in self.op_sched.steps)
         print(f"Schedule: total time {t}")
@@ -756,7 +763,7 @@ class HRockmate(torch.nn.Module):
         with open(f"{path}/{id}_rkgb_res.pkl", "rb") as f:
             self.rkgb_res = pickle.load(f)
             if load_sched:
-                self.list_solutions = self.rkgb_res.H_cluster.list_sched
+                self.list_solutions = self.rkgb_res.hierarchical_cluster.list_schedules
                 try:
                     with open(f"{path}/{id}_sched.pkl", "rb") as f_sched:
                         self.op_sched = pickle.load(f_sched)

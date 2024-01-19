@@ -60,15 +60,15 @@ class Activation(Allocation):
 
 
 class Parameter(Allocation):
-    def __init__(self, kdn, grad=False):
+    def __init__(self, pnode, grad=False):
         super().__init__(
-            name=kdn.name + "_grad"*grad,
+            name=pnode.param_name + "_grad"*grad,
             alloc_type="Parameter",
-            mem=kdn.mem,
-            info=kdn.info,
-            dtype=kdn.info.dtype,
+            mem=pnode.mem,
+            info=pnode.info,
+            dtype=pnode.info.dtype,
         )
-        self.kdn = kdn
+        self.pnode = pnode
         self.grad = grad
     
     def __copy__(self):
@@ -82,7 +82,7 @@ class Parameter(Allocation):
         result = cls.__new__(cls)
         memo[id(self)] = result
         for k, v in self.__dict__.items():
-            if k == "kdn":  # do not deepcopy kn
+            if k == "pnode":  # do not deepcopy kn
                 setattr(result, k, v)
             else:
                 setattr(result, k, deepcopy(v, memo))
@@ -396,10 +396,10 @@ class OpSchedule:
             self.list_anodes = cluster.list_anodes
             if with_parameters:
                 self.list_alloc.extend(
-                    [Parameter(kdn) for kdn in cluster.list_anodes_parameters]
+                    [Parameter(kdn) for kdn in cluster.parameter_nodes]
                 )
                 self.list_alloc.extend(
-                    [Parameter(kdn, grad=True) for kdn in cluster.list_anodes_parameters
+                    [Parameter(kdn, grad=True) for kdn in cluster.parameter_nodes
                      if kdn.info.requires_grad]
                 )# add parameter grad allocation
                 self.list_alloc.extend(self.create_buffer_list())
@@ -602,12 +602,12 @@ class OpSchedule:
         self.bwd2param = {}
         for alloc in self.list_alloc:
             if isinstance(alloc, Parameter) and "grad" in alloc.name:
-                for kcn in alloc.kdn.users_real:
+                for kcn in alloc.pnode.users_real:
                     kcn_name = kcn.name.replace("fwd", "bwd")
                     if kcn_name in self.bwd2param:
-                        self.bwd2param[kcn_name].append(alloc.kdn.name+"_grad")
+                        self.bwd2param[kcn_name].append(alloc.pnode.param_name+"_grad")
                     else:
-                        self.bwd2param[kcn_name] = [alloc.kdn.name+"_grad"]
+                        self.bwd2param[kcn_name] = [alloc.pnode.param_name+"_grad"]
                 
         alive_list = []
         for op in self.op_list:
@@ -825,26 +825,3 @@ class OpSchedule:
         return [
                 (str(op) if not op.disabled else "") for op in self.op_list
             ]
-
-# def hg_to_cluster(hg: H_graph, kg: K_graph):
-#     interfaces = dict()
-#     interfaces["input_data_anodes"] = set(hdn.kdn for hdn in hg.inputs_hdn_data)
-#     interfaces["output_data_anodes"] = set(hdn.kdn for hdn in hg.outputs_hdn_data)
-#     interfaces["input_grad_anodes"] = set(hdn.kdn for hdn in hg.inputs_hdn_grad)
-#     interfaces["output_grad_anodes"] = set(hdn.kdn for hdn in hg.outputs_hdn_grad)
-#     # interfaces["all"] = hg.interfaces
-#     list_cnodes = []
-#     loss_kcn = K_C_node("loss")
-#     for kdn in interfaces["output_data_anodes"]:
-#         loss_kcn.deps_real.add(kdn)
-#     for kdn in interfaces["output_grad_anodes"]:
-#         loss_kcn.users.add(kdn)
-#     for kcn in kg.list_cnodes:
-#         if kcn in hg.all_kcn_inside or kcn.main_target in hg.name:
-#             # bottom level hg has no kcn inside
-#             list_cnodes.append(kcn)
-#         if kcn == kg.loss_kcn:
-#             loss_idx = len(list_cnodes)
-#             list_cnodes.append(loss_kcn)
-#     cluster = Cluster(list_cnodes, interfaces, loss_idx)
-#     return cluster

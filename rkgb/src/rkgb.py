@@ -103,6 +103,7 @@ class Result():
             self.hierarchical_structure = HierarchicalStructure(
                 self.partitioned_structure,
                 self.forward_and_backward_graph)
+            self.hierarchical_cluster = self.hierarchical_structure.main_cluster
 
     @property
     def R(self):

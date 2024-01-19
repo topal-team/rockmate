@@ -214,13 +214,13 @@ class ModelPULP:
         self.protected_indices = [
             i
             for i, hdn in enumerate(self.hgraph.list_HANs)
-            if hdn.kdn.name in protected_names
+            if hdn.anode.name in protected_names
         ]
         if accurate_mem:
             self.protected_indices += [
                 i
                 for i, hdn in enumerate(self.hgraph.list_HANs)
-                if hdn.kdn in self.hgraph.cluster.interfaces["output_data_anodes"]
+                if hdn.anode in self.hgraph.cluster.interfaces["output_data_anodes"]
             ]
 
         self.input_grad_indices = [
@@ -441,13 +441,13 @@ class ModelPULP:
 
             for i,sub_cluster in enumerate(hierarchical_nodes):
                 if not hasattr(sub_cluster, "required_parameter_nodes_real"):continue
-                for kdn in sub_cluster.required_parameter_nodes_real:
-                    # sub_c2params[sub_cluster.name].add(kdn.name)
-                    all_params[kdn.name] = kdn
-                    if kdn.name not in param2sub_c:
-                        param2sub_c[kdn.name] = {i}
+                for pnode in sub_cluster.required_parameter_nodes_real:
+                    # sub_c2params[sub_cluster.name].add(pnode.param_name)
+                    all_params[pnode.param_name] = pnode
+                    if pnode.param_name not in param2sub_c:
+                        param2sub_c[pnode.param_name] = {i}
                     else:
-                        param2sub_c[kdn.name].add(i)
+                        param2sub_c[pnode.param_name].add(i)
             result = {}
             for p, c in param2sub_c.items():
                 c_ = tuple(sorted(c))
@@ -483,8 +483,8 @@ class ModelPULP:
                 for hcn in hcn_s:
                     self.hcn2param[hcn].append(p)
 
-            self.parameter_size = [sum(kdn.mem for kdn in p)/self.gcd for p in self.parameters]
-            self.parameter_gradient_size = [sum(kdn.mem for kdn in p if kdn.info.requires_grad
+            self.parameter_size = [sum(pnode.mem for pnode in p)/self.gcd for p in self.parameters]
+            self.parameter_gradient_size = [sum(pnode.mem for pnode in p if pnode.info.requires_grad
                                                 )/self.gcd for p in self.parameters]
             self.W = W = len(self.parameters)
 
@@ -739,9 +739,9 @@ class ModelPULP:
                     list_sched = self.list_list_sched[j]
                     for i in list_sched[o].dep_interfaces_data:
                         hcn = self.hgraph.list_HCNs[fwd_i]
-                        name = self.sub_clusters[j].list_kdn[i].name
+                        name = self.sub_clusters[j].list_anodes[i].name
                         # Tensor req_i is required by BWD
-                        req_i = [hdn.kdn.name for hdn in self.hgraph.list_HANs].index(
+                        req_i = [hdn.anode.name for hdn in self.hgraph.list_HANs].index(
                             name
                         )
                         for j_, (k_, i_) in enumerate(self.create_list):
@@ -939,10 +939,10 @@ class ModelPULP:
                                     continue
 
                                 i_ = [
-                                    hdn.kdn.name for hdn in self.hgraph.list_HANs
+                                    hdn.anode.name for hdn in self.hgraph.list_HANs
                                 ].index(
                                     self.sub_clusters[j]
-                                    .list_kdn[inter_position[0]]
+                                    .list_anodes[inter_position[0]]
                                     .name
                                 )
                                 if inter_position[1] == "always":
@@ -1283,9 +1283,8 @@ class ModelPULP:
             if not self.single_fwd and self.sol(self.sumComp[t,fwd_i].value()):
                 early_fwd.append(t)#if recompute fwd after bwd
         hcn = self.hgraph.list_HCNs[fwd_i]
-        # parameters = {kdn.name: kdn for kdn in hcn.sub_cluster.list_kdn_parameters}
-        parameters = {kdn.name: kdn for kdn in self.parameters[w]}
-        parameter_size = sum(kdn.mem for kdn in parameters.values())
+        parameters = {pnode.param_name: pnode for pnode in self.parameters[w]}
+        parameter_size = sum(pnode.mem for pnode in parameters.values())
 
         Alive = {p: 1 for p in parameters.keys()}
         Offloaded = {p: False for p in parameters.keys()}
@@ -1432,8 +1431,8 @@ class ModelPULP:
             # print(select_paras)
             
         # Optimize parameters which requires grad
-        for p, kdn in parameters.items():
-            if not kdn.info.requires_grad:continue
+        for p, pnode in parameters.items():
+            if not pnode.info.requires_grad:continue
             if p in select_paras:
                 self.cpu_optimized_params[p] = parameters[p].mem
                 apply_cpu_optimize(p)
@@ -1455,8 +1454,8 @@ class ModelPULP:
 
         sol = self.sol
 
-        T = len(hgraph.list_hcn)
-        I = len(hgraph.list_hdn)
+        T = len(hgraph.list_HCNs)
+        I = len(hgraph.list_HANs)
         J = len(self.list_list_sched)
         init_op_list = []
         restore_op_list = []
@@ -1476,7 +1475,7 @@ class ModelPULP:
             for t in range(T):
                 for k in self.krange(t):
                     if t == self.loss_idx and k == self.loss_idx:
-                        op_list.append(ComputeOp(self.hgraph.cluster.loss_kcn))
+                        op_list.append(ComputeOp(self.hgraph.cluster.loss_cnode))
                     op_list += self.schedule_compute(t,k,hgraph)
         
         op_sched = OpSchedule(
@@ -1508,7 +1507,7 @@ class ModelPULP:
         j = self.hcn2sub_c[k]
         # if self.sumComp[t, k].value() == 1:
         if sol(self.sumComp[t, k].value()):
-            hcn = hgraph.list_hcn[k]
+            hcn = hgraph.list_HCNs[k]
             opt = -1
             for o in range(self.nOpts[k]):
                 if sol(self.Comp[t, k, o].value()):
@@ -1562,8 +1561,8 @@ class ModelPULP:
             # print(k_, i)
             # if k == k_ and self.delete[t, eidx].value()==1:
             if k == k_ and sol(self.delete[t, eidx].value()):
-                hdn = hgraph.list_hdn[i]
-                op_list.append(DeleteOp(Activation(hdn.kdn)))
+                hdn = hgraph.list_HANs[i]
+                op_list.append(DeleteOp(Activation(hdn.anode)))
         return op_list
 
     def greedy_post_processing(self, hgraph=None):
@@ -1573,8 +1572,8 @@ class ModelPULP:
         """
         hgraph = hgraph if hgraph else self.hgraph
         assert self.feasible, "Cannot schedule an infeasible model!"
-        T = len(hgraph.list_hcn)
-        I = len(hgraph.list_hdn)
+        T = len(hgraph.list_HCNs)
+        I = len(hgraph.list_HANs)
         J = len(self.list_list_sched)
         W = len(self.parameter_size)
 
@@ -1617,16 +1616,7 @@ class ModelPULP:
         # offload_buffers = {w:[] for w in range(W)}
         op_list = []
         init_alive_status = dict()
-        # for kdn in self.hgraph.cluster.list_kdn_parameters:
-        #     init_alive_status[kdn.name] = True
-        # for w in range(W):
-        #     hcn = self.hgraph.list_HCNs[self.param2hcn[w]]
-        #     self.current_buffers[w] = Parameter(hcn.sub_cluster.name)
-        # self.cpu_optimized_params = []
-        # for (_,_,op) in self.opt_ops:
-        #     if isinstance(op, OptimizeOp):
-        #         self.cpu_optimized_params.append(op.target.name)
-
+        
         for t in range(T):
             for k in self.krange(t):
                 op_list.append(SynchronizeOp(f"{(t,k)}"))
@@ -1634,7 +1624,7 @@ class ModelPULP:
                     # loss_idx = len(op_list)
                     # loss_op = Op(K_C_node("loss"))
 
-                    op_list.append(ComputeOp(self.hgraph.cluster.loss_kcn))
+                    op_list.append(ComputeOp(self.hgraph.cluster.loss_cnode))
                 if not sol(self.sumComp[t, k].value()):
                     continue
                 j = self.hcn2sub_c[k]
@@ -1669,7 +1659,7 @@ class ModelPULP:
                 if (
                     t_ == t
                     and k_ == k
-                    and op.target.kdn.name in [k.name for k in self.parameters[w]]
+                    and op.target.pnode.param_name in [k.param_name for k in self.parameters[w]]
                 ):
                     op_list.append(op)
             return op_list
@@ -1682,7 +1672,7 @@ class ModelPULP:
                 if (
                     t_ == t
                     and k_ == k
-                    and op.target.kdn.name in [k.name for k in self.parameters[w]]
+                    and op.target.pnode.param_name in [k.param_name for k in self.parameters[w]]
                 ):
                     op_list.append(op)
             return op_list
@@ -1697,7 +1687,7 @@ class ModelPULP:
                 if (
                     t_ == t
                     and k_ == k
-                    and op.target.kdn.name in [k.name for k in self.parameters[w]]
+                    and op.target.pnode.param_name in [k.param_name for k in self.parameters[w]]
                 ):
                     pre_op_list.append(op)
 
@@ -1711,7 +1701,7 @@ class ModelPULP:
                 if (
                     t_ == t
                     and k_ == k
-                    and op.target.kdn.name in [k.name for k in self.parameters[w]]
+                    and op.target.pnode.param_name in [k.param_name for k in self.parameters[w]]
                 ):
                     op_list.append(op)
             return op_list
