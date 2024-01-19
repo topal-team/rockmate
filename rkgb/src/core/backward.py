@@ -135,7 +135,7 @@ class ParameterNode(base.ParameterNode):
 class ForwardAndBackwardGraph(base.Graph):
     source_data_anode : AllocationNode = None
     list_output_data_anodes : list[AllocationNode] = None
-    loss_computation_node : ComputationNode = None
+    loss_cnode : ComputationNode = None
     list_output_grad_anodes : list[AllocationNode] = None
     source_grad_anode : AllocationNode = None
     # Note: We no longer have chain/list of K_graph,
@@ -431,7 +431,7 @@ class ForwardAndBackwardGraph(base.Graph):
             deps_real = set(self.list_output_data_anodes),
             graph = self
         )
-        self.loss_computation_node = loss_cnode
+        self.loss_cnode = loss_cnode
         loss_cnode.time = 0
         loss_cnode.mem_overhead = 0
         self.dict_fwd_cnodes[loss_cnode.main_target] = loss_cnode

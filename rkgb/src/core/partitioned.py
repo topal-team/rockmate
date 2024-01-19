@@ -113,7 +113,7 @@ class PartitionedGraph(base.Graph):
         else:
             graph_nb = -1
         self.graph_nb = graph_nb
-        self.name = f"PartitionedGraph_{graph_nb}"
+        self.name = f"PartitionedGraph({graph_nb})"
 
         # 2) Real constructor in case we have a partitioned_cluster
         self.cluster = partitioned_cluster

@@ -32,6 +32,8 @@ class HierarchicalComputationNode(base.Node):
         self.deps = set()  # HAN set
         self.users = set()  # HAN set
         self.deps_through_artifacts = set()  # HCN set
+        self.required_parameter_nodes_real = set()
+        self.required_parameter_nodes_fake = set()
         self._topological_number = _topological_number
         # About self._topological_number :
         # When toposorting list_hcn we want to respect as much as possible
@@ -99,6 +101,7 @@ class HierarchicalAllocationNode(base.Node):
         return f"Hierarchical_{anode.allocation_type}_{anode.mt}"
 
 
+
 class HierarchicalParameterNode(base.ParameterNode):
     """
     Sub class base.ParameterNode, to add .users_real/fake 
@@ -119,11 +122,16 @@ class HierarchicalParameterNode(base.ParameterNode):
 # * HierarchicalGraph *
 # ***********
 class HierarchicalGraph(base.Graph):
-    def __init__(self, name, h_cluster = None):
+    def __init__(self,
+            h_cluster,
+            p_graph : PartitionedGraph,
+            fb_graph : ForwardAndBackwardGraph):
         super().__init__()
         # /!\ All the HCN's and HAN's should be in the same level. /!\ 
-        self.name = name
-        self.dict_nodes = dict()  #  name -> HN
+        self.graph_nb = p_graph.graph_nb
+        self.name = f"HierarchicalGraph({self.graph_nb})"
+        self.cluster : HierarchicalCluster = h_cluster
+        self.dict_HN = dict()  #  name -> HN
         self.list_HCNs = []  #  toposorted
         self.list_HANs = []  #  including interface HANs
         self.input_data_HANs = set()  # HAN set -> inputs' data
@@ -131,17 +139,212 @@ class HierarchicalGraph(base.Graph):
         self.output_grad_HANs = set()  # HAN set -> outputs' grad
         self.input_grad_HANs = set()  # HAN set -> inputs' grad
         self.loss_hcn = None
-        if h_cluster is not None:
-            self.cluster = h_cluster
-            self.all_clusters = set([h_cluster])
-        else:
-            self.cluster = None
-            self.all_clusters = set()
 
-    def make_users(self):
-        for hn in self.dict_nodes.values():
-            for req_hn in hn.deps:
-                req_hn.users.add(hn)
+        # == Useful dictionaries to build interfaces and edges ==
+        dict_mt_to_data_han = dict()
+        dict_mt_to_grad_han = dict()
+        dict_han_to_anode : dict[HierarchicalAllocationNode, AllocationNode] = dict()
+        # A han represents exactly one anode
+        dict_cnode_to_hcn : dict[ComputationNode, HierarchicalComputationNode] = dict()
+        # At a fixed level of depth, a cnode can be found in only one hcn
+        # Warning: the opposite isn't true: one HCN may contain multiple cnodes
+        #  -> These two dict make it super easy to build edges
+
+        # ======== PROCEED EACH NODE ONE BY ONE ========
+        # For a P_node: build the corresponding HCNs/HANs (fwd/bwd + data/grad)
+        for pn_to_proceed in p_graph.nodes:
+            # Generate pn's sub structure if needed
+            if (pn_to_proceed.is_leaf 
+            and pn_to_proceed.main_target not in fb_graph.dict_bwd_cnodes):
+                pn_sub_cluster = None
+            else:
+                pn_sub_cluster = HierarchicalCluster(fb_graph,p_node = pn_to_proceed)
+            
+            # There are two cases:
+            # If pn_to_proceed is a leaf node, then we simply generate corresponding
+            # fwd_hcn(mt), data_han(mt), bwd_hcn(mt) and grad_han(mt) (if requires_grad)
+            # otherwise we have a non trivial sub cluster representing multiple nodes
+            # CASE 1: bottom
+            if pn_to_proceed.is_leaf:
+                target_to_proceed = pn_to_proceed.main_target
+                # 1) Forward Hierarchical Computation Node
+                fwd_cnode = fb_graph.dict_fwd_cnodes[target_to_proceed]
+                fwd_hcn = HierarchicalComputationNode(
+                    fwd_cnode.name,
+                    main_target = target_to_proceed,
+                    info = fwd_cnode.info,
+                    sub_cluster = pn_sub_cluster,
+                    is_fwd = True,
+                    _topological_number = fwd_cnode._topological_number)
+                dict_cnode_to_hcn[fwd_cnode] = fwd_hcn
+
+                # 2) Data Hierarchical Allocation Node
+                if target_to_proceed not in dict_mt_to_data_han: # interfaces of sub clusters overlap 
+                    data_anode = fb_graph.dict_data_anodes[target_to_proceed]
+                    data_han = HierarchicalAllocationNode(data_anode)
+                    dict_han_to_anode[data_han] = data_anode
+                    dict_mt_to_data_han[target_to_proceed] = data_han
+
+                if target_to_proceed in fb_graph.dict_bwd_cnodes:
+                    # 3) Backward Hierarchical Computation Node
+                    bwd_cnode = fb_graph.dict_bwd_cnodes[target_to_proceed]
+                    bwd_hcn = HierarchicalComputationNode(
+                        bwd_cnode.name,
+                        main_target = target_to_proceed,
+                        info = bwd_cnode.info,
+                        sub_cluster = pn_sub_cluster,
+                        is_fwd = False,
+                        _topological_number = bwd_cnode._topological_number)
+                    dict_cnode_to_hcn[bwd_cnode] = bwd_hcn
+
+                    # 4) Grad Hierarchical Allocation Node
+                    if target_to_proceed not in dict_mt_to_grad_han: # interfaces of sub clusters overlap
+                        grad_anode = fb_graph.dict_grad_anode[target_to_proceed]
+                        grad_han = HierarchicalAllocationNode(grad_anode)
+                        dict_han_to_anode[grad_han] = grad_anode
+                        dict_mt_to_grad_han[target_to_proceed] = grad_han
+
+                # CASE 2: NOT bottom
+                else:
+                    # 1) topological_number
+                    # => fwd_hcn.topological_number = min cnode.topological_number for cnode inside HCN
+                    # => and bwd_hcn's topological_number is the max
+                    # Reminder: topological_number guide the toposort, so 
+                    # we want fwd_hcn to be place at the position of the first cnode it includes
+                    # and bwd_hcn to come on the last position
+                    fwd_hcn_num = 999999
+                    bwd_hcn_num = -1
+                    for cnode in pn_sub_cluster.list_cnodes:
+                        if not hasattr(cnode,"_topological_number"): continue
+                        if cnode.is_fwd:
+                            fwd_hcn_num = min(fwd_hcn_num,cnode._topological_number)
+                        else:
+                            bwd_hcn_num = max(bwd_hcn_num,cnode._topological_number)
+
+                    # 2) Hierarchical Computation Nodes
+                    fwd_hcn = HierarchicalComputationNode(
+                        f"FWD[{pn_to_proceed.name}]",
+                        sub_cluster = pn_sub_cluster,
+                        is_fwd = True,
+                        _topological_number = fwd_hcn_num)
+                    bwd_hcn = HierarchicalComputationNode(
+                        f"BWD[{pn_to_proceed.name}]",
+                        sub_cluster = pn_sub_cluster,
+                        is_fwd = False,
+                        _topological_number = bwd_hcn_num)
+                    for cnode in pn_sub_cluster.list_cnodes:
+                        dict_cnode_to_hcn[cnode] = fwd_hcn if cnode.is_fwd else bwd_hcn
+                        # fwd_hcn represents all the fwd cnodes inside of
+                        #  the sub graph and bwd_hcn all the bwd cnodes
+
+                    # 3) Hierarchical Allocation Nodes
+                    # -> The interfaces, ie inputs/outputs, of the sub cluster
+                    for anode in pn_sub_cluster.all_interfaces:
+                        han = HierarchicalAllocationNode(anode)
+                        if han.is_data:
+                            if anode.mt not in dict_mt_to_data_han:
+                                dict_han_to_anode[han] = anode
+                                dict_mt_to_data_han[han.mt] = han
+                        else:
+                            if anode.mt not in dict_mt_to_grad_han:
+                                dict_han_to_anode[han] = anode
+                                dict_mt_to_grad_han[han.mt] = han
+        # ===== END OF PROCESSING EACH PN =====
+        
+        # 1) Loss HCN
+        self.loss_hcn = HierarchicalComputationNode(
+            f"Loss_HCN[Graph_{self.graph_nb}]",
+            main_target = "loss"
+        )
+
+        # 2) Missing HANs
+        # When we processed each pn, for non bottom ones we created
+        # all the interfaces (good), but for bottom ones, we only
+        # have the targets created, not the deps.
+        # Hence we might miss some inputs:
+        for inp_mt in h_cluster.p_cluster.inputs_mt:
+            if inp_mt not in dict_mt_to_data_han:
+                data_anode = fb_graph.dict_data_anodes[inp_mt]
+                han_data = HierarchicalAllocationNode(data_anode)
+                dict_han_to_anode[han_data] = data_anode
+                dict_mt_to_data_han[han_data.mt] = data_anode
+                if inp_mt in fb_graph.dict_grad_anodes:
+                    grad_anode = fb_graph.dict_grad_anodes[inp_mt]
+                    if grad_anode in h_cluster.all_interfaces:
+                        han_grad = HierarchicalAllocationNode(grad_anode)
+                        dict_han_to_anode[han_grad] = grad_anode
+                        dict_mt_to_grad_han[han_grad.mt] = grad_anode
+
+        # 3) Register the nodes and interfaces
+        self.list_HANs = list(dict_han_to_anode.keys())
+        self.list_HCNs = list(dict_cnode_to_hcn.values())
+        self.list_HCNs.append(self.loss_hcn)
+        self.dict_nodes = dict(
+            [(han.name,han) for han in self.list_HANs]
+          + [(hcn.name,hcn) for hcn in self.list_HCNs]
+        )
+        dict_anode_to_han = dict((anode,han) for (han,anode) in dict_han_to_anode.items())
+        self.input_data_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["input_data_anodes"])
+        self.output_data_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["output_data_anodes"])
+        self.input_grad_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["input_grad_anodes"])
+        self.output_grad_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["output_grad_anodes"])
+
+        # ====== EDGES ======
+        # 4) Classic edges
+        # The idea is, for each 'HAN', we have the corresponding 'anode'
+        # and for 'cnode' in 'anode'.deps/users, we have the 'HCN' which
+        # contains 'cnode' => we transpose the edge to 'HAN'.deps/users.add('HCN)
+        for han in self.list_HANs:
+            anode = dict_han_to_anode[han]
+            for cnode in anode.deps: # TO REMOVE:  if anode.mt != constants.init_target_string else anode.deps_global:
+                if cnode is not fb_graph.loss_cnode:
+                    if cnode in dict_cnode_to_hcn:
+                        hcn = dict_cnode_to_hcn[cnode]
+                        han.deps.add(hcn)
+                        hcn.users.add(han)
+            for cnode in anode.users_real: # TO REMOVE: if anode.mt != constants.init_target_string else anode.users_global:
+                if cnode is not fb_graph.loss_cnode:
+                    if cnode in dict_cnode_to_hcn:
+                        hcn = dict_cnode_to_hcn[cnode]
+                        if not (hcn in han.deps):
+                            han.users.add(hcn)
+                            hcn.deps.add(han)
+
+        # 5) Loss edges
+        for han in self.output_data_HANs:
+            han.users.add(self.loss_hcn)
+            self.loss_hcn.deps.add(han)
+        for han in self.output_grad_HANs:
+            han.deps.add(self.loss_hcn)
+            self.loss_hcn.users.add(han)
+
+        # 6) Artifact edges
+        for cnode,hcn in dict_cnode_to_hcn.items():
+            for req_via_art_cnode in cnode.deps_through_artifacts:
+                if req_via_art_cnode in dict_cnode_to_hcn:
+                    req_via_art_hcn = dict_cnode_to_hcn[req_via_art_cnode]
+                    if req_via_art_hcn is not hcn:
+                        hcn.deps_through_artifacts.add(
+                            req_via_art_hcn
+                        )
+
+        self.list_HCNs = self.get_sorted_nodes_by_following_deps_relation()
+
+        # 7) Parameter nodes
+        self.hierarchical_parameter_nodes = []
+        for param_node in self.cluster.parameter_nodes:
+            h_param_node = HierarchicalParameterNode(param_node)
+            self.hierarchical_parameter_nodes.append(h_param_node)
+            for cnode in param_node.users_real:
+                if cnode in dict_cnode_to_hcn:
+                    hcn = dict_cnode_to_hcn[cnode]
+                    hcn.required_parameter_nodes_real.add(h_param_node)
+                    h_param_node.users_real.add(hcn)
+            for cnode in param_node.users_fake:
+                if cnode in dict_cnode_to_hcn:
+                    hcn = dict_cnode_to_hcn[cnode]
+                    hcn.required_parameter_nodes_fake.add(h_param_node)
+                    h_param_node.users_fake.add(hcn)
 
     # **********************************
     # == OVERWRITE base.Graph METHODS ==
@@ -171,9 +374,9 @@ class HierarchicalGraph(base.Graph):
 
 
 
-# *************
+# ***********************
 # * HierarchicalCluster *
-# *************
+# ***********************
 class HierarchicalCluster():
     is_bottom : bool = None
     # Warning: A bottom cluster is composed of ComputationNodes
@@ -184,6 +387,7 @@ class HierarchicalCluster():
     loss_idx : int = None
     dict_nodes : dict = None
     interfaces : dict[str, set[AllocationNode]]
+    parameter_nodes : list[bwdParameterNode] = None
     translator : anonymize.ClusterTranslator = None
     p_cluster : PartitionedCluster = None
     p_node : PartitionedNode = None
@@ -245,7 +449,10 @@ class HierarchicalCluster():
                 input_grad_anodes.add(fb_graph.source_grad_anode)
             self.list_anodes = list(all_anodes)
 
-            # 5) useful attributes
+            # 5) Parameter nodes
+            self.parameter_nodes = list(fwd_cnode.required_parameter_nodes_real) # fake is empty, and bwd_cnode.params \included in fwd.params
+
+            # 6) useful attributes
             self.make_dict_nodes()
             self.interfaces = {
                 "input_data_anodes" : input_data_anodes,
@@ -253,6 +460,7 @@ class HierarchicalCluster():
                 "output_grad_anodes" : {grad_anode},
                 "input_grad_anodes"  : input_grad_anodes
             }
+        # ================ END FIRST CONSTRUCTOR ===================
 
 
         # ==========================================================
@@ -319,11 +527,17 @@ class HierarchicalCluster():
 
             self.list_anodes = list(all_anodes)
             self.make_dict_nodes()
-            # 5) Translator
+
+            # 5) Parameter Nodes
+            self.parameter_nodes = list(set().union(
+                *[cnode.required_parameter_nodes_real # fake is included in the rest
+                  for cnode in self.list_cnodes]))
+
+            # 6) Translator
             self.translator = p_cluster.translator
             self.translator.enrich_with_cnodes_and_anodes(self)
 
-            # 6) Partitionings
+            # 7) Partitionings
             if p_cluster is p_cluster.representee_cluster:
                 self.representee_cluster = self
                 self.partitionings = []
@@ -351,13 +565,7 @@ class HierarchicalCluster():
                         for ano in representee_anonymized_list_anodes
                     ]
                     assert(set(old_self_list_anodes) == set(self.list_anodes))
-
-
-
-
-
-
-
+        # ================ END SECOND CONSTRUCTOR ==================
 
 
     def make_dict_nodes(self):
@@ -439,183 +647,6 @@ class HierarchicalStructure():
         print(f"- A total of {len(biggest_hg.list_HCNs)} allocations")
 
         
-
-
-def PartitionedGraph_to_HierarchicalGraph(
-        pg : PartitionedGraph, 
-        h_cluster : HierarchicalCluster,
-        kg : ForwardAndBackwardGraph):
-    hg = HierarchicalGraph(pg.name.replace("pg","hg"),h_cluster)
-
-    # -> Useful for interfaces
-    dict_mt_to_han_data = dict()
-    dict_mt_to_han_grad = dict()
-
-    dict_han_to_anode : dict[HierarchicalAllocationNode, AllocationNode] = dict()
-    #  A han represents exactly one anode
-    dict_cnode_to_hcn : dict[ComputationNode, HierarchicalComputationNode] = dict()
-    #  At a fixed level of depth, a cnode can be found in only one hcn
-    #  -> These two dict make it super easy to build edges
-
-    for pn in pg.nodes:
-        sub_cluster = PartitionedNode_to_HierarchicalCluster(pn,kg)
-        if pn.is_leaf:
-            # === Bottom level ===
-            mt = pn.mt
-            # ** HCN_fwd **
-            cnode_fwd = kg.dict_cnode_fwd[mt]
-            hcn_fwd = HierarchicalComputationNode(
-                cnode_fwd.name,
-                main_target = mt,
-                info = cnode_fwd.info,
-                sub_cluster = sub_cluster, # = None if no grad
-                is_fwd = True,
-                _topological_number = cnode_fwd._topological_number)
-            dict_cnode_to_hcn[cnode_fwd] = hcn_fwd
-
-            # ** HAN_data **
-            if mt not in dict_mt_to_han_data: # interfaces of sub clusters overlap
-                anode_data = kg.dict_anode_data[mt]
-                han_data = HierarchicalAllocationNode(anode_data)
-                dict_han_to_anode[han_data] = anode_data
-                dict_mt_to_han_data[mt] = han_data
-            
-            if mt in kg.dict_cnode_bwd:
-                # ** HCN_bwd **
-                cnode_bwd = kg.dict_cnode_bwd[mt]
-                hcn_bwd = HierarchicalComputationNode(
-                    cnode_bwd.name,
-                    main_target = mt,
-                    info = cnode_bwd.info,
-                    sub_cluster = sub_cluster,
-                    is_fwd = False,
-                    _topological_number = cnode_bwd._topological_number)
-                dict_cnode_to_hcn[cnode_bwd] = hcn_bwd
-
-                # ** HAN_grad **
-                if mt not in dict_mt_to_han_grad: # interfaces of sub clusters overlap
-                    anode_grad = kg.dict_anode_grad[mt]
-                    han_grad = HierarchicalAllocationNode(anode_grad)
-                    dict_han_to_anode[han_grad] = anode_grad
-                    dict_mt_to_han_grad[mt] = han_grad
-
-        else:
-            # === NOT bottom ===
-            # ** HCN_fwd and bwd **
-            hcn_fwd_num = 999999
-            hcn_bwd_num = -1
-            for cnode in sub_cluster.list_cnode:
-                if not hasattr(cnode,"_topological_number"): continue
-                if cnode.is_fwd:
-                    hcn_fwd_num = min(hcn_fwd_num,cnode._topological_number)
-                else:
-                    hcn_bwd_num = max(hcn_bwd_num,cnode._topological_number)
-            hcn_fwd = HierarchicalComputationNode(
-                f"fwd_{pn.name}",
-                sub_cluster = sub_cluster,
-                is_fwd = True,
-                _topological_number = hcn_fwd_num)
-            hcn_bwd = HierarchicalComputationNode(
-                f"bwd_{pn.name}",
-                sub_cluster = sub_cluster,
-                is_fwd = False,
-                _topological_number = hcn_bwd_num)
-            for cnode in sub_cluster.list_cnode:
-                dict_cnode_to_hcn[cnode] = hcn_fwd if cnode.is_fwd else hcn_bwd
-
-            # ** HANs **
-            all_interfaces = sub_cluster.all_interfaces
-            for anode in all_interfaces:
-                han = HierarchicalAllocationNode(anode)
-                if han.is_data:
-                    if anode.mt not in dict_mt_to_han_data:
-                        dict_han_to_anode[han] = anode
-                        dict_mt_to_han_data[han.mt] = han
-                else:
-                    if anode.mt not in dict_mt_to_han_grad:
-                        dict_han_to_anode[han] = anode
-                        dict_mt_to_han_grad[han.mt] = han
-
-    # ** loss_hcn **
-    hg.loss_hcn = loss_hcn = HierarchicalComputationNode(
-        f"Loss_hcn_of_{hg.name}",
-        main_target = "loss"
-        )
-    
-    # ** missing HierarchicalAllocationNodes -> inputs of bottom sub nodes**
-    for inp_mt in h_cluster.p_cluster.inputs_mt:
-        if inp_mt not in dict_mt_to_han_data:
-            anode_data = kg.dict_anode_data[inp_mt]
-            han_data = HierarchicalAllocationNode(anode_data)
-            dict_han_to_anode[han_data] = anode_data
-            dict_mt_to_han_data[han_data.mt] = anode_data
-            if inp_mt in kg.dict_anode_grad:
-                anode_grad = kg.dict_anode_grad[inp_mt]
-                if anode_grad in h_cluster.all_interfaces:
-                    han_grad = HierarchicalAllocationNode(anode_grad)
-                    dict_han_to_anode[han_grad] = anode_grad
-                    dict_mt_to_han_grad[han_grad.mt] = anode_grad
-    
-    # ** register nodes **
-    hg.list_han = list(dict_han_to_anode.keys())
-    hg.list_hcn = list(dict_cnode_to_hcn.values())
-    hg.list_hcn.append(loss_hcn)
-    hg.dict_nodes = dict(
-        [(han.name,han) for han in hg.list_han]
-      + [(hcn.name,hcn) for hcn in hg.list_hcn]
-    )
-
-    # ** interfaces **
-    dict_anode_to_han = dict((anode,han) for (han,anode) in dict_han_to_anode.items())
-    hg.input_data_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["input_data_anodes"])
-    hg.output_data_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["output_data_anodes"])
-    hg.input_grad_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["input_grad_anodes"])
-    hg.output_grad_HANs = set(dict_anode_to_han[anode] for anode in h_cluster.interfaces["output_grad_anodes"])
-    
-    
-    # === Build the edges ===
-    for han in hg.list_han:
-        anode = dict_han_to_anode[han]
-        for cnode in anode.deps if anode.mt != constants.init_target_string else anode.deps_global:
-            if cnode is not kg.loss_cnode:
-                if cnode in dict_cnode_to_hcn:
-                    hcn = dict_cnode_to_hcn[cnode]
-                    han.deps.add(hcn)
-                    hcn.users.add(han)
-        for cnode in anode.users_real if anode.mt != constants.init_target_string else anode.users_global:
-            if cnode is not kg.loss_cnode:
-                if cnode in dict_cnode_to_hcn:
-                    hcn = dict_cnode_to_hcn[cnode]
-                    if not (hcn in han.deps):
-                        han.users.add(hcn)
-                        hcn.deps.add(han)
-
-    # -> loss edges
-    for han in hg.output_data_HANs:
-        han.users.add(loss_hcn)
-        loss_hcn.deps.add(han)
-    for han in hg.output_grad_HANs:
-        han.deps.add(loss_hcn)
-        loss_hcn.users.add(han)
-
-    # -> artifacts edges
-    for cnode,hcn in dict_cnode_to_hcn.items():
-        for req_via_art_cnode in cnode.deps_through_artifacts:
-            if req_via_art_cnode in dict_cnode_to_hcn:
-                req_via_art_hcn = dict_cnode_to_hcn[req_via_art_cnode]
-                if req_via_art_hcn is not hcn:
-                    hcn.deps_through_artifacts.add(
-                        req_via_art_hcn
-                    )
-
-    hg.list_HCNs = hg.get_sorted_nodes_by_following_deps_relation()
-    return hg
-
-
-
-
-
-
 
 
 # ==========================
