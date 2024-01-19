@@ -66,16 +66,16 @@ class Node_unique_id_generator():
 # =====                   =====
 # =============================
 
+no_target_string = "__No_Target__"
 class Node():
-    no_target_string = "__No_Target__"
     def __init__(
             self,
-            main_target : str = None,
+            main_target : str = no_target_string,
             target = None, mt = None, # aliases
             parent_structure_with_id_generator = None, # to get unique_id from it
             unique_id_generator : Node_unique_id_generator = None):
         # == init main_target ==
-        if not (main_target is None):
+        if main_target is not no_target_string:
             self.main_target = main_target
         elif not (target is None):
             self.main_target = target

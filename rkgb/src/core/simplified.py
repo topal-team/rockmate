@@ -458,14 +458,9 @@ class SimplifiedGraph(base.Graph):
             sn_info = sn.info
             if sn_info.variable_type is not torch.Tensor:
                 raise Exception(
-                  f"After simplifications there should be only "\
+                  f"After simplifications there should only be "\
                   f"tensors, but {sn_info.variable_type} "\
                   f"found for {sn.main_target}.")
-            # if sn_info.variable_type==torch.Size and not sn.is_artifact:
-                # raise Exception(
-                #   f"After simplifications, all remaining "\
-                #   f"\"size\" should be \"artifacts\", but "\
-                #   f"{sn.main_target} isn't an artifact")
     # ===== END BLOCK 1 : CLEAR and CHECK =====
 
 
@@ -664,6 +659,14 @@ class SimplifiedGraph(base.Graph):
                 sn.substitute_self_by_its_code_in_its_users(self)
         self.clear()
 
+    def simplify_sizes_without_deps(self):
+        # Special case: we simplify sizes nodes that don't have any req
+        nodes = list(self.nodes)
+        for sn in nodes:
+            if sn.deps == set() and sn.info.variable_type == torch.Size:
+                self.nodes.remove(sn)
+                self.init_node.insert(sn_to_insert=sn,strong=True,simplified_graph=self)
+
     def simplify_sizes(self):
         """
         1) merge the size nodes which have the same parent
@@ -671,6 +674,7 @@ class SimplifiedGraph(base.Graph):
            parent, and keep them only if needed -> artifact
         Note: from leaves to root (output_nodes to init_node)
         """
+        self.simplify_sizes_without_deps()
         nodes = [self.init_node] + self.nodes
         nodes.reverse()
         sn : SimplifiedNode
