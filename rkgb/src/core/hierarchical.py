@@ -530,14 +530,14 @@ class HierarchicalCluster():
                 all_anodes.add(fb_graph.dict_phantoms_anodes[target_to_proceed])
             input_data_anodes = set(fwd_cnode.deps_real)
             input_grad_anodes = set(bwd_cnode.users)
-            all_anodes.update(input_data_anodes)
-            all_anodes.update(input_grad_anodes)
 
             # 4) In case user of global source node
             if fwd_cnode in fb_graph.source_data_anode.users_real:
                 input_data_anodes.add(fb_graph.source_data_anode)
             if fb_graph.source_grad_anode in bwd_cnode.users:
                 input_grad_anodes.add(fb_graph.source_grad_anode)
+            all_anodes.update(input_data_anodes)
+            all_anodes.update(input_grad_anodes)
             self.list_anodes = list(all_anodes)
 
             # 5) Parameter nodes
@@ -720,12 +720,14 @@ class HierarchicalStructure():
         self.main_cluster = HierarchicalCluster(
             p_cluster = partitioned_structure.main_cluster,
             fb_graph = forward_and_backward_graph)
-        # Useful attributes :
-        self.dict_cluster_nb_to_cluster = dict(
-            (cluster_nb,p_cluster.h_cluster)
-            for (cluster_nb,p_cluster)
-            in partitioned_structure.dict_cluster_nb_to_cluster.items()
-        )
+        # Secondary attributes
+        self.make_all_targets_like_attributes(partitioned_structure)
+        for cluster in self.all_unique_clusters: cluster.list_schedules = []
+        for cluster in self.all_bottom_clusters: cluster.list_schedules = []
+
+
+    def make_all_targets_like_attributes(self,partitioned_structure):
+        # Collect all clusters and graphs
         self.all_clusters = set(
             p_cluster.h_cluster 
             for p_cluster in partitioned_structure.all_clusters)
@@ -735,13 +737,26 @@ class HierarchicalStructure():
         self.all_unique_graphs = set().union(
             *[set(h_cluster.partitionings) 
             for h_cluster in self.all_unique_clusters])
+        # Dict to easily find them based on cluster_nb
+        self.dict_cluster_nb_to_cluster = dict(
+            (h_cluster.cluster_nb,h_cluster)
+            for h_cluster in self.all_clusters
+        )
+        # Collect bottom ones
         self.all_bottom_clusters = set()
         for hg in self.all_unique_graphs:
             for hcn in hg.list_HCNs:
                 if hcn.sub_cluster is not None and hcn.sub_cluster.is_bottom:
                     self.all_bottom_clusters.add(hcn.sub_cluster)
-        for cluster in self.all_unique_clusters: cluster.list_schedules = []
-        for cluster in self.all_bottom_clusters: cluster.list_schedules = []
+        
+        self.dict_mt_to_bottom_cluster = dict(
+            (h_cluster.main_target,h_cluster)
+            for h_cluster in self.all_bottom_clusters
+        )
+        self.dict_nb_to_bottom_cluster = dict(
+            (base.Node.get_num_tar(h_cluster.main_target),h_cluster)
+            for h_cluster in self.all_bottom_clusters
+        )
         
 
     # ***************************************************

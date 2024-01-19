@@ -1,6 +1,6 @@
 __all__ = [
+    "lowlevel","core",
     "raw","base","forward","simplified","backward","partitioned","hierarchical",
-    "lowlevel",
     "Result"]
 
 from .core import base
@@ -12,6 +12,7 @@ from .core import partitioned
 from .core import hierarchical
 from .rkgb import Result
 from . import lowlevel
+from . import core
 
 
 # OLD
