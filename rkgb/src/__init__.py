@@ -1,3 +1,17 @@
+__all__ = ["raw","base","forward","simplified","backward","partitioned","hierarchical"]
+
+from .core import base
+from .core import raw
+from .core import forward
+from .core import simplified
+from .core import backward
+from .core import partitioned
+from .core import hierarchical
+from . import lowlevel
+
+
+# OLD
+"""
 __all__ = [
     "Btools","Dtools","Stools","Ktools","Atools_for_S_and_K","Ptools","Htools",
     "print_inputs","make_inputs",
@@ -17,3 +31,4 @@ from . import Htools
 from .main import print_inputs,make_inputs
 from .main import make_all_graphs,test_rkgb,make_late_partitioning
 from .main import RK_print as print
+"""

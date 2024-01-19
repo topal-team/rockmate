@@ -165,7 +165,7 @@ class Translator:  # to execute Op
             # return code for generate the target fake tensor (only for data/grad)
             prep_code = ""
             after_code = ""
-            req_shape = kdn.info.tsize
+            req_shape = kdn.info.tensor_size
             target_tensor = None
             mt = kdn.main_target
             dict_info = (

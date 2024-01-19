@@ -1,26 +1,24 @@
 # ====================================
 # = Useful functions for ast objects =
 # ====================================
+
+import sys
 import inspect
-from .imports import *
-from .global_vars import default_forced_kwargs 
-from .small_fcts import remove_prefix,remove_suffix
+import ast
+import astunparse
+from src.lowlevel import constants
+from src.utils import utils
+
+sys_info = sys.version_info
+python_version = sys_info.major + sys_info.minor/10
 
 # -- general --
 
-def ast_to_str(ast_code):
-    #return ast.unparse(ast.fix_missing_locations(ast_code))
-    code = astunparse.unparse(ast_code)
-    return remove_prefix(remove_suffix(code,"\n"),"\n")
-
-def open_attr_until_name(v):
-    l_name = []
-    while isinstance(v,ast.Attribute):
-        l_name.append(v.attr)
-        v = v.value
-    l_name.append(v.id)
-    l_name.reverse()
-    return l_name
+def ast_to_str(code_ast):
+    #return ast.unparse(ast.fix_missing_locations(code_ast))
+    if code_ast is None: return ""
+    code = astunparse.unparse(code_ast)
+    return utils.remove_prefix(utils.remove_suffix(code,"\n"),"\n")
 
 def make_ast_constant(v):
     x = ast.Constant(v)
@@ -32,6 +30,25 @@ def make_ast_module(l):
     try:    return ast.Module(l,[])
     except: return ast.Module(l)
 
+def open_all_nested_attributes(value):
+    list_attributes = []
+    while isinstance(value,ast.Attribute):
+        list_attributes.append(value.attr)
+        value = value.value
+    list_attributes.reverse()
+    return value,list_attributes
+
+def make_ast_attribute_from_list(parent_ast,list_attributes):
+    new_ast = parent_ast
+    for attr in list_attributes:
+        if attr.isdigit():
+            new_ast = ast.Subscript(new_ast,
+                slice=make_ast_constant(int(attr)))
+        else:
+            new_ast = ast.Attribute(new_ast,attr)
+    return new_ast
+
+
 
 # -- make_assign --
 # optional parameter **force_special_kwargs** : 
@@ -42,7 +59,7 @@ def make_ast_module(l):
 #   It relies on a dict of type :
 #   -> <fct_name -> (arg_name,arg_value) list to inforce>
 #   if force_special_kwargs=True then you use :
-#   -> global_vars.default_forced_kwargs
+#   -> constants.default_forced_kwargs
 #   you can also do force_special_kwargs=<your dict>
 
 def make_ast_assign(
@@ -53,12 +70,14 @@ def make_ast_assign(
     if force_special_kwargs and isinstance(right_part,ast.Call):
         # nothing done inplace, so we don't impact the code
         dict_forced_kwargs = (
-            default_forced_kwargs 
+            constants.default_forced_kwargs 
             if force_special_kwargs is True
             else force_special_kwargs)
         a = right_part
-        fct_name = a.func.id
-        if fct_name in dict_forced_kwargs:
+        if (isinstance(a,ast.Call) 
+        and isinstance(a.func,ast.Name)
+        and a.func.id in dict_forced_kwargs):
+            fct_name = a.func.id
             attrs_to_inforce = dict_forced_kwargs[fct_name]
             for arg_name,arg_pos,arg_value in attrs_to_inforce:
                 arg_value_ast = make_ast_constant(arg_value)
@@ -108,7 +127,7 @@ def make_str_assign(
 def make_str_list_assign(
     lc,prefix="",suffix="",force_special_kwargs=False
 ):
-    ls = [make_str_assign(c,prefix="",suffix="",
+    ls = [make_str_assign(c,prefix=prefix,suffix=suffix,
         force_special_kwargs=force_special_kwargs) for c in lc]
     return "\n".join(ls)
 
@@ -117,18 +136,67 @@ def make_str_list_assign(
 # -> older version compatibility
 
 def is_constant(v):
-    if py_version >= 3.8:
+    if python_version >= 3.8:
         return isinstance(v,ast.Constant)
     else:
-        rep = type(v) in [
+        answer = type(v) in [
             ast.Num,ast.Str,ast.Bytes,
-            ast.NameConstant]
-        if rep:
+            ast.NameConstant,ast.Constant]
+        if answer:
             if isinstance(v,ast.Num):
                 setattr(v,"value",v.n)
             elif isinstance(v,ast.Str) or isinstance(v,ast.Bytes):
                 setattr(v,"value",v.s)
-        return rep
+        return answer
 
 # ==========================
 
+def substitute_with_dict(code,dict_of_substitutions):
+    r""" dict: id (string) => ast.AST
+    Replace any string in 'code' by its correspondence in dict_of_substitutions
+    """
+    if isinstance(code,ast.Name):
+        if code.id in dict_of_substitutions:
+            return dict_of_substitutions[code.id]
+        else: return code
+    elif isinstance(code,ast.AST):
+        for attr in code._fields:
+            if attr != "ctx":
+                old_val = getattr(code,attr)
+                new_val = substitute_with_dict(old_val,dict_of_substitutions)
+                # Hopefully the depth of nested ast.AST is small.
+                if not new_val is old_val:
+                    setattr(code,attr,new_val)
+    elif isinstance(code,list):
+        return [
+            substitute_with_dict(old_val,dict_of_substitutions)
+            for old_val in code]
+    return code
+
+def substitute(code,sub_id,sub_code : ast.AST):
+    r"""
+    Substitute ast.Name('sub_id') in 'code' by 'sub_code'
+    """
+    return substitute_with_dict(code,{sub_id:sub_code})
+
+def substitute_device_call(code : ast.AST):
+    r"""
+    Change `device = device(type="cpu")` by `device = device`
+    with the second 'device' being a global variable
+    """
+    if (isinstance(code,ast.Call)
+    and isinstance(code.func,ast.Name)
+    and code.func.id == "device"):
+        return ast.Name("device")
+    elif isinstance(code,ast.AST):
+        for attr in code._fields:
+            if attr != "ctx":
+                old_val = getattr(code,attr)
+                new_val = substitute_device_call(old_val)
+                if not new_val is old_val:
+                    setattr(code,attr,new_val)
+    elif isinstance(code,list):
+        return [
+            substitute_device_call(old_val)
+            for old_val in code]
+    return code

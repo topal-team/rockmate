@@ -6,7 +6,6 @@ from . import Ktools
 from . import Atools_for_S_and_K
 from . import Ptools
 from . import Htools
-import inspect
 import time
 
 # ==========================
@@ -19,7 +18,7 @@ class rkGB_res():
         self.D_graph = dg
         self.S_graph = sg
         self.K_graph = kg
-        self.P_structure = ps
+        self.PartitionedStructure = ps
         self.H_cluster = hc
         self.S_graph_list = list_sg
         self.K_graph_list = list_kg
@@ -46,11 +45,11 @@ class rkGB_res():
         return self.K_graph_list
     @property
     def Ps(self):
-        return self.P_structure
+        return self.PartitionedStructure
     @property
     def Pc(self):
-        if hasattr("main_cluster",self.P_structure):
-            return self.P_structure.main_cluster
+        if hasattr("main_cluster",self.PartitionedStructure):
+            return self.PartitionedStructure.main_cluster
         else:
             return None
     @property
@@ -68,102 +67,6 @@ class rkGB_res():
 
 
 # ==========================
-# ===== AUX FUNCTIONS ======
-# ==========================
-
-# to check if the given dict_inputs is correct
-def print_inputs(model):
-    s = inspect.signature(model.forward)
-    p = list(s.parameters.items())
-    print(f"This module has {len(p)} parameters :")
-    for c in p: print(c[1])
-
-
-def make_inputs(model,model_inputs,model_kwargs):
-    # 1) Build dict_inputs
-    # -- load params list --
-    sign = inspect.signature(model.forward)
-    params = list(sign.parameters.items())
-    # -- build model_kwargs --
-    if model_kwargs is None: model_kwargs = dict()
-    elif not isinstance(model_kwargs,dict): raise Exception(
-        f"model_kwargs must be a dict not {type(model_kwargs)}")
-    # -- positional params --
-    not_kw_params = [
-        p[0] for p in params
-        if p[0] not in model_kwargs]
-    pos_params = [
-        p[0] for p in params
-        if (p[1].default is inspect._empty
-        and p[0] not in model_kwargs)]
-    # -- build positional inputs --
-    if isinstance(model_inputs,dict):
-        dict_inputs = model_inputs.copy()
-        st_given = set(dict_inputs.keys())
-        st_asked = set(pos_params)
-        st_missing = st_asked - st_given
-        nb_missing = len(st_missing)
-        if nb_missing>0: raise Exception(
-            f"Missing {nb_missing} inputs for the model: {st_missing}")
-    else:
-        if (isinstance(model_inputs,set)
-        or  isinstance(model_inputs,list)
-        or  isinstance(model_inputs,tuple)):
-            inputs = list(model_inputs)
-        else:
-            inputs = [model_inputs]
-        nb_given = len(inputs)
-        nb_asked_pos = len(pos_params)
-        nb_asked_tot = len(not_kw_params)
-        if nb_given < nb_asked_pos: raise Exception(
-            f"To few values given in model_inputs "\
-            f"({nb_asked_pos - nb_given} missing).\n"\
-            f"You can use \"rkgb.print_inputs(<model>)\" to help you.")
-        if nb_given > nb_asked_tot: raise Exception(
-            f"To much values given in model_inputs "\
-            f"({nb_given - nb_asked_tot} too many, including kwargs).\n"\
-            f"You can use \"rkgb.print_inputs(<model>)\" to help you.")
-        dict_inputs = dict(zip(not_kw_params,inputs))
-
-    dict_inputs.update(model_kwargs)
-    sign = inspect.signature(model.forward)
-    params = list(sign.parameters.items())
-
-    # 2) check types
-    """ # -> might fail
-    for (name,value) in dict_inputs.items():
-        info = sign.parameters[name]
-        if not info.annotation is inspect._empty:
-            if not isinstance(value,info.annotation): raise Exception(
-                f"According to model's signature, {name} argument "\
-                f"is supposed to be of type {info.annotation}, but "\
-                f"the given value has type {type(value)}")
-    """
-    return dict_inputs
-
-
-# to check is the device is cuda
-def print_cuda_warning_msg(things_not_on_cuda):
-    l = things_not_on_cuda
-    if l == []: pass
-    else:
-      if len(l) == 1:
-        main_line = f"{l[0]}'s device is not cuda !"
-      else:
-        s = " and ".join(l)
-        main_line = f"{s}'s devices are not cuda !"
-      print(
-        f"/!\\/!\\=======================================/!\\/!\\\n"\
-        f"/!\\/!\\= WARNING : {main_line}\n"\
-        f"/!\\/!\\=======================================/!\\/!\\\n\n"\
-        f"/!\\You ask rk-GB to measure the time and memory used by all\n"\
-        f"/!\\the computation nodes. But measuring memory can only\n"\
-        f"/!\\be done with cuda, therefore model and inputs' devices\n"\
-        f"/!\\should be cuda to get relevant results. You can use the \n"\
-        f"/!\\parameter \"check_device_is_gpu\" to avoid this warning.\n")
-
-
-# ==========================
 # ===== Main function ======
 # ==========================
 
@@ -172,18 +75,18 @@ def make_all_graphs(model,
     model_kwargs=None,
     wanted_graphs = {"B","D","S","K","P","H","Sl","Kl"},
     partitioners = [
-        Ptools.Partitioner_bottom_to_top(),
-        #Ptools.Partitioner_seq()
+        Ptools.PartitionerBottomToTop(),
+        #Ptools.PartitionerSequence()
     ],
     verbose=False,
     impose_device=True,
-    check_device_is_gpu = True,
+    check_device_is_cuda = True,
     print_time_rkgb=False):
     r"""
     ***** this function returns an objet with attributes *****
      -> .B_graph, .D_graph, .S_graph and .K_graph of the whole module
      -> .S_graph_list and .K_graph_list of the sequentialized module
-     -> .P_structure, .H_cluster
+     -> .PartitionedStructure, .H_cluster
     on which you can use : rkgb.print
 
     ***** args *****
@@ -206,12 +109,12 @@ def make_all_graphs(model,
     bool_bg = ("B" in wanted_graphs) or bool_dg
 
     # check inputs
-    global_vars.ref_verbose[0] = verbose
+    constants.ref_verbose[0] = verbose
     dict_inputs = make_inputs(model,model_inputs,model_kwargs)
 
     # check device
     things_not_on_cuda = []
-    if bool_kg and check_device_is_gpu:
+    if bool_kg and check_device_is_cuda:
         for (key,inp) in dict_inputs.items():
             if not isinstance(inp,torch.Tensor):
                 print(f"Warning : {key} has type {type(inp)}")
@@ -229,7 +132,7 @@ def make_all_graphs(model,
     # -> save running stats
     saved_running_stats = dict()
     for m in model.modules():
-        for batch_fct in global_vars.list_batch_fct:
+        for batch_fct in constants.list_batch_fct:
             if isinstance(m,batch_fct):
                 r_mean = m.running_mean
                 r_var  = m.running_var
@@ -284,7 +187,7 @@ def make_all_graphs(model,
 def make_late_partitioning(res : rkGB_res, model, partitioners):
     assert(res.S is not None)
     assert(res.K is not None)
-    res.P_structure = ps = Ptools.S_to_P(res.S,model,partitioners)
+    res.PartitionedStructure = ps = Ptools.S_to_P(res.S,model,partitioners)
     res.H_cluster = Htools.P_and_K_to_H(ps,res.K)
 
 # ==========================
@@ -308,7 +211,7 @@ def RK_print(*args,
     - Given a list of rk-GB graphs, render all graphs next to each other in a single file.
     - Given a `rkGB_res`, render all the graphs in separate files.
     - Given a cluster, render all the possible partitioning in separate files.
-    - Given a P_structure, render main_cluster.
+    - Given a PartitionedStructure, render main_cluster.
     - For any other object, call python default print.
 
     Note: /!\ You need external Graphviz tool to generate the pdf/svg /!\
@@ -371,10 +274,10 @@ def RK_print(*args,
             msg += Ktools.aux_print_K_graph_message(arg)
             name = Ktools.aux_print_K_graph_name(arg,get_name(name))
             to_render.append((name,arg,Ktools.print_K_graph))
-        elif isinstance(arg,Ptools.P_graph):
-            msg += Ptools.aux_print_P_graph_message(arg)
-            name = Ptools.aux_print_P_graph_name(arg,get_name(name))
-            to_render.append((name,arg,Ptools.print_P_graph))
+        elif isinstance(arg,Ptools.PartitionedGraph):
+            msg += Ptools.aux_print_PartitionedGraph_message(arg)
+            name = Ptools.aux_print_PartitionedGraph_name(arg,get_name(name))
+            to_render.append((name,arg,Ptools.print_PartitionedGraph))
         elif isinstance(arg,Htools.H_graph):
             msg += Htools.aux_print_H_graph_message(arg)
             name = Htools.aux_print_H_graph_name(arg,get_name(name))
@@ -389,7 +292,7 @@ def RK_print(*args,
             to_render.append((name,arg,Ktools.print_K_graph_list))
         elif ((isinstance(arg,list) or isinstance(arg,tuple))
                 and len(arg) != 1
-                and all(isinstance(a,RK_graph) for a in arg)):
+                and all(isinstance(a,base.Graph) for a in arg)):
             msg += f"List of {len(arg)} RK graphs:\n"
             sub_msgs = []
             list_sub = []
@@ -399,12 +302,12 @@ def RK_print(*args,
                         indent=2,pre_msg="",post_msg="",name="Empty")
                 )
             name = get_name(name)
-            name = name if name is not None else f"List_of_{len(arg)}_RK_graphs"
+            name = name if name is not None else f"List_of_{len(arg)}_base.Graphs"
             to_render.append((name,[c[1] for c in list_sub],[c[2] for c in list_sub]))
             msg += "\n".join(sub_msgs)
-        elif isinstance(arg,Ptools.P_cluster):
-            msg += Ptools.aux_print_P_cluster_message(arg)+"\n"
-            names[:0] = Ptools.aux_print_P_cluster_names(arg,get_name(name))
+        elif isinstance(arg,Ptools.PartitionedCluster):
+            msg += Ptools.aux_print_PartitionedCluster_message(arg)+"\n"
+            names[:0] = Ptools.aux_print_PartitionedCluster_names(arg,get_name(name))
             sub_msgs = []
             for pg in arg.representee_cluster.possible_partitioning:
                 sub_msgs.append(process_arg(pg,to_render,2))
@@ -416,8 +319,8 @@ def RK_print(*args,
             for pg in arg.representee_cluster.possible_hg:
                 sub_msgs.append(process_arg(pg,to_render,2))
             msg += "\n".join(sub_msgs)
-        elif isinstance(arg,Ptools.P_structure):
-            msg += "P_structure's main cluster :\n"
+        elif isinstance(arg,Ptools.PartitionedStructure):
+            msg += "PartitionedStructure's main cluster :\n"
             msg += process_arg(arg.main_cluster,to_render)
         elif isinstance(arg,rkGB_res):
             msg += "rkGB_res : all graphs\n"
@@ -429,7 +332,7 @@ def RK_print(*args,
                 "K_graph",
                 "S_graph_list",
                 "K_graph_list",
-                "P_structure",
+                "PartitionedStructure",
                 "H_cluster"]:
                 if getattr(arg,at) is None: continue
                 sub_msgs.append(
