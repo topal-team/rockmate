@@ -199,56 +199,56 @@ class HierarchicalGraph(base.Graph):
 
                     # 4) Grad Hierarchical Allocation Node
                     if target_to_proceed not in dict_mt_to_grad_han: # interfaces of sub clusters overlap
-                        grad_anode = fb_graph.dict_grad_anode[target_to_proceed]
+                        grad_anode = fb_graph.dict_grad_anodes[target_to_proceed]
                         grad_han = HierarchicalAllocationNode(grad_anode)
                         dict_han_to_anode[grad_han] = grad_anode
                         dict_mt_to_grad_han[target_to_proceed] = grad_han
 
-                # CASE 2: NOT bottom
-                else:
-                    # 1) topological_number
-                    # => fwd_hcn.topological_number = min cnode.topological_number for cnode inside HCN
-                    # => and bwd_hcn's topological_number is the max
-                    # Reminder: topological_number guide the toposort, so 
-                    # we want fwd_hcn to be place at the position of the first cnode it includes
-                    # and bwd_hcn to come on the last position
-                    fwd_hcn_num = 999999
-                    bwd_hcn_num = -1
-                    for cnode in pn_sub_cluster.list_cnodes:
-                        if not hasattr(cnode,"_topological_number"): continue
-                        if cnode.is_fwd:
-                            fwd_hcn_num = min(fwd_hcn_num,cnode._topological_number)
-                        else:
-                            bwd_hcn_num = max(bwd_hcn_num,cnode._topological_number)
+            # CASE 2: NOT bottom
+            else:
+                # 1) topological_number
+                # => fwd_hcn.topological_number = min cnode.topological_number for cnode inside HCN
+                # => and bwd_hcn's topological_number is the max
+                # Reminder: topological_number guide the toposort, so 
+                # we want fwd_hcn to be place at the position of the first cnode it includes
+                # and bwd_hcn to come on the last position
+                fwd_hcn_num = 999999
+                bwd_hcn_num = -1
+                for cnode in pn_sub_cluster.list_cnodes:
+                    if cnode._topological_number is None: continue
+                    if cnode.is_fwd:
+                        fwd_hcn_num = min(fwd_hcn_num,cnode._topological_number)
+                    else:
+                        bwd_hcn_num = max(bwd_hcn_num,cnode._topological_number)
 
-                    # 2) Hierarchical Computation Nodes
-                    fwd_hcn = HierarchicalComputationNode(
-                        f"FWD[{pn_to_proceed.name}]",
-                        sub_cluster = pn_sub_cluster,
-                        is_fwd = True,
-                        _topological_number = fwd_hcn_num)
-                    bwd_hcn = HierarchicalComputationNode(
-                        f"BWD[{pn_to_proceed.name}]",
-                        sub_cluster = pn_sub_cluster,
-                        is_fwd = False,
-                        _topological_number = bwd_hcn_num)
-                    for cnode in pn_sub_cluster.list_cnodes:
-                        dict_cnode_to_hcn[cnode] = fwd_hcn if cnode.is_fwd else bwd_hcn
-                        # fwd_hcn represents all the fwd cnodes inside of
-                        #  the sub graph and bwd_hcn all the bwd cnodes
+                # 2) Hierarchical Computation Nodes
+                fwd_hcn = HierarchicalComputationNode(
+                    f"FWD[{pn_to_proceed.name}]",
+                    sub_cluster = pn_sub_cluster,
+                    is_fwd = True,
+                    _topological_number = fwd_hcn_num)
+                bwd_hcn = HierarchicalComputationNode(
+                    f"BWD[{pn_to_proceed.name}]",
+                    sub_cluster = pn_sub_cluster,
+                    is_fwd = False,
+                    _topological_number = bwd_hcn_num)
+                for cnode in pn_sub_cluster.list_cnodes:
+                    dict_cnode_to_hcn[cnode] = fwd_hcn if cnode.is_fwd else bwd_hcn
+                    # fwd_hcn represents all the fwd cnodes inside of
+                    #  the sub graph and bwd_hcn all the bwd cnodes
 
-                    # 3) Hierarchical Allocation Nodes
-                    # -> The interfaces, ie inputs/outputs, of the sub cluster
-                    for anode in pn_sub_cluster.all_interfaces:
-                        han = HierarchicalAllocationNode(anode)
-                        if han.is_data:
-                            if anode.mt not in dict_mt_to_data_han:
-                                dict_han_to_anode[han] = anode
-                                dict_mt_to_data_han[han.mt] = han
-                        else:
-                            if anode.mt not in dict_mt_to_grad_han:
-                                dict_han_to_anode[han] = anode
-                                dict_mt_to_grad_han[han.mt] = han
+                # 3) Hierarchical Allocation Nodes
+                # -> The interfaces, ie inputs/outputs, of the sub cluster
+                for anode in pn_sub_cluster.all_interfaces:
+                    han = HierarchicalAllocationNode(anode)
+                    if han.is_data:
+                        if anode.mt not in dict_mt_to_data_han:
+                            dict_han_to_anode[han] = anode
+                            dict_mt_to_data_han[han.mt] = han
+                    else:
+                        if anode.mt not in dict_mt_to_grad_han:
+                            dict_han_to_anode[han] = anode
+                            dict_mt_to_grad_han[han.mt] = han
         # ===== END OF PROCESSING EACH PN =====
         
         # 1) Loss HCN
@@ -500,7 +500,7 @@ class HierarchicalCluster():
             p_cluster = p_node.sub_cluster
         # ======================================================
         # ====== FIRST H_CLUSTER CONSTRUCTOR: FROM P_NODE ======
-        if p_node is not None:
+        if p_cluster is None:
             target_to_proceed = p_node.main_target
             assert(target_to_proceed in fb_graph.dict_bwd_cnodes)
             self.is_bottom = True

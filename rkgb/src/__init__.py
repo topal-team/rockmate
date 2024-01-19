@@ -1,4 +1,4 @@
-__all__ = ["raw","base","forward","simplified","backward","partitioned"]
+__all__ = ["raw","base","forward","simplified","backward","partitioned","hierarchical"]
 
 from .core import base
 from .core import raw
@@ -6,6 +6,7 @@ from .core import forward
 from .core import simplified
 from .core import backward
 from .core import partitioned
+from .core import hierarchical
 from . import lowlevel
 
 

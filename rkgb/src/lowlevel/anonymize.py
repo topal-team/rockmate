@@ -367,8 +367,8 @@ class ClusterTranslator():
         for anode in hierarchical_cluster.list_anodes:
             mt_ano = self.dict_to_ano[anode.mt]
             ano = ("anode",anode.allocation_type,mt_ano)
-            self.dict_to_ano[cnode] = ano
-            self.dict_from_ano[ano] = cnode
+            self.dict_to_ano[anode] = ano
+            self.dict_from_ano[ano] = anode
 
         # 3) Node names
         for node_name,node in hierarchical_cluster.dict_nodes.items():
