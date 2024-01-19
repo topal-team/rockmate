@@ -739,7 +739,11 @@ class ModelPULP:
                     list_sched = self.list_list_sched[j]
                     for i in list_sched[o].dep_interfaces_data:
                         hcn = self.hgraph.list_HCNs[fwd_i]
-                        name = self.sub_clusters[j].list_anodes[i].name
+                        if self.sub_clusters[j].representee_cluster is self.sub_clusters[j]:
+                            name = self.sub_clusters[j].list_anodes[i].name
+                        else:
+                            ano = self.sub_clusters[j].representee_cluster.translator.to_ano(list_sched[o].list_anodes[i])
+                            name = self.sub_clusters[j].translator.from_ano(ano).name
                         # Tensor req_i is required by BWD
                         req_i = [hdn.anode.name for hdn in self.hgraph.list_HANs].index(
                             name
@@ -1440,9 +1444,6 @@ class ModelPULP:
                 apply_gpu_optimize(p)
         return ofl_ops, prf_ops, del_ops, opt_ops, init_ops, restore_ops
 
-    def distribute_cpu_optimize(self):
-        # after grouping the optimize ops, re-distribute them to reduce the overhead
-        pass
 
     def schedule(self, hgraph=None, check_valid=False):
         """
@@ -1542,7 +1543,6 @@ class ModelPULP:
                     #         # Only the last del should be disabled
                     #         op.disabled = True
                     #         phantoms_to_keep.remove(op.kn)
-
                 # translating sub_op_list
                 if (
                     hcn.sub_cluster
