@@ -314,7 +314,7 @@ class HRockmate(torch.nn.Module):
     def init_fwd_exec(self):
         #  -> Initialize the storage
         storage = self.compiler.storage
-        for kdn in self.rkgb_res.K_graph.list_kdn:
+        for kdn in self.rkgb_res.forward_and_backward_graph.allocation_nodes:
             storage.ld[kdn.main_target] = torch.empty(
                 0,
                 device=self.device,
@@ -519,8 +519,8 @@ class HRockmate(torch.nn.Module):
                 
                 # -> Get the output
                 outs = [
-                    RkMod.compiler.get_val(out_mt)
-                    for out_mt in RkMod.rkgb_res.S_graph.outputs
+                    RkMod.compiler.get_val(out_node.main_target)
+                    for out_node in RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes
                 ]
                 if len(outs) == 1:
                     return outs[0]
@@ -558,7 +558,11 @@ class HRockmate(torch.nn.Module):
                 RkMod.compiler.storage = storage
                 # -> Put grad_out in out.grad (Rem 4)
                 # print(grad_outs)
-                for out_mt, out_grad in zip(RkMod.rkgb_res.S_graph.outputs, grad_outs):
+                # for out_mt, out_grad in zip(RkMod.rkgb_res.S_graph.outputs, grad_outs):
+                for out_node, out_grad in zip(
+                    self.rkgb_res.forward_and_backward_graph.list_output_data_anodes,
+                    grad_outs):
+                    out_mt = out_node.main_target
                     out = RkMod.compiler.get_val(out_mt)
                     out.grad = out_grad.view(out_grad.shape)
                     out_grad.data = torch.empty(0)
@@ -622,9 +626,13 @@ class HRockmate(torch.nn.Module):
                     "define_autograd_Function"
                 )
             # -> Send the inputs to Function.forward via the buffer (Rem 1)
-            self.dict_inputs_buffer = dict_inputs = ExampleInputs(
+            # self.dict_inputs_buffer = dict_inputs = ExampleInputs(
+            #     self.original_mod, args, kwargs
+            # )
+            self.inputs_buffer = ExampleInputs(
                 self.original_mod, args, kwargs
             )
+            self.dict_inputs_buffer = dict_inputs = self.inputs_buffer.dict
             # -> Pass the inputs which req grad to prepare their backward (Rem 1)
             inputs_which_req_grad = []
             name_of_inputs_which_req_grad = []
@@ -637,19 +645,23 @@ class HRockmate(torch.nn.Module):
             output_mt_values = self.autograd_Function.apply(
                 dummy_input, *inputs_which_req_grad
             )
-            for out_mt, out_mt_value in zip(
-                self.rkgb_res.S_graph.outputs, output_mt_values
-            ):
+            # for out_mt, out_mt_value in zip(
+            #     self.rkgb_res.S_graph.outputs, output_mt_values
+            # ):
+            for out_node in self.rkgb_res.forward_and_backward_graph.list_output_data_anodes:
+                out_mt = out_node.main_target
                 view_code = self.dict_output_viewing_code[out_mt]
                 exec(view_code, self.gd, self.compiler.storage.ld)
                 # -> We access to out_mt_value directly in the storage
-            exec(self.outputs_wrapping_code, self.gd, self.compiler.storage.ld)
-            final_output = self.compiler.get_val(
-                self.rkgb_res.D_graph.whole_module_output
-            )
+            # exec(self.outputs_wrapping_code, self.gd, self.compiler.storage.ld)
+            output_nodes = self.rkgb_res.forward_graph.output_nodes
+            # final_output = self.compiler.get_val(
+            #     self.rkgb_res.D_graph.whole_module_output
+            # )
+            final_outputs = [self.compiler.get_val(output.main_target) for output in output_nodes]
             #  -> Clear the compiler
             # self.compiler.storage = None
-            return final_output
+            return final_outputs[0]
 
     # === end of forward ===
 

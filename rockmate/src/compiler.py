@@ -207,7 +207,7 @@ class Compiler:
             else:
                 # control saved_tensors in autograd : manual check to avoid pytorch to save some tensors in with_grad mode
                 no_save_list = []
-                candidates = list(kn.deps_global) + list(kn.users_global)
+                candidates = list(kn.deps_real) + list(kn.users)
                 candidates = self._get_names(candidates)
                 for kdn_name in candidates:
                     if "Delete_"+kdn_name in self.op_name_list[i:next_bwd_idx]:
@@ -494,14 +494,14 @@ class Compiler:
                     continue
 
                 if isinstance(op, ComputeOp):
-                    if "fwd" in op.kcn.name:
+                    if "FWD" in op.kcn.name:
                         for kdn in op.kcn.users:
-                            if kdn.kdn_type != "data":
+                            if kdn.allocation_type != "data":
                                 continue
                             setattr(op.kcn, "proxy", kdn.info.requires_grad)
 
                         fct_list.append(self.get_fwd(op.kcn, i, detach=op.detach))
-                    elif "bwd" in op.kcn.name:
+                    elif "BWD" in op.kcn.name:
                         fct_list.append(self.get_bwd(op.kcn, i, detach=op.detach))
                     else:
                         fct_list.append([])

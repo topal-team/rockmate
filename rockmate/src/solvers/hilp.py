@@ -13,6 +13,7 @@ from .main import (
 )
 import pulp
 from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
+from rkgb.lowlevel.constants import init_target_string
 # from .HILP_gurobi import ModelGurobi
 # from .HILP_pulp import ModelPULP
 from .HILP_pulp_ofl_para import ModelPULP
@@ -35,7 +36,7 @@ class HILP(Solver):
                 "IntegralityFocus": 1,
                 "NodeFileStart":0.5,
             },
-            protected_names=["sources data", "sources grad"],
+            protected_names=[f"{init_target_string} data", f"{init_target_string} grad"],
             nb_total_sched=100,
             nb_total_nodes_top_level=30,
             nb_total_nodes=20,
