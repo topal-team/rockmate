@@ -68,6 +68,7 @@ class Node_unique_id_generator():
 
 no_target_string = "__No_Target__"
 class Node():
+    no_target_string = no_target_string
     def __init__(
             self,
             main_target : str = no_target_string,
