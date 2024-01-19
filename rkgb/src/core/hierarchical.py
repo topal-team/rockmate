@@ -2,7 +2,7 @@
 # ====== H structure =======
 # ==========================
 
-from src.lowlevel import constants
+from src.lowlevel.measure import pretty_format_memory
 from src.lowlevel.variable_info import VariableInfo
 from src.lowlevel import anonymize
 from src.core import base
@@ -17,7 +17,7 @@ class HierarchicalComputationNode(base.Node):
     def __init__(self,
             name,
             main_target = None,
-            info : VariableInfo = None, # TO REMOVE USELESS ??
+            cnode : ComputationNode = None,
             sub_cluster = None,
             is_fwd = True,
             _topological_number = -1,
@@ -25,8 +25,8 @@ class HierarchicalComputationNode(base.Node):
         super().__init__(main_target,
             parent_structure_with_id_generator=hierarchical_graph)
         self.name = name  # e.g. Fwd_1
-        self.info = info
-        self.sub_cluster = sub_cluster
+        self.cnode = cnode
+        self.sub_cluster : HierarchicalCluster = sub_cluster
         self.is_fwd = is_fwd
         self.is_leaf = bool(main_target is None)
         self.deps = set()  # HAN set
@@ -172,7 +172,7 @@ class HierarchicalGraph(base.Graph):
                 fwd_hcn = HierarchicalComputationNode(
                     fwd_cnode.name,
                     main_target = target_to_proceed,
-                    info = fwd_cnode.info,
+                    cnode = fwd_cnode,
                     sub_cluster = pn_sub_cluster,
                     is_fwd = True,
                     _topological_number = fwd_cnode._topological_number)
@@ -191,7 +191,7 @@ class HierarchicalGraph(base.Graph):
                     bwd_hcn = HierarchicalComputationNode(
                         bwd_cnode.name,
                         main_target = target_to_proceed,
-                        info = bwd_cnode.info,
+                        cnode = bwd_cnode,
                         sub_cluster = pn_sub_cluster,
                         is_fwd = False,
                         _topological_number = bwd_cnode._topological_number)
@@ -331,7 +331,7 @@ class HierarchicalGraph(base.Graph):
         self.list_HCNs = self.get_sorted_nodes_by_following_deps_relation()
 
         # 7) Parameter nodes
-        self.hierarchical_parameter_nodes = []
+        self.hierarchical_parameter_nodes : list[HierarchicalParameterNode] = []
         for param_node in self.cluster.parameter_nodes:
             h_param_node = HierarchicalParameterNode(param_node)
             self.hierarchical_parameter_nodes.append(h_param_node)
@@ -371,6 +371,97 @@ class HierarchicalGraph(base.Graph):
         # We don't need the users relation, as we only use this
         # root_node to toposort; hence nothing to unplug
         pass
+
+    # = print and render =
+    def __str__(self):
+        return self.name # TO IMPROVE
+    
+    @staticmethod
+    def get_render_color(node):
+        color_hcn_fwd = "blue"
+        color_hcn_bwd = "blueviolet"
+        color_special = "green"
+        color_han  = "olive"
+        color_parameter_node = "black"
+        if isinstance(node,HierarchicalParameterNode):
+            return color_parameter_node
+        if node.main_target == "loss":
+            return color_special
+        elif isinstance(node, HierarchicalAllocationNode):
+            return color_han
+        elif node.is_fwd:
+            return color_hcn_fwd
+        else:
+            return color_hcn_bwd
+    
+    def render(self,
+            name=None,
+            view=True,
+            only_function_name=False,
+            include_parameter_nodes=True,
+            include_artifact_edges=True,
+            directory=base.Graph.default_render_directory,
+            render_format=base.Graph.default_render_format,
+            render=True,
+            dot=None):
+        name = self._get_render_name(name)
+        dot = base.Graph._get_graphviz_dot(name,dot)
+        color_edge = "black"
+
+        # 1) Computation Nodes
+        for hcn in self.list_HCNs:
+            if hcn.main_target is not None:
+                if hcn.cnode is None:
+                    label = hcn.name
+                else:
+                    if only_function_name:
+                        code = hcn.cnode.main_fct
+                    else:
+                        code = hcn.cnode.get_code()
+                    label = f"{hcn.name}\n{code}"
+            else:
+                label = f"{hcn.name}\nCluster size: {hcn.sub_cluster.p_cluster.size}"
+            dot.node(hcn.name,label,color=self.__class__.get_render_color(hcn))
+        # 2) Allocation Nodes
+        for han in self.list_HANs:
+            dot.node(han.name,han.name,
+                color=self.__class__.get_render_color(han),
+                tooltip=f"Mem {pretty_format_memory(han.mem)}")
+
+        # 3) Edges
+        for hcn in self.list_HCNs:
+            for req_han in hcn.deps:
+                dot.edge(req_han.name, hcn.name, color=color_edge)
+            for user_han in hcn.users:
+                dot.edge(hcn.name, user_han.name, color=color_edge)
+            if include_artifact_edges:
+                for req_han in hcn.deps_through_artifacts:
+                    dot.edge(req_han.name,hcn.name, color=color_edge, style ="dotted")
+
+        # 4) Parameter nodes
+        if include_parameter_nodes:
+            for h_param_node in self.hierarchical_parameter_nodes:
+                if h_param_node.view_targets == []:
+                    label = h_param_node.param_str
+                elif only_function_name:
+                    label = "\n".join(
+                        [h_param_node.param_str]+h_param_node.view_targets)
+                else:
+                    label = f"{h_param_node.param_str}\n{h_param_node.get_code()}"
+                dot.node(
+                    h_param_node.param_str,
+                    label,
+                    color = self.__class__.get_render_color(h_param_node),
+                    style = "dashed")
+                for user_hcn in h_param_node.users_real:
+                    dot.edge(h_param_node.param_str,user_hcn.name)
+                for user_hcn in h_param_node.users_fake:
+                    dot.edge(h_param_node.param_str,user_hcn.name,style="dashed")
+
+        if render:
+            base.Graph._call_graphviz_to_render(
+                dot,view,directory,render_format
+            )
 
 
 

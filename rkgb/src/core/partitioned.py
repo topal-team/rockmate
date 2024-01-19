@@ -239,6 +239,7 @@ class PartitionedGraph(base.Graph):
             out_node.users.add(fresh_root)
         return fresh_root
     
+    # = print and render =
     def __str__(self):
         return (
             f"{self.name}:\nGraph composed of {self.size} top level nodes,\n"\
