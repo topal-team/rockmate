@@ -27,11 +27,11 @@ import inspect
 import ast
 import torch
 from torch import Tensor
-from src.lowlevel import ast_add_on
-from src.lowlevel import constants
-from src.lowlevel import preprocess_samples
-from src.lowlevel import jit_patch
-from src.core import base
+from rkgb.lowlevel import ast_add_on
+from rkgb.lowlevel import constants
+from rkgb.lowlevel import preprocess_samples
+from rkgb.lowlevel import jit_patch
+from rkgb.core import base
 
 
 class RawNode(base.Node):

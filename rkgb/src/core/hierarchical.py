@@ -2,13 +2,13 @@
 # ====== H structure =======
 # ==========================
 
-from src.lowlevel.measure import pretty_format_memory
-from src.lowlevel.variable_info import VariableInfo
-from src.lowlevel import anonymize
-from src.core import base
-from src.core.backward import ForwardAndBackwardGraph, ComputationNode, AllocationNode
-from src.core.backward import ParameterNode as bwdParameterNode
-from src.core.partitioned import PartitionedStructure, PartitionedCluster, PartitionedGraph, PartitionedNode
+from rkgb.lowlevel.measure import pretty_format_memory
+from rkgb.lowlevel.variable_info import VariableInfo
+from rkgb.lowlevel import anonymize
+from rkgb.core import base
+from rkgb.core.backward import ForwardAndBackwardGraph, ComputationNode, AllocationNode
+from rkgb.core.backward import ParameterNode as bwdParameterNode
+from rkgb.core.partitioned import PartitionedStructure, PartitionedCluster, PartitionedGraph, PartitionedNode
 
 # ************
 # * HierarchicalComputationNode *

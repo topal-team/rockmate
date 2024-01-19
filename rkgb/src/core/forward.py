@@ -6,13 +6,13 @@ from typing import Union
 import ast
 import warnings
 import torch
-from src.lowlevel import ast_add_on
-from src.lowlevel import jit_patch
-from src.lowlevel import constants
-from src.lowlevel import preprocess_samples
-from src.lowlevel.variable_info import VariableInfo
-from src.core import base
-from src.core.raw import RawNode,RawGraph
+from rkgb.lowlevel import ast_add_on
+from rkgb.lowlevel import jit_patch
+from rkgb.lowlevel import constants
+from rkgb.lowlevel import preprocess_samples
+from rkgb.lowlevel.variable_info import VariableInfo
+from rkgb.core import base
+from rkgb.core.raw import RawNode,RawGraph
 
 class ExceptionViewOverParameter(Exception):
     def __init__(self,view_value):

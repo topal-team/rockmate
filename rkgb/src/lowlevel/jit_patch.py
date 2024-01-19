@@ -2,7 +2,7 @@ import sys
 import warnings
 import torch
 import ast
-from src.lowlevel import ast_add_on
+from rkgb.lowlevel import ast_add_on
 
 torchscript_dtype_numbers = [
     torch.uint8,

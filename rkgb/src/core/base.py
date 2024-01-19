@@ -14,8 +14,8 @@ try:
     has_graphviz = True
 except ModuleNotFoundError:
     has_graphviz = False
-from src.lowlevel import ast_add_on
-from src.lowlevel import variable_info
+from rkgb.lowlevel import ast_add_on
+from rkgb.lowlevel import variable_info
 # import lowlevel.ast_add_on
 # from lowlevel import ast_add_on
 

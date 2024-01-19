@@ -3,9 +3,9 @@
 # ==========================
 
 import torch
-from src.utils.utils import all_non_private_attributes
-from src.lowlevel import constants
-from src.lowlevel import measure
+from rkgb.utils.utils import all_non_private_attributes
+from rkgb.lowlevel import constants
+from rkgb.lowlevel import measure
 
 # -> all the info concerning a variable/tensor which might be useful
 # -> e.g. to regenerate it, using def_info.generate_value(info,device)

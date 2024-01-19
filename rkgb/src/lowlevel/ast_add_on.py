@@ -6,8 +6,8 @@ import sys
 import inspect
 import ast
 import astunparse
-from src.lowlevel import constants
-from src.utils import utils
+from rkgb.lowlevel import constants
+from rkgb.utils import utils
 
 sys_info = sys.version_info
 python_version = sys_info.major + sys_info.minor/10

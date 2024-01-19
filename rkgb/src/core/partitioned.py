@@ -5,10 +5,10 @@
 import warnings
 import math
 import torch
-from src.utils.utils import Counter
-from src.lowlevel import anonymize
-from src.core import base
-from src.core.simplified import SimplifiedGraph, SimplifiedNode
+from rkgb.utils.utils import Counter
+from rkgb.lowlevel import anonymize
+from rkgb.core import base
+from rkgb.core.simplified import SimplifiedGraph, SimplifiedNode
 
 
 class PartitionedNode(base.Node):

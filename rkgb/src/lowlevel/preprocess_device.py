@@ -1,7 +1,7 @@
 
 import warnings
 from torch import Tensor
-from src.lowlevel import preprocess_samples
+from rkgb.lowlevel import preprocess_samples
 
 
 def check_all_cuda(

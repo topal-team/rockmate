@@ -3,11 +3,11 @@
 
 import ast
 import torch
-from src.utils.utils import Counter
-from src.core import base
-from src.lowlevel.variable_info import VariableInfo
-from src.core.simplified import SimplifiedGraph, SimplifiedNode
-from src.core.backward import ComputationNode, AllocationNode
+from rkgb.utils.utils import Counter
+from rkgb.core import base
+from rkgb.lowlevel.variable_info import VariableInfo
+from rkgb.core.simplified import SimplifiedGraph, SimplifiedNode
+from rkgb.core.backward import ComputationNode, AllocationNode
 
 
 class SimplifiedNodeAnonymizationMaterial():

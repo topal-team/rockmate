@@ -3,12 +3,12 @@
 # ==========================
 
 import torch
-from src.lowlevel import ast_add_on
-from src.lowlevel import constants
-from src.lowlevel import measure
-from src.lowlevel import inspection
-from src.core import base
-from src.core.simplified import SimplifiedNode,SimplifiedGraph
+from rkgb.lowlevel import ast_add_on
+from rkgb.lowlevel import constants
+from rkgb.lowlevel import measure
+from rkgb.lowlevel import inspection
+from rkgb.core import base
+from rkgb.core.simplified import SimplifiedNode,SimplifiedGraph
 
 
 class ComputationNode(base.Node):
