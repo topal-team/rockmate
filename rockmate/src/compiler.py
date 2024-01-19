@@ -391,7 +391,10 @@ class Compiler:
     def get_prefetch(self, op: PrefetchOp, before_idx=None, after_idx=None):
         function_list = []
         # function_list.append(self.fct_mem_alloc(kn.main_target))
-        function_list.append(self.fct_prefetch(op.target.param_name, after_idx=after_idx, indices=op.indices))
+        function_list.append(self.fct_prefetch(op.target.param_name, 
+                                               after_idx=after_idx, 
+                                               indices=op.indices,
+                                               view_code=op.target.pnode.get_code()))
         return function_list
 
     def get_offload(self, op: OffloadOp, before_idx=None, after_idx=None):
@@ -647,7 +650,7 @@ class Compiler:
 
         return fct
 
-    def fct_prefetch(self, var_name, after_idx=None, stream=None, indices=[0,None]):
+    def fct_prefetch(self, var_name, after_idx=None, stream=None, indices=[0,None],view_code=""):
         indices = indices
         device = self.gd["device"]
         stream = stream or self.gd["prefetch_stream"]
@@ -664,6 +667,7 @@ class Compiler:
                     ],
                     non_blocking=True,
                 )
+                exec(view_code, self.gd, self.storage.ld)
                 # self.storage.ld[f"_{var_name}"].data = self.storage.ld[
                 #     f"{var_name}"
                 # ].data
