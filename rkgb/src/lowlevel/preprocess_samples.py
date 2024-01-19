@@ -2,6 +2,8 @@ import inspect
 
 class ExampleInputs():
     def __init__(self,original_mod,original_mod_args,original_mod_kwargs=None):
+        if original_mod_args is ExampleInputs:
+            self.dict = original_mod_args.dict
         # -- load params list --
         sign = inspect.signature(original_mod.forward)
         params = list(sign.parameters.items())
