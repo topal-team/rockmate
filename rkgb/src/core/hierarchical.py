@@ -669,6 +669,45 @@ class HierarchicalCluster():
     def all_interfaces(self):
         return set().union(*self.interfaces.values())
     
+    def __str__(self):
+        return self.name # TO IMPROVE
+    def render(self,
+            name=None,
+            view=True,
+            only_function_name=False,
+            include_parameter_nodes=True,
+            include_artifact_edges=True,
+            no_message = False,
+            directory=base.Graph.default_render_directory,
+            render_format=base.Graph.default_render_format,
+            render=True,
+            dot=None):
+        cluster = self.representee_cluster
+        if not no_message:
+            if len(cluster.partitionings) == 0:
+                print("Sorry your cluster doesn't have any partitioning, "\
+                    "ie corresponding Hierarchical Graph.")
+            if cluster is not self:
+                print(
+                    f"Warning : your cluster has some equivalent ones, "\
+                    f"{cluster.name} is the representee of the equivalent class, "\
+                    f"so we render its graphs")
+        for i,hg in enumerate(cluster.partitionings):
+            if name is not None:
+                graph_name = f"{i}-th partitioning of {name}"
+            else:
+                graph_name = None
+            hg.render(graph_name,
+                view,
+                only_function_name,
+                include_parameter_nodes,
+                include_artifact_edges,
+                directory,
+                render_format,
+                render,
+                dot)
+
+
 
 
 
@@ -737,75 +776,26 @@ class HierarchicalStructure():
         print(f"- {len([hcn for hcn in biggest_hg.list_HCNs if hcn.is_fwd])} of which are forward computations")
         print(f"- A total of {len(biggest_hg.list_HCNs)} allocations")
 
-        
-
-
-# ==========================
-# === printing functions ===
-# ==========================
-
-color_hcn_fwd = "blue"
-color_hcn_bwd = "blueviolet"
-color_special = "green"
-color_han = "olive"
-color_edge = "black"
-
-
-def get_color(hn):
-    if hn.main_target == "loss":
-        return color_special
-    elif isinstance(hn, HierarchicalAllocationNode):
-        return color_han
-    elif hn.is_fwd:
-        return color_hcn_fwd
-    else:
-        return color_hcn_bwd
-
-def aux_print_HierarchicalGraph_message(hg : HierarchicalGraph):
-    return (
-        f"HierarchicalGraph - Hierarchical forward+backward graph, "\
-        f"{len(hg.list_hcn)} HierarchicalComputationNodes; {len(hg.list_han)} HierarchicalAllocationNodes"
-    )
-def aux_print_HierarchicalGraph_name(hg,name=None):
-    if name is not None: return name
-    else: return "Hierarchical_HierarchicalGraph"
-
-def aux_print_HierarchicalCluster_message(hc : HierarchicalCluster):
-    partitionings = hc.representee_cluster.partitionings
-    return f"{hc.name}, with {len(partitionings)} possible HierarchicalGraphs"
-def aux_print_HierarchicalCluster_names(hc : HierarchicalCluster,name=None):
-    if name is None: name = hc.name
-    nb_hg = len(hc.representee_cluster.partitionings)
-    return [f"HierarchicalGraph_{i}_of_{name}" for i in range(nb_hg)]
-
-def print_HierarchicalGraph(hg: HierarchicalGraph, name=None, open=True, render_format="svg",dot=None,uniq_num=0):
-    # ----- init -----
-    if dot is None:
-        render = True
-        if name is None: name = aux_print_HierarchicalGraph_name(hg)
-        dot = graphviz.Digraph(name,comment=name)
-    else:
-        render = False
-    def uni(tar): return f"_{uniq_num}_{tar}"
-    def node(i,l,**kwargs): dot.node(uni(i),l,**kwargs)
-    def edge(i1,i2,**kwargs): dot.edge(uni(i1),uni(i2), **kwargs)
-    # ----- Core -----
-    # * nodes *
-    for hcn in hg.list_hcn:
-        node(hcn.name,hcn.name,color=get_color(hcn))
-    for han in hg.list_han:
-        node(han.name,han.name,
-            color=get_color(han),
-            tooltip=f"Mem {irotor.MemSize(han.mem)}")
-
-    # * edges *
-    for hcn in hg.list_hcn:
-        for req_han in hcn.deps:
-            edge(req_han.name, hcn.name, color=color_edge)
-        for user_han in hcn.users:
-            edge(hcn.name, user_han.name, color=color_edge)
-
-    #  ----- render -----
-    if render:
-        small_fcts.graph_render(dot, open, "H", render_format)
+    def __str__(self): # TO IMPROVE
+        return "HierarchicalStructure whose main cluster is:\n"+str(self.main_cluster)
+    
+    def render(self,
+            name=None,
+            view=True,
+            only_function_name=False,
+            include_parameter_nodes=True,
+            include_artifact_edges=True,
+            no_message=False,
+            directory=base.Graph.default_render_directory,
+            render_format=base.Graph.default_render_format,
+            render=True,
+            dot=None):
+        self.main_cluster.render(
+            name,view,only_function_name,
+            include_parameter_nodes,
+            include_artifact_edges,
+            no_message,
+            directory,render_format,
+            render,dot
+        )
 

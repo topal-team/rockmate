@@ -528,19 +528,21 @@ class PartitionedCluster():
             view=True,
             only_function_name=False,
             include_artifact_edges=True,
+            no_message = False,
             directory=base.Graph.default_render_directory,
             render_format=base.Graph.default_render_format,
             render=True,
             dot=None):
         cluster = self.representee_cluster
-        if len(cluster.partitionings) == 0:
-            print("Sorry your cluster doesn't have any partitioning, "\
-                  "ie corresponding PartitionedGraph: use cluster.partition()")
-        if cluster is not self:
-            print(
-                f"Warning : your cluster has some equivalent ones, "\
-                f"{cluster.name} is the representee of the equivalent class, "\
-                f"so we render its graphs")
+        if not no_message:
+            if len(cluster.partitionings) == 0:
+                print("Sorry your cluster doesn't have any partitioning, "\
+                    "ie corresponding PartitionedGraph: use cluster.partition()")
+            if cluster is not self:
+                print(
+                    f"Warning : your cluster has some equivalent ones, "\
+                    f"{cluster.name} is the representee of the equivalent class, "\
+                    f"so we render its graphs")
         for i,pg in enumerate(cluster.partitionings):
             if name is not None:
                 graph_name = f"{i}-th partitioning of {name}"
