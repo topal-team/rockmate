@@ -1,13 +1,21 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from rockmate.solvers.op_schedule import *
-from rockmate.solvers.main import add_parameter_node
+from rockmate.solvers.op_schedule import (SynchronizeOp, 
+                                          OffloadOp, 
+                                          PrefetchOp,
+                                          ComputeOp,
+                                          DeleteOp,
+                                          OptimizeOp)
+# from rockmate.solvers.main import add_parameter_node
 from copy import deepcopy
-from rkgb.utils import irotor
+# from rkgb.utils import irotor
+from rkgb.lowlevel.measure import TimerCUDA
+
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 
-timer = irotor.make_timer(torch.device("cuda"))
+# timer = irotor.make_timer(torch.device("cuda"))
+timer = TimerCUDA(torch.device("cuda"))
 
 from models.GPT import  GPT2
 
@@ -476,13 +484,13 @@ def get_wide_decoder_NN(nlayers=6, d_model=4096, batch_size=32, seq_length=40):
     return model, sample
 
 
-def prepare_for_offload(rkmod):
-    rkmod.preprocess()
-    print("finish preprocess")
-    # for hcn in rkmod.rkgb_res.H_cluster.possible_hg[0].list_hcn:
-    #     add_parameter_node(hcn.sub_cluster, rkmod.original_mod)
-    add_parameter_node(rkmod.rkgb_res.H_cluster, rkmod.original_mod)
-    print("finish adding parameter node")
+# def prepare_for_offload(rkmod):
+#     rkmod.preprocess()
+#     print("finish preprocess")
+#     # for hcn in rkmod.rkgb_res.H_cluster.possible_hg[0].list_hcn:
+#     #     add_parameter_node(hcn.sub_cluster, rkmod.original_mod)
+#     add_parameter_node(rkmod.rkgb_res.H_cluster, rkmod.original_mod)
+#     print("finish adding parameter node")
 
 
 def disable_offload_op(rkmod):

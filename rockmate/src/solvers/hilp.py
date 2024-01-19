@@ -2,7 +2,8 @@ import time
 import torch
 import rkgb
 import numpy as np
-from rkgb.Htools import H_cluster, H_graph, H_C_node
+# from rkgb.Htools import H_cluster, H_graph
+from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
 import gc
 from .main import (
     Solver,
@@ -11,7 +12,7 @@ from .main import (
     get_hgraph_budget_ub,
 )
 import pulp
-from .HILP_gurobi import ModelGurobi
+# from .HILP_gurobi import ModelGurobi
 # from .HILP_pulp import ModelPULP
 from .HILP_pulp_ofl_para import ModelPULP
 from .rotor_solver import seq_builder, solve_dp_functional

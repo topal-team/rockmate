@@ -27,8 +27,9 @@ from .op_schedule import (
     OptimizeOp,
     OpSchedule,
 )
-from rkgb.Htools import *
-from rkgb.utils.global_vars import solver_name
+# from rkgb.Htools import *
+from rkgb.core.hierarchical import HierarchicalGraph
+# from rkgb.utils.global_vars import solver_name
 # from functools import lru_cache
 
 class knapsack:
@@ -101,7 +102,7 @@ class ModelPULP:
 
     def __init__(
         self,
-        hgraph: H_graph,
+        hgraph: HierarchicalGraph,
         peak_budget: int,
         save_budget=None,
         ilp_solver_params: Dict[str, Any] = {

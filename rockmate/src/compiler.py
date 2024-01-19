@@ -1,5 +1,8 @@
-from rkgb.utils.ast_add_on import make_str_assign, make_str_list_assign
-from rkgb.utils import np, torch
+# from rkgb.utils.ast_add_on import make_str_assign, make_str_list_assign
+from rkgb.lowlevel.ast_add_on import make_str_assign, make_str_list_assign
+# from rkgb.utils import np, torch
+import torch
+import numpy as np
 from .solvers.op_schedule import (
     Activation,
     Parameter,

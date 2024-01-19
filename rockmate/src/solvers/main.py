@@ -2,11 +2,17 @@ import rkgb
 import torch
 import numpy as np
 from copy import deepcopy
-from rkgb.Htools import H_C_node, H_D_node, H_graph, H_cluster
-from rkgb.Ktools import K_C_node, K_D_node
-from rkgb.utils.ast_add_on import ast_to_str
-from rkgb.utils.def_info import Var_info
-from rkgb.utils import irotor
+# from rkgb.Htools import H_C_node, H_D_node, H_graph, H_cluster
+# from rkgb.Ktools import K_C_node, K_D_node
+# from rkgb.utils.ast_add_on import ast_to_str
+# from rkgb.utils.def_info import Var_info
+# from rkgb.utils import irotor
+
+from rkgb.lowlevel.ast_add_on import ast_to_str
+from rkgb.lowlevel.measure import TimerCPU
+from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
+from rkgb.core.backward import ComputationNode
+
 from .op_schedule import OpSchedule, ComputeOp, DeleteOp, Activation
 import time
 import psutil
@@ -20,10 +26,10 @@ class Solver:
     def __init__(self, config=None):
         self.config = config if config is not None else type(self).Config()
 
-    def __call__(self, cluster: H_cluster, budgets=None, *args, **kargs):
+    def __call__(self, cluster: HierarchicalCluster, budgets=None, *args, **kargs):
         return self.solve(cluster, budgets, *args, **kargs)
 
-    def solve(self, cluster: H_cluster, budgets=None):
+    def solve(self, cluster: HierarchicalCluster, budgets=None):
         # -> RETURN list of Op_sched
         pass
 
@@ -76,12 +82,12 @@ def H_cluster_method_solve(self, solver: Solver):
         self.sched.extend(solver(self))
 
 
-setattr(H_cluster, "get_sched", H_cluster_method_get_sched)
-setattr(H_cluster, "solve", H_cluster_method_solve)
-setattr(H_cluster, "translate_op_list", H_cluster_method_translate_op_list)
+setattr(HierarchicalCluster, "get_sched", H_cluster_method_get_sched)
+setattr(HierarchicalCluster, "solve", H_cluster_method_solve)
+setattr(HierarchicalCluster, "translate_op_list", H_cluster_method_translate_op_list)
 
 
-def get_hgraph_budget_lb(hgraph: H_graph):
+def get_hgraph_budget_lb(hgraph: HierarchicalGraph):
     # Lower bound for minimum feasible budget given schedules
     hcn_memory_budget = []
     for hcn in hgraph.list_hcn:
@@ -93,7 +99,7 @@ def get_hgraph_budget_lb(hgraph: H_graph):
     return max(hcn_memory_budget)
 
 
-def get_hgraph_budget_ub(hgraph: H_graph):
+def get_hgraph_budget_ub(hgraph: HierarchicalGraph):
     # Upper bound for minimum feasible budget given schedules
     cluster = hgraph.cluster
     if cluster.representee_cluster.list_sched == []:
@@ -112,7 +118,7 @@ def get_hgraph_budget_ub(hgraph: H_graph):
 
 
 def get_cluster_budget(
-    cluster: H_cluster,
+    cluster: HierarchicalCluster,
     nb_bdg_peak=3,
     nb_bdg_save=6,
     overall_bdg=None,
@@ -182,7 +188,7 @@ def get_cluster_budget(
     return budgets
 
 
-def solve_recursive(h_cluster: H_cluster, list_solvers=[], skip_self=False):
+def solve_recursive(h_cluster: HierarchicalCluster, list_solvers=[], skip_self=False):
     # assume it's representee
     # print(h_cluster.name)
     for hg in h_cluster.possible_hg:
@@ -214,7 +220,7 @@ def solve_recursive(h_cluster: H_cluster, list_solvers=[], skip_self=False):
 
 
 # Preprocessing Cluster: add fast_forward and autograd option
-def preprocess_rec(cluster: H_cluster):
+def preprocess_rec(cluster: HierarchicalCluster):
     if cluster is cluster.representee_cluster:
         if not cluster.is_bottom:
             for hg in cluster.possible_hg:
@@ -225,7 +231,7 @@ def preprocess_rec(cluster: H_cluster):
             preprocess(cluster)
 
 
-def preprocess(cluster: H_cluster, protect_names=[]):
+def preprocess(cluster: HierarchicalCluster, protect_names=[]):
     if cluster is cluster.representee_cluster:
         # assert cluster.list_sched == []  # only visit representee once
         # autograd_op_list, autograd_loss_idx = get_single_compute_op_list(
@@ -269,7 +275,7 @@ def preprocess(cluster: H_cluster, protect_names=[]):
                         ff=True,
                     )
                     ff_op_sched = OpSchedule(
-                        ff_op_list + [ComputeOp(K_C_node("loss"))],
+                        ff_op_list + [ComputeOp(ComputationNode("loss"))],
                         cluster=cluster,
                         correct_overhead=False,
                     )  # not real sched, only for info
@@ -279,7 +285,7 @@ def preprocess(cluster: H_cluster, protect_names=[]):
 
 
 def get_single_compute_op_list(
-    cluster: H_cluster, with_bwd=True, protect_names=[], ff=False
+    cluster: HierarchicalCluster, with_bwd=True, protect_names=[], ff=False
 ):
     list_kcn = cluster.list_kcn.copy()
     if not with_bwd:
@@ -340,65 +346,66 @@ def get_single_compute_op_list(
     return op_list  # , loss_idx
 
 
-def add_parameter_node(h_cluster, original_mod, minor_size=1024*1024):
-    if h_cluster is None:
-        return None
-    if not hasattr(h_cluster, "list_kcn"):
-        setattr(h_cluster, "list_kdn_parameters", [])
-        return None
-    list_kcn = h_cluster.list_kcn
-    list_kdn_parameters = []
-    parameters_id_to_name = {id(p):n for n,p in original_mod.named_parameters()}
-    for kcn in list_kcn:
-        if "loss" in kcn.name or not kcn.is_fwd:
-            continue
-        # for arg in kcn.get_code_ast().body[0].value.args:
-        for assign in kcn.get_code_ast().body:
-            if not hasattr(assign.value, "args"):
-                continue
-            for arg in assign.value.args:
-                if "self" in ast_to_str(arg):
-                    arg_id = id(eval(ast_to_str(arg).replace("self[", "original_mod[").replace("self.", "original_mod.")))
-                    assert arg_id in parameters_id_to_name.keys()
-                    n = parameters_id_to_name[arg_id]
-                    p = original_mod.get_parameter(n)
-                    if p.numel()<minor_size:
-                        continue
-                    info = Var_info(p)
-                    list_kdn_name = [k.name for k in list_kdn_parameters]
-                    if str(n)+" parameter" in list_kdn_name:
-                        kdn = list_kdn_parameters[list_kdn_name.index(str(n)+" parameter")]
-                    else:
-                        kdn = K_D_node(main_target=n, kdn_type="parameter", info=info,)
-                    kdn.users_real.add(kcn)
-                    kdn.mem = p.shape.numel()*p.element_size()
+# def add_parameter_node(h_cluster, original_mod, minor_size=1024*1024):
+#     if h_cluster is None:
+#         return None
+#     if not hasattr(h_cluster, "list_kcn"):
+#         setattr(h_cluster, "list_kdn_parameters", [])
+#         return None
+#     list_kcn = h_cluster.list_kcn
+#     list_kdn_parameters = []
+#     parameters_id_to_name = {id(p):n for n,p in original_mod.named_parameters()}
+#     for kcn in list_kcn:
+#         if "loss" in kcn.name or not kcn.is_fwd:
+#             continue
+#         # for arg in kcn.get_code_ast().body[0].value.args:
+#         for assign in kcn.get_code_ast().body:
+#             if not hasattr(assign.value, "args"):
+#                 continue
+#             for arg in assign.value.args:
+#                 if "self" in ast_to_str(arg):
+#                     arg_id = id(eval(ast_to_str(arg).replace("self[", "original_mod[").replace("self.", "original_mod.")))
+#                     assert arg_id in parameters_id_to_name.keys()
+#                     n = parameters_id_to_name[arg_id]
+#                     p = original_mod.get_parameter(n)
+#                     if p.numel()<minor_size:
+#                         continue
+#                     info = Var_info(p)
+#                     list_kdn_name = [k.name for k in list_kdn_parameters]
+#                     if str(n)+" parameter" in list_kdn_name:
+#                         kdn = list_kdn_parameters[list_kdn_name.index(str(n)+" parameter")]
+#                     else:
+#                         kdn = K_D_node(main_target=n, kdn_type="parameter", info=info,)
+#                     kdn.users_real.add(kcn)
+#                     kdn.mem = p.shape.numel()*p.element_size()
                     
-                    list_kdn_parameters.append(kdn)
-    setattr(h_cluster, "list_kdn_parameters", list_kdn_parameters)
-    for hcn in h_cluster.possible_hg[0].list_hcn:
-        sub_cluster = hcn.sub_cluster
-        if sub_cluster is None:# no_grad hcn
-            list_kdn_parameters = []
-            for op in hcn.ff_op_list:
-                for kdn in h_cluster.list_kdn_parameters:
-                    if op.kcn in kdn.users_real:
-                        list_kdn_parameters.append(kdn)
-            setattr(hcn, "list_kdn_parameters", list_kdn_parameters)
-            continue
-        if not hasattr(sub_cluster, "list_kcn"):
-            setattr(sub_cluster, "list_kdn_parameters", [])
-        list_kdn_parameters = []
-        for kcn in sub_cluster.list_kcn:
-            for kdn in h_cluster.list_kdn_parameters:
-                if kcn in kdn.users_real:
-                    list_kdn_parameters.append(kdn)
-        setattr(sub_cluster, "list_kdn_parameters", list_kdn_parameters)
-        setattr(hcn, "list_kdn_parameters", list_kdn_parameters)
-    return list_kdn_parameters
+#                     list_kdn_parameters.append(kdn)
+#     setattr(h_cluster, "list_kdn_parameters", list_kdn_parameters)
+#     for hcn in h_cluster.possible_hg[0].list_hcn:
+#         sub_cluster = hcn.sub_cluster
+#         if sub_cluster is None:# no_grad hcn
+#             list_kdn_parameters = []
+#             for op in hcn.ff_op_list:
+#                 for kdn in h_cluster.list_kdn_parameters:
+#                     if op.kcn in kdn.users_real:
+#                         list_kdn_parameters.append(kdn)
+#             setattr(hcn, "list_kdn_parameters", list_kdn_parameters)
+#             continue
+#         if not hasattr(sub_cluster, "list_kcn"):
+#             setattr(sub_cluster, "list_kdn_parameters", [])
+#         list_kdn_parameters = []
+#         for kcn in sub_cluster.list_kcn:
+#             for kdn in h_cluster.list_kdn_parameters:
+#                 if kcn in kdn.users_real:
+#                     list_kdn_parameters.append(kdn)
+#         setattr(sub_cluster, "list_kdn_parameters", list_kdn_parameters)
+#         setattr(hcn, "list_kdn_parameters", list_kdn_parameters)
+#     return list_kdn_parameters
 
 
 def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
-    timer = irotor.make_timer(torch.device("cpu"))
+    # timer = irotor.make_timer(torch.device("cpu"))
+    timer = TimerCPU()
     a_c = torch.ones([10, 1024,1024], device="cpu", pin_memory=True)
     a_g = torch.ones([10, 1024,1024], device="cuda")
     b_c = torch.ones([10, 1024,1024], device="cpu", pin_memory=True)
@@ -451,7 +458,7 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
 
 
 
-# def add_autograd_sched(cluster: H_cluster, protect_names=[]):
+# def add_autograd_sched(cluster: HierarchicalCluster, protect_names=[]):
 #     if cluster is cluster.representee_cluster:
 #         op_list, loss_idx = get_single_compute_op_list(
 #             cluster, with_bwd=True, protect_names=protect_names
