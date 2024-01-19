@@ -12,10 +12,11 @@ from .main import (
     get_hgraph_budget_ub,
 )
 import pulp
+from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
 # from .HILP_gurobi import ModelGurobi
 # from .HILP_pulp import ModelPULP
 from .HILP_pulp_ofl_para import ModelPULP
-from .rotor_solver import seq_builder, solve_dp_functional
+# from .rotor_solver import seq_builder, solve_dp_functional
 from .op_schedule import OpSchedule
 # from rkgb.utils.global_vars import solver_name
 import psutil
@@ -80,19 +81,19 @@ class HILP(Solver):
     # def __repr__(self):
     #     return f"HILP solver"
 
-    def can_solve(self, hg: H_graph):
+    def can_solve(self, hg: HierarchicalGraph):
         if self.config.solve_top_level:
             limit = self.config.nb_total_nodes_top_level
         else:
             limit = self.config.nb_total_nodes
-        return len(hg.list_hcn) // 2 <= limit
+        return len(hg.list_HCNs) // 2 <= limit
 
-    def get_budget_list(self, hgraph: H_graph):
+    def get_budget_list(self, hgraph: HierarchicalGraph):
         min_bdg = get_hgraph_budget_lb(hgraph)
         max_bdg = get_hgraph_budget_ub(hgraph)
         # interfaces_mem = sum(kdn.mem for kdn in hgraph.cluster.all_interfaces)
-        interfaces_mem = sum(kdn.mem for kdn in hgraph.cluster.interfaces["inputs_kdn_data"])
-        interfaces_mem += sum(kdn.mem for kdn in hgraph.cluster.interfaces["outputs_kdn_data"])
+        interfaces_mem = sum(kdn.mem for kdn in hgraph.cluster.interfaces["input_data_anodes"])
+        interfaces_mem += sum(kdn.mem for kdn in hgraph.cluster.interfaces["output_data_anodes"])
 
         budgets = []
         l_bd_peak = (
@@ -113,14 +114,14 @@ class HILP(Solver):
         # for fwd hcn, select sched from hcn.sub_cluster and put in hcn.list_sched
         weights = []
         overall_budget = overall_budget or np.inf
-        for hcn in hg.list_hcn:
+        for hcn in hg.list_HCNs:
             if hcn.is_fwd:
                 if hcn.sub_cluster is None:
                     weights.append(0)
                 else:
-                    weights.append(len(hcn.sub_cluster.list_kcn))
+                    weights.append(len(hcn.sub_cluster.list_cnodes))
 
-        for hcn, w in zip(hg.list_hcn, weights):
+        for hcn, w in zip(hg.list_HCNs, weights):
             nb_sched = max(
                 self.config.nb_total_sched * w // sum(weights), 1
             )  # at least 1 sched
@@ -154,12 +155,13 @@ class HILP(Solver):
                 hcn.list_sched = []
 
     def solve(
-        self, cluster: H_cluster, budgets=None, accurate_mem=False, gc_collect=True
+        self, cluster: HierarchicalCluster, budgets=None, accurate_mem=False, gc_collect=True
     ):
         print(f"solving {cluster.name}")
         list_op_sched = []
 
-        for hg in cluster.representee_cluster.possible_hg:
+        # for hg in cluster.representee_cluster.possible_hg:
+        for hg in cluster.representee_cluster.partitionings:
             if budgets is None:
                 # self.budgets = get_cluster_budget(
                 #     cluster.representee_cluster, with_save_budget=True
@@ -189,7 +191,7 @@ class HILP(Solver):
 
     def solve_hg(
         self,
-        hg: H_graph,
+        hg: HierarchicalGraph,
         peak_budget,
         save_budget=None,
         accurate_mem=False,
@@ -242,7 +244,7 @@ class HILP(Solver):
                         #     f"Solution with obj: {md.md.getObjective().getValue()}"
                         # )
                         print(
-                            f"Solve Hgraph {hg.name} with {len(hg.list_hcn)} nodes takes {md.solve_time:03f}s, used {psutil.virtual_memory().used}B memory"
+                            f"Solve Hgraph {hg.name} with {len(hg.list_HCNs)} nodes takes {md.solve_time:03f}s, used {psutil.virtual_memory().used}B memory"
                         )
                     loss_idx = md.loss_idx
                     # if solver_name[0] == "gurobi":

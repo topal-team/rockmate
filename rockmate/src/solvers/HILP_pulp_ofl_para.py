@@ -112,7 +112,6 @@ class ModelPULP:
         },
         gcd=None,
         accurate_mem=False,
-        offload=False,
         protected_names=[],
         grouping=True,
         grad_mode="free", #["free", "accumulate"]
@@ -158,7 +157,7 @@ class ModelPULP:
         self.time = []
         self.overhead = []
 
-        for i, hcn in enumerate(self.hgraph.list_hcn):
+        for i, hcn in enumerate(self.hgraph.list_HCNs):
             if "Loss" in hcn.name:
                 self.loss_idx = i
             if hcn.sub_cluster is None:
@@ -202,60 +201,60 @@ class ModelPULP:
             if j is None:
                 continue
             self.sub_c2hcn[j].append(i)
-        self.mem = [hdn.mem / self.gcd for hdn in self.hgraph.list_hdn]
+        self.mem = [hdn.mem / self.gcd for hdn in self.hgraph.list_HANs]
         self.saved_mem = [
             [op_sched.mem / self.gcd for op_sched in list_sched]
             for list_sched in self.list_list_sched
         ]
 
-        self.T = T = len(self.hgraph.list_hcn)
-        self.I = I = len(self.hgraph.list_hdn)
+        self.T = T = len(self.hgraph.list_HCNs)
+        self.I = I = len(self.hgraph.list_HANs)
         self.J = J = len(self.list_list_sched)
 
         self.protected_indices = [
             i
-            for i, hdn in enumerate(self.hgraph.list_hdn)
+            for i, hdn in enumerate(self.hgraph.list_HANs)
             if hdn.kdn.name in protected_names
         ]
         if accurate_mem:
             self.protected_indices += [
                 i
-                for i, hdn in enumerate(self.hgraph.list_hdn)
-                if hdn.kdn in self.hgraph.cluster.interfaces["outputs_kdn_data"]
+                for i, hdn in enumerate(self.hgraph.list_HANs)
+                if hdn.kdn in self.hgraph.cluster.interfaces["output_data_anodes"]
             ]
 
         self.input_grad_indices = [
-            self.hgraph.list_hdn.index(hdn)
-            for hdn in self.hgraph.inputs_hdn_grad
-            if hdn in self.hgraph.list_hdn
+            self.hgraph.list_HANs.index(hdn)
+            for hdn in self.hgraph.input_grad_HANs
+            if hdn in self.hgraph.list_HANs
         ]
         self.input_data_indices = [
-            self.hgraph.list_hdn.index(hdn)
-            for hdn in self.hgraph.inputs_hdn_data
-            if hdn in self.hgraph.list_hdn
+            self.hgraph.list_HANs.index(hdn)
+            for hdn in self.hgraph.input_data_HANs
+            if hdn in self.hgraph.list_HANs
         ]
 
         _deps_d = [
-            [self.hgraph.list_hcn.index(hcn) for hcn in hdn.deps]
-            for hdn in self.hgraph.list_hdn
+            [self.hgraph.list_HCNs.index(hcn) for hcn in hdn.deps]
+            for hdn in self.hgraph.list_HANs
         ]  # source of hdn
         _users_d = [
             [
-                self.hgraph.list_hcn.index(hcn)
-                for hcn in self.hgraph.list_hdn[i].users
-                if hcn in self.hgraph.list_hcn
+                self.hgraph.list_HCNs.index(hcn)
+                for hcn in self.hgraph.list_HANs[i].users
+                if hcn in self.hgraph.list_HCNs
             ]
             for i in range(I)
         ]  # outputs of hdn
         _users_c = [
-            [self.hgraph.list_hdn.index(hdn) for hdn in self.hgraph.list_hcn[k].users]
+            [self.hgraph.list_HANs.index(hdn) for hdn in self.hgraph.list_HCNs[k].users]
             for k in range(T)
         ]  # outputs of hcn
 
         #### Update edges based on .dep_interfaces_data
         #### In certain schedules, BWD depends on input/output data
         # for i in range(I):
-        #     for k, hcn in enumerate(self.hgraph.list_hcn):
+        #     for k, hcn in enumerate(self.hgraph.list_HCNs):
         #         if hcn.sub_cluster is None:
         #             continue
         #         for op_sched in hcn.list_sched:
@@ -263,7 +262,7 @@ class ModelPULP:
         #             for i_ in op_sched.dep_interfaces_data:
         #                 if (
         #                     op_sched.list_kdn[i_]
-        #                     == self.hgraph.list_hdn[i].kdn.name
+        #                     == self.hgraph.list_HANs[i].kdn.name
         #                     and k not in _users_d[i]
         #                 ):
         #                     _users_d[i].append(k)
@@ -369,7 +368,7 @@ class ModelPULP:
                 for k in self.krange(t):
                     if k in _deps_d[i]+_users_d[i]:
                         self.active_stages[i].append(t)
-            if not self.hgraph.list_hdn[i].deps:# src node
+            if not self.hgraph.list_HANs[i].deps:# src node
                 self.active_stages[i].append(-1)
         # to present whether one saved tensor can be inherited from the last stage
         self.AliveA = RkLpVariable.dicts(
@@ -434,15 +433,15 @@ class ModelPULP:
                     self.delete[t, i] = 0
 
         self.W = W = len(self.sub_clusters)
-        def get_parameter_cluster(sub_clusters):
+        def get_parameters(hierarchical_nodes):
             all_params = {}
             # all_clusters = {sub_cluster.name:sub_cluster for sub_cluster in sub_clusters if sub_cluster}
             # sub_c2params = {sub_cluster.name:set() for sub_cluster in sub_clusters if sub_cluster}
             param2sub_c = {}
 
-            for i,sub_cluster in enumerate(sub_clusters):
-                if not hasattr(sub_cluster, "list_kdn_parameters"):continue
-                for kdn in sub_cluster.list_kdn_parameters:
+            for i,sub_cluster in enumerate(hierarchical_nodes):
+                if not hasattr(sub_cluster, "required_parameter_nodes_real"):continue
+                for kdn in sub_cluster.required_parameter_nodes_real:
                     # sub_c2params[sub_cluster.name].add(kdn.name)
                     all_params[kdn.name] = kdn
                     if kdn.name not in param2sub_c:
@@ -465,7 +464,7 @@ class ModelPULP:
             return params2sub_c, parameters
         
         if self.with_parameters:
-            # self.param2sub_c, self.parameters = get_parameter_cluster(self.sub_clusters)
+            # self.param2sub_c, self.parameters = get_parameters(self.sub_clusters)
             # self.param2hcn = {w:[] for w in range(W)}
             # self.hcn2param = {}# is no param for hcn[k], k not in hcn2param
             # for w,l_c in self.param2sub_c.items():
@@ -477,7 +476,7 @@ class ModelPULP:
             #                 self.hcn2param[k] = [w]
             #             self.param2hcn[w].append(k)
 
-            self.param2hcn, self.parameters = get_parameter_cluster(self.hgraph.list_hcn)
+            self.param2hcn, self.parameters = get_parameters(self.hgraph.list_HCNs)
             self.hcn2param = {t:[] for t in range(self.T)}
 
             for p,hcn_s in self.param2hcn.items():
@@ -739,10 +738,10 @@ class ModelPULP:
 
                     list_sched = self.list_list_sched[j]
                     for i in list_sched[o].dep_interfaces_data:
-                        hcn = self.hgraph.list_hcn[fwd_i]
+                        hcn = self.hgraph.list_HCNs[fwd_i]
                         name = self.sub_clusters[j].list_kdn[i].name
                         # Tensor req_i is required by BWD
-                        req_i = [hdn.kdn.name for hdn in self.hgraph.list_hdn].index(
+                        req_i = [hdn.kdn.name for hdn in self.hgraph.list_HANs].index(
                             name
                         )
                         for j_, (k_, i_) in enumerate(self.create_list):
@@ -880,7 +879,7 @@ class ModelPULP:
                     )
                 )
                 # if k < self.loss_idx:
-                if self.hgraph.list_hcn[k].is_fwd:
+                if self.hgraph.list_HCNs[k].is_fwd:
                     self.U[t, k] += lpSum(
                         self.Comp[t, k, o] * self.saved_mem[j][o]
                         for o in range(self.nOpts[k])
@@ -921,7 +920,7 @@ class ModelPULP:
                         <= self.peak_budget - parameter_mem
                     )
                 else:
-                    hcn = self.hgraph.list_hcn[k]
+                    hcn = self.hgraph.list_HCNs[k]
                     for o, op_sched in enumerate(self.list_list_sched[j]):
                         for correction in (
                             op_sched.fwd_overhead_correction
@@ -940,7 +939,7 @@ class ModelPULP:
                                     continue
 
                                 i_ = [
-                                    hdn.kdn.name for hdn in self.hgraph.list_hdn
+                                    hdn.kdn.name for hdn in self.hgraph.list_HANs
                                 ].index(
                                     self.sub_clusters[j]
                                     .list_kdn[inter_position[0]]
@@ -1018,7 +1017,7 @@ class ModelPULP:
         return (t_, i_)
 
     def add_abar_constraint(self, save_budget):
-        T = len(self.hgraph.list_hcn)
+        T = len(self.hgraph.list_HCNs)
         self.save_budget = save_budget / self.gcd
         for k in range(T):
             self.md += self.U[(self.loss_idx, k)] <= self.save_budget
@@ -1283,7 +1282,7 @@ class ModelPULP:
         for t in range(bwd_i, self.T):
             if not self.single_fwd and self.sol(self.sumComp[t,fwd_i].value()):
                 early_fwd.append(t)#if recompute fwd after bwd
-        hcn = self.hgraph.list_hcn[fwd_i]
+        hcn = self.hgraph.list_HCNs[fwd_i]
         # parameters = {kdn.name: kdn for kdn in hcn.sub_cluster.list_kdn_parameters}
         parameters = {kdn.name: kdn for kdn in self.parameters[w]}
         parameter_size = sum(kdn.mem for kdn in parameters.values())
@@ -1621,7 +1620,7 @@ class ModelPULP:
         # for kdn in self.hgraph.cluster.list_kdn_parameters:
         #     init_alive_status[kdn.name] = True
         # for w in range(W):
-        #     hcn = self.hgraph.list_hcn[self.param2hcn[w]]
+        #     hcn = self.hgraph.list_HCNs[self.param2hcn[w]]
         #     self.current_buffers[w] = Parameter(hcn.sub_cluster.name)
         # self.cpu_optimized_params = []
         # for (_,_,op) in self.opt_ops:
@@ -1664,7 +1663,7 @@ class ModelPULP:
 
     def create_optimize_ops(self, t, k, w, itemsize=4):
         op_list = []
-        # sub_cluster = self.hgraph.list_hcn[min(self.param2hcn[w])].sub_cluster
+        # sub_cluster = self.hgraph.list_HCNs[min(self.param2hcn[w])].sub_cluster
         if self.grouping:
             for t_, k_, op in self.opt_ops:
                 if (
@@ -1677,7 +1676,7 @@ class ModelPULP:
 
     def create_delete_ops(self, t, k, w, itemsize=4):
         op_list = []
-        sub_cluster = self.hgraph.list_hcn[min(self.param2hcn[w])].sub_cluster
+        sub_cluster = self.hgraph.list_HCNs[min(self.param2hcn[w])].sub_cluster
         if self.grouping:
             for t_, k_, op in self.del_ops:
                 if (
@@ -1691,7 +1690,7 @@ class ModelPULP:
     def create_prefetch_ops(self, t, k, w, itemsize=4):
         pre_op_list = []
         post_op_list = []
-        sub_cluster = self.hgraph.list_hcn[min(self.param2hcn[w])].sub_cluster
+        sub_cluster = self.hgraph.list_HCNs[min(self.param2hcn[w])].sub_cluster
 
         if self.grouping:
             for t_, k_, op in self.prf_ops:
@@ -1706,7 +1705,7 @@ class ModelPULP:
 
     def create_offload_ops(self, t, k, w, itemsize=4):
         op_list = []
-        sub_cluster = self.hgraph.list_hcn[min(self.param2hcn[w])].sub_cluster
+        sub_cluster = self.hgraph.list_HCNs[min(self.param2hcn[w])].sub_cluster
         if self.grouping:
             for t_, k_, op in self.ofl_ops:
                 if (

@@ -37,23 +37,23 @@ class Solver:
 def H_cluster_method_get_sched(self, pareto=False):
     representee = self.representee_cluster
     if not pareto:
-        return representee.list_sched
+        return representee.list_schedules
     else:
-        list_sched = representee.list_sched
+        list_schedules = representee.list_schedules
         time_mem = np.array(
-            [(sum(op_sched.time), op_sched.mem) for op_sched in list_sched]
+            [(sum(op_sched.time), op_sched.mem) for op_sched in list_schedules]
         )
-        is_pareto = np.ones(len(list_sched), dtype=bool)
+        is_pareto = np.ones(len(list_schedules), dtype=bool)
         for i, c in enumerate(time_mem):
             is_pareto[i] = np.all(np.any(time_mem >= c, axis=1))
 
-    return [list_sched[i] for i, p in enumerate(is_pareto) if p]
+    return [list_schedules[i] for i, p in enumerate(is_pareto) if p]
     # if self is not representee:
     #     repr_sols = representee.get_sched()
     #     ano_sols = [representee.translator.translate(sol) for sol in repr_sols]
     #     return [self.translator.reverse_translate(sol) for sol in ano_sols]
     # else:
-    #     return self.list_sched
+    #     return self.list_schedules
 
 
 def H_cluster_method_translate_op_list(self, op_list):
@@ -90,10 +90,10 @@ setattr(HierarchicalCluster, "translate_op_list", H_cluster_method_translate_op_
 def get_hgraph_budget_lb(hgraph: HierarchicalGraph):
     # Lower bound for minimum feasible budget given schedules
     hcn_memory_budget = []
-    for hcn in hgraph.list_hcn:
+    for hcn in hgraph.list_HCNs:
         if hcn.sub_cluster is not None:
-            list_sched = hcn.sub_cluster.get_sched()
-            hcn_memory_budget.append(min(op_sched.peak_mem for op_sched in list_sched))
+            list_schedules = hcn.sub_cluster.get_sched()
+            hcn_memory_budget.append(min(op_sched.peak_mem for op_sched in list_schedules))
         else:
             hcn_memory_budget.append(hcn.ff_overhead)
     return max(hcn_memory_budget)
@@ -102,7 +102,7 @@ def get_hgraph_budget_lb(hgraph: HierarchicalGraph):
 def get_hgraph_budget_ub(hgraph: HierarchicalGraph):
     # Upper bound for minimum feasible budget given schedules
     cluster = hgraph.cluster
-    if cluster.representee_cluster.list_sched == []:
+    if cluster.representee_cluster.list_schedules == []:
         autograd_op_list = get_single_compute_op_list(
             cluster,
             with_bwd=True,
@@ -112,7 +112,7 @@ def get_hgraph_budget_ub(hgraph: HierarchicalGraph):
             cluster=cluster,
         )
     else:
-        autograd_sched = cluster.representee_cluster.list_sched[0]
+        autograd_sched = cluster.representee_cluster.list_schedules[0]
     max_bdg = autograd_sched.mem + autograd_sched.bwd_overhead
     return max_bdg
 
@@ -133,22 +133,22 @@ def get_cluster_budget(
     budgets = []
     sizes = []
     # fwd_hdns = set()
-    # for hcn in hg.list_hcn:
+    # for hcn in hg.list_HCNs:
     #     # if hcn.is_fwd:
     #     for hdn in hcn.users:
     #         # if hdn not in hg.interfaces:
     #         #     fwd_hdns.add(hdn)
     #         if not hcn.sub_cluster is None:
-    #             sizes.append(hcn.sub_cluster.list_sched[0].mem)
+    #             sizes.append(hcn.sub_cluster.list_schedules[0].mem)
     # sizes += [hdn.mem for hdn in hg.list_hdn]
-    sizes = [kdn.mem for kdn in cluster.list_kdn]
-    overheads = [kcn.overhead for kcn in cluster.list_kcn if kcn.overhead]
+    sizes = [kdn.mem for kdn in cluster.list_anodes]
+    overheads = [kcn.overhead for kcn in cluster.list_cnodes if kcn.overhead]
 
-    # overheads = [hcn.sub_cluster.ff_overhead for hcn in hg.list_hcn] + [
-    #     op_sched.bwd_overhead for op_sched in hg.list_sched
+    # overheads = [hcn.sub_cluster.ff_overhead for hcn in hg.list_HCNs] + [
+    #     op_sched.bwd_overhead for op_sched in hg.list_schedules
     # ]
     # max_bdg = sum(sizes) + max(overheads)
-    if cluster.representee_cluster.list_sched == []:
+    if cluster.representee_cluster.list_schedules == []:
         autograd_op_list = get_single_compute_op_list(
             cluster,
             with_bwd=True,
@@ -158,17 +158,17 @@ def get_cluster_budget(
             cluster=cluster,
         )
     else:
-        autograd_sched = cluster.representee_cluster.list_sched[0]
+        autograd_sched = cluster.representee_cluster.list_schedules[0]
     interfaces_mem = sum(kdn.mem for kdn in cluster.all_interfaces)
     max_bdg = autograd_sched.mem + autograd_sched.bwd_overhead
     if overall_bdg is not None:
         max_bdg = min(max_bdg, overall_bdg)
     min_bdg = max(overheads)
-    # max_bdg = hg.list_sched[0].mem + max(overheads)
+    # max_bdg = hg.list_schedules[0].mem + max(overheads)
 
     # TODO: find the minimum feasible budget
     # min_bdg = hg.fast_fwd_overhead()[0]
-    # min_bdg = min(op_sched.mem for op_sched in hg.list_sched) + max(overheads)
+    # min_bdg = min(op_sched.mem for op_sched in hg.list_schedules) + max(overheads)
 
     l_bd_peak = np.linspace(min_bdg, max_bdg, nb_bdg_peak) + interfaces_mem
     if not with_save_budget:
@@ -191,9 +191,9 @@ def get_cluster_budget(
 def solve_recursive(h_cluster: HierarchicalCluster, list_solvers=[], skip_self=False):
     # assume it's representee
     # print(h_cluster.name)
-    for hg in h_cluster.possible_hg:
+    for hg in h_cluster.partitionings:
         # print(hg.name)
-        for hcn in hg.list_hcn:
+        for hcn in hg.list_HCNs:
             if (
                 hcn.is_fwd
                 and hcn.sub_cluster is not None
@@ -207,9 +207,9 @@ def solve_recursive(h_cluster: HierarchicalCluster, list_solvers=[], skip_self=F
             # h_cluster.solve(solver)
             if h_cluster is h_cluster.representee_cluster:
                 last_time = time.time()
-                h_cluster.list_sched.extend(solver(h_cluster))
+                h_cluster.list_schedules.extend(solver(h_cluster))
                 # print(
-                #     f"Time to solve {h_cluster.name} of size {len(h_cluster.list_kcn)}: {time.time() - last_time}"
+                #     f"Time to solve {h_cluster.name} of size {len(h_cluster.list_cnodes)}: {time.time() - last_time}"
                 # )
                 # mem = psutil.virtual_memory()
                 # print(
@@ -223,28 +223,28 @@ def solve_recursive(h_cluster: HierarchicalCluster, list_solvers=[], skip_self=F
 def preprocess_rec(cluster: HierarchicalCluster):
     if cluster is cluster.representee_cluster:
         if not cluster.is_bottom:
-            for hg in cluster.possible_hg:
-                for hcn in hg.list_hcn:
+            for hg in cluster.partitionings:
+                for hcn in hg.list_HCNs:
                     if hcn.is_fwd and hcn.sub_cluster is not None:
-                        # if not hcn.sub_cluster.list_sched:
+                        # if not hcn.sub_cluster.list_schedules:
                         preprocess_rec(hcn.sub_cluster)
             preprocess(cluster)
 
 
 def preprocess(cluster: HierarchicalCluster, protect_names=[]):
     if cluster is cluster.representee_cluster:
-        # assert cluster.list_sched == []  # only visit representee once
+        # assert cluster.list_schedules == []  # only visit representee once
         # autograd_op_list, autograd_loss_idx = get_single_compute_op_list(
         #     cluster, with_bwd=True, protect_names=protect_names
         # )
-        # cluster.list_sched.append(
+        # cluster.list_schedules.append(
         #     OpSchedule(autograd_op_list, autograd_loss_idx, cluster=cluster)
         # )
-        for hg in cluster.possible_hg:
-            for hcn in hg.list_hcn:
+        for hg in cluster.partitionings:
+            for hcn in hg.list_HCNs:
                 if hcn.sub_cluster is None:  # fwd with no grad
-                    if hcn.name in cluster.dict_kn:
-                        kcn = cluster.dict_kn[hcn.name]
+                    if hcn.name in cluster.dict_nodes:
+                        kcn = cluster.dict_nodes[hcn.name]
                         ff_op_list = [ComputeOp(kcn, fast_forward=True)]
                         hcn.ff_time = kcn.time
                         hcn.ff_overhead = kcn.overhead
@@ -255,14 +255,14 @@ def preprocess(cluster: HierarchicalCluster, protect_names=[]):
                 else:
                     if (
                         hcn.sub_cluster.representee_cluster is hcn.sub_cluster
-                        and hcn.sub_cluster.list_sched == []
+                        and hcn.sub_cluster.list_schedules == []
                     ):
                         autograd_op_list = get_single_compute_op_list(
                             hcn.sub_cluster,
                             with_bwd=True,
                             protect_names=protect_names,
                         )
-                        hcn.sub_cluster.list_sched.append(
+                        hcn.sub_cluster.list_schedules.append(
                             OpSchedule(
                                 autograd_op_list,
                                 cluster=hcn.sub_cluster,
@@ -287,7 +287,7 @@ def preprocess(cluster: HierarchicalCluster, protect_names=[]):
 def get_single_compute_op_list(
     cluster: HierarchicalCluster, with_bwd=True, protect_names=[], ff=False
 ):
-    list_kcn = cluster.list_kcn.copy()
+    list_kcn = cluster.list_cnodes.copy()
     if not with_bwd:
         list_kcn = list_kcn[: cluster.loss_idx]
 
@@ -300,21 +300,21 @@ def get_single_compute_op_list(
         for kcn in kdn.users_real:
             if kcn in list_kcn[i + 1 :]:
                 return False
-        if kdn in cluster.loss_kcn.deps_real:
+        if kdn in cluster.loss_cnode.deps_real:
             return False
-        if kdn in cluster.interfaces["inputs_kdn_data"]:
+        if kdn in cluster.interfaces["input_data_anodes"]:
             return False
-        if kdn in cluster.interfaces["inputs_kdn_grad"]:
+        if kdn in cluster.interfaces["input_grad_anodes"]:
             return False
         return True
 
     op_list = []
     # alive_list = []
     alive_status = {}
-    for kdn in cluster.list_kdn:
+    for kdn in cluster.list_anodes:
         # if hdn not in cluster.interfaces:
         alive_status[kdn.name] = (
-            1 if (kdn in cluster.interfaces["inputs_kdn_data"]) else 0
+            1 if (kdn in cluster.interfaces["input_data_anodes"]) else 0
         )
 
     for i, kcn in enumerate(list_kcn):
@@ -336,7 +336,7 @@ def get_single_compute_op_list(
 
         for kdn_name, alive in alive_status.items():
             if alive:
-                kdn = cluster.dict_kn[kdn_name]
+                kdn = cluster.dict_nodes[kdn_name]
                 if _can_del(i, kdn):
                     op_list.append(DeleteOp(Activation(kdn)))
 
@@ -350,10 +350,10 @@ def get_single_compute_op_list(
 #     if h_cluster is None:
 #         return None
 #     if not hasattr(h_cluster, "list_kcn"):
-#         setattr(h_cluster, "list_kdn_parameters", [])
+#         setattr(h_cluster, "list_anodes_parameters", [])
 #         return None
-#     list_kcn = h_cluster.list_kcn
-#     list_kdn_parameters = []
+#     list_kcn = h_cluster.list_cnodes
+#     list_anodes_parameters = []
 #     parameters_id_to_name = {id(p):n for n,p in original_mod.named_parameters()}
 #     for kcn in list_kcn:
 #         if "loss" in kcn.name or not kcn.is_fwd:
@@ -371,36 +371,36 @@ def get_single_compute_op_list(
 #                     if p.numel()<minor_size:
 #                         continue
 #                     info = Var_info(p)
-#                     list_kdn_name = [k.name for k in list_kdn_parameters]
-#                     if str(n)+" parameter" in list_kdn_name:
-#                         kdn = list_kdn_parameters[list_kdn_name.index(str(n)+" parameter")]
+#                     list_anodes_name = [k.name for k in list_anodes_parameters]
+#                     if str(n)+" parameter" in list_anodes_name:
+#                         kdn = list_anodes_parameters[list_anodes_name.index(str(n)+" parameter")]
 #                     else:
 #                         kdn = K_D_node(main_target=n, kdn_type="parameter", info=info,)
 #                     kdn.users_real.add(kcn)
 #                     kdn.mem = p.shape.numel()*p.element_size()
                     
-#                     list_kdn_parameters.append(kdn)
-#     setattr(h_cluster, "list_kdn_parameters", list_kdn_parameters)
-#     for hcn in h_cluster.possible_hg[0].list_hcn:
+#                     list_anodes_parameters.append(kdn)
+#     setattr(h_cluster, "list_anodes_parameters", list_anodes_parameters)
+#     for hcn in h_cluster.partitionings[0].list_HCNs:
 #         sub_cluster = hcn.sub_cluster
 #         if sub_cluster is None:# no_grad hcn
-#             list_kdn_parameters = []
+#             list_anodes_parameters = []
 #             for op in hcn.ff_op_list:
-#                 for kdn in h_cluster.list_kdn_parameters:
+#                 for kdn in h_cluster.list_anodes_parameters:
 #                     if op.kcn in kdn.users_real:
-#                         list_kdn_parameters.append(kdn)
-#             setattr(hcn, "list_kdn_parameters", list_kdn_parameters)
+#                         list_anodes_parameters.append(kdn)
+#             setattr(hcn, "list_anodes_parameters", list_anodes_parameters)
 #             continue
 #         if not hasattr(sub_cluster, "list_kcn"):
-#             setattr(sub_cluster, "list_kdn_parameters", [])
-#         list_kdn_parameters = []
-#         for kcn in sub_cluster.list_kcn:
-#             for kdn in h_cluster.list_kdn_parameters:
+#             setattr(sub_cluster, "list_anodes_parameters", [])
+#         list_anodes_parameters = []
+#         for kcn in sub_cluster.list_cnodes:
+#             for kdn in h_cluster.list_anodes_parameters:
 #                 if kcn in kdn.users_real:
-#                     list_kdn_parameters.append(kdn)
-#         setattr(sub_cluster, "list_kdn_parameters", list_kdn_parameters)
-#         setattr(hcn, "list_kdn_parameters", list_kdn_parameters)
-#     return list_kdn_parameters
+#                     list_anodes_parameters.append(kdn)
+#         setattr(sub_cluster, "list_anodes_parameters", list_anodes_parameters)
+#         setattr(hcn, "list_anodes_parameters", list_anodes_parameters)
+#     return list_anodes_parameters
 
 
 def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
@@ -463,20 +463,20 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
 #         op_list, loss_idx = get_single_compute_op_list(
 #             cluster, with_bwd=True, protect_names=protect_names
 #         )
-#         cluster.list_sched.append(
+#         cluster.list_schedules.append(
 #             OpSchedule(op_list, loss_idx=loss_idx, cluster=cluster)
 #         )
 
-#     list_kcn = cluster.list_kcn
+#     list_kcn = cluster.list_cnodes
 
 #     def _can_del(i, kdn):
 #         if kdn.name in protect_names:
 #             return False
-#         for kcn in cluster.list_kcn[i + 1 :]:
+#         for kcn in cluster.list_cnodes[i + 1 :]:
 #             if kdn in kcn.deps_real:
 #                 return False
 #         # for kcn in kdn.users_real:
-#         #     if cluster.list_kcn.index(kcn) > i:
+#         #     if cluster.list_cnodes.index(kcn) > i:
 #         #         return False
 #         return True
 
@@ -494,13 +494,13 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
 #         op_list = []
 #         alive_list = []
 #         alive_status = {}
-#         for kdn in cluster.list_kdn:
+#         for kdn in cluster.list_anodes:
 #             # if hdn not in cluster.interfaces:
 #             alive_status[kdn.name] = (
-#                 1 if (kdn in cluster.interfaces["inputs_kdn_data"]) else 0
+#                 1 if (kdn in cluster.interfaces["input_data_anodes"]) else 0
 #             )
 
-#         for i, kcn in enumerate(cluster.list_kcn):
+#         for i, kcn in enumerate(cluster.list_cnodes):
 #             if i == cluster.loss_idx:
 #                 loss_idx = len(op_list)
 #             for kdn in kcn.users:
@@ -509,7 +509,7 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
 #             alive_list.append(alive_status.copy())
 
 #             for kdn_name, alive in alive_status.items():
-#                 kdn = cluster.dict_kn[kdn_name]
+#                 kdn = cluster.dict_nodes[kdn_name]
 #                 if alive and _can_del(i, kdn):
 #                     op_list.append(Op(kdn))
 #                     alive_status[kdn_name] = 0
@@ -528,19 +528,19 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
 #         for hcn in hdn.users:
 #             if not hcn.is_fwd:
 #                 continue
-#             if self.list_hcn.index(hcn) > i:
+#             if self.list_HCNs.index(hcn) > i:
 #                 return False
 #         return True
 
-#     loss_idx = self.list_hcn.index(self.loss_hcn)
+#     loss_idx = self.list_HCNs.index(self.loss_hcn)
 #     op_list = []
 #     alive_mem = []
 #     alive_list = []
 #     alive_status = np.zeros(len(self.list_hdn), dtype=bool)
 #     for hdn in self.inputs_hdn_data:
 #         alive_status[self.list_hdn.index(hdn)] = 1
-#     loss_idx = self.list_hcn.index(self.loss_hcn)
-#     for i, hcn in enumerate(self.list_hcn[:loss_idx]):
+#     loss_idx = self.list_HCNs.index(self.loss_hcn)
+#     for i, hcn in enumerate(self.list_HCNs[:loss_idx]):
 #         op_list += hcn.ff_op_list
 #         for hdn in hcn.users:
 #             alive_status[self.list_hdn.index(hdn)] = 1
@@ -574,7 +574,7 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
 
 # def add_sched(self, sched):
 #     pareto = True
-#     for opt in self.list_sched:
+#     for opt in self.list_schedules:
 #         if (
 #             opt.fwd_time + opt.bwd_time < sched.fwd_time + sched.bwd_time
 #         ) and (opt.mem < sched.mem):
@@ -583,9 +583,9 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
 #         if (
 #             opt.fwd_time + opt.bwd_time > sched.fwd_time + sched.bwd_time
 #         ) and (opt.mem > sched.mem):
-#             self.list_sched.remove(opt)
+#             self.list_schedules.remove(opt)
 #     if pareto:
-#         self.list_sched.append(sched)
+#         self.list_schedules.append(sched)
 #     # self.refine_scheds()
 
 # def refine_scheds(self, expect_num=10):
@@ -601,8 +601,8 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
 
 #         # find the pair to remove one
 #         diff = 100
-#         for i, _sched1 in enumerate(self.list_sched[1:]):
-#             for _sched2 in self.list_sched[i + 1 :]:
+#         for i, _sched1 in enumerate(self.list_schedules[1:]):
+#             for _sched2 in self.list_schedules[i + 1 :]:
 
 #                 if (
 #                     abs((_sched2.mem - _sched1.mem + 1) / (_sched2.mem + 1))
@@ -613,12 +613,12 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
 #                     diff = abs(
 #                         (_sched2.mem - _sched1.mem + 1) / (_sched2.mem + 1)
 #                     )
-#         # assert sched1 in self.list_sched
-#         # assert sched2 in self.list_sched
-#         self.list_sched.remove(worse_sched(sched1, sched2))
+#         # assert sched1 in self.list_schedules
+#         # assert sched2 in self.list_schedules
+#         self.list_schedules.remove(worse_sched(sched1, sched2))
 
-#     while len(self.list_sched) > expect_num:
-#         # print(len(self.list_sched))
+#     while len(self.list_schedules) > expect_num:
+#         # print(len(self.list_schedules))
 #         exclude_one()
 
 

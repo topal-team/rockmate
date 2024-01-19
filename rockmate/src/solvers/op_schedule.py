@@ -127,7 +127,7 @@ class ComputeOp(Op):
         self.fast_forward = fast_forward
         self.detach = detach
         self.target = kcn
-        self.overhead = kcn.overhead
+        self.overhead = kcn.mem_overhead
         # self.time = kcn.time if kcn.time is not None else 0
 
     def __copy__(self):
@@ -392,14 +392,14 @@ class OpSchedule:
             self.prepare_allocation_from_op_list(interfaces)
         else:
             self.interfaces = cluster.interfaces
-            self.list_alloc = [Activation(kdn) for kdn in cluster.list_kdn]
-            self.list_kdn = cluster.list_kdn
+            self.list_alloc = [Activation(kdn) for kdn in cluster.list_anodes]
+            self.list_anodes = cluster.list_anodes
             if with_parameters:
                 self.list_alloc.extend(
-                    [Parameter(kdn) for kdn in cluster.list_kdn_parameters]
+                    [Parameter(kdn) for kdn in cluster.list_anodes_parameters]
                 )
                 self.list_alloc.extend(
-                    [Parameter(kdn, grad=True) for kdn in cluster.list_kdn_parameters
+                    [Parameter(kdn, grad=True) for kdn in cluster.list_anodes_parameters
                      if kdn.info.requires_grad]
                 )# add parameter grad allocation
                 self.list_alloc.extend(self.create_buffer_list())
@@ -452,7 +452,7 @@ class OpSchedule:
         self.bwd_time = np.sum(self.time[self.loss_idx + 1 :])
 
         self.phantoms = set()
-        for kdn in self.list_kdn:
+        for kdn in self.list_anodes:
             if alive_list[self.loss_idx][kdn.name] and not kdn in self.all_interfaces:
                 self.phantoms.add(kdn)
 
@@ -473,14 +473,14 @@ class OpSchedule:
                 continue
             if isinstance(op, ComputeOp):
                 for kdn in op.kcn.deps_real:
-                    if kdn in self.interfaces["inputs_kdn_data"]:
-                        self.dep_interfaces_data.add(self.list_kdn.index(kdn))
-                    if kdn in self.interfaces["outputs_kdn_data"]:
+                    if kdn in self.interfaces["input_data_anodes"]:
+                        self.dep_interfaces_data.add(self.list_anodes.index(kdn))
+                    if kdn in self.interfaces["output_data_anodes"]:
                         for kcn in kdn.deps:
                             if (
                                 kcn not in self.op_name_list[self.loss_idx + 1 :][:i]
                             ):  # if not generated during bwd
-                                self.dep_interfaces_data.add(self.list_kdn.index(kdn))
+                                self.dep_interfaces_data.add(self.list_anodes.index(kdn))
 
         self.fwd_overhead_correction = []
         self.bwd_overhead_correction = []
@@ -573,25 +573,25 @@ class OpSchedule:
 
     def prepare_allocation_from_op_list(self, interfaces):
         self.interfaces = interfaces or {
-            "inputs_kdn_data": set(),
-            "outputs_kdn_data": set(),
-            "inputs_kdn_grad": set(),
-            "outputs_kdn_grad": set(),
+            "input_data_anodes": set(),
+            "output_data_anodes": set(),
+            "input_grad_anodes": set(),
+            "output_grad_anodes": set(),
         }
-        self.list_kdn = []
+        self.list_anodes = []
         for op in self.op_list:
             if isinstance(op, DeleteOp):
-                self.list_kdn.append(op.target)
+                self.list_anodes.append(op.target)
             elif isinstance(op, ComputeOp):
-                self.list_kdn.extend([kdn for kdn in op.kcn.users_global])
-                self.list_kdn.extend([kdn for kdn in op.kcn.deps_global])
-        self.list_alloc = self.list_kdn
+                self.list_anodes.extend([kdn for kdn in op.kcn.users_global])
+                self.list_anodes.extend([kdn for kdn in op.kcn.deps_global])
+        self.list_alloc = self.list_anodes
 
     def create_alive_list(self, init_status={}):
         alive_status = {alloc.name: False for alloc in self.list_alloc}
         for k, v in init_status.items():
             alive_status[k] = v
-        for kdn in self.interfaces["inputs_kdn_data"]:
+        for kdn in self.interfaces["input_data_anodes"]:
             alive_status[kdn.name] = True  # kdn share the name as alloc
         for op in self.init_op_list:
             if isinstance(op, AllocateOp):
@@ -633,20 +633,20 @@ class OpSchedule:
         # correction terms of overhead, each term represents one step in op_list
 
         interfaces_status = []
-        for kdn in self.interfaces["inputs_kdn_data"]:  # Input of Fwd
+        for kdn in self.interfaces["input_data_anodes"]:  # Input of Fwd
             interfaces_status.append((kdn.name, self.loss_idx))  # After fwd
-            if self.list_kdn.index(kdn) in self.dep_interfaces_data:
+            if self.list_anodes.index(kdn) in self.dep_interfaces_data:
                 interfaces_status.append((kdn.name, len(self.op_list)))  # After Bwd
-        for kdn in self.interfaces["outputs_kdn_data"]:  # Output of Fwd
+        for kdn in self.interfaces["output_data_anodes"]:  # Output of Fwd
             interfaces_status.append((kdn.name, 0))  # Before fwd?
-            if self.list_kdn.index(kdn) in self.dep_interfaces_data:
+            if self.list_anodes.index(kdn) in self.dep_interfaces_data:
                 interfaces_status.append((kdn.name, len(self.op_list)))  # After Bwd
             else:
                 interfaces_status.append((kdn.name, -1))  # After Bwd
 
-        for kdn in self.interfaces["outputs_kdn_grad"]:
+        for kdn in self.interfaces["output_grad_anodes"]:
             interfaces_status.append((kdn.name, len(self.op_list)))  # After Bwd
-        for kdn in self.interfaces["inputs_kdn_grad"]:
+        for kdn in self.interfaces["input_grad_anodes"]:
             interfaces_status.append((kdn.name, self.loss_idx + 1))  # Before Bwd
         self.interfaces_status = interfaces_status
         for i, (op, alive_status) in enumerate(zip(self.op_list, alive_list)):
@@ -664,7 +664,7 @@ class OpSchedule:
                     # Otherwise, add kdn to memory
                     if i > self.loss_idx and alive_status[kdn_name] > 0:
                         correction_term["save"] += kdn.mem
-                        correction_term[(self.list_kdn.index(kdn), False)] = -kdn.mem
+                        correction_term[(self.list_anodes.index(kdn), False)] = -kdn.mem
                     continue
 
                 if (
@@ -681,20 +681,20 @@ class OpSchedule:
                     if (  # and not deleted in between
                         kdn_name not in self.op_name_list[index : i + 1]
                     ):
-                        correction_term[(self.list_kdn.index(kdn), True)] = -kdn.mem
+                        correction_term[(self.list_anodes.index(kdn), True)] = -kdn.mem
                     else:
-                        correction_term[(self.list_kdn.index(kdn), "always")] = -kdn.mem
+                        correction_term[(self.list_anodes.index(kdn), "always")] = -kdn.mem
                 else:  # if exist afterwards
-                    if not (kdn in self.interfaces["outputs_kdn_data"]) and (
+                    if not (kdn in self.interfaces["output_data_anodes"]) and (
                         kdn.deps
                         and (list(kdn.deps)[0].name in self.op_name_list[i : index + 1])
                     ):  # and not generated in between
                         # check if output_data is created after i
-                        correction_term[(self.list_kdn.index(kdn), False)] = -kdn.mem
-                    elif kdn in self.interfaces["inputs_kdn_data"]:
-                        correction_term[(self.list_kdn.index(kdn), False)] = -kdn.mem
+                        correction_term[(self.list_anodes.index(kdn), False)] = -kdn.mem
+                    elif kdn in self.interfaces["input_data_anodes"]:
+                        correction_term[(self.list_anodes.index(kdn), False)] = -kdn.mem
                     else:
-                        correction_term[(self.list_kdn.index(kdn), "always")] = -kdn.mem
+                        correction_term[(self.list_anodes.index(kdn), "always")] = -kdn.mem
 
             if (
                 i < self.loss_idx
@@ -828,23 +828,23 @@ class OpSchedule:
 
 # def hg_to_cluster(hg: H_graph, kg: K_graph):
 #     interfaces = dict()
-#     interfaces["inputs_kdn_data"] = set(hdn.kdn for hdn in hg.inputs_hdn_data)
-#     interfaces["outputs_kdn_data"] = set(hdn.kdn for hdn in hg.outputs_hdn_data)
-#     interfaces["inputs_kdn_grad"] = set(hdn.kdn for hdn in hg.inputs_hdn_grad)
-#     interfaces["outputs_kdn_grad"] = set(hdn.kdn for hdn in hg.outputs_hdn_grad)
+#     interfaces["input_data_anodes"] = set(hdn.kdn for hdn in hg.inputs_hdn_data)
+#     interfaces["output_data_anodes"] = set(hdn.kdn for hdn in hg.outputs_hdn_data)
+#     interfaces["input_grad_anodes"] = set(hdn.kdn for hdn in hg.inputs_hdn_grad)
+#     interfaces["output_grad_anodes"] = set(hdn.kdn for hdn in hg.outputs_hdn_grad)
 #     # interfaces["all"] = hg.interfaces
-#     list_kcn = []
+#     list_cnodes = []
 #     loss_kcn = K_C_node("loss")
-#     for kdn in interfaces["outputs_kdn_data"]:
+#     for kdn in interfaces["output_data_anodes"]:
 #         loss_kcn.deps_real.add(kdn)
-#     for kdn in interfaces["outputs_kdn_grad"]:
+#     for kdn in interfaces["output_grad_anodes"]:
 #         loss_kcn.users.add(kdn)
-#     for kcn in kg.list_kcn:
+#     for kcn in kg.list_cnodes:
 #         if kcn in hg.all_kcn_inside or kcn.main_target in hg.name:
 #             # bottom level hg has no kcn inside
-#             list_kcn.append(kcn)
+#             list_cnodes.append(kcn)
 #         if kcn == kg.loss_kcn:
-#             loss_idx = len(list_kcn)
-#             list_kcn.append(loss_kcn)
-#     cluster = Cluster(list_kcn, interfaces, loss_idx)
+#             loss_idx = len(list_cnodes)
+#             list_cnodes.append(loss_kcn)
+#     cluster = Cluster(list_cnodes, interfaces, loss_idx)
 #     return cluster
