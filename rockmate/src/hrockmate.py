@@ -332,16 +332,28 @@ class HRockmate(torch.nn.Module):
                 
         for p in self.minor_parameters:
             p.data = p.data.to("cuda")
+
+        for pnode in self.rkgb_res.hierarchical_cluster.parameter_nodes:
+            if pnode.is_buffer:
+                target = pnode.get_value(self.original_mod)
+                target.data = target.data.to("cuda")
+                storage.ld[pnode.param_name] = target
+                exec(pnode.get_code(), self.gd, storage.ld)
+                # print(target.device, pnode.get_code())
         for k,v in self.op_sched.dict_alloc_param.items():
             if v.grad:continue
-            target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
+            # target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
+            target = v.pnode.get_value(self.original_mod)
             storage.ld["cpu_"+k] = torch.empty_like(target, 
                                                 dtype=target.dtype, 
                                                 device=torch.device("cpu"),
                                                 pin_memory=True)
             storage.ld["cpu_"+k].copy_(target.data)
             storage.ld["cpu_"+k].grad = torch.empty_like(storage.ld["cpu_"+k], pin_memory=True)
-            storage.ld[k] = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
+            # if v.pnode.is_buffer:
+            #     storage.ld[k] = target.to("cuda")    
+            # else:
+            storage.ld[k] = target
 
         # for k, v in self.op_sched.dict_alloc.items():
         #     if isinstance(v, Activation):
@@ -391,9 +403,12 @@ class HRockmate(torch.nn.Module):
         for p in self.minor_parameters:
             p.data = p.data.to("cpu")
 
+        
+
         for k,v in self.op_sched.dict_alloc_param.items():
             if v.grad:continue
-            target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
+            # target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
+            target = v.pnode.get_valule()
             target.data = self.compiler.storage.ld["cpu_"+k].data
             if keep_grad:
                 target.grad = self.compiler.storage.ld["cpu_"+k].grad
