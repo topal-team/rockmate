@@ -6,8 +6,13 @@ import sys
 import inspect
 import ast
 import astunparse
-from rkgb.lowlevel import constants
-from rkgb.utils import utils
+pip_editable_broken_imports = False
+if pip_editable_broken_imports:
+    from utils import utils
+    from lowlevel import constants
+else:
+    from rkgb.utils import utils
+    from rkgb.lowlevel import constants
 
 sys_info = sys.version_info
 python_version = sys_info.major + sys_info.minor/10

@@ -6,12 +6,19 @@ import sys
 import numpy as np
 import gc
 import torch
-from rkgb.lowlevel import ast_add_on
-from rkgb.lowlevel import constants
-from rkgb.lowlevel import measure
-from rkgb.lowlevel.variable_info import VariableInfo
-from rkgb.core import base
-from rkgb.core.simplified import SimplifiedNode,SimplifiedGraph
+pip_editable_broken_imports = False
+if pip_editable_broken_imports:
+    from lowlevel import ast_add_on
+    from lowlevel import measure
+    from lowlevel.variable_info import VariableInfo
+    from core import base
+    from core.simplified import SimplifiedNode,SimplifiedGraph
+else:
+    from rkgb.lowlevel import ast_add_on
+    from rkgb.lowlevel import measure
+    from rkgb.lowlevel.variable_info import VariableInfo
+    from rkgb.core import base
+    from rkgb.core.simplified import SimplifiedNode,SimplifiedGraph
 
 
 

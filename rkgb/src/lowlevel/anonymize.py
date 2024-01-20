@@ -3,11 +3,19 @@
 
 import ast
 import torch
-from rkgb.utils.utils import Counter
-from rkgb.core import base
-from rkgb.lowlevel.variable_info import VariableInfo
-from rkgb.core.simplified import SimplifiedGraph, SimplifiedNode
-from rkgb.core.backward import ComputationNode, AllocationNode
+pip_editable_broken_imports = False
+if pip_editable_broken_imports:
+    from utils.utils import Counter
+    from core import base
+    from lowlevel.variable_info import VariableInfo
+    from core.simplified import SimplifiedGraph, SimplifiedNode
+    from core.backward import ComputationNode, AllocationNode
+else:
+    from rkgb.utils.utils import Counter
+    from rkgb.core import base
+    from rkgb.lowlevel.variable_info import VariableInfo
+    from rkgb.core.simplified import SimplifiedGraph, SimplifiedNode
+    from rkgb.core.backward import ComputationNode, AllocationNode
 
 
 class SimplifiedNodeAnonymizationMaterial():
@@ -355,6 +363,7 @@ class ClusterTranslator():
     def enrich_with_cnodes_and_anodes(self,hierarchical_cluster):
         # 1) Computation Nodes
         for cnode in hierarchical_cluster.list_cnodes:
+            cnode : ComputationNode
             if cnode is hierarchical_cluster.loss_cnode:
                 ano = ("cnode","loss")
             else:
@@ -365,6 +374,7 @@ class ClusterTranslator():
 
         # 2) Allocation Nodes
         for anode in hierarchical_cluster.list_anodes:
+            anode : AllocationNode
             mt_ano = self.dict_to_ano[anode.mt]
             ano = ("anode",anode.allocation_type,mt_ano)
             self.dict_to_ano[anode] = ano

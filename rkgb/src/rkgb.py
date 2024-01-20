@@ -1,12 +1,22 @@
-from rkgb.lowlevel import preprocess_device
-from rkgb.lowlevel import preprocess_samples
-from rkgb.core.raw import RawGraph
-from rkgb.core.forward import ForwardGraph
-from rkgb.core.simplified import SimplifiedGraph
-from rkgb.core.backward import ForwardAndBackwardGraph
-from rkgb.core import partitioned
-from rkgb.core.hierarchical import HierarchicalStructure
-
+pip_editable_broken_imports = False
+if pip_editable_broken_imports:
+    from lowlevel import preprocess_device
+    from lowlevel import preprocess_samples
+    from core.raw import RawGraph
+    from core.forward import ForwardGraph
+    from core.simplified import SimplifiedGraph
+    from core.backward import ForwardAndBackwardGraph
+    from core import partitioned
+    from core.hierarchical import HierarchicalStructure
+else:
+    from rkgb.lowlevel import preprocess_device
+    from rkgb.lowlevel import preprocess_samples
+    from rkgb.core.raw import RawGraph
+    from rkgb.core.forward import ForwardGraph
+    from rkgb.core.simplified import SimplifiedGraph
+    from rkgb.core.backward import ForwardAndBackwardGraph
+    from rkgb.core import partitioned
+    from rkgb.core.hierarchical import HierarchicalStructure
 
 
 class Result():

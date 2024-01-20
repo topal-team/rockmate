@@ -1,14 +1,31 @@
 # ==========================
 # ====== H structure =======
 # ==========================
+pip_editable_broken_imports = False
+if pip_editable_broken_imports:
+    from lowlevel.measure import pretty_format_memory
+    from lowlevel import anonymize
+    from core import base
+    from core.backward import ForwardAndBackwardGraph, ComputationNode, AllocationNode
+    from core.backward import ParameterNode as bwdParameterNode
+    from core.partitioned import PartitionedStructure, PartitionedCluster, PartitionedGraph, PartitionedNode
+else:
+    from rkgb.lowlevel.measure import pretty_format_memory
+    from rkgb.lowlevel.variable_info import VariableInfo
+    from rkgb.lowlevel import anonymize
+    from rkgb.core import base
+    from rkgb.core.backward import ForwardAndBackwardGraph, ComputationNode, AllocationNode
+    from rkgb.core.backward import ParameterNode as bwdParameterNode
+    from rkgb.core.partitioned import PartitionedStructure, PartitionedCluster, PartitionedGraph, PartitionedNode
 
-from rkgb.lowlevel.measure import pretty_format_memory
-from rkgb.lowlevel.variable_info import VariableInfo
-from rkgb.lowlevel import anonymize
-from rkgb.core import base
-from rkgb.core.backward import ForwardAndBackwardGraph, ComputationNode, AllocationNode
-from rkgb.core.backward import ParameterNode as bwdParameterNode
-from rkgb.core.partitioned import PartitionedStructure, PartitionedCluster, PartitionedGraph, PartitionedNode
+
+# from rkgb.lowlevel.measure import pretty_format_memory
+# from rkgb.lowlevel.variable_info import VariableInfo
+# from rkgb.lowlevel import anonymize
+# from rkgb.core import base
+# from rkgb.core.backward import ForwardAndBackwardGraph, ComputationNode, AllocationNode
+# from rkgb.core.backward import ParameterNode as bwdParameterNode
+# from rkgb.core.partitioned import PartitionedStructure, PartitionedCluster, PartitionedGraph, PartitionedNode
 
 # ************
 # * HierarchicalComputationNode *
