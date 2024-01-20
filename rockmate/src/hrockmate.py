@@ -25,7 +25,7 @@ import rkgb
 from rkgb.lowlevel.preprocess_samples import ExampleInputs
 from rkgb.lowlevel.measure import tensor_memory_size
 from rkgb.lowlevel.constants import ref_verbose, ExceptionModuleDoesNotReqGrad
-from rkgb.lowlevel.ast_add_on import ast_to_str
+from rkgb.lowlevel.ast_add_on import ast_to_str, make_str_list_assign
 from rkgb.core.partitioned import PartitionerBottomToTop, PartitionerSequence, Partitioner
 
 from .solvers.main import preprocess, solve_recursive, get_cpu_optimize_stats
@@ -321,6 +321,14 @@ class HRockmate(torch.nn.Module):
                 requires_grad=kdn.info.requires_grad,
             )
 
+        for out_node in self.rkgb_res.forward_graph.output_nodes:
+            storage.ld[f"out_{out_node.main_target}"] = torch.empty(
+                0,
+                device=self.device,
+                requires_grad=out_node.info.requires_grad,
+            )
+            
+
         for op in self.op_sched.init_op_list:
             if isinstance(op, MappingOp) and len(op.targets)==1:
                 # to create the full size buffer
@@ -335,10 +343,13 @@ class HRockmate(torch.nn.Module):
 
         for pnode in self.rkgb_res.hierarchical_cluster.parameter_nodes:
             if pnode.is_buffer:
+                for t in pnode.view_targets:
+                    storage.ld[t] = torch.empty(0, requires_grad=False)
                 target = pnode.get_value(self.original_mod)
                 target.data = target.data.to("cuda")
                 storage.ld[pnode.param_name] = target
-                exec(pnode.get_code(), self.gd, storage.ld)
+                code = make_str_list_assign(pnode.view_code, suffix=".data")
+                exec(code, self.gd, storage.ld)
                 # print(target.device, pnode.get_code())
         for k,v in self.op_sched.dict_alloc_param.items():
             if v.grad:continue
@@ -402,8 +413,6 @@ class HRockmate(torch.nn.Module):
             self._exec(l)
         for p in self.minor_parameters:
             p.data = p.data.to("cpu")
-
-        
 
         for k,v in self.op_sched.dict_alloc_param.items():
             if v.grad:continue
@@ -519,24 +528,27 @@ class HRockmate(torch.nn.Module):
 
                     torch.cuda.synchronize()
                     with torch.enable_grad():
-                        # exec(RkMod.init_code, RkMod.gd, storage.ld)  # is compiler.gd
                         self.init_fwd_exec()
                     torch.cuda.synchronize()
-                    # with torch.cuda.stream(self.gd["offload_stream"]):
-                    #     # RkMod.compiler.storage.ld[f"cpu_H_Cluster_bottom___12_fv"].copy_(RkMod.compiler.storage.ld[f"H_Cluster_bottom___12_fv"])
-
-                    #     print(RkMod.compiler.storage.ld[f"cpu_H_Cluster_bottom___12_fv"])
-                    #     print(RkMod.compiler.storage.ld[f"H_Cluster_bottom___12_fv"])
 
                 #  *** EXECUTION PART ***
                 # -> Autograd turns off itself before giving use the control.
                 # -> But we need it to forward/backward each node.
                 
                 # -> Get the output
-                outs = [
-                    RkMod.compiler.get_val(out_node.main_target)
-                    for out_node in RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes
-                ]
+                # outs = [
+                #     RkMod.compiler.get_val(out_node.main_target).detach().requires_grad_()
+                #     for out_node in RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes
+                # ]
+
+                outs = []
+                for out_node in self.rkgb_res.forward_graph.output_nodes:
+                    # print(kdn)
+                    RkMod.compiler.get_val(f"out_{out_node.main_target}").data = RkMod.compiler.get_val(out_node.main_target)
+                    o = RkMod.compiler.get_val(f"out_{out_node.main_target}")#.detach().requires_grad_()
+                    # print(o.grad_fn)
+                    outs.append(o)
+
                 if len(outs) == 1:
                     return outs[0]
                 else:
@@ -579,7 +591,10 @@ class HRockmate(torch.nn.Module):
                     grad_outs):
                     out_mt = out_node.main_target
                     out = RkMod.compiler.get_val(out_mt)
-                    out.grad = out_grad.view(out_grad.shape)
+                    # out.grad = out_grad.view(out.shape)
+                    out.grad = out_grad.data.as_strided_(
+                                out.shape, out.stride(), out.storage_offset()
+                            )
                     out_grad.data = torch.empty(0)
 
                 #  * record_mem stuff *
@@ -673,7 +688,7 @@ class HRockmate(torch.nn.Module):
             # final_output = self.compiler.get_val(
             #     self.rkgb_res.D_graph.whole_module_output
             # )
-            final_outputs = [self.compiler.get_val(output.main_target) for output in output_nodes]
+            final_outputs = [self.compiler.get_val(f"out_{output.main_target}") for output in output_nodes]
             #  -> Clear the compiler
             # self.compiler.storage = None
             return final_outputs[0]
