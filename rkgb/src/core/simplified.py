@@ -875,7 +875,7 @@ class SimplifiedGraph(base.Graph):
                     render_label = param_node.param_str
                 elif only_function_name:
                     render_label = "\n".join(
-                        [param_node.param_str]+[param_node.view_targets])
+                        [param_node.param_str]+param_node.view_targets)
                 else:
                     render_label = f"{param_node.param_str}\n{param_node.get_code()}"
                 dot.node(
