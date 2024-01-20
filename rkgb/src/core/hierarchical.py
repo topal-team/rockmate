@@ -11,7 +11,6 @@ if pip_editable_broken_imports:
     from core.partitioned import PartitionedStructure, PartitionedCluster, PartitionedGraph, PartitionedNode
 else:
     from rkgb.lowlevel.measure import pretty_format_memory
-    from rkgb.lowlevel.variable_info import VariableInfo
     from rkgb.lowlevel import anonymize
     from rkgb.core import base
     from rkgb.core.backward import ForwardAndBackwardGraph, ComputationNode, AllocationNode

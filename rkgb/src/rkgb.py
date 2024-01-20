@@ -1,3 +1,6 @@
+
+
+import time
 pip_editable_broken_imports = False
 if pip_editable_broken_imports:
     from lowlevel import preprocess_device
@@ -33,12 +36,15 @@ class Result():
             use_jit_instead_of_dynamo = False,
             jit_impose_device = True,
             partitioners = None,
+            print_time_in_each_stage = False,
             ):
         self.original_mod = model
         self.inspection_device = inspection_device
         self.use_jit_instead_of_dynamo = use_jit_instead_of_dynamo
         self.jit_impose_device = jit_impose_device
         self.partitioners = partitioners
+        self.print_time_in_each_stage = print_time_in_each_stage
+        self.last_time = 0
 
         # 0) See what we want
         bool_h = "H" in wanted_graphs
@@ -60,60 +66,80 @@ class Result():
         if bool_p: self.build_partitioned()
         if bool_h: self.build_hierarchical()
 
+    def start_time(self):
+        self.last_time = time.time()
+    def show_time(self,stage):
+        if self.print_time_in_each_stage:
+            time_taken = time.time() - self.last_time
+            clean_time_taken = time.strftime("%H:%M:%S", time.gmtime(time_taken))
+            print(f"Stage {stage} took {clean_time_taken}")
+
     def build_raw(self):
         if self.raw_graph is None:
+            self.start_time()
             self.raw_graph = RawGraph(
                 self.original_mod,
                 self.example_inputs,
                 use_jit_instead_of_dynamo=self.use_jit_instead_of_dynamo,
                 jit_impose_device=self.jit_impose_device)
+            self.show_time("Raw")
             
     def build_forward(self):
         if self.forward_graph is None:
             self.build_raw()
+            self.start_time()
             self.forward_graph = ForwardGraph(
                 self.raw_graph,
                 self.original_mod,
                 self.example_inputs,
                 self.current_device)
+            self.show_time("Forward")
             
     def build_simplified(self):
         if self.simplified_graph is None:
             self.build_forward()
+            self.start_time()
             self.simplified_graph = SimplifiedGraph(
                 self.forward_graph,
                 self.original_mod,
                 self.current_device)
+            self.show_time("Simplifications")
 
     def build_forward_and_backward(self):
         if self.forward_and_backward_graph is None:
             self.build_simplified()
+            self.start_time()
             if self.inspection_device is None:
                 self.inspection_device = self.current_device
             self.forward_and_backward_graph = ForwardAndBackwardGraph(
                 self.simplified_graph,
                 self.original_mod,
                 self.inspection_device)
+            self.show_time("ForwardAndBackward")
 
     def build_partitioned(self,partitioners = None):
         partitioners = partitioners or self.partitioners
         if self.partitioned_structure is None or partitioners is not None:
             self.build_simplified()
+            self.start_time()
             if partitioners is None:
                 partitioners = [partitioned.PartitionerBottomToTop()]
             self.partitioned_structure = partitioned.PartitionedStructure(
                 self.simplified_graph,
                 self.original_mod,
                 partitioners)
+            self.show_time("Partitioning")
             
     def build_hierarchical(self,partitioners = None):
         if self.hierarchical_structure is None or partitioners is not None:
             self.build_forward_and_backward()
             self.build_partitioned(partitioners)
+            self.start_time()
             self.hierarchical_structure = HierarchicalStructure(
                 self.partitioned_structure,
                 self.forward_and_backward_graph)
             self.hierarchical_cluster = self.hierarchical_structure.main_cluster
+            self.show_time("Hierarchical")
 
     @property
     def R(self):

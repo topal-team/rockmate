@@ -616,24 +616,27 @@ class PartitionedStructure():
         for cluster in self.all_clusters:
             cluster.translator = anonymize.ClusterTranslator(cluster)
 
+        # render
+        self.render = self.main_cluster.render
+
     def __str__(self):
         return "PartitionedStructure whose main cluster is:\n"+str(self.main_cluster)
     
-    def render(self,
-            name=None,
-            view=True,
-            only_function_name=False,
-            include_artifact_edges=True,
-            directory=base.Graph.default_render_directory,
-            render_format=base.Graph.default_render_format,
-            render=True,
-            dot=None):
-        self.main_cluster.render(
-            name,view,only_function_name,
-            include_artifact_edges,
-            directory,render_format,
-            render,dot
-        )
+    # def render(self,
+            # name=None,
+            # view=True,
+            # only_function_name=False,
+            # include_artifact_edges=True,
+            # directory=base.Graph.default_render_directory,
+            # render_format=base.Graph.default_render_format,
+            # render=True,
+            # dot=None):
+        # self.main_cluster.render(
+            # name,view,only_function_name,
+            # include_artifact_edges,
+            # directory,render_format,
+            # render,dot
+        # )
                 
 
 
