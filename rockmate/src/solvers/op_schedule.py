@@ -384,7 +384,7 @@ class OpSchedule:
             for i, op in enumerate(self._op_list):
                 if "loss" in op.name:
                     self.loss_idx = i
-                if "bwd" in op.name:
+                if isinstance(op, ComputeOp) and not op.target.is_fwd:
                     break
         else:
             self.loss_idx = loss_idx
@@ -481,7 +481,7 @@ class OpSchedule:
                     if kdn in self.interfaces["output_data_anodes"]:
                         for kcn in kdn.deps:
                             if (
-                                kcn not in self.op_name_list[self.loss_idx + 1 :][:i]
+                                kcn.name not in self.op_name_list[self.loss_idx + 1 :][:i]
                             ):  # if not generated during bwd
                                 self.dep_interfaces_data.add(self.list_anodes.index(kdn))
 
@@ -531,7 +531,7 @@ class OpSchedule:
         for i, op in enumerate(self.op_list):
             if "loss" in op.name:
                 self.loss_idx = i
-            if "bwd" in op.name:
+            if isinstance(op, ComputeOp) and not op.target.is_fwd:
                 break
         self.alive_list = self.create_alive_list()
         self.refine()
@@ -607,7 +607,7 @@ class OpSchedule:
             if isinstance(alloc, Parameter) and "grad" in alloc.name:
                 for kcn in alloc.pnode.users_real:
                     if kcn.is_fwd:continue
-                    kcn_name = kcn.name#.replace("fwd", "bwd")
+                    kcn_name = kcn.name
                     if kcn_name in self.bwd2param:
                         self.bwd2param[kcn_name].append(alloc.pnode.param_name+"_grad")
                     else:
