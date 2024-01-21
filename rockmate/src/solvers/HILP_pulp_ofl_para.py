@@ -216,12 +216,12 @@ class ModelPULP:
             for i, hdn in enumerate(self.hgraph.list_HANs)
             if hdn.anode.name in protected_names
         ]
-        if accurate_mem:
-            self.protected_indices += [
-                i
-                for i, hdn in enumerate(self.hgraph.list_HANs)
-                if hdn.anode in self.hgraph.cluster.interfaces["output_data_anodes"]
-            ]
+        # if accurate_mem:
+        #     self.protected_indices += [
+        #         i
+        #         for i, hdn in enumerate(self.hgraph.list_HANs)
+        #         if hdn.anode in self.hgraph.cluster.interfaces["output_data_anodes"]
+        #     ]
 
         self.input_grad_indices = [
             self.hgraph.list_HANs.index(hdn)
