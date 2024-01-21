@@ -441,7 +441,7 @@ class ModelPULP:
 
             for i,hcn in enumerate(hierarchical_nodes):
                 if not hasattr(hcn, "required_parameter_nodes_real"):continue
-                for pnode in hcn.required_parameter_nodes_real:
+                for pnode in hcn.required_parameter_nodes_real|hcn.required_parameter_nodes_fake:
                     if pnode.is_buffer:continue
                     # sub_c2params[sub_cluster.name].add(pnode.param_name)
                     all_params[pnode.param_name] = pnode
