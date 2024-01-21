@@ -1339,18 +1339,18 @@ class PartitionerSequence(Partitioner):
         len_separators = len(separators)
         separators.insert(0,-1)
         pg.nodes = p_nodes = []
-        for block_nb in range(len_separators):
+        for block_nb in range(len_separators+1):
             first_i = separators[block_nb]
-            last_i = separators[block_nb+1]
-            if last_i - first_i == 1:
-                sn = cluster.s_nodes[last_i]
+            last_i = separators[block_nb+1]+1 if block_nb<len_separators else None
+            if last_i == first_i+1:
+                sn = cluster.s_nodes[first_i+1]
                 block_pn = PartitionedNode(pg,main_target=sn.mt,sn=sn)
                 block_pn.memory_occupied_by_all_outputs = dict_info[sn.mt].memsize
             else:
-                block_s_nodes = cluster.s_nodes[first_i+1:last_i+1]
+                block_s_nodes = cluster.s_nodes[first_i+1:last_i]
                 sub_cluster = PartitionedCluster(block_s_nodes,cluster.p_structure)
                 block_pn = PartitionedNode(pg,sub_cluster=sub_cluster)
-                block_pn.memory_occupied_by_all_outputs = dict_info[cluster.s_nodes[last_i].mt].memsize
+                block_pn.memory_occupied_by_all_outputs = dict_info[block_s_nodes[-1].mt].memsize
             p_nodes.append(block_pn)
             if block_nb > 0:
                 prev_pn : PartitionedNode = p_nodes[-2]
@@ -1409,6 +1409,8 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
         separators = [start for (start,end) in patterns_indices]
         if patterns_indices[-1][1] != len(cluster.s_nodes):
             separators.append(patterns_indices[-1][1])
+
+        # print(separators, len(list_nodes_hash))
 
         pg = PartitionedGraph(cluster)
         return PartitionerSequence.build_based_on_separators(
