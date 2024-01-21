@@ -132,6 +132,7 @@ class HRockmate(torch.nn.Module):
                     # verbose=verbose,
                     wanted_graphs={"FB"},
                     partitioners=partitioners,
+                    inspection_device=torch.device("cuda")
                     # check_device_is_gpu=False
                 )
             else:
@@ -691,7 +692,7 @@ class HRockmate(torch.nn.Module):
             final_outputs = [self.compiler.get_val(f"out_{output.main_target}") for output in output_nodes]
             #  -> Clear the compiler
             # self.compiler.storage = None
-            return final_outputs[0]
+            return tuple(final_outputs)
 
     # === end of forward ===
 
