@@ -1303,8 +1303,8 @@ class PartitionerSequence(Partitioner):
             self.sub_partitioner = sub_partitioner 
 
     config : Config = None
-    def __init__(self, **kwargs):
-        self.config = self.__class__.Config(**kwargs)
+    def __init__(self, sub_partitioner : Partitioner = None):
+        self.config = self.__class__.Config(sub_partitioner)
 
     def __call__(self, cluster : PartitionedCluster):
         pg = PartitionedGraph(cluster)
@@ -1360,3 +1360,100 @@ class PartitionerSequence(Partitioner):
                 sub_cluster : PartitionedCluster = block_pn.sub_cluster
                 sub_cluster.partition(self.config.sub_partitioner)
         return pg
+
+
+
+
+class PartitionerRecognizeRepetitivePattern(Partitioner):
+    class Config():
+        def __init__(self,
+                sub_partitioner : Partitioner = None,
+                recognize_simply_by_main_fct_not_whole_ano_material = True):
+            if sub_partitioner is None:
+                sub_partitioner = PartitionerBottomToTop(
+                    main_graph_as_any_other = True
+                )
+            self.sub_partitioner = sub_partitioner 
+            self.recognize_simply_by_main_fct_not_whole_ano_material \
+                = recognize_simply_by_main_fct_not_whole_ano_material
+
+    config : Config = None
+    def __init__(self,
+            sub_partitioner : Partitioner = None,
+            recognize_simply_by_main_fct_not_whole_ano_material = True):
+        self.config = self.__class__.Config(
+            sub_partitioner,
+            recognize_simply_by_main_fct_not_whole_ano_material)
+
+    def __call__(self, cluster : PartitionedCluster):
+        pg = PartitionedGraph(cluster)
+        dict_info = cluster.p_structure.dict_info
+
+        list_nodes_hash = self.hash_cluster_nodes(cluster)
+        patterns_indices = self.find_repetitive_patterns(list_nodes_hash)
+
+        return patterns_indices
+
+
+    def hash_cluster_nodes(self,cluster : PartitionedCluster):
+        # Give a simple hash number to each node
+        if self.config.recognize_simply_by_main_fct_not_whole_ano_material:
+            s_nodes_main_fcts = [sn.main_fct for sn in cluster.s_nodes]
+            dict_main_fct_to_nb = dict()
+            nb = 0
+            for fct in s_nodes_main_fcts:
+                if fct not in dict_main_fct_to_nb:
+                    dict_main_fct_to_nb[fct] = nb
+                    nb += 1
+            return [
+                dict_main_fct_to_nb[fct] 
+                for fct in s_nodes_main_fcts]
+        else:
+            dict_mt_to_sn_ano_material = cluster.p_structure.dict_mt_to_sn_ano_material
+            return [
+                dict_mt_to_sn_ano_material[sn.mt]
+                for sn in cluster.s_nodes
+            ]
+
+
+    def find_repetitive_patterns(self,list_nodes_hash):
+        # TO IMPROVE: Currently O(n²) with some tricks
+        # I think there exist super fancy algorithms to do this,
+        # See Knuth-Morris-Pratt related algorithms
+        # 0) Parameters to tune
+        total_length = len(list_nodes_hash)
+        max_number_of_patterns = 8
+        min_number_of_patterns = 2
+        min_interesting_pattern_length = math.ceil(total_length / max_number_of_patterns)
+        max_interesting_pattern_length = int(total_length/min_number_of_patterns)
+        min_nb_nodes_covered_by_patterns = int(total_length*0.75)
+
+        # 0) Store current best solution
+        current_best_solution = None
+        current_best_nb_patterns = 0
+
+        for pattern_length in range(
+                min_interesting_pattern_length,
+                max_interesting_pattern_length+1):
+            # 0) If we already found a solution and if it's no longer possible to find better one
+            if int(total_length/pattern_length) < current_best_nb_patterns:
+                return current_best_solution
+            # 1) Hash all the possible patterns
+            dict_hashes = dict()
+            for start in range(total_length - pattern_length +1):
+                end = start + pattern_length
+                pattern_hash = hash(tuple(list_nodes_hash[start:end]))
+                if pattern_hash in dict_hashes:
+                    equivalent_start_indices = dict_hashes[pattern_hash]
+                    if start >= equivalent_start_indices[-1]+pattern_length:
+                        equivalent_start_indices.append(start)
+                else:
+                    dict_hashes[pattern_hash] = [start]
+            # 2) See if a pattern is repeated
+            for pattern_hash,start_indices in dict_hashes.items():
+                if len(start_indices)*pattern_length >= min_nb_nodes_covered_by_patterns:
+                    current_best_solution = [
+                        (start,start+pattern_length) 
+                        for start in start_indices]
+                    current_best_nb_patterns = len(current_best_solution)
+        return current_best_solution
