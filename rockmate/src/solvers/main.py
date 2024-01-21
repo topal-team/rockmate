@@ -235,7 +235,7 @@ def preprocess_rec(cluster: HierarchicalCluster):
             preprocess(cluster)
 
 
-def preprocess(cluster: HierarchicalCluster, protect_names=[]):
+def preprocess(cluster: HierarchicalCluster, protect_names=[], add_no_save_sched=True):
     if cluster is cluster.representee_cluster:
         # assert cluster.list_schedules == []  # only visit representee once
         # autograd_op_list, autograd_loss_idx = get_single_compute_op_list(
@@ -257,6 +257,19 @@ def preprocess(cluster: HierarchicalCluster, protect_names=[]):
                         hcn.ff_time = 0
                         hcn.ff_overhead = 0
                 else:
+                    ff_op_list = get_single_compute_op_list(
+                        hcn.sub_cluster,
+                        with_bwd=False,
+                        protect_names=protect_names,
+                        ff=True,
+                    )
+                    ff_op_sched = OpSchedule(
+                        ff_op_list + [ComputeOp(ComputationNode("loss"))],
+                        cluster=cluster,
+                        correct_overhead=False,
+                    )  # not real sched, only for info
+                    hcn.ff_time = ff_op_sched.fwd_time
+                    hcn.ff_overhead = ff_op_sched.fwd_overhead
                     if (
                         hcn.sub_cluster.representee_cluster is hcn.sub_cluster
                         and hcn.sub_cluster.list_schedules == []
@@ -272,19 +285,14 @@ def preprocess(cluster: HierarchicalCluster, protect_names=[]):
                                 cluster=hcn.sub_cluster,
                             )
                         )
-                    ff_op_list = get_single_compute_op_list(
-                        hcn.sub_cluster,
-                        with_bwd=False,
-                        protect_names=protect_names,
-                        ff=True,
-                    )
-                    ff_op_sched = OpSchedule(
-                        ff_op_list + [ComputeOp(ComputationNode("loss"))],
-                        cluster=cluster,
-                        correct_overhead=False,
-                    )  # not real sched, only for info
-                    hcn.ff_time = ff_op_sched.fwd_time
-                    hcn.ff_overhead = ff_op_sched.fwd_overhead
+                        if add_no_save_sched:
+                            hcn.sub_cluster.list_schedules.append(
+                                OpSchedule(
+                                    ff_op_list + [ComputeOp(ComputationNode("loss"))]+autograd_op_list,
+                                    cluster=hcn.sub_cluster,
+                                    loss_idx=len(ff_op_list)
+                                )
+                            )
                 hcn.ff_op_list = ff_op_list
 
 
