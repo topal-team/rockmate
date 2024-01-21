@@ -292,11 +292,11 @@ class Step():
             elif isinstance(op, OptimizeOp) and "cpu" in op.name:
                 opt_ops.append(op)
             elif isinstance(op, ComputeOp) or (
-                isinstance(op, DeleteOp) and "parameter" not in op.name) or(
+                isinstance(op, DeleteOp) and isinstance(op.target, Activation)) or(
                 isinstance(op, OptimizeOp) and "cpu" not in op.name):
                 # all happen in the main stream
                 comp_ops.append(op)
-            elif isinstance(op, DeleteOp) and "parameter" in op.name:
+            elif isinstance(op, DeleteOp) and isinstance(op.target, Parameter):
                 self.del_ops.append(op)
             else:#if isinstance(op, AllocateOp):
                 self.alloc_ops.append(op)
@@ -507,7 +507,7 @@ class OpSchedule:
                 if None not in opt2user_step.values():break
                 for opt_op in opt_ops:
                     if opt2user_step[opt_op.name]:continue
-                    for usr in opt_op.target.kdn.users_real:
+                    for usr in opt_op.target.pnode.users_real:
                         if str(usr) in [str(op) for op in step.comp_ops]:
                             # print(opt_op.name)
                             opt2user_step[opt_op.name] = i
@@ -606,7 +606,8 @@ class OpSchedule:
         for alloc in self.list_alloc:
             if isinstance(alloc, Parameter) and "grad" in alloc.name:
                 for kcn in alloc.pnode.users_real:
-                    kcn_name = kcn.name.replace("fwd", "bwd")
+                    if kcn.is_fwd:continue
+                    kcn_name = kcn.name#.replace("fwd", "bwd")
                     if kcn_name in self.bwd2param:
                         self.bwd2param[kcn_name].append(alloc.pnode.param_name+"_grad")
                     else:
@@ -788,7 +789,7 @@ class OpSchedule:
             save_mem = []
             for i,alive_status in enumerate(self.alive_list):
                 save_mem.append(sum(self.dict_alloc[a].mem*alive_status[a]
-                                    *(act_multiplier if "parameter" not in a else 1)
+                                    *(act_multiplier if isinstance(self.dict_alloc[a], Parameter) else 1)
                                     for a in alive_status))
             overhead = self.overhead*act_multiplier
         if with_interface:
