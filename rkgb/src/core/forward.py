@@ -2,7 +2,6 @@
 # ====== D structure =======
 # ==========================
 
-from typing import Union
 import ast
 import warnings
 import torch
@@ -199,6 +198,7 @@ class ForwardGraph(base.Graph):
         self.output_nodes = [
             dict_forward_nodes[output_tar] 
             for output_tar in self.output_targets]
+        self.nodes = self.get_sorted_nodes_by_following_deps_relation()
         self.check_if_output_requires_grad()
 
         self.fix_requires_grad()

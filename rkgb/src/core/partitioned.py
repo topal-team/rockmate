@@ -106,7 +106,8 @@ class PartitionedGraph(base.Graph):
     def __init__(self,
             partitioned_cluster = None,
             parent_objet = None,
-            is_main_graph = False):
+            is_main_graph = False,
+            list_of_blocks_indices : list[tuple[int,int]] = None):
         # 1) Initialize simple attributes
         super().__init__(parent_objet)
         self.is_main_graph = is_main_graph
@@ -122,46 +123,98 @@ class PartitionedGraph(base.Graph):
         self.graph_nb = graph_nb
         self.name = f"PartitionedGraph({graph_nb})"
 
-        # 2) Real constructor in case we have a partitioned_cluster
         self.cluster = partitioned_cluster
+        # Real constructors based on a partitioner_cluster
         if partitioned_cluster is not None:
             partitioned_cluster : PartitionedCluster
-            self.nodes = []
             dict_info = partitioned_cluster.p_structure.dict_info
-            dict_mt_to_pn = dict()
-            s_nodes = partitioned_cluster.s_nodes
-            for sn in s_nodes:
-                sn : SimplifiedNode
-                pn = PartitionedNode(
-                    main_target = sn.mt,
-                    main_graph = self,
-                    simplified_node = sn)
-                pn.memory_occupied_by_all_outputs = dict_info[sn.mt].memsize
-                self.nodes.append(pn)
-                dict_mt_to_pn[sn.mt] = pn
-                for req_sn in sn.deps:
-                    if req_sn in s_nodes:
-                        req_pn = dict_mt_to_pn[req_sn.mt]
-                        pn.deps.add(req_pn)
-                        req_pn.users.add(pn)
-                for req_sn in sn.deps_through_artifacts:
-                    if req_sn in s_nodes:
-                        req_pn = dict_mt_to_pn[req_sn.mt]
-                        pn.deps_through_artifacts.add(req_pn)
-                        req_pn.users_through_artifacts.add(pn)
-                
-            for pn in self.nodes:
-                pn.deps_global = set(pn.deps)
-                pn.users_global = set(pn.users)
-                pn.deps_through_artifacts_global = set(pn.deps_through_artifacts)
-                pn.users_through_artifacts_global = set(pn.users_through_artifacts)
+            # 2) FIRST CONSTRUCTOR:
+            # - Based on a list of blocks:
+            if list_of_blocks_indices:
+                nb_blocks = len(list_of_blocks_indices)
+                self.nodes = []
+                s_nodes = partitioned_cluster.s_nodes
+                list_blocks_s_nodes = []
+                for block_i in range(nb_blocks):
+                    (start_i,end_i) = nb_blocks[block_i]
+                    # BOTH start_i and end_i are included 
+                    if start_i == end_i:
+                        sn = s_nodes[start_i]
+                        block_s_nodes = [sn]
+                        block_pn = PartitionedNode(
+                            main_graph=self,
+                            main_target=sn.mt,
+                            simplified_node=sn)
+                        block_pn.memory_occupied_by_all_outputs = dict_info[sn.mt].memsize
+                    else:
+                        block_s_nodes = s_nodes[start_i:end_i+1]
+                        sub_cluster = PartitionedCluster(
+                            block_s_nodes,
+                            partitioned_cluster.p_structure)
+                        block_pn = PartitionedNode(
+                            main_graph=self,
+                            sub_cluster=sub_cluster)
+                        block_pn.memory_occupied_by_all_outputs = dict_info[block_s_nodes[-1].mt].memsize
+                    self.nodes.append(block_pn)
+                    list_blocks_s_nodes.append(set(block_s_nodes))
+                    if block_i > 0:
+                        prev_pn : PartitionedNode = self.nodes[-2]
+                        block_pn.deps.add(prev_pn)
+                        block_pn.deps_global.add(prev_pn)
+                        prev_pn.users.add(block_pn)
+                        prev_pn.users_global.add(block_pn)
+                        # global edges are useless since not dynamic
+                        preceding_block_s_nodes = list_blocks_s_nodes[-2]
+                        for sn in block_s_nodes:
+                            for req_sn in sn.deps_through_artifacts:
+                                if req_sn in preceding_block_s_nodes:
+                                    block_pn.deps_through_artifacts.add(prev_pn)
+                                    block_pn.deps_through_artifacts_global.add(prev_pn)
+                                    prev_pn.users_through_artifacts.add(block_pn)
+                                    prev_pn.users_through_artifacts_global.add(block_pn)
+                        # artifact edges are redundant with classic ones -> useless
+                self._first_nodes = set([self.nodes[0]])
+                self.output_nodes = set([self.nodes[-1]])
 
-            self._first_nodes = set(
-                [dict_mt_to_pn[first_mt] 
-                for first_mt in partitioned_cluster.firsts_mt])
-            self.output_nodes = set(
-                [dict_mt_to_pn[out_mt] 
-                for out_mt in partitioned_cluster.outputs_mt])
+
+            # 2) SECOND CONSTRUCTOR:
+            # - Default constructor translating partitioner_cluster.s_nodes
+            else:
+                self.nodes = []
+                dict_mt_to_pn = dict()
+                s_nodes = partitioned_cluster.s_nodes
+                for sn in s_nodes:
+                    sn : SimplifiedNode
+                    pn = PartitionedNode(
+                        main_target = sn.mt,
+                        main_graph = self,
+                        simplified_node = sn)
+                    pn.memory_occupied_by_all_outputs = dict_info[sn.mt].memsize
+                    self.nodes.append(pn)
+                    dict_mt_to_pn[sn.mt] = pn
+                    for req_sn in sn.deps:
+                        if req_sn in s_nodes:
+                            req_pn = dict_mt_to_pn[req_sn.mt]
+                            pn.deps.add(req_pn)
+                            req_pn.users.add(pn)
+                    for req_sn in sn.deps_through_artifacts:
+                        if req_sn in s_nodes:
+                            req_pn = dict_mt_to_pn[req_sn.mt]
+                            pn.deps_through_artifacts.add(req_pn)
+                            req_pn.users_through_artifacts.add(pn)
+                    
+                for pn in self.nodes:
+                    pn.deps_global = set(pn.deps)
+                    pn.users_global = set(pn.users)
+                    pn.deps_through_artifacts_global = set(pn.deps_through_artifacts)
+                    pn.users_through_artifacts_global = set(pn.users_through_artifacts)
+
+                self._first_nodes = set(
+                    [dict_mt_to_pn[first_mt] 
+                    for first_mt in partitioned_cluster.firsts_mt])
+                self.output_nodes = set(
+                    [dict_mt_to_pn[out_mt] 
+                    for out_mt in partitioned_cluster.outputs_mt])
 
 
     @property
@@ -273,10 +326,12 @@ class PartitionedGraph(base.Graph):
             if pn.is_leaf:
                 if only_function_name:
                     code = pn.simplified_node.main_fct
+                    fontsize = '14'
                 else:
                     code = pn.simplified_node.get_code()
+                    fontsize = '10'
                 label = f"{pn.name}\n{code}"
-                dot.node(pn.name,label,color=color_leaf)
+                dot.node(pn.name,label,color=color_leaf,fontsize=fontsize)
             else:
                 label = f"{pn.name}\nCluster size: {pn.size}"
                 dot.node(pn.name,label,color=color_sub_graph)
@@ -1307,7 +1362,7 @@ class PartitionerSequence(Partitioner):
         self.config = self.__class__.Config(sub_partitioner)
 
     @staticmethod
-    def find_sequential_separators(cluster : PartitionedCluster,pg : PartitionedGraph):
+    def find_sequential_blocks(cluster : PartitionedCluster,pg : PartitionedGraph):
         # Return indices where to cut
         # To call base.Graph.find_cutting_points we first need
         # to add a sink to the .deps relation. An equivalent
@@ -1328,31 +1383,37 @@ class PartitionerSequence(Partitioner):
 
         seps_mt = [sep.mt for sep in seps_pn]
         seps_sn = [sn for sn in cluster.s_nodes if sn.mt in seps_mt]
-        return [cluster.s_nodes.index(sep) for sep in seps_sn]
+        seps_index = [cluster.s_nodes.index(sep) for sep in seps_sn]
+        nb_blocks = len(seps_index)
+        seps_index.insert(0,0)
+        blocks = [
+            (seps_index[i],seps_index[i+1]) 
+            for i in range(nb_blocks)]
+        return blocks
+    
 
-    def build_based_on_separators(
-            sub_partitioner : Partitioner,
-            separators : list[int],
+    def build_based_on_blocks(
+            blocks_indices : list[tuple[int,int]],
             cluster : PartitionedCluster,
-            pg : PartitionedGraph):
+            pg : PartitionedGraph,
+            sub_partitioner : Partitioner):
         dict_info = cluster.p_structure.dict_info
-        len_separators = len(separators)
-        separators.insert(0,-1)
+        nb_blocks = len(blocks_indices)
         pg.nodes = p_nodes = []
-        for block_nb in range(len_separators+1):
-            first_i = separators[block_nb]
-            last_i = separators[block_nb+1]+1 if block_nb<len_separators else None
-            if last_i == first_i+1:
-                sn = cluster.s_nodes[first_i+1]
-                block_pn = PartitionedNode(pg,main_target=sn.mt,sn=sn)
+        for block_i in range(nb_blocks):
+            (start_i,end_i) = nb_blocks[block_i]
+            # BOTH start_i and end_i are included 
+            if start_i == end_i:
+                sn = cluster.s_nodes[start_i]
+                block_pn = PartitionedNode(pg,main_target=sn.mt,simplified_node=sn)
                 block_pn.memory_occupied_by_all_outputs = dict_info[sn.mt].memsize
             else:
-                block_s_nodes = cluster.s_nodes[first_i+1:last_i]
+                block_s_nodes = cluster.s_nodes[start_i:end_i+1]
                 sub_cluster = PartitionedCluster(block_s_nodes,cluster.p_structure)
                 block_pn = PartitionedNode(pg,sub_cluster=sub_cluster)
                 block_pn.memory_occupied_by_all_outputs = dict_info[block_s_nodes[-1].mt].memsize
             p_nodes.append(block_pn)
-            if block_nb > 0:
+            if block_i > 0:
                 prev_pn : PartitionedNode = p_nodes[-2]
                 block_pn.deps.add(prev_pn)
                 block_pn.deps_global.add(prev_pn)
@@ -1367,8 +1428,6 @@ class PartitionerSequence(Partitioner):
                 sub_cluster : PartitionedCluster = block_pn.sub_cluster
                 sub_cluster.partition(sub_partitioner)
         return pg
-
-        
 
 
     def __call__(self, cluster : PartitionedCluster):
@@ -1405,17 +1464,16 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
     def __call__(self, cluster : PartitionedCluster):
         list_nodes_hash = self.hash_cluster_nodes(cluster)
         patterns_indices = self.find_repetitive_patterns(list_nodes_hash)
-
-        separators = [start for (start,end) in patterns_indices]
-        if patterns_indices[-1][1] != len(cluster.s_nodes):
-            separators.append(patterns_indices[-1][1])
-
-        # print(separators, len(list_nodes_hash))
-
         pg = PartitionedGraph(cluster)
-        return PartitionerSequence.build_based_on_separators(
-                self.config.sub_partitioner,
-                separators,cluster,pg)
+        if patterns_indices is None:
+            return pg
+        else:
+            separators = [start for (start,end) in patterns_indices]
+            if patterns_indices[-1][1] != len(cluster.s_nodes):
+                separators.append(patterns_indices[-1][1])
+            return PartitionerSequence.build_based_on_separators(
+                    self.config.sub_partitioner,
+                    separators,cluster,pg)
 
 
     def hash_cluster_nodes(self,cluster : PartitionedCluster):
