@@ -253,19 +253,26 @@ class ModelPULP:
 
         #### Update edges based on .dep_interfaces_data
         #### In certain schedules, BWD depends on input/output data
-        # for i in range(I):
-        #     for k, hcn in enumerate(self.hgraph.list_HCNs):
-        #         if hcn.sub_cluster is None:
-        #             continue
-        #         for op_sched in hcn.list_sched:
-        #             # Without specifying schedule, we assume it's possible to use hdn here
-        #             for i_ in op_sched.dep_interfaces_data:
-        #                 if (
-        #                     op_sched.list_kdn[i_]
-        #                     == self.hgraph.list_HANs[i].kdn.name
-        #                     and k not in _users_d[i]
-        #                 ):
-        #                     _users_d[i].append(k)
+        for k, hcn in enumerate(self.hgraph.list_HCNs):
+            if hcn.sub_cluster is None:
+                continue
+            list_sched = self.list_list_sched[self.hcn2sub_c[k]]
+            for op_sched in list_sched:
+                for i_ in op_sched.dep_interfaces_data:
+                    sub_cluster = hcn.sub_cluster
+                    if sub_cluster.representee_cluster is sub_cluster:
+                        name = sub_cluster.list_anodes[i_].name
+                    else:
+                        ano = sub_cluster.representee_cluster.translator.to_ano(op_sched.list_anodes[i_])
+                        name = sub_cluster.translator.from_ano(ano).name
+                    # print(hcn, i_, name)
+                    # Without specifying schedule, we assume it's possible to use hdn here
+                    for i in range(I):
+                        if (name
+                            == self.hgraph.list_HANs[i].anode.name
+                            and k not in _users_d[i]
+                        ):
+                            _users_d[i].append(k)
 
         ##############################
 
@@ -276,6 +283,7 @@ class ModelPULP:
 
         self.create_list = [(k, i) for k in range(T) for i in _users_c[k]]
         self.delete_list = [(k, i) for i in range(I) for k in _deps_d[i] + _users_d[i]]
+        
 
         Cr = len(self.create_list)
         De = len(self.delete_list)
@@ -717,6 +725,7 @@ class ModelPULP:
                         self.sumComp[t, k_] <= self.sumComp[t, k] + self.AliveA[t, j]
                     )
 
+        self.dep_interfaces = {hcn.name :[] for hcn in self.hgraph.list_HCNs}
         #### Options-related constraints
         for t in range(T):
             for j in range(J):
@@ -740,12 +749,13 @@ class ModelPULP:
 
                     list_sched = self.list_list_sched[j]
                     for i in list_sched[o].dep_interfaces_data:
-                        hcn = self.hgraph.list_HCNs[fwd_i]
+                        hcn = self.hgraph.list_HCNs[bwd_i]
                         if self.sub_clusters[j].representee_cluster is self.sub_clusters[j]:
                             name = self.sub_clusters[j].list_anodes[i].name
                         else:
                             ano = self.sub_clusters[j].representee_cluster.translator.to_ano(list_sched[o].list_anodes[i])
                             name = self.sub_clusters[j].translator.from_ano(ano).name
+                        self.dep_interfaces[hcn.name].append((o, name))
                         # Tensor req_i is required by BWD
                         req_i = [hdn.anode.name for hdn in self.hgraph.list_HANs].index(
                             name
@@ -793,13 +803,23 @@ class ModelPULP:
                 self.md += self.create[t, eidx] <= self.sumComp[t, k]
             for i in range(I):
                 if t + 1 < T:
+                    pass
                     self.md += (
                         self.AliveT[t + 1, i]
                         == self.alive[(t, max(_deps_d[i] + _users_d[i]), i)]
                     )
                 elif i not in self.protected_indices:
                     # in the end of bwd, del every HDN
-                    self.md += self.alive[(t, max(_deps_d[i] + _users_d[i]), i)] == 0
+                    step = None
+                    for k in self.krange(t):
+                        if k in _deps_d[i] + _users_d[i]:
+                            step = k
+                    if step is not None:
+                        self.md += self.alive[(t, step, i)] == 0
+                    # elif i>9:
+                    #     print(i)
+                    else:
+                        self.md += self.AliveT[T-1, i] == 0
 
         def _num_hazards(t, i, k):
             if i in self.protected_indices:
