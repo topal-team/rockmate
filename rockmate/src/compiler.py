@@ -352,7 +352,10 @@ class Compiler:
         return [self.fct_del_tensor_grad(target)]
 
     def get_del_parameter(self, alloc, i):
-        return [self.fct_del_tensor_data(alloc.param_name)]
+        del_ops = [self.fct_del_tensor_data(alloc.param_name)]
+        for view_target in alloc.view_targets:
+            del_ops.append(self.fct_del_tensor_data(view_target))
+        return del_ops
 
     def get_del_buffer(self, alloc, i):
         return [self.fct_del_tensor_data(alloc.param_name)]
