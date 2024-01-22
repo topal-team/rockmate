@@ -231,9 +231,16 @@ class RawGraph(base.Graph):
 
         # II) Process all the assignments
         dynamo_all_nodes = dynamo_graph.nodes
-        dynamo_assignment_nodes = [
-            node for node in dynamo_all_nodes
-            if node.op == "call_function"]
+        dynamo_assignment_nodes = []
+        for dynamo_node in dynamo_all_nodes:
+            if dynamo_node.op == "call_function":
+                dynamo_assignment_nodes.append(dynamo_node)
+            elif dynamo_node.op == "get_attr":
+                dict_dynamo_name_to_correct_ast[dynamo_node.name] = dynamo_node.value
+            elif dynamo_node.op in ["placeholder","output"]:
+                continue # Nothing interesting
+            else:
+                raise Exception(f"Unknown Dynamo Node's operation type {dynamo_node.op}")
         assignment_codes = [
             code for code in whole_code_ast.body
             if (isinstance(code,ast.Assign)

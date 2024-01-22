@@ -131,7 +131,6 @@ class PartitionedGraph(base.Graph):
             # 2) FIRST CONSTRUCTOR:
             # - Based on a list of blocks:
             if list_of_blocks_indices:
-                print(list_of_blocks_indices)
                 nb_blocks = len(list_of_blocks_indices)
                 self.nodes = []
                 s_nodes = partitioned_cluster.s_nodes
@@ -1396,7 +1395,6 @@ class PartitionerSequence(Partitioner):
             for i in range(nb_blocks)]
         # 'start' is included in the block; 'end' isn't
 
-        print("PartitionSeq")
         pg = PartitionedGraph(cluster,list_of_blocks_indices=blocks)
         # -- sub partition --
         for block_pn in pg.nodes:
@@ -1442,7 +1440,6 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             if blocks_indices[-1][1] != len(cluster.s_nodes):
                 blocks_indices.append(
                     (blocks_indices[-1][1],len(cluster.s_nodes)))
-            print("PartitionPattern")
             pg = PartitionedGraph(
                 partitioned_cluster=cluster,
                 list_of_blocks_indices=blocks_indices 
