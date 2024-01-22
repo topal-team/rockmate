@@ -10,6 +10,8 @@ __all__ = [
     "get_UFNO",
     "get_UNO",
     "get_Bert",
+    "get_LLAMA",
+    "get_Bloom",
     "LossLayer",
     "get_iterator_over_all_examples",
     "sanity_check_forward_and_backward",
@@ -175,6 +177,15 @@ def get_LLAMA(device,num_hidden_layers=2):
     return model,sample
 
 # =========================================================
+
+def get_Bloom(device,n_layer=2):
+    from transformers import BloomConfig, BloomModel
+    config = BloomConfig(hidden_size=2560, n_layer=n_layer)
+    model = BloomModel(config)
+    model.to(device)
+    sample = [torch.randint(0, 600, [3, 64])]
+    return model,sample
+
 # =========================================================
 
 
