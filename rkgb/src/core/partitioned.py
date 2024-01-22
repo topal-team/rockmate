@@ -1423,7 +1423,8 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
                 recognize_simply_by_main_fct_not_whole_ano_material = True,
                 max_number_of_patterns = 8,
                 min_number_of_patterns = 2,
-                min_percentage_covered_required = 0.75):
+                min_percentage_covered_required = 0.75,
+                put_intermediates_with_preceding_block = True):
             if sub_partitioner is None:
                 sub_partitioner = PartitionerBottomToTop(
                     main_graph_as_any_other = True
@@ -1434,6 +1435,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             self.max_number_of_patterns = max_number_of_patterns
             self.min_number_of_patterns = min_number_of_patterns
             self.min_percentage_covered_required = min_percentage_covered_required
+            self.put_intermediates_with_preceding_block = put_intermediates_with_preceding_block 
 
     config : Config = None
     def __init__(self,
@@ -1441,13 +1443,15 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             recognize_simply_by_main_fct_not_whole_ano_material = True,
             max_number_of_patterns = 8,
             min_number_of_patterns = 2,
-            min_percentage_covered_required = 0.75):
+            min_percentage_covered_required = 0.75,
+            put_intermediates_with_preceding_block = True):
         self.config = self.__class__.Config(
             sub_partitioner,
             recognize_simply_by_main_fct_not_whole_ano_material,
             max_number_of_patterns,
             min_number_of_patterns,
-            min_percentage_covered_required)
+            min_percentage_covered_required,
+            put_intermediates_with_preceding_block)
 
     def __call__(self, cluster : PartitionedCluster):
         list_nodes_hash = self.hash_cluster_nodes(cluster)
@@ -1459,18 +1463,42 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             return None
 
         else:
-            blocks_indices = [(start,end) for (start,end) in patterns_indices]
-            # 'start' is included in the block; 'end' isn't
-            if blocks_indices[0][0] != 0:
-                blocks_indices.insert(0,(0,blocks_indices[0][0]))
-            if blocks_indices[-1][1] != len(cluster.s_nodes):
-                blocks_indices.append(
-                    (blocks_indices[-1][1],len(cluster.s_nodes)))
+            # 1) Delimit the blocks based on patterns_indices
+            print("PATTERNS INDICES: ",patterns_indices)
+            total_nb_nodes = len(cluster.s_nodes)
+            if self.config.put_intermediates_with_preceding_block:
+                # CASE 1: we want to avoid having intermediate nodes at the top level
+                # Note: We keep inputs and outputs outside any pattern
+                separators = [start for (start,end) in patterns_indices]
+                if separators[0] != 0:
+                    separators.insert(0,0)
+                if patterns_indices[-1][1] != total_nb_nodes:
+                    separators.append(patterns_indices[-1][1])
+                separators.append(total_nb_nodes)
+                blocks_indices = [(separators[i],separators[i+1]) for i in range(len(separators)-1)]
+
+            else:
+                # CASE 2: we keep the intermediate nodes between the patterns
+                # separators = [0] if patterns_indices[0][0] != 0 else []
+                blocks_indices = [(-1,0)] # to start the loop, removed at the end
+                for start,end in patterns_indices:
+                    prev_end = blocks_indices[-1][1]
+                    if blocks_indices[-1][1] != start:
+                        blocks_indices.append((prev_end,start))
+                    blocks_indices.append((start,end))
+                blocks_indices.pop(0) 
+                if blocks_indices[-1][1] != len(cluster.s_nodes):
+                    blocks_indices.append(
+                        (blocks_indices[-1][1],len(cluster.s_nodes)))
+                    
+            print("BLOCKS INDICES: ",blocks_indices)
+
+            # 2) Build the PartitionedGraph
             pg = PartitionedGraph(
                 partitioned_cluster=cluster,
                 list_of_blocks_indices=blocks_indices 
             )
-            # sub partition:
+            # 3) Sub partition:
             for block_pn in pg.nodes:
                 if block_pn.sub_cluster is not None:
                     sub_cluster : PartitionedCluster = block_pn.sub_cluster
