@@ -1464,7 +1464,6 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
 
         else:
             # 1) Delimit the blocks based on patterns_indices
-            print("PATTERNS INDICES: ",patterns_indices)
             total_nb_nodes = len(cluster.s_nodes)
             if self.config.put_intermediates_with_preceding_block:
                 # CASE 1: we want to avoid having intermediate nodes at the top level
@@ -1491,8 +1490,6 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
                     blocks_indices.append(
                         (blocks_indices[-1][1],len(cluster.s_nodes)))
                     
-            print("BLOCKS INDICES: ",blocks_indices)
-
             # 2) Build the PartitionedGraph
             pg = PartitionedGraph(
                 partitioned_cluster=cluster,
@@ -1534,7 +1531,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
         # 0) Parameters to tune
         total_length = len(list_nodes_hash)
         min_interesting_pattern_length \
-            = math.ceil(total_length / self.config.max_number_of_patterns)
+            = math.ceil(total_length / self.config.max_number_of_patterns * self.config.min_percentage_covered_required)
         max_interesting_pattern_length = int(total_length/self.config.min_number_of_patterns)
         min_nb_nodes_covered_by_patterns = int(total_length*self.config.min_percentage_covered_required)
 
