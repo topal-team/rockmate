@@ -619,10 +619,7 @@ class PartitionedCluster():
                 print("Sorry your cluster doesn't have any partitioning, "\
                     "ie corresponding PartitionedGraph: use cluster.partition()")
             if cluster is not self:
-                print(
-                    f"Warning : your cluster has some equivalent ones, "\
-                    f"{cluster.name} is the representee of the equivalent class, "\
-                    f"so we render its graphs")
+                print("Warning : render an equivalent cluster (the representee)")
         for i,pg in enumerate(cluster.partitionings):
             if name is not None:
                 graph_name = f"{i}-th partitioning of {name}"

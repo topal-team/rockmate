@@ -489,6 +489,8 @@ class Graph():
         if name is not None: 
             return name
         else:
+            if hasattr(self,"name"):
+                return self.name
             return type(self).__name__
     @staticmethod
     def _get_graphviz_dot(name,dot=None):
