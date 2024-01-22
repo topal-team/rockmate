@@ -1439,7 +1439,9 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
                 max_number_of_patterns = 8,
                 min_number_of_patterns = 2,
                 min_percentage_covered_required = 0.75,
-                put_intermediates_with_preceding_block = True):
+                put_intermediates_with_preceding_block = True,
+                put_inputs_with_first_block = False,
+                put_outputs_with_last_block = False):
             if sub_partitioner is None:
                 sub_partitioner = PartitionerBottomToTop(
                     main_graph_as_any_other = True
@@ -1452,6 +1454,8 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             self.min_number_of_patterns = min_number_of_patterns
             self.min_percentage_covered_required = min_percentage_covered_required
             self.put_intermediates_with_preceding_block = put_intermediates_with_preceding_block 
+            self.put_inputs_with_first_block = put_inputs_with_first_block
+            self.put_outputs_with_last_block = put_outputs_with_last_block 
 
     config : Config = None
     def __init__(self,
@@ -1461,7 +1465,9 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             max_number_of_patterns = 8,
             min_number_of_patterns = 2,
             min_percentage_covered_required = 0.75,
-            put_intermediates_with_preceding_block = True):
+            put_intermediates_with_preceding_block = True,
+            put_inputs_with_first_block = False,
+            put_outputs_with_last_block = False):
         self.config = self.__class__.Config(
             sub_partitioner,
             recognize_simply_by_main_fct_not_whole_ano_material,
@@ -1469,7 +1475,9 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             max_number_of_patterns,
             min_number_of_patterns,
             min_percentage_covered_required,
-            put_intermediates_with_preceding_block)
+            put_intermediates_with_preceding_block,
+            put_inputs_with_first_block,
+            put_outputs_with_last_block)
 
     def __call__(self, cluster : PartitionedCluster):
         list_nodes_hash = self.hash_cluster_nodes(cluster)
@@ -1501,9 +1509,15 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             # CASE 1: we want to avoid having intermediate nodes at the top level
             # Note: We keep inputs and outputs outside any pattern
             separators = [start for (start,end) in patterns_indices]
+            # Inputs block:
             if separators[0] != 0:
-                separators.insert(0,0)
-            if patterns_indices[-1][1] != total_length:
+                if self.config.put_inputs_with_first_block:
+                    separators[0] = 0
+                else:
+                    separators.insert(0,0)
+            # Outputs block:
+            if (patterns_indices[-1][1] != total_length
+            and not self.config.put_outputs_with_last_block):
                 separators.append(patterns_indices[-1][1])
             separators.append(total_length)
             blocks_indices = [(separators[i],separators[i+1]) for i in range(len(separators)-1)]
@@ -1517,10 +1531,19 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
                 if blocks_indices[-1][1] != start:
                     blocks_indices.append((prev_end,start))
                 blocks_indices.append((start,end))
-            blocks_indices.pop(0) 
+            blocks_indices.pop(0)
+            # Inputs block:
+            if (self.config.put_inputs_with_first_block
+            and blocks_indices[0][0] != patterns_indices[0][0]):
+                blocks_indices.pop(0)
+                blocks_indices[0][0] = 0
+            # Outputs block:
             if blocks_indices[-1][1] != total_length:
-                blocks_indices.append(
-                    (blocks_indices[-1][1],total_length))
+                if self.config.put_outputs_with_last_block:
+                    blocks_indices[-1][1] = total_length
+                else:
+                    blocks_indices.append(
+                        (blocks_indices[-1][1],total_length))
         return blocks_indices
 
 
