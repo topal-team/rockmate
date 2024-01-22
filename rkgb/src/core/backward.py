@@ -558,7 +558,7 @@ class ForwardAndBackwardGraph(base.Graph):
             name=None,
             view=True,
             only_function_name=False,
-            include_parameter_nodes=True,
+            include_parameter_nodes=False,
             include_artifact_edges=True,
             directory=base.Graph.default_render_directory,
             render_format=base.Graph.default_render_format,

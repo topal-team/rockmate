@@ -134,11 +134,14 @@ class PartitionedGraph(base.Graph):
             if list_of_blocks_indices:
                 nb_blocks = len(list_of_blocks_indices)
                 self.nodes = []
+                self._first_nodes = set()
+                self.output_nodes = set()
                 s_nodes = partitioned_cluster.s_nodes
                 list_blocks_s_nodes = []
                 for block_i in range(nb_blocks):
                     (start_i,end_i) = list_of_blocks_indices[block_i]
                     # 'start' is included in the block; 'end' isn't
+                    # 1) Create the PartitionedNode
                     if start_i == end_i - 1:
                         sn = s_nodes[start_i]
                         block_s_nodes = [sn]
@@ -156,7 +159,19 @@ class PartitionedGraph(base.Graph):
                             main_graph=self,
                             sub_cluster=sub_cluster)
                         block_pn.memory_occupied_by_all_outputs = dict_info[block_s_nodes[-1].mt].memsize
+                    
+                    # 2) Store the PNode in self.nodes/output_nodes/_first_nodes 
                     self.nodes.append(block_pn)
+                    for sn in block_s_nodes:
+                        if sn.mt in partitioned_cluster.outputs_mt:
+                            self.output_nodes.add(block_pn)
+                            break
+                    for sn in block_s_nodes:
+                        if sn.mt in partitioned_cluster.firsts_mt:
+                            self._first_nodes.add(block_pn)
+                            break
+
+                    # 3) Edges with the previous block
                     list_blocks_s_nodes.append(set(block_s_nodes))
                     if block_i > 0:
                         prev_pn : PartitionedNode = self.nodes[-2]
@@ -174,8 +189,6 @@ class PartitionedGraph(base.Graph):
                                     prev_pn.users_through_artifacts.add(block_pn)
                                     prev_pn.users_through_artifacts_global.add(block_pn)
                         # artifact edges are redundant with classic ones -> useless
-                self._first_nodes = set([self.nodes[0]])
-                self.output_nodes = set([self.nodes[-1]])
 
 
             # 2) SECOND CONSTRUCTOR:
