@@ -1365,14 +1365,14 @@ class PartitionerBottomToTop(Partitioner):
 
 
 
+default_partitioner = PartitionerBottomToTop()
+
 
 class PartitionerSequence(Partitioner):
     class Config():
         def __init__(self,sub_partitioner : Partitioner = None):
             if sub_partitioner is None:
-                sub_partitioner = PartitionerBottomToTop(
-                    main_graph_as_any_other = True
-                )
+                sub_partitioner = default_partitioner
             self.sub_partitioner = sub_partitioner 
 
     config : Config = None
@@ -1421,10 +1421,14 @@ class PartitionerSequence(Partitioner):
         else:
             pg = PartitionedGraph(cluster,list_of_blocks_indices=blocks)
             # sub partition:
+            if hasattr(self.config.sub_partitioner,"main_graph_as_any_other"):
+                self.config.sub_partitioner.main_graph_as_any_other = True
             for block_pn in pg.nodes:
                 if block_pn.sub_cluster is not None:
                     sub_cluster : PartitionedCluster = block_pn.sub_cluster
                     sub_cluster.partition(self.config.sub_partitioner)
+            if hasattr(self.config.sub_partitioner,"main_graph_as_any_other"):
+                self.config.sub_partitioner.main_graph_as_any_other = False
             return pg
 
 
@@ -1443,9 +1447,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
                 put_inputs_with_first_block = False,
                 put_outputs_with_last_block = False):
             if sub_partitioner is None:
-                sub_partitioner = PartitionerBottomToTop(
-                    main_graph_as_any_other = True
-                )
+                sub_partitioner = default_partitioner
             self.sub_partitioner = sub_partitioner 
             self.recognize_simply_by_main_fct_not_whole_ano_material \
                 = recognize_simply_by_main_fct_not_whole_ano_material
@@ -1496,10 +1498,14 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
                 list_of_blocks_indices=blocks_indices 
             )
             # Sub partition:
+            if hasattr(self.config.sub_partitioner,"main_graph_as_any_other"):
+                self.config.sub_partitioner.main_graph_as_any_other = True
             for block_pn in pg.nodes:
                 if block_pn.sub_cluster is not None:
                     sub_cluster : PartitionedCluster = block_pn.sub_cluster
                     sub_cluster.partition(self.config.sub_partitioner)
+            if hasattr(self.config.sub_partitioner,"main_graph_as_any_other"):
+                self.config.sub_partitioner.main_graph_as_any_other = False
             return pg
         
 

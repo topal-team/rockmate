@@ -230,23 +230,51 @@ class RawGraph(base.Graph):
                 )
 
         # II) Process all the assignments
-        dynamo_all_nodes = dynamo_graph.nodes
-        dynamo_assignment_nodes = []
-        for dynamo_node in dynamo_all_nodes:
-            if dynamo_node.op == "call_function":
-                dynamo_assignment_nodes.append(dynamo_node)
-            elif dynamo_node.op == "get_attr":
-                dict_dynamo_name_to_correct_ast[dynamo_node.name] = dynamo_node.value
-            elif dynamo_node.op in ["placeholder","output"]:
-                continue # Nothing interesting
-            else:
-                raise Exception(f"Unknown Dynamo Node's operation type {dynamo_node.op}")
+        # DEBUG
         assignment_codes = [
             code for code in whole_code_ast.body
             if (isinstance(code,ast.Assign)
             and (not ast_add_on.is_constant(code.value)
             or code.value.value is not None))
         ]
+        dict_code_target_to_code = dict()
+        for code in assignment_codes:
+            # So we can remove 'get_attr'
+            assert(len(code.targets)==1)
+            dict_code_target_to_code[code.targets[0].id] = code
+        self.dict_constants = dict()
+
+        dynamo_all_nodes = dynamo_graph.nodes
+        dynamo_assignment_nodes = []
+        for dynamo_node in dynamo_all_nodes:
+            if dynamo_node.op == "call_function":
+                dynamo_assignment_nodes.append(dynamo_node)
+            elif dynamo_node.op == "get_attr":
+                code = dict_code_target_to_code[dynamo_node.name]
+                if not "self" in ast_add_on.ast_to_str(code):
+                    raise Exception(
+                        "Dynamo 'get_attr' node, but not over self ?? "\
+                        "Please notify us about this case:\n",
+                        ast_add_on.ast_to_str(code))
+                assignment_codes.remove(code)
+                assert(code.value,ast.Attribute)
+                attr = code.value.attr
+                assert(hasattr(dynamo_result.graph_module,attr))
+                cst_name = parser.get_constant_name(dynamo_node.name)
+                self.dict_constants[cst_name] = getattr(dynamo_result.graph_module,attr)
+                dict_dynamo_name_to_correct_ast[dynamo_node.name] = ast.Name(cst_name)
+            elif dynamo_node.op in ["placeholder","output"]:
+                continue # Nothing interesting
+            else:
+                raise Exception(f"Unknown Dynamo Node's operation type {dynamo_node.op}")
+            
+        # DEBUG
+        # assignment_codes = [
+            # code for code in whole_code_ast.body
+            # if (isinstance(code,ast.Assign)
+            # and (not ast_add_on.is_constant(code.value)
+            # or code.value.value is not None))
+        # ]
         assert(len(dynamo_assignment_nodes)==len(assignment_codes))
         for dynamo_node,node_code in zip(
                 dynamo_assignment_nodes,
@@ -284,7 +312,8 @@ class RawGraph(base.Graph):
                 ast_add_on.ast_to_str(
                     dict_dynamo_name_to_correct_ast[param_id])
                 for param_id in dependency_dynamo_names
-                if param_id not in dict_dynamo_name_to_raw_node
+                if (param_id not in dict_code_target_to_code
+                and param_id not in dict_dynamo_name_to_raw_node)
             )
         self.nodes = parser.all_raw_nodes
 

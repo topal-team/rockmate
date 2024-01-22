@@ -125,7 +125,7 @@ class Result():
             self.build_simplified()
             self.start_time()
             if partitioners is None:
-                partitioners = [partitioned.PartitionerBottomToTop()]
+                partitioners = [partitioned.default_partitioner]
             self.partitioned_structure = partitioned.PartitionedStructure(
                 self.simplified_graph,
                 self.original_mod,
