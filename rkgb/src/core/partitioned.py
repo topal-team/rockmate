@@ -3,6 +3,7 @@
 # ==========================
 
 import warnings
+import inspect
 import math
 import torch
 pip_editable_broken_imports = False
@@ -1421,6 +1422,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
         def __init__(self,
                 sub_partitioner : Partitioner = None,
                 recognize_simply_by_main_fct_not_whole_ano_material = True,
+                strict_max_number_of_top_level_nodes = 12,
                 max_number_of_patterns = 8,
                 min_number_of_patterns = 2,
                 min_percentage_covered_required = 0.75,
@@ -1432,6 +1434,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             self.sub_partitioner = sub_partitioner 
             self.recognize_simply_by_main_fct_not_whole_ano_material \
                 = recognize_simply_by_main_fct_not_whole_ano_material
+            self.strict_max_number_of_top_level_nodes = strict_max_number_of_top_level_nodes 
             self.max_number_of_patterns = max_number_of_patterns
             self.min_number_of_patterns = min_number_of_patterns
             self.min_percentage_covered_required = min_percentage_covered_required
@@ -1441,6 +1444,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
     def __init__(self,
             sub_partitioner : Partitioner = None,
             recognize_simply_by_main_fct_not_whole_ano_material = True,
+            strict_max_number_of_top_level_nodes = 12,
             max_number_of_patterns = 8,
             min_number_of_patterns = 2,
             min_percentage_covered_required = 0.75,
@@ -1448,6 +1452,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
         self.config = self.__class__.Config(
             sub_partitioner,
             recognize_simply_by_main_fct_not_whole_ano_material,
+            strict_max_number_of_top_level_nodes,
             max_number_of_patterns,
             min_number_of_patterns,
             min_percentage_covered_required,
@@ -1463,44 +1468,47 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             return None
 
         else:
-            # 1) Delimit the blocks based on patterns_indices
-            total_nb_nodes = len(cluster.s_nodes)
-            if self.config.put_intermediates_with_preceding_block:
-                # CASE 1: we want to avoid having intermediate nodes at the top level
-                # Note: We keep inputs and outputs outside any pattern
-                separators = [start for (start,end) in patterns_indices]
-                if separators[0] != 0:
-                    separators.insert(0,0)
-                if patterns_indices[-1][1] != total_nb_nodes:
-                    separators.append(patterns_indices[-1][1])
-                separators.append(total_nb_nodes)
-                blocks_indices = [(separators[i],separators[i+1]) for i in range(len(separators)-1)]
-
-            else:
-                # CASE 2: we keep the intermediate nodes between the patterns
-                # separators = [0] if patterns_indices[0][0] != 0 else []
-                blocks_indices = [(-1,0)] # to start the loop, removed at the end
-                for start,end in patterns_indices:
-                    prev_end = blocks_indices[-1][1]
-                    if blocks_indices[-1][1] != start:
-                        blocks_indices.append((prev_end,start))
-                    blocks_indices.append((start,end))
-                blocks_indices.pop(0) 
-                if blocks_indices[-1][1] != len(cluster.s_nodes):
-                    blocks_indices.append(
-                        (blocks_indices[-1][1],len(cluster.s_nodes)))
-                    
-            # 2) Build the PartitionedGraph
+            blocks_indices = self.build_blocks_based_on_patterns(
+                patterns_indices,len(cluster.s_nodes))
             pg = PartitionedGraph(
                 partitioned_cluster=cluster,
                 list_of_blocks_indices=blocks_indices 
             )
-            # 3) Sub partition:
+            # Sub partition:
             for block_pn in pg.nodes:
                 if block_pn.sub_cluster is not None:
                     sub_cluster : PartitionedCluster = block_pn.sub_cluster
                     sub_cluster.partition(self.config.sub_partitioner)
             return pg
+        
+
+    def build_blocks_based_on_patterns(self,patterns_indices,total_length):
+        """Delimits the blocks/sub clusters based on patterns_indices"""
+        if self.config.put_intermediates_with_preceding_block:
+            # CASE 1: we want to avoid having intermediate nodes at the top level
+            # Note: We keep inputs and outputs outside any pattern
+            separators = [start for (start,end) in patterns_indices]
+            if separators[0] != 0:
+                separators.insert(0,0)
+            if patterns_indices[-1][1] != total_length:
+                separators.append(patterns_indices[-1][1])
+            separators.append(total_length)
+            blocks_indices = [(separators[i],separators[i+1]) for i in range(len(separators)-1)]
+
+        else:
+            # CASE 2: we keep the intermediate nodes between the patterns
+            # separators = [0] if patterns_indices[0][0] != 0 else []
+            blocks_indices = [(-1,0)] # to start the loop, removed at the end
+            for start,end in patterns_indices:
+                prev_end = blocks_indices[-1][1]
+                if blocks_indices[-1][1] != start:
+                    blocks_indices.append((prev_end,start))
+                blocks_indices.append((start,end))
+            blocks_indices.pop(0) 
+            if blocks_indices[-1][1] != total_length:
+                blocks_indices.append(
+                    (blocks_indices[-1][1],total_length))
+        return blocks_indices
 
 
     def hash_cluster_nodes(self,cluster : PartitionedCluster):
@@ -1559,8 +1567,14 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             # 2) See if a pattern is repeated
             for pattern_hash,start_indices in dict_hashes.items():
                 if len(start_indices)*pattern_length >= min_nb_nodes_covered_by_patterns:
-                    current_best_solution = [
+                    patterns_indices =  [
                         (start,start+pattern_length) 
                         for start in start_indices]
-                    current_best_nb_patterns = len(current_best_solution)
+                    blocks_indices = self.build_blocks_based_on_patterns(patterns_indices,total_length)
+                    if (
+                        len(blocks_indices)
+                        <= self.config.strict_max_number_of_top_level_nodes
+                    ):
+                        current_best_solution = patterns_indices
+                        current_best_nb_patterns = len(current_best_solution)
         return current_best_solution
