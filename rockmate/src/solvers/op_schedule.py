@@ -497,7 +497,6 @@ class OpSchedule:
             self.alive_list = []
 
     def refine_optimize(self):
-        return None
         steps = self.steps
         for j in range(len(steps)-1, self.loss_step, -1):
             opt_ops = list(steps[j].opt_ops)
@@ -508,15 +507,16 @@ class OpSchedule:
             for i,step in enumerate(steps[:]):
                 if None not in opt2user_step.values():break
                 for opt_op in opt_ops:
-                    if opt2user_step[opt_op.name]:continue
-                    for usr in opt_op.target.pnode.users_real:
-                        if str(usr) in [str(op) for op in step.comp_ops]:
+                    if opt2user_step[opt_op.name] is not None:continue
+                    # for usr in opt_op.target.pnode.users_real:
+                    #     if usr.name in [str(op) for op in step.comp_ops]:
+                    for prf_op in step.prf_ops:
+                        if prf_op.target.param_name == opt_op.target.pnode.param_name:
                             # print(opt_op.name)
                             opt2user_step[opt_op.name] = i
                             steps_avail[opt_op].extend(steps[:i])
                             # located_ops.append(opt_op)
                             # opt_ops.remove(opt_op)
-
             for op, avail in steps_avail.items():
                 avail_step = max(avail, key=lambda x:x.time-x.opt_ops.time)
                 # print(avail_step.time,avail_step.opt_ops.time)

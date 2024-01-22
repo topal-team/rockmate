@@ -175,7 +175,7 @@ class HRockmate(torch.nn.Module):
             optimize_stats["minor_param_size"] = minor_param_size
             self.minor_param_nodes = []
             for pnode in self.rkgb_res.hierarchical_cluster.parameter_nodes:
-                if pnode.mem < minor_param_size:
+                if pnode.mem < minor_param_size and not pnode.is_buffer:
                     self.minor_param_nodes.append(pnode)
             self.gd = make_gd(
                 self.device, 

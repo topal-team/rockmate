@@ -445,7 +445,7 @@ class ModelPULP:
                     if pnode.is_buffer:continue
                     if pnode.mem < cpu_optimize_kwargs["minor_param_size"]:continue
                     # sub_c2params[sub_cluster.name].add(pnode.param_name)
-                    all_params[pnode.param_name] = pnode
+                    all_params[pnode.param_name] = pnode.original_param_node
                     if pnode.param_name not in param2sub_c:
                         param2sub_c[pnode.param_name] = {i}
                     else:
