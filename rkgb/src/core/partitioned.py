@@ -561,8 +561,12 @@ class PartitionedCluster():
         elif self.size < self.p_structure.min_size_to_trigger_partitioning:
             pass
         else:
-            self.partitioners_already_used.append(partitioner)
-            self.partitionings.append(partitioner(self))
+            pg = partitioner(self)
+            if pg is not None: 
+                # we found something interesting 
+                # => some Partitioners returns None if failed, eg PartitionerSequence 
+                self.partitionings.append(pg)
+                self.partitioners_already_used.append(partitioner)
 
     def fix_redundant_clusters(self):
         if self.partitionings is not None:
@@ -1395,13 +1399,19 @@ class PartitionerSequence(Partitioner):
             for i in range(nb_blocks)]
         # 'start' is included in the block; 'end' isn't
 
-        pg = PartitionedGraph(cluster,list_of_blocks_indices=blocks)
-        # -- sub partition --
-        for block_pn in pg.nodes:
-            if block_pn.sub_cluster is not None:
-                sub_cluster : PartitionedCluster = block_pn.sub_cluster
-                sub_cluster.partition(self.config.sub_partitioner)
-        return pg
+        if len(blocks)==1:
+            # We didn't find any structure
+            # => directly use the sub_partitioner instead
+            cluster.partition(self.config.sub_partitioner)
+            return None
+        else:
+            pg = PartitionedGraph(cluster,list_of_blocks_indices=blocks)
+            # sub partition:
+            for block_pn in pg.nodes:
+                if block_pn.sub_cluster is not None:
+                    sub_cluster : PartitionedCluster = block_pn.sub_cluster
+                    sub_cluster.partition(self.config.sub_partitioner)
+            return pg
 
 
 
@@ -1410,7 +1420,10 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
     class Config():
         def __init__(self,
                 sub_partitioner : Partitioner = None,
-                recognize_simply_by_main_fct_not_whole_ano_material = True):
+                recognize_simply_by_main_fct_not_whole_ano_material = True,
+                max_number_of_patterns = 8,
+                min_number_of_patterns = 2,
+                min_percentage_covered_required = 0.75):
             if sub_partitioner is None:
                 sub_partitioner = PartitionerBottomToTop(
                     main_graph_as_any_other = True
@@ -1418,20 +1431,33 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             self.sub_partitioner = sub_partitioner 
             self.recognize_simply_by_main_fct_not_whole_ano_material \
                 = recognize_simply_by_main_fct_not_whole_ano_material
+            self.max_number_of_patterns = max_number_of_patterns
+            self.min_number_of_patterns = min_number_of_patterns
+            self.min_percentage_covered_required = min_percentage_covered_required
 
     config : Config = None
     def __init__(self,
             sub_partitioner : Partitioner = None,
-            recognize_simply_by_main_fct_not_whole_ano_material = True):
+            recognize_simply_by_main_fct_not_whole_ano_material = True,
+            max_number_of_patterns = 8,
+            min_number_of_patterns = 2,
+            min_percentage_covered_required = 0.75):
         self.config = self.__class__.Config(
             sub_partitioner,
-            recognize_simply_by_main_fct_not_whole_ano_material)
+            recognize_simply_by_main_fct_not_whole_ano_material,
+            max_number_of_patterns,
+            min_number_of_patterns,
+            min_percentage_covered_required)
 
     def __call__(self, cluster : PartitionedCluster):
         list_nodes_hash = self.hash_cluster_nodes(cluster)
         patterns_indices = self.find_repetitive_patterns(list_nodes_hash)
-        if patterns_indices is None:
-            pg = PartitionedGraph(cluster)
+        if patterns_indices is None or len(patterns_indices)==0:
+            # We didn't find any structure 
+            # => directly use the sub_partitioner instead
+            cluster.partition(self.config.sub_partitioner)
+            return None
+
         else:
             blocks_indices = [(start,end) for (start,end) in patterns_indices]
             # 'start' is included in the block; 'end' isn't
@@ -1444,12 +1470,12 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
                 partitioned_cluster=cluster,
                 list_of_blocks_indices=blocks_indices 
             )
-        # -- sub partition --
-        for block_pn in pg.nodes:
-            if block_pn.sub_cluster is not None:
-                sub_cluster : PartitionedCluster = block_pn.sub_cluster
-                sub_cluster.partition(self.config.sub_partitioner)
-        return pg
+            # sub partition:
+            for block_pn in pg.nodes:
+                if block_pn.sub_cluster is not None:
+                    sub_cluster : PartitionedCluster = block_pn.sub_cluster
+                    sub_cluster.partition(self.config.sub_partitioner)
+            return pg
 
 
     def hash_cluster_nodes(self,cluster : PartitionedCluster):
@@ -1479,11 +1505,10 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
         # See Knuth-Morris-Pratt related algorithms
         # 0) Parameters to tune
         total_length = len(list_nodes_hash)
-        max_number_of_patterns = 8
-        min_number_of_patterns = 2
-        min_interesting_pattern_length = math.ceil(total_length / max_number_of_patterns)
-        max_interesting_pattern_length = int(total_length/min_number_of_patterns)
-        min_nb_nodes_covered_by_patterns = int(total_length*0.75)
+        min_interesting_pattern_length \
+            = math.ceil(total_length / self.config.max_number_of_patterns)
+        max_interesting_pattern_length = int(total_length/self.config.min_number_of_patterns)
+        min_nb_nodes_covered_by_patterns = int(total_length*self.config.min_percentage_covered_required)
 
         # 0) Store current best solution
         current_best_solution = None

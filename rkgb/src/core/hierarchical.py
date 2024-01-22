@@ -646,9 +646,20 @@ class HierarchicalCluster():
 
             # 7) Partitionings
             if p_cluster is p_cluster.representee_cluster:
+                # DEBUG
+                # if p_cluster is p_cluster.p_structure.main_cluster:
+                    # debug = True
+                # else: debug = False
                 self.representee_cluster = self
                 self.partitionings = []
                 for pg in p_cluster.partitionings:
+                    # if debug:
+                        # print(self.name)
+                        # print("Start to build HG")
+                        # print(len(pg.nodes))
+                        # print(len(p_cluster.partitionings))
+                        # print(p_cluster.partitionings)
+                        # print(p_cluster.partitioners_already_used)
                     self.partitionings.append(
                         HierarchicalGraph(self,pg,fb_graph)
                     )
