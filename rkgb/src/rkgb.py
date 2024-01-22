@@ -43,6 +43,7 @@ class Result():
         self.use_jit_instead_of_dynamo = use_jit_instead_of_dynamo
         self.jit_impose_device = jit_impose_device
         self.partitioners = partitioners
+        self.last_partitioners = None
         self.print_time_in_each_stage = print_time_in_each_stage
         self.last_time = 0
 
@@ -119,7 +120,8 @@ class Result():
 
     def build_partitioned(self,partitioners = None):
         partitioners = partitioners or self.partitioners
-        if self.partitioned_structure is None or partitioners is not None:
+        if (self.partitioned_structure is None 
+        or partitioners != self.last_partitioners):
             self.build_simplified()
             self.start_time()
             if partitioners is None:
@@ -128,6 +130,7 @@ class Result():
                 self.simplified_graph,
                 self.original_mod,
                 partitioners)
+            self.last_partitioners = partitioners
             self.show_time("Partitioning")
             
     def build_hierarchical(self,partitioners = None):

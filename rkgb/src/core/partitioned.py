@@ -131,14 +131,15 @@ class PartitionedGraph(base.Graph):
             # 2) FIRST CONSTRUCTOR:
             # - Based on a list of blocks:
             if list_of_blocks_indices:
+                print(list_of_blocks_indices)
                 nb_blocks = len(list_of_blocks_indices)
                 self.nodes = []
                 s_nodes = partitioned_cluster.s_nodes
                 list_blocks_s_nodes = []
                 for block_i in range(nb_blocks):
-                    (start_i,end_i) = nb_blocks[block_i]
-                    # BOTH start_i and end_i are included 
-                    if start_i == end_i:
+                    (start_i,end_i) = list_of_blocks_indices[block_i]
+                    # 'start' is included in the block; 'end' isn't
+                    if start_i == end_i - 1:
                         sn = s_nodes[start_i]
                         block_s_nodes = [sn]
                         block_pn = PartitionedNode(
@@ -147,7 +148,7 @@ class PartitionedGraph(base.Graph):
                             simplified_node=sn)
                         block_pn.memory_occupied_by_all_outputs = dict_info[sn.mt].memsize
                     else:
-                        block_s_nodes = s_nodes[start_i:end_i+1]
+                        block_s_nodes = s_nodes[start_i:end_i]
                         sub_cluster = PartitionedCluster(
                             block_s_nodes,
                             partitioned_cluster.p_structure)
@@ -1361,82 +1362,49 @@ class PartitionerSequence(Partitioner):
     def __init__(self, sub_partitioner : Partitioner = None):
         self.config = self.__class__.Config(sub_partitioner)
 
-    @staticmethod
-    def find_sequential_blocks(cluster : PartitionedCluster,pg : PartitionedGraph):
-        # Return indices where to cut
+    def __call__(self, cluster : PartitionedCluster):
+        # cluster only contains the list of concerned s_nodes, 
+        # but to search for cutting_points we need a graph structure
+        # hence we create a first temporary PartitionedGraph
+        # which transposes cluster.s_nodes to PNode, with deps/users
+        tmp_pg = PartitionedGraph(cluster)
         # To call base.Graph.find_cutting_points we first need
         # to add a sink to the .deps relation. An equivalent
         # of sg.init_node, without any deps, one clear first node.
-        tmp_sink_pn = PartitionedNode(main_graph=pg,main_target="tmp_sink")
-        pg.nodes.insert(0,tmp_sink_pn)
-        first_nodes = pg.first_nodes
+        tmp_sink_pn = PartitionedNode(main_graph=tmp_pg,main_target="tmp_sink")
+        tmp_pg.nodes.insert(0,tmp_sink_pn)
+        first_nodes = tmp_pg.first_nodes
         for first_pn in first_nodes:
             if first_pn.deps == set():
                 first_pn.deps.add(tmp_sink_pn)
                 tmp_sink_pn.users.add(first_pn)
 
-        seps_pn = pg.find_cutting_points()
+        seps_pn = tmp_pg.find_cutting_points()
         # Remove the temporary sink
         for first_pn in first_nodes:
             first_pn.deps.discard(tmp_sink_pn)
-        pg.nodes.remove(tmp_sink_pn)
+        tmp_pg.nodes.remove(tmp_sink_pn)
+        # Could do: del tmp_pg
 
         seps_mt = [sep.mt for sep in seps_pn]
         seps_sn = [sn for sn in cluster.s_nodes if sn.mt in seps_mt]
         seps_index = [cluster.s_nodes.index(sep) for sep in seps_sn]
         nb_blocks = len(seps_index)
-        seps_index.insert(0,0)
+        seps_index.insert(0,-1)
         blocks = [
-            (seps_index[i],seps_index[i+1]) 
+            (seps_index[i]+1,seps_index[i+1]+1) # (start,end)
             for i in range(nb_blocks)]
-        return blocks
-    
+        # 'start' is included in the block; 'end' isn't
 
-    def build_based_on_blocks(
-            blocks_indices : list[tuple[int,int]],
-            cluster : PartitionedCluster,
-            pg : PartitionedGraph,
-            sub_partitioner : Partitioner):
-        dict_info = cluster.p_structure.dict_info
-        nb_blocks = len(blocks_indices)
-        pg.nodes = p_nodes = []
-        for block_i in range(nb_blocks):
-            (start_i,end_i) = nb_blocks[block_i]
-            # BOTH start_i and end_i are included 
-            if start_i == end_i:
-                sn = cluster.s_nodes[start_i]
-                block_pn = PartitionedNode(pg,main_target=sn.mt,simplified_node=sn)
-                block_pn.memory_occupied_by_all_outputs = dict_info[sn.mt].memsize
-            else:
-                block_s_nodes = cluster.s_nodes[start_i:end_i+1]
-                sub_cluster = PartitionedCluster(block_s_nodes,cluster.p_structure)
-                block_pn = PartitionedNode(pg,sub_cluster=sub_cluster)
-                block_pn.memory_occupied_by_all_outputs = dict_info[block_s_nodes[-1].mt].memsize
-            p_nodes.append(block_pn)
-            if block_i > 0:
-                prev_pn : PartitionedNode = p_nodes[-2]
-                block_pn.deps.add(prev_pn)
-                block_pn.deps_global.add(prev_pn)
-                prev_pn.users.add(block_pn)
-                prev_pn.users_global.add(block_pn)
-                # global edges are useless since not dynamic
-        pg._first_nodes = set([p_nodes[0]])
-        pg.output_nodes = set([p_nodes[-1]])
+        print("PartitionSeq")
+        pg = PartitionedGraph(cluster,list_of_blocks_indices=blocks)
         # -- sub partition --
-        for block_pn in p_nodes:
+        for block_pn in pg.nodes:
             if block_pn.sub_cluster is not None:
                 sub_cluster : PartitionedCluster = block_pn.sub_cluster
-                sub_cluster.partition(sub_partitioner)
+                sub_cluster.partition(self.config.sub_partitioner)
         return pg
 
-
-    def __call__(self, cluster : PartitionedCluster):
-        pg = PartitionedGraph(cluster)
-
-        separators = PartitionerSequence.find_sequential_separators(cluster,pg)
-        return PartitionerSequence.build_based_on_separators(
-                self.config.sub_partitioner,
-                separators,cluster,pg)
 
 
 
@@ -1464,16 +1432,27 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
     def __call__(self, cluster : PartitionedCluster):
         list_nodes_hash = self.hash_cluster_nodes(cluster)
         patterns_indices = self.find_repetitive_patterns(list_nodes_hash)
-        pg = PartitionedGraph(cluster)
         if patterns_indices is None:
-            return pg
+            pg = PartitionedGraph(cluster)
         else:
-            separators = [start for (start,end) in patterns_indices]
-            if patterns_indices[-1][1] != len(cluster.s_nodes):
-                separators.append(patterns_indices[-1][1])
-            return PartitionerSequence.build_based_on_separators(
-                    self.config.sub_partitioner,
-                    separators,cluster,pg)
+            blocks_indices = [(start,end) for (start,end) in patterns_indices]
+            # 'start' is included in the block; 'end' isn't
+            if blocks_indices[0][0] != 0:
+                blocks_indices.insert(0,(0,blocks_indices[0][0]))
+            if blocks_indices[-1][1] != len(cluster.s_nodes):
+                blocks_indices.append(
+                    (blocks_indices[-1][1],len(cluster.s_nodes)))
+            print("PartitionPattern")
+            pg = PartitionedGraph(
+                partitioned_cluster=cluster,
+                list_of_blocks_indices=blocks_indices 
+            )
+        # -- sub partition --
+        for block_pn in pg.nodes:
+            if block_pn.sub_cluster is not None:
+                sub_cluster : PartitionedCluster = block_pn.sub_cluster
+                sub_cluster.partition(self.config.sub_partitioner)
+        return pg
 
 
     def hash_cluster_nodes(self,cluster : PartitionedCluster):
