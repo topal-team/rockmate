@@ -321,10 +321,11 @@ class Step():
         if not self.opt_ops:
             opt_ops = []
         else:
-            list_params = [p for op in self.opt_ops for p in op.list_params]
-            opt_ops = [OptimizeOp(f"cpu_{str(list_params[0])}", 
-                                list_params=list_params,
-                                time=sum(op.time for op in self.opt_ops))]
+            # list_params = [p for op in self.opt_ops for p in op.list_params]
+            # opt_ops = [OptimizeOp(f"cpu_{str(list_params[0])}", 
+            #                     list_params=list_params,
+            #                     time=sum(op.time for op in self.opt_ops))]
+            opt_ops = self.opt_ops
         # cpu_ops = [OptimizeOp(f"cpu_{str(list_params[0])}", list_params=list_params)] if list_params else []
         # opt_ops = cpu_ops+gpu_ops
         return self.alloc_ops+self.ofl_ops+self.prf_ops+self.comp_ops+opt_ops+self.del_ops
@@ -496,6 +497,7 @@ class OpSchedule:
             self.alive_list = []
 
     def refine_optimize(self):
+        return None
         steps = self.steps
         for j in range(len(steps)-1, self.loss_step, -1):
             opt_ops = list(steps[j].opt_ops)
@@ -812,6 +814,13 @@ class OpSchedule:
         for op in self.op_list:
             if isinstance(op, OptimizeOp) and "cpu" not in op.name:
                 optim_size += sum(self.dict_alloc[kdn].mem for kdn in op.list_params)
+        return optim_size
+    
+    def cpu_optimize_size(self):
+        optim_size = 0
+        for op in self.op_list:
+            if isinstance(op, OptimizeOp) and "cpu" in op.name:
+                optim_size += sum(self.dict_alloc[kdn.strip("cpu_")].mem for kdn in op.list_params)
         return optim_size
 
     @property
