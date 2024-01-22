@@ -49,7 +49,7 @@ def make_gd(device,
             cpu_optim,
             gpu_optim,
             optim_kwargs={},
-            cpu_optimize_stats={}):
+            optimize_stats={}):
     return {
         **globals(),
         **dict_constants,
@@ -62,7 +62,7 @@ def make_gd(device,
         "cpu_optim": cpu_optim,
         "gpu_optim": gpu_optim,
         "opt_kwargs": optim_kwargs,
-        "cpu_optimize_stats": cpu_optimize_stats,
+        "optimize_stats": optimize_stats,
         "main_stream": torch.cuda.current_stream(),
         # "prefetch_stream": torch.cuda.current_stream(),
         # "offload_stream": torch.cuda.current_stream(),
@@ -625,10 +625,10 @@ class Compiler:
 
     def fct_synchronize(self):
         def fct():
-            # torch.cuda.synchronize()
-            self.gd["prefetch_stream"].synchronize()
-            self.gd["offload_stream"].synchronize()
-            self.gd["main_stream"].synchronize()
+            torch.cuda.synchronize()
+            # self.gd["prefetch_stream"].synchronize()
+            # self.gd["offload_stream"].synchronize()
+            # self.gd["main_stream"].synchronize()
             # self.gd["prefetch_stream"].wait_stream(self.gd["offload_stream"])
             # self.gd["prefetch_stream"].wait_stream(self.gd["main_stream"])
             # self.gd["offload_stream"].wait_stream(self.gd["main_stream"])
@@ -803,7 +803,8 @@ class Compiler:
             # self.gd["offload_stream"].synchronize()
 
             # optimizer = self.storage.ld["optimizers"][op.name]
-            self.storage.ld["optimizers"][op.name].step()
+            if "cpu" not in op.name:
+                self.storage.ld["optimizers"][op.name].step()
             for p in del_grad:
                 self.storage.ld[p].grad = None
             #     self.storage.ld[p.removeprefix("cpu_")].grad = None

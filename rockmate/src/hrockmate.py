@@ -28,7 +28,7 @@ from rkgb.lowlevel.constants import ref_verbose, ExceptionModuleDoesNotReqGrad
 from rkgb.lowlevel.ast_add_on import ast_to_str, make_str_list_assign
 from rkgb.core.partitioned import PartitionerBottomToTop, PartitionerSequence, Partitioner
 
-from .solvers.main import preprocess, solve_recursive, get_cpu_optimize_stats
+from .solvers.main import preprocess, solve_recursive, get_optimize_stats
 from .solvers.op_schedule import *
 # from .solvers import RK_rotor, HILP, TwRemat, RK_checkmate
 from .solvers import HILP
@@ -62,6 +62,7 @@ class HRockmate(torch.nn.Module):
         cpu_optim = torch.optim.Adam,
         gpu_optim = torch.optim.Adam,
         optim_kwargs = {},
+        minor_param_size = 10*1024,
         # [
         #    Partitioner,
         #    PartitionerBottomToTop(),
@@ -167,10 +168,15 @@ class HRockmate(torch.nn.Module):
             self.output = self.rkgb_res.forward_and_backward_graph.list_output_data_anodes[0]
             self.budget = budget
             p = list(original_mod.parameters())[0]
-            cpu_optimize_stats = get_cpu_optimize_stats(p, 
-                                                        cpu_optim=cpu_optim, 
-                                                        gpu_optim=gpu_optim,
-                                                        optim_kwargs=optim_kwargs)
+            optimize_stats = get_optimize_stats(p, 
+                                                cpu_optim=cpu_optim, 
+                                                gpu_optim=gpu_optim,
+                                                optim_kwargs=optim_kwargs)
+            optimize_stats["minor_param_size"] = minor_param_size
+            self.minor_param_nodes = []
+            for pnode in self.rkgb_res.hierarchical_cluster.parameter_nodes:
+                if pnode.mem < minor_param_size:
+                    self.minor_param_nodes.append(pnode)
             self.gd = make_gd(
                 self.device, 
                 self.original_mod, 
@@ -178,7 +184,7 @@ class HRockmate(torch.nn.Module):
                 cpu_optim, 
                 gpu_optim,
                 optim_kwargs=optim_kwargs,
-                cpu_optimize_stats = cpu_optimize_stats
+                optimize_stats = optimize_stats
             )
             self.list_solutions = []
             if solve_sched:
@@ -249,7 +255,7 @@ class HRockmate(torch.nn.Module):
         for solver in list_solvers:
             if isinstance(solver, HILP):
                 solver.config.solve_top_level = True
-                solver.config.cpu_optimize_kwargs = self.gd["cpu_optimize_stats"]
+                solver.config.cpu_optimize_kwargs = self.gd["optimize_stats"]
                 # print("temporarily changing total_nodes for top level hilp")
                 list_solutions.extend(
                     solver(self.rkgb_res.hierarchical_cluster, [budget], accurate_mem=True)
@@ -282,12 +288,15 @@ class HRockmate(torch.nn.Module):
         l = [self.compiler.fct_del_var(v) for v in self.output.tensor_targets]
         self.bwd_fct_list.append(l)
         self.minor_parameters = []
-        for n, p in self.original_mod.named_parameters():
-            if n not in [kdn.param_name for kdn in self.rkgb_res.hierarchical_cluster.parameter_nodes]:
-                self.minor_parameters.append(p)
+        # for n, p in self.original_mod.named_parameters():
+        #     if n in self.minor_param_nodes.append(pnode)
+        #     # if n not in [kdn.param_name for kdn in self.rkgb_res.hierarchical_cluster.parameter_nodes]:
+        #         self.minor_parameters.append(p)
                 # p.data = p.data.to("cuda")
         
-        if self.minor_parameters:
+        if self.minor_param_nodes:
+            self.minor_parameters = [self.original_mod.get_parameter(pnode.param_name) 
+                                for pnode in self.minor_param_nodes]
             def optimize():
                 self.compiler.storage.ld["optimizers"]["minors"].step()
                 for p in self.minor_parameters:p.grad=None
@@ -339,8 +348,14 @@ class HRockmate(torch.nn.Module):
                                                     device=torch.device("cpu"),
                                                     pin_memory=True)
                 
-        for p in self.minor_parameters:
-            p.data = p.data.to("cuda")
+        for pnode in self.minor_param_nodes:
+            for t in pnode.view_targets:
+                storage.ld[t] = torch.empty(0, requires_grad=pnode.requires_grad)
+            target = pnode.get_value(self.original_mod)
+            target.data = target.data.to("cuda")
+            storage.ld[pnode.param_name] = target
+            code = make_str_list_assign(pnode.view_code, suffix=".data")
+            exec(code, self.gd, storage.ld)
 
         for pnode in self.rkgb_res.hierarchical_cluster.parameter_nodes:
             if pnode.is_buffer:
@@ -356,6 +371,7 @@ class HRockmate(torch.nn.Module):
             if v.grad:continue
             # target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
             target = v.pnode.get_value(self.original_mod)
+            target.grad = None
             storage.ld["cpu_"+k] = torch.empty_like(target, 
                                                 dtype=target.dtype, 
                                                 device=torch.device("cpu"),
@@ -363,7 +379,7 @@ class HRockmate(torch.nn.Module):
             storage.ld["cpu_"+k].copy_(target.data)
             storage.ld["cpu_"+k].grad = torch.empty_like(storage.ld["cpu_"+k], pin_memory=True)
             # if v.pnode.is_buffer:
-            #     storage.ld[k] = target.to("cuda")    
+            #     storage.ld[k] = target.to("cuda")
             # else:
             storage.ld[k] = target
 
@@ -627,6 +643,10 @@ class HRockmate(torch.nn.Module):
                     grads = (torch.ones(1),) + grad_inputs
                     #  -> Clear the compiler (and Autograd clears ctx)
                     # RkMod.compiler.storage = None
+                    for out_node in self.rkgb_res.forward_graph.output_nodes:
+                        # print(kdn)
+                        RkMod.compiler.get_val(f"out_{out_node.main_target}").data = torch.empty(0)
+                        
                     return grads
 
             # === END OF BACKWARD FUNCTION ===
@@ -734,7 +754,7 @@ class HRockmate(torch.nn.Module):
             #     pred_mem[-1] += op.overhead
         return pred_mem
 
-    def zero_grad(self, set_to_none=True):
+    def zero_grad(self, set_to_none=True, remain_for_offload=True):
         # if self.compiler.storage:
             # if set_to_none:
             #     for k,v in self.compiler.storage.ld.items():
@@ -744,7 +764,16 @@ class HRockmate(torch.nn.Module):
             # for k,v in self.compiler.storage.ld.items():
             #     if "cpu_" in k:
             #         v.grad = torch.zeros_like(v)
-        self.original_mod.zero_grad(set_to_none=set_to_none)
+        if remain_for_offload:
+            remains = []
+            for k,v in self.op_sched.dict_alloc_param.items():
+                if v.grad and self.op_sched.alive_list[-1][k]:
+                    remains.append(v.pnode.param_name)
+            for k,p in self.original_mod.named_parameters():
+                if k not in remains:
+                    p.grad = None if set_to_none else torch.zeros_like(p)
+        else:
+            self.original_mod.zero_grad(set_to_none=set_to_none)
 
     def reinit(self, set_to_none=False):
         # In our experiments, we set the parameter grad to 0's

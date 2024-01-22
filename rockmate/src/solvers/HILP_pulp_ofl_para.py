@@ -443,6 +443,7 @@ class ModelPULP:
                 if not hasattr(hcn, "required_parameter_nodes_real"):continue
                 for pnode in hcn.required_parameter_nodes_real|hcn.required_parameter_nodes_fake:
                     if pnode.is_buffer:continue
+                    if pnode.mem < cpu_optimize_kwargs["minor_param_size"]:continue
                     # sub_c2params[sub_cluster.name].add(pnode.param_name)
                     all_params[pnode.param_name] = pnode
                     if pnode.param_name not in param2sub_c:

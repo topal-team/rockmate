@@ -415,7 +415,7 @@ def get_single_compute_op_list(
 #     return list_anodes_parameters
 
 
-def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
+def get_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
     # timer = irotor.make_timer(torch.device("cpu"))
     timer = TimerCPU()
     a_c = torch.ones([10, 1024,1024], device="cpu", pin_memory=True)
@@ -462,11 +462,11 @@ def get_cpu_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
             b_g.copy_(b_c, non_blocking=True)
         optimizer.step()
     timer.end()
-    cpu_optimize_stats = {"optimizer_states_size": round(opt_size//size/p.element_size()),
+    optimize_stats = {"optimizer_states_size": round(opt_size//size/p.element_size()),
                           "optimizer_overhead":round(opt_overhead//size/p.element_size()),
                           "cpu_optimize_speed": size*p.element_size()*niter/timer.elapsed(),
                           "bandwidth": bandwidth}
-    return cpu_optimize_stats
+    return optimize_stats
 
 
 
