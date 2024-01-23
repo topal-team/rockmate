@@ -134,7 +134,8 @@ class HRockmate(torch.nn.Module):
                     # verbose=verbose,
                     wanted_graphs={"FB"},
                     partitioners=partitioners,
-                    inspection_device=torch.device("cuda")
+                    inspection_device=torch.device("cuda"),
+                    print_time_in_each_stage=True
                     # check_device_is_gpu=False
                 )
             else:
@@ -302,6 +303,9 @@ class HRockmate(torch.nn.Module):
             def optimize():
                 self.compiler.storage.ld["optimizers"]["minors"].step()
                 for p in self.minor_parameters:p.grad=None
+                for pnode in self.minor_param_nodes:
+                    code = make_str_list_assign(pnode.view_code, suffix=".data")
+                    exec(code, self.gd, self.compiler.storage.ld)
             self.bwd_fct_list.append([optimize])
         
         self.define_autograd_Function()
@@ -380,7 +384,8 @@ class HRockmate(torch.nn.Module):
                                                 device=torch.device("cpu"),
                                                 pin_memory=True)
             storage.ld["cpu_"+k].copy_(target.data)
-            storage.ld["cpu_"+k].grad = torch.empty_like(storage.ld["cpu_"+k], pin_memory=True)
+            if v.pnode.requires_grad:
+                storage.ld["cpu_"+k].grad = torch.empty_like(storage.ld["cpu_"+k], pin_memory=True)
             # if v.pnode.is_buffer:
             #     storage.ld[k] = target.to("cuda")
             # else:
@@ -416,7 +421,6 @@ class HRockmate(torch.nn.Module):
         if self.minor_parameters:
             storage.ld["optimizers"]["minors"] = self.gd["gpu_optim"](self.minor_parameters, **self.gd["opt_kwargs"])
         
-
         for l in self.init_fct_list:
             self._exec(l)
         torch.cuda.synchronize()

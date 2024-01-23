@@ -1,6 +1,7 @@
 # import logging
 # import math
 from typing import Dict, Any
+import time
 import numpy as np
 from copy import deepcopy
 from pulp import (
@@ -139,7 +140,7 @@ class ModelPULP:
         if cpu_optimize_kwargs and accurate_mem:
             self.cpu_optimize = True
             self.optimizer_states_factor = cpu_optimize_kwargs["optimizer_states_size"]#*weight size
-            self.cpu_optimize_speed = cpu_optimize_kwargs["cpu_optimize_speed"]#B/ms
+            self.cpu_optimize_speed = cpu_optimize_kwargs["cpu_optimize_speed"]/self.gcd#B/ms
             self.optimizer_overhead_factor = cpu_optimize_kwargs["optimizer_overhead"]#*weight size
             batch_multiplier = 4
             # self.BatMpl = RkLpVariable("BMpl", lowBound=0, upBound=self.batch_multiplier, cat="Integer")
@@ -583,8 +584,8 @@ class ModelPULP:
             self.param_grad_mem = {(t,k):0 for t in range(T) for k in self.krange(t)}
             self.prefill()
 
-            self.bandwidthOfl = cpu_optimize_kwargs["bandwidth"]#6 * 1024**2  # byte/ms
-            self.bandwidthPrf = cpu_optimize_kwargs["bandwidth"]#6 * 1024**2  # byte/ms
+            self.bandwidthOfl = cpu_optimize_kwargs["bandwidth"]/self.gcd#6 * 1024**2  # byte/ms
+            self.bandwidthPrf = cpu_optimize_kwargs["bandwidth"]/self.gcd#6 * 1024**2  # byte/ms
 
         self.Time = RkLpVariable.dicts(
             "Time", [(t, k) for t in range(T) for k in self.krange(t)], cat="Continuous"
@@ -1303,8 +1304,12 @@ class ModelPULP:
             solver = get_solver(
                 avail_solver, msg=0, timeLimit=self.ilp_solver_params["TimeLimit"]
             )
-
+        # print("start solving")
+        last_time = time.time()
         status = self.md.solve(solver)
+        time_taken = time.time() - last_time
+        clean_time_taken = time.strftime("%H:%M:%S", time.gmtime(time_taken))
+        self.solving_time = clean_time_taken
         self.status = LpStatus[status]  # readable status
         self.feasible = status == 1
 
@@ -1359,7 +1364,7 @@ class ModelPULP:
             #         op.grad = True
             i = self.active_steps.index((t,k))+1# TODO: distribute cpu optimization based on time
             op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]),
-                            time=parameters[p].mem/self.cpu_optimize_speed,
+                            time=parameters[p].mem/self.cpu_optimize_speed/self.gcd,
                             )
             opt_ops.append((*self.active_steps[i], op))
             del_ops.append((*self.active_steps[i],DeleteOp(Parameter(parameters[p]), grad=True)))
@@ -1390,12 +1395,12 @@ class ModelPULP:
                         init_ops.append((t, k, AllocateOp(Parameter(parameters[p]))))
                         op = PrefetchOp(
                             alloc=Parameter(parameters[p]), indices=(0, None), 
-                            time=parameters[p].mem/self.bandwidthPrf
+                            time=parameters[p].mem/self.bandwidthPrf/self.gcd
                         )
                         init_ops.append((t, k, op))
                         op = OffloadOp(
                             alloc=Parameter(parameters[p]), indices=(0, None),
-                            time=parameters[p].mem/self.bandwidthOfl
+                            time=parameters[p].mem/self.bandwidthOfl/self.gcd
                         )
                         restore_ops.append((t, k, op))
                         restore_ops.append((t, k, DeleteOp(Parameter(parameters[p]))))
@@ -1414,7 +1419,7 @@ class ModelPULP:
                 #     pass
                 for p in select_paras:
                     op = OffloadOp(alloc=Parameter(parameters[p]), indices=(0, None),
-                                   time=parameters[p].mem/self.bandwidthOfl)
+                                   time=parameters[p].mem/self.bandwidthOfl/self.gcd)
                     ofl_ops.append((t, k, op))
                     Offloaded[p] = 1
 
@@ -1453,7 +1458,7 @@ class ModelPULP:
                 for p in select_paras:
                     prf_ops.append((t, k, AllocateOp(Parameter(parameters[p]))))
                     op = PrefetchOp(alloc=Parameter(parameters[p]), indices=(0, None),
-                                    time=parameters[p].mem/self.bandwidthPrf)
+                                    time=parameters[p].mem/self.bandwidthPrf/self.gcd)
                     prf_ops.append((t, k, op))
                     Alive[p] = 1
                     if (t > bwd_i and t < min(early_fwd + [self.T + 1])) or t < fwd_i:
@@ -1473,7 +1478,7 @@ class ModelPULP:
         else:
             multiplier = self.param_multiplier.value()
         cpu_optimize_size = (sum(self.sumOptC[w_].value() * 
-                                self.parameter_gradient_size[w_] 
+                                self.parameter_gradient_size[w_] *self.gcd
                                 for w_ in range(w, self.W)) / (1-multiplier)
                             - sum(self.cpu_optimized_params.values()))# size by all graphs
         if candidates and cpu_optimize_size>0:
@@ -1526,6 +1531,8 @@ class ModelPULP:
                     if t == self.loss_idx and k == self.loss_idx:
                         op_list.append(ComputeOp(self.hgraph.cluster.loss_cnode))
                     op_list += self.schedule_compute(t,k,hgraph)
+        
+        print("finish scheduling")
         
         op_sched = OpSchedule(
             op_list,
