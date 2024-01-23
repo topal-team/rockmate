@@ -38,7 +38,7 @@ class HILP(Solver):
             },
             protected_names=[f"{init_target_string} data", f"{init_target_string} grad"],
             nb_total_sched=100,
-            nb_total_nodes_top_level=30,
+            nb_total_nodes_top_level=100,
             nb_total_nodes=20,
             nb_bdg_save=6,
             nb_bdg_peak=4,
@@ -122,13 +122,17 @@ class HILP(Solver):
                 else:
                     weights.append(len(hcn.sub_cluster.list_cnodes))
 
-        for hcn, w in zip(hg.list_HCNs, weights):
+        for i, (hcn, w) in enumerate(zip(hg.list_HCNs, weights)):
+            # if i<len(hg.list_HCNs)//2-2 and hcn.sub_cluster is not None:
+            #     hcn.list_sched = [min(hcn.sub_cluster.representee_cluster.list_schedules,
+            #                key=lambda x: x.mem)]
+            #     continue
             nb_sched = max(
                 self.config.nb_total_sched * w // sum(weights), 1
             )  # at least 1 sched
             if hcn.sub_cluster is not None:
                 # list_sched = hcn.sub_cluster.get_sched(pareto=True)
-                list_sched = hcn.sub_cluster.list_schedules
+                list_sched = hcn.sub_cluster.representee_cluster.list_schedules
                 list_sched = [
                     op_sched
                     for op_sched in list_sched
@@ -203,7 +207,7 @@ class HILP(Solver):
         accurate_mem=False,
         print_result=False,
     ):
-        
+        # print(accurate_mem)
         gc.collect()
         if not self.can_solve(hg):
             return []
@@ -223,6 +227,7 @@ class HILP(Solver):
         def solve_md(ilp_solver_params=ilp_solver_params, 
                      model_ilp = self.model_ilp,
                      protected_names=self.config.protected_names,
+                     accurate_mem=False,
                      ilp_solver = self.ilp_solver):
             
             md = model_ilp(
@@ -280,10 +285,12 @@ class HILP(Solver):
                         # print(f"scheduling: {time.time()-start}")
                 else:  # if infeasible, no need to try smaller budget
                     return list_op_sched, md
+            # if accurate_mem:print(md.feasible)
             return list_op_sched, md if accurate_mem else None
         
         list_op_sched, md = solve_md(ilp_solver_params=ilp_solver_params, 
                      model_ilp = self.model_ilp,
+                     accurate_mem=accurate_mem,
                      protected_names=self.config.protected_names,
                      ilp_solver = self.ilp_solver)
         self.md = md
