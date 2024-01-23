@@ -489,7 +489,7 @@ class SimplifiedGraph(base.Graph):
                     simplified_graph=self)
             # -> We need to generate VariableInfo
             # to do so we generate the value by running the code
-            our_global = self.make_copy_of_globals(original_mod,device)
+            our_global = self.make_simple_copy_of_globals(original_mod,device)
             dict_info[random_variable_name] \
                 = random_variable_node.info \
                 = VariableInfo(eval(ast_add_on.ast_to_str(code_ast),our_global))

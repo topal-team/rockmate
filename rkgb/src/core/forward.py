@@ -503,7 +503,7 @@ class ForwardGraph(base.Graph):
                         self.__dict__[k] = v
             def forward(self,*args,**kwargs):
                 # 1) Prepare the environnement of exec
-                our_global = forward_graph.make_copy_of_globals(self,device)
+                our_global = forward_graph.make_simple_copy_of_globals(self,device)
                 example_inputs = preprocess_samples.ExampleInputs(original_mod,args,kwargs)
                 tmp_local = example_inputs.dict
                 # 2) exec each node one by one

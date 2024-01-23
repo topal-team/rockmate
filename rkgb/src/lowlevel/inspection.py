@@ -2,58 +2,25 @@
 # = INSPECTION OF KCN =
 # =====================
 
-import sys
-import numpy as np
 import gc
 import torch
 pip_editable_broken_imports = False
 if pip_editable_broken_imports:
-    from lowlevel import ast_add_on
     from lowlevel import measure
+    from lowlevel.execution_environments import EnvironmentGenerator
     from lowlevel.variable_info import VariableInfo
     from core import base
-    from core.simplified import SimplifiedNode,SimplifiedGraph
+    from core.simplified import SimplifiedNode
 else:
-    from rkgb.lowlevel import ast_add_on
     from rkgb.lowlevel import measure
     from rkgb.lowlevel.variable_info import VariableInfo
     from rkgb.core import base
-    from rkgb.core.simplified import SimplifiedNode,SimplifiedGraph
-
-
-
-
-# ======================
-
-
-
-
+    from rkgb.core.simplified import SimplifiedNode
 
 
 # ==========================
 # ======= INSPECTION =======
 # ==========================
-
-class FakeMod():
-    def __init__(self):
-        self.__list__ = []
-
-    def __getitem__(self, i):
-        if i>=len(self.__list__):
-            self.__list__ += [FakeMod() for _ in range((i-len(self.__list__)+1))]
-        return self.__list__[i]
-    def __setitem__(self, i, value):
-        if i>=len(self.__list__):
-            self.__list__ += [FakeMod() for _ in range((i-len(self.__list__)+1))]
-        self.__list__[i] = value
-
-    def __setattr__(self, name: str, value):
-        self.__dict__[name] = value
-    def __getattr__(self, name):
-        if name not in self.__dict__:
-            self.__setattr__(name, FakeMod())
-        return self.__dict__[name]
-
 
 class InspectionResult():
     def __init__(self):
@@ -67,151 +34,13 @@ class InspectionResult():
         self.time_bwd = 0
 
 
-class Inspector():
+class Inspector(EnvironmentGenerator):
     """
-    Use Inspector.generate_global_env() 
-    and Inspector.generate_local_env()
+    Inherits 2 static methods from EnvironmentGenerator:
+    - self.generate_local_env()
+    - self.generate_global_env()
     to get fresh environments where to run inspection.
     """
-    @staticmethod
-    def generate_global_env(
-            simplified_graph : SimplifiedGraph,
-            inspection_device : torch.device):
-        our_global = globals().copy()
-        our_global["device"] = inspection_device
-        for cst_name,cst_value in simplified_graph.dict_constants.items():
-            our_global[cst_name] = cst_value.to(inspection_device)
-        # our_global["self"] = original_mod
-        # this time we won't put the whole model in the env
-        # instead we create local FakeMod
-        return our_global
-    
-    @staticmethod
-    def aux_generate_a_parameter_locally(
-        param_node : base.ParameterNode,
-        our_global, tmp_local,
-        original_mod,
-        inspection_device
-    ):
-        param_value = param_node.get_value(original_mod).to(inspection_device)
-        if not param_node.is_buffer:
-            param_value = torch.nn.Parameter(param_value)
-        tmp_local["all_parameters_values"].append(param_value)
-        tmp_local["all_parameters_names"].append(param_node.param_name)
-        tmp_local["__value"] = param_value
-        exec(f"{param_node.param_str} = __value ; {param_node.get_code()}",
-            our_global, tmp_local)
-
-    @staticmethod
-    def generate_local_env(
-            sn_to_proceed : SimplifiedNode,
-            simplified_graph : SimplifiedGraph,
-            our_global : dict,
-            original_mod : torch.nn.Module,
-            inspection_device : torch.device):
-        tmp_local = dict()
-        tmp_local["self"] = FakeMod()
-        tmp_local["all_parameters_names"] = [] # to find them easily
-        tmp_local["all_parameters_values"] = []
-        all_inputs = (
-            simplified_graph.original_mod_input_targets
-            + simplified_graph.input_targets)
-        tmp_local["all_inputs_values"] = set()
-        # 1) Do we need to run the init_code:
-        # - Generating the sizes related to init_code is free
-        # so we can do it anyway, but if we require a tensor
-        # for the moment I generate all the real inputs and then
-        # run the init_code, as the tensor we need may be a view
-        # TO IMPROVE ? Generate exactly the tensors needed
-        init_node = simplified_graph.init_node
-        if (
-                ((sn_to_proceed,init_node)
-                in simplified_graph.dict_of_labels_on_edges)
-        and 
-            any(
-                simplified_graph.dict_info[needed_input].variable_type 
-                is torch.Tensor
-                for needed_input 
-                in simplified_graph.dict_of_labels_on_edges[
-                    (sn_to_proceed,init_node)
-        ])):
-            for inp in simplified_graph.original_mod_input_targets:
-                inp_info = simplified_graph.dict_info[inp]
-                tmp_local[inp] = inp_info.generate_value(inspection_device)
-            for param_node in init_node.required_parameter_nodes:
-                Inspector.aux_generate_a_parameter_locally(
-                    param_node,our_global,tmp_local,
-                    original_mod,inspection_device)
-            exec(
-                init_node.get_code(force_special_kwargs=True),
-                our_global,tmp_local)
-            for inp in all_inputs:
-                tmp_local["all_inputs_values"].add(tmp_local[inp])
-        else:
-            # We don't need any tensor:
-            # we generate sizes anyway as they come free 
-            for inp in all_inputs:
-                inp_info = simplified_graph.dict_info[inp]
-                if inp_info.variable_type is not torch.Tensor:
-                    inp_value = inp_info.generate_value(inspection_device)
-                    tmp_local[inp] = inp_value
-                    tmp_local["all_inputs_values"].add(inp_value)
-
-        # 2) Generate required parameters
-        for param_node in sn_to_proceed.required_parameter_nodes:
-            Inspector.aux_generate_a_parameter_locally(
-                param_node,our_global,tmp_local,
-                original_mod,inspection_device)
-
-        # 3) Generate all the deps
-        list_nodes_to_generate = list(sn_to_proceed.deps)
-        set_nodes_to_generate = set(list_nodes_to_generate)
-        while list_nodes_to_generate != []:
-            # Get next node to generate
-            sn_to_generate : SimplifiedNode = list_nodes_to_generate.pop(0)
-            if sn_to_generate is init_node: # TO REMOVE
-                raise Exception("init_node in sn.deps ???")
-            # Check if it's `sn`'s turn:
-            # if some of the deps of sn are in the waiting list
-            # ie we plan to properly generate them (because they
-            # are also in main_sn's deps) it's better to wait.
-            # But note that we don't add any additional node to 
-            # the waiting list. So latter on, for sn'deps which
-            # aren't main_sn'deps: we will just generate them on the fly.
-            if set(sn_to_generate.deps).intersection(set_nodes_to_generate) != set():
-                list_nodes_to_generate.append(sn_to_generate) # not his turn yet
-                continue
-            else:
-                set_nodes_to_generate.remove(sn_to_generate)
-
-            # We are ready to generate sn:
-            # - First we create the main_target value based on info
-            # - Then we run the body_code to generate views / sizes
-            main_value = sn_to_generate.info.generate_value(inspection_device)
-            # Some operations are impossible over leaf tensors 
-            # in term of grad_fn. So we have to clone them :
-            if isinstance(main_value,torch.Tensor):
-                main_value = main_value.clone()
-            tmp_local[sn_to_generate.main_target] = main_value
-            
-            # To run the body code we may need some dependencies to be
-            # in tmp_local (e.g. sizes): so we create them on the fly
-            # Note: a dependency of sn_to_generate which also happens to
-            # be a dependency of sn_to_proceed, isn't created from info
-            # but had already been generated in this while loop.
-            body_code = ast_add_on.make_str_list_assign(
-                sn_to_generate.body_code, force_special_kwargs=True)
-            for body_target in sn_to_generate.all_targets:
-                if body_target is sn_to_generate.main_target: continue
-                for req_param_node in simplified_graph.dict_target_to_direct_parameter_deps[body_target]:
-                    Inspector.aux_generate_a_parameter_locally(
-                        req_param_node,our_global,tmp_local,
-                        original_mod,inspection_device)
-                for req_var_target in simplified_graph.dict_target_to_direct_variable_deps[body_target]:
-                    req_var_info = simplified_graph.dict_info[req_var_target]
-                    tmp_local[req_var_target] = req_var_info.generate_value(inspection_device)
-            exec(body_code,our_global,tmp_local)
-        return tmp_local
     
     @staticmethod
     def reset_local_env(sn_to_proceed : SimplifiedNode,tmp_local):

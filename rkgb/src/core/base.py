@@ -365,7 +365,7 @@ class Graph():
             setattr(self,attr,copy.copy(getattr(other_graph,attr)))
     # ===============================
 
-    def make_copy_of_globals(self,original_mod,device):
+    def make_simple_copy_of_globals(self,original_mod,device):
         our_global = globals().copy()
         our_global.update(self.dict_constants)
         our_global["self"] = original_mod
