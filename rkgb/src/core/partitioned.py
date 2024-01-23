@@ -47,10 +47,10 @@ class PartitionedNode(base.Node):
                 "temporary, during the partitioning."
             )
         if sub_cluster is not None:
-            self.name = f"PNode({sub_cluster.name})"
+            self.name = f"PN({sub_cluster.name})"
             self.is_leaf = False
         elif sub_graph is not None:
-            self.name = f"PNode({sub_graph.name})"
+            self.name = f"PN({sub_graph.name})"
             self.is_leaf = False
             self.is_protected_from_unwrap = False
         else:
@@ -288,6 +288,17 @@ class PartitionedGraph(base.Graph):
                 pn.is_protected_from_unwrap = False
                 pn.sub_graph.set_all_protected_to_false()
 
+    def make_attribute_all_snodes(self): # FOR DYNAMIC PARTITIONING
+        # Assume a dynamic structure
+        self._all_snodes = all_snodes = set()
+        for pn in self.nodes:
+            if pn.sub_graph is not None:
+                pn.sub_graph.make_attribute_all_snodes()
+                all_snodes.update(pn.sub_graph._all_snodes)
+            else:
+                assert(pn.simplified_node is not None) # DYNAMIC MOD
+                all_snodes.add(pn.simplified_node)
+
     def fix_redundant_clusters(self):
         for pn in self.nodes:
             pn : PartitionedNode
@@ -430,6 +441,7 @@ class PartitionedCluster():
         # ie the same set of s_nodes. So to be efficient, we store 
         # a handmade __repr__/__hash__ of each cluster:
         cluster_hash = hash(tuple(self.s_nodes))
+        self.cluster_hash = cluster_hash
         dict_hash_to_cluster = self.p_structure.dict_cluster_hash_to_cluster
         if cluster_hash in dict_hash_to_cluster:
             self.self_or_strictly_equal_cluster = dict_hash_to_cluster[cluster_hash]
@@ -619,7 +631,8 @@ class PartitionedCluster():
                 print("Sorry your cluster doesn't have any partitioning, "\
                     "ie corresponding PartitionedGraph: use cluster.partition()")
             if cluster is not self:
-                print("Warning : render an equivalent cluster (the representee)")
+                print(f"Warning : render an equivalent cluster "\
+                      f"{cluster.cluster_nb} (the representee)")
         for i,pg in enumerate(cluster.partitionings):
             if name is not None:
                 graph_name = f"{i}-th partitioning of {name}"
@@ -918,27 +931,27 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
     # **********
     # Freeze the dynamic structure : sub_graph -> sub_cluster
     @staticmethod
-    def freeze(pg : PartitionedGraph,p_structure : PartitionedStructure,partitioner : Partitioner):
+    def freeze(
+            pg : PartitionedGraph,
+            p_structure : PartitionedStructure,
+            partitioner : Partitioner,):
         # return list of all nodes in pg for recursive purpose
         pg._first_nodes = pg.first_nodes # comment this if one day want to restart Dynamic
-        all_snodes = set()
         for pn in pg.nodes:
             pn : PartitionedNode
             if pn.sub_graph is not None:
-                sub_g = pn.sub_graph
-                sub_snodes = PartitionedDynamicManipulation.freeze(sub_g,p_structure,partitioner)
-                sub_c = PartitionedCluster(sub_snodes,p_structure)
-                original_c = sub_c.self_or_strictly_equal_cluster
-                if original_c.representee_cluster is original_c:
-                    original_c.partitioners_already_used.append(partitioner)
-                    original_c.partitionings.append(sub_g)
+                sub_graph : PartitionedGraph = pn.sub_graph
+                sub_cluster = PartitionedCluster(sub_graph._all_snodes,p_structure)
+                sub_cluster = sub_cluster.self_or_strictly_equal_cluster
+                pn.sub_cluster = sub_cluster
+                pn.name = "PN(sub_cluster.name)"
+                pn.sub_graph = None # no longer dynamic
+                if sub_cluster.representee_cluster is sub_cluster:
+                    sub_cluster.partitionings.append(sub_graph)
+                    sub_cluster.partitioners_already_used.append(partitioner)
+                    PartitionedDynamicManipulation.freeze(sub_graph,p_structure,partitioner)
                 # otherwise -> We won't keep this sub_graph
                 # -> we are only interested in partitioning representee
-                sub_g.cluster = original_c
-                pn.sub_cluster = original_c
-                pn.name = sub_c.name
-                pn.sub_graph = None # comment this if one day want to restart Dynamic
-                all_snodes.update(sub_snodes)
             else:
                 if pn.simplified_node is None:
                     raise Exception(
@@ -946,8 +959,6 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
                         f"(except special nodes, but there shouldn't be any "\
                         f"special node here). Here : pn.name : {pn.name}."
                     )
-                all_snodes.add(pn.simplified_node)
-        return all_snodes
 
 
 
@@ -1349,15 +1360,15 @@ class PartitionerBottomToTop(Partitioner):
             )
 
         # === SECOND : freeze ===
-        all_snodes = PartitionedDynamicManipulation.freeze(
-            pg,cluster.p_structure,self.__class__)
-        if all_snodes != set(cluster.s_nodes):
+        pg.make_attribute_all_snodes()
+        if pg._all_snodes != set(cluster.s_nodes):
             raise Exception(
                 f"BUG in {self.__class__}. When collecting all the "\
-                f"SimplifiedNodes at the end, we don't find cluster.s_nodes. We probably "\
-                f"lost some nodes...\n Original nb of nodes : {len(cluster.s_nodes)}; "\
-                f"Nb of nodes at the end : {len(all_snodes)}"
+                f"SimplifiedNodes at the end, we don't find cluster.s_nodes. "\
+                f"We lost some nodes...\n Original nb of nodes : {len(cluster.s_nodes)}; "\
+                f"Nb of nodes at the end : {len(pg._all_snodes)}"
             )
+        PartitionedDynamicManipulation.freeze(pg,cluster.p_structure,self.__class__)
         return pg
 
 
