@@ -12,6 +12,7 @@ from rkgb.lowlevel.ast_add_on import ast_to_str
 from rkgb.lowlevel.measure import TimerCPU
 from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
 from rkgb.core.backward import ComputationNode
+from rkgb.lowlevel.constants import init_target_string
 
 from .op_schedule import OpSchedule, ComputeOp, DeleteOp, Activation
 import time
@@ -235,7 +236,10 @@ def preprocess_rec(cluster: HierarchicalCluster):
             preprocess(cluster)
 
 
-def preprocess(cluster: HierarchicalCluster, protect_names=[], add_no_save_sched=True):
+def preprocess(cluster: HierarchicalCluster, 
+               protect_names=[f"{init_target_string} data", 
+                              f"{init_target_string} grad"], 
+               add_no_save_sched=True):
     if cluster is cluster.representee_cluster:
         # assert cluster.list_schedules == []  # only visit representee once
         # autograd_op_list, autograd_loss_idx = get_single_compute_op_list(
@@ -302,6 +306,7 @@ def get_single_compute_op_list(
     list_kcn = cluster.list_cnodes.copy()
     if not with_bwd:
         list_kcn = list_kcn[: cluster.loss_idx]
+    loss_idx = list_kcn.index(cluster.loss_cnode) if cluster.loss_cnode in list_kcn else -1
 
     def _can_del(i, kdn):
         if kdn.name in protect_names:
@@ -312,10 +317,11 @@ def get_single_compute_op_list(
         for kcn in kdn.users_real:
             if kcn in list_kcn[i + 1 :]:
                 return False
-        if kdn in cluster.loss_cnode.deps_real:
+        
+        if kdn in cluster.loss_cnode.deps_real and i<= loss_idx:
             return False
-        if kdn in cluster.interfaces["input_data_anodes"]:
-            return False
+        # if kdn in cluster.interfaces["input_data_anodes"]:
+        #     return False
         if kdn in cluster.interfaces["input_grad_anodes"]:
             return False
         return True
@@ -354,7 +360,7 @@ def get_single_compute_op_list(
 
                     alive_status[kdn_name] = 0
                     # alive_list.append(alive_status.copy())
-
+    # print(alive_status)
     return op_list  # , loss_idx
 
 

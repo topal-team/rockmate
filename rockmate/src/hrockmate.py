@@ -27,6 +27,7 @@ from rkgb.lowlevel.measure import tensor_memory_size
 from rkgb.lowlevel.constants import ref_verbose, ExceptionModuleDoesNotReqGrad
 from rkgb.lowlevel.ast_add_on import ast_to_str, make_str_list_assign
 from rkgb.core.partitioned import PartitionerBottomToTop, PartitionerSequence, Partitioner
+from rkgb.lowlevel.constants import init_target_string
 
 from .solvers.main import preprocess, solve_recursive, get_optimize_stats
 from .solvers.op_schedule import *
@@ -198,8 +199,8 @@ class HRockmate(torch.nn.Module):
                 preprocess(
                     cluster,
                     protect_names=[
-                        "sources data",
-                        "sources grad",
+                        f"{init_target_string} data", 
+                        f"{init_target_string} grad",
                         self.output.name,
                     ],
                 )
@@ -217,6 +218,7 @@ class HRockmate(torch.nn.Module):
         # if multiple solvers in list_solvers,
         # will choose the one with minimum time
         budget = budget or self.budget
+        budget -= self.minor_size
         list_solvers = list_solvers or self.list_solvers
         rotor_solver = False
         hilp_solver = False
@@ -368,6 +370,7 @@ class HRockmate(torch.nn.Module):
                 exec(code, self.gd, storage.ld)
                 # print(target.device, pnode.get_code())
         for k,v in self.op_sched.dict_alloc_param.items():
+            if v.pnode.mem < self.gd["optimize_stats"]["minor_param_size"]:continue
             if v.grad:continue
             # target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
             target = v.pnode.get_value(self.original_mod)
@@ -800,6 +803,10 @@ class HRockmate(torch.nn.Module):
         t = sum((step.time - step.max2nd()) for step in self.op_sched.steps if step.time == step.prf_ops.time)
         print(f"Schedule: time from waiting prefetch {t}")
 
+    @property
+    def minor_size(self):
+        return (sum([pnode.mem for pnode in self.minor_param_nodes]) * 
+                   (self.gd["optimize_stats"]["optimizer_states_size"]+1))
 
     # === Inherits original_mod Attributes and Methods ===
     """

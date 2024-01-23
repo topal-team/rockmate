@@ -801,6 +801,7 @@ class ModelPULP:
                 # if k not in self.krange(t):
                 #     continue
                 self.md += self.create[t, eidx] <= self.sumComp[t, k]
+                self.md += self.create[t, eidx] >= self.sumComp[t, k] - self.alive[(t,k,i)]
             for i in range(I):
                 if t + 1 < T:
                     pass

@@ -127,7 +127,8 @@ class HILP(Solver):
                 self.config.nb_total_sched * w // sum(weights), 1
             )  # at least 1 sched
             if hcn.sub_cluster is not None:
-                list_sched = hcn.sub_cluster.get_sched(pareto=True)
+                # list_sched = hcn.sub_cluster.get_sched(pareto=True)
+                list_sched = hcn.sub_cluster.list_schedules
                 list_sched = [
                     op_sched
                     for op_sched in list_sched
@@ -144,6 +145,10 @@ class HILP(Solver):
 
                 while len(sel_sched) < nb_sched:
                     # add the one with most different .mem with all selected sched
+                    if np.max(
+                        [min(abs(x - y) for y in sel_mem) for x in indices[:, 1]]
+                    ) == 0:#no different schedules:
+                        break
                     argmax_diff = np.argmax(
                         [min(abs(x - y) for y in sel_mem) for x in indices[:, 1]]
                     )

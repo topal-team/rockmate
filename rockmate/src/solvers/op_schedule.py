@@ -321,11 +321,11 @@ class Step():
         if not self.opt_ops:
             opt_ops = []
         else:
-            # list_params = [p for op in self.opt_ops for p in op.list_params]
-            # opt_ops = [OptimizeOp(f"cpu_{str(list_params[0])}", 
-            #                     list_params=list_params,
-            #                     time=sum(op.time for op in self.opt_ops))]
-            opt_ops = self.opt_ops
+            list_params = [p for op in self.opt_ops for p in op.list_params]
+            opt_ops = [OptimizeOp(f"cpu_{str(list_params[0])}", 
+                                list_params=list_params,
+                                time=sum(op.time for op in self.opt_ops))]
+            # opt_ops = self.opt_ops
         # cpu_ops = [OptimizeOp(f"cpu_{str(list_params[0])}", list_params=list_params)] if list_params else []
         # opt_ops = cpu_ops+gpu_ops
         return self.alloc_ops+self.ofl_ops+self.prf_ops+self.comp_ops+opt_ops+self.del_ops
@@ -449,6 +449,8 @@ class OpSchedule:
                 continue
             if isinstance(op, ComputeOp):
                 self.time[i] = op.kcn.time
+                self.overhead[i] = op.overhead
+            elif isinstance(op, OptimizeOp) and "cpu" not in op.name:
                 self.overhead[i] = op.overhead
 
         self.mem = self.save_mem[self.loss_idx]
@@ -790,13 +792,23 @@ class OpSchedule:
         else:
             save_mem = []
             for i,alive_status in enumerate(self.alive_list):
-                save_mem.append(sum(self.dict_alloc[a].mem*alive_status[a]
-                                    *(act_multiplier if isinstance(self.dict_alloc[a], Parameter) else 1)
-                                    for a in alive_status))
+                save_mem.append(self.param_mem(i, act_multiplier=act_multiplier)+self.act_param(i))
             overhead = self.overhead*act_multiplier
         if with_interface:
             return max(np.array(save_mem) + overhead+ self.interface_mem)
         return max(np.array(save_mem) + overhead)
+    
+    def param_mem(self, i, act_multiplier=1):
+        alive_status = self.alive_list[i]
+        return sum(self.dict_alloc[a].mem*alive_status[a]
+                                    *(act_multiplier if isinstance(self.dict_alloc[a], Parameter) else 0)
+                                    for a in alive_status)
+    
+    def act_mem(self, i):
+        alive_status = self.alive_list[i]
+        return sum(self.dict_alloc[a].mem*alive_status[a]
+                                    *(1 if not isinstance(self.dict_alloc[a], Parameter) else 0)
+                                    for a in alive_status)
     
     @property
     def simulation_overhead(self):
