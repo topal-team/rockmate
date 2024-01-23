@@ -91,7 +91,8 @@ class ForwardGraph(base.Graph):
         # => dict_rand / dict_constants / output_targets 
         self.sources_req_grad = False # by default
         dict_forward_nodes = dict()
-        our_global = EnvironmentGenerator.generate_global_env(self,current_device,inspection_device)
+        our_global = EnvironmentGenerator.generate_global_env(
+            self,current_device,inspection_device,original_mod)
 
         # Parameter nodes
         dict_param_str_to_node = dict()
@@ -112,7 +113,6 @@ class ForwardGraph(base.Graph):
                     param_node.requires_grad = param_info.requires_grad
                     param_node.mem = param_info.memsize
         self.parameter_nodes = dict_param_str_to_node.values()
-        all_param_data_ptrs = VariableInfo.find_all_data_ptr_of_params(original_mod)
         # -> to recognize views over parameters
 
         # === PART 1: Translate each node one by one following the topo-order ===
@@ -162,9 +162,8 @@ class ForwardGraph(base.Graph):
                 fn.info = self.dict_info[fn.target] = VariableInfo()
             # 1) Generate local environment
             tmp_local = EnvironmentGenerator.generate_local_env(
-                fn,self,
-                our_global,
-                original_mod,current_device,inspection_device)
+                fn,self,our_global,original_mod,
+                current_device,inspection_device)
             
             # 2) Execute fn's code
             fn_code_str = fn.get_code(force_special_kwargs=True)
@@ -185,8 +184,7 @@ class ForwardGraph(base.Graph):
                 fn.info = self.dict_info[rn.target] \
                     = self.detect_inplace_or_view(
                     rn,fn,tmp_local,
-                    dict_forward_nodes,
-                    all_param_data_ptrs)
+                    dict_forward_nodes)
                 self.nodes.append(fn)
 
             # 4) Special case: view over a parameter
@@ -269,13 +267,15 @@ class ForwardGraph(base.Graph):
             current_raw_node,
             current_forward_node,
             tmp_local,
-            dict_forward_nodes,
-            all_param_data_ptrs):
+            dict_forward_nodes):
         current_target = current_raw_node.target
         current_rn_value = tmp_local[current_target]
         is_view    = False # by default
         is_inplace = False
         data_parents = set() # variables which have the same data_ptr
+        all_parameters_data_ptr = [
+            VariableInfo.get_data_ptr(param_value) 
+            for param_value in tmp_local["all_parameters_values"]]
 
         # === FIRST WAY TO RECOGNIZE A VIEW ===
         # -> data_ptr
@@ -283,7 +283,7 @@ class ForwardGraph(base.Graph):
         and not (current_raw_node.fct is
                 constants.constructor_function_string)): # TO TEST
             current_rn_data_ptr = VariableInfo.get_data_ptr(current_rn_value)
-            if current_rn_data_ptr in all_param_data_ptrs:
+            if current_rn_data_ptr in all_parameters_data_ptr:
                 raise ExceptionViewOverParameter(current_rn_value)
             else:
                 for o_name,o_value in tmp_local.items():

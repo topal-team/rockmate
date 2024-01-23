@@ -198,6 +198,7 @@ class ForwardAndBackwardGraph(base.Graph):
                     simplified_graph,
                     original_mod,
                     do_inspection,
+                    current_device,
                     inspection_device,
                     dict_old_param_node_to_new_param_node)
             self.make_special_loss_and_output_nodes(simplified_graph)
@@ -213,14 +214,16 @@ class ForwardAndBackwardGraph(base.Graph):
             simplified_graph : SimplifiedGraph,
             original_mod : torch.nn.Module,
             do_inspection,
+            current_device,
             inspection_device,
             dict_old_param_node_to_new_param_node):
         # 0) Create the execution environment
         our_global = inspection.Inspector.generate_global_env(
-            self,inspection_device)
+            self,current_device,inspection_device,original_mod)
         tmp_local = inspection.Inspector.generate_local_env(
             sn_to_proceed,simplified_graph,our_global,
-            original_mod,inspection_device
+            original_mod,
+            current_device,inspection_device
         )
 
         # =====================================

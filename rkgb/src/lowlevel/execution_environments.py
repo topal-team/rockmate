@@ -40,31 +40,42 @@ class EnvironmentGenerator():
     @staticmethod
     def generate_global_env(
             graph : base.Graph,
-            inspection_device : torch.device):
+            current_device : torch.device,
+            inspection_device : torch.device,
+            original_mod = None):
         our_global = globals().copy()
         our_global["device"] = inspection_device
         for cst_name,cst_value in graph.dict_constants.items():
             our_global[cst_name] = cst_value.to(inspection_device)
-        # our_global["self"] = original_mod
-        # this time we won't put the whole model in the env
-        # instead we create local FakeMod
+        if current_device == inspection_device:
+            assert original_mod is not None
+            our_global["self"] = original_mod
+        # Otherwise we create local FakeMod
+        # that only have the required params
         return our_global
     
+
     @staticmethod
     def aux_generate_a_parameter_locally(
         param_node : base.ParameterNode,
         our_global, tmp_local,
         original_mod,
+        current_device,
         inspection_device
     ):
-        param_value = param_node.get_value(original_mod).to(inspection_device)
-        if not param_node.is_buffer:
-            param_value = torch.nn.Parameter(param_value)
+        if current_device == inspection_device:
+            # Nothing to do: the whole model is already in our_global !
+            param_value = param_node.get_value(original_mod)
+        else:
+            # Move to inspection device and FakeMod
+            param_value = param_node.get_value(original_mod).to(inspection_device)
+            if not param_node.is_buffer:
+                param_value = torch.nn.Parameter(param_value)
+            tmp_local["__value"] = param_value
+            exec(f"{param_node.param_str} = __value ; {param_node.get_code()}",
+                our_global, tmp_local)
         tmp_local["all_parameters_values"].append(param_value)
         tmp_local["all_parameters_names"].append(param_node.param_name)
-        tmp_local["__value"] = param_value
-        exec(f"{param_node.param_str} = __value ; {param_node.get_code()}",
-            our_global, tmp_local)
 
 
     @staticmethod
@@ -83,6 +94,7 @@ class EnvironmentGenerator():
             simplified_graph : base.Graph,
             our_global : dict,
             original_mod : torch.nn.Module,
+            current_device : torch.device,
             inspection_device : torch.device):
         assert type(sn_to_proceed).__name__ == "SimplifiedNode"
         assert type(simplified_graph).__name__ == "SimplifiedGraph"
@@ -117,8 +129,8 @@ class EnvironmentGenerator():
                 tmp_local[inp] = inp_info.generate_value(inspection_device)
             for param_node in init_node.required_parameter_nodes:
                 EnvironmentGenerator.aux_generate_a_parameter_locally(
-                    param_node,our_global,tmp_local,
-                    original_mod,inspection_device)
+                    param_node,our_global,tmp_local,original_mod,
+                    current_device,inspection_device)
             exec(
                 init_node.get_code(force_special_kwargs=True),
                 our_global,tmp_local)
@@ -137,15 +149,15 @@ class EnvironmentGenerator():
         # 2) Generate required parameters
         for param_node in sn_to_proceed.required_parameter_nodes:
             EnvironmentGenerator.aux_generate_a_parameter_locally(
-                param_node,our_global,tmp_local,
-                original_mod,inspection_device)
+                param_node,our_global,tmp_local,original_mod,
+                current_device,inspection_device)
 
         # 3) Generate all the deps
         list_nodes_to_generate = list(sn_to_proceed.deps)
         set_nodes_to_generate = set(list_nodes_to_generate)
         while list_nodes_to_generate != []:
             # Get next node to generate
-            sn_to_generate : SimplifiedNode = list_nodes_to_generate.pop(0)
+            sn_to_generate = list_nodes_to_generate.pop(0)
             if sn_to_generate is init_node: # TO REMOVE
                 raise Exception("init_node in sn.deps ???")
             # Check if it's `sn`'s turn:
@@ -182,8 +194,8 @@ class EnvironmentGenerator():
                 if body_target is sn_to_generate.main_target: continue
                 for req_param_node in simplified_graph.dict_target_to_direct_parameter_deps[body_target]:
                     EnvironmentGenerator.aux_generate_a_parameter_locally(
-                        req_param_node,our_global,tmp_local,
-                        original_mod,inspection_device)
+                        req_param_node,our_global,tmp_local,original_mod,
+                        current_device,inspection_device)
                 for req_var_target in simplified_graph.dict_target_to_direct_variable_deps[body_target]:
                     req_var_info = simplified_graph.dict_info[req_var_target]
                     tmp_local[req_var_target] = req_var_info.generate_value(inspection_device)
@@ -197,6 +209,7 @@ class EnvironmentGenerator():
             graph : base.Graph,
             our_global : dict,
             original_mod : torch.nn.Module,
+            current_device : torch.device,
             inspection_device : torch.device):
         if (type(node_to_proceed).__name__ == "SimplifiedNode"
         and type(graph).__name__ == "SimplifiedGraph"):
@@ -204,7 +217,7 @@ class EnvironmentGenerator():
         else:
             method = EnvironmentGenerator.generate_local_env_with_forward
         return method(
-                node_to_proceed,graph,our_global,
-                original_mod,inspection_device
+                node_to_proceed,graph,our_global,original_mod,
+                current_device,inspection_device
             )
     
