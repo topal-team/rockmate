@@ -439,6 +439,24 @@ class ModelPULP:
             for i in range(De):
                 if self.delete_list[i][0] not in self.krange(t):
                     self.delete[t, i] = 0
+            if self.single_fwd:
+                for d in range(De):
+                    (k, i) = self.delete_list[d]
+                    if i in self.protected_indices:continue
+                    if k == max(_deps_d[i] + _users_d[i]) and k == t:
+                        self.delete[t, d] = 1
+                        pass
+                    # elif t<=self.loss_idx:
+                    else:
+                        self.delete[t, d] = 0
+                        pass
+
+                for c in range(Cr):
+                    (k, i) = self.create_list[c]
+                    if k == min(_deps_d[i]) and k == t:
+                        self.create[t, c] = 1
+                    else:
+                        self.create[t, c] = 0
 
         self.W = W = len(self.sub_clusters)
         def get_parameters(hierarchical_nodes):
@@ -766,7 +784,11 @@ class ModelPULP:
                                     self.Comp[t, bwd_i, o]
                                     <= self.sumComp[t, k_] + self.AliveA[t, j_]
                                 )
-
+        # self.md += (self.create[14,67] == 0)
+        # self.md += (self.create[14,68] == 0)
+        # self.md += (self.create[14,69] == 0)
+        # self.md += (self.create[10,51] == 0)
+        # self.md += (self.create[12,58] == 0)
         #### Offload constraints
         if self.with_parameters:
             self.add_parameter_constraints()
@@ -801,7 +823,7 @@ class ModelPULP:
                 # if k not in self.krange(t):
                 #     continue
                 self.md += self.create[t, eidx] <= self.sumComp[t, k]
-                self.md += self.create[t, eidx] >= self.sumComp[t, k] - self.alive[(t,k,i)]
+                # self.md += self.create[t, eidx] >= self.sumComp[t, k] - self.alive[(t,k,i)]
             for i in range(I):
                 if t + 1 < T:
                     pass
@@ -845,18 +867,18 @@ class ModelPULP:
             return 1 + num_uses_after_k
 
         # delete when not needed
-        for t in range(T):
-            for eidx, (k, i) in enumerate(self.delete_list):
-                self.md += 1 - self.delete[t, eidx] <= _num_hazards(t, i, k)
+        # for t in range(T):
+        #     for eidx, (k, i) in enumerate(self.delete_list):
+        #         self.md += 1 - self.delete[t, eidx] <= _num_hazards(t, i, k)
 
-        # don't delete if still needed
-        for t in range(T):
-            for eidx, (k, i) in enumerate(self.delete_list):
-                self.md += _max_num_hazards(t, i, k) * (
-                    1 - self.delete[t, eidx]
-                ) >= _num_hazards(t, i, k)
-                if i in self.protected_indices:
-                    self.md += self.delete[t, eidx] == 0
+        # # don't delete if still needed
+        # for t in range(T):
+        #     for eidx, (k, i) in enumerate(self.delete_list):
+        #         self.md += _max_num_hazards(t, i, k) * (
+        #             1 - self.delete[t, eidx]
+        #         ) >= _num_hazards(t, i, k)
+        #         if i in self.protected_indices:
+        #             self.md += self.delete[t, eidx] == 0
 
         self.U = {}
         for t in range(T):
@@ -1270,6 +1292,7 @@ class ModelPULP:
         # if self.with_parameters:
         #     self.add_single_fwd_constraints()
         #     self.add_single_bwd_constraints()
+        print(f"time limit {self.ilp_solver_params['TimeLimit']}")
         try:
             solver = get_solver(
                 solver, msg=0, timeLimit=self.ilp_solver_params["TimeLimit"]
@@ -1294,11 +1317,13 @@ class ModelPULP:
                 range(self.loss_idx + 1)
             ):
                 for k in self.krange(t):
-                    if not sol(self.sumComp[t, k].value()):
+                    if not sol(self.sumComp[t, k]):
                         continue
                     self.active_steps.append((t, k))
 
     def sol(self, value):
+        if hasattr(value, "value"):
+            return value.value() > 0.9999
         return value > 0.9999
 
     def group(self, w, tol=1):
@@ -1307,7 +1332,7 @@ class ModelPULP:
         bwd_i = max(self.param2hcn[w])
         early_fwd = []
         for t in range(bwd_i, self.T):
-            if not self.single_fwd and self.sol(self.sumComp[t,fwd_i].value()):
+            if not self.single_fwd and self.sol(self.sumComp[t,fwd_i]):
                 early_fwd.append(t)#if recompute fwd after bwd
         hcn = self.hgraph.list_HCNs[fwd_i]
         parameters = {pnode.param_name: pnode for pnode in self.parameters[w]}
@@ -1415,7 +1440,7 @@ class ModelPULP:
                 }
                 if not candidates:
                     continue
-                if self.sol(self.AliveW[(t_, k_, w)].value()):
+                if self.sol(self.AliveW[(t_, k_, w)]):
                     select_paras = list(candidates.keys())
                 else:
                     selector = knapsack(list(candidates.items()))
@@ -1530,11 +1555,11 @@ class ModelPULP:
         
         j = self.hcn2sub_c[k]
         # if self.sumComp[t, k].value() == 1:
-        if sol(self.sumComp[t, k].value()):
+        if sol(self.sumComp[t, k]):
             hcn = hgraph.list_HCNs[k]
             opt = -1
             for o in range(self.nOpts[k]):
-                if sol(self.Comp[t, k, o].value()):
+                if sol(self.Comp[t, k, o]):
                     opt = o
                     break
             if opt > -1:
@@ -1554,7 +1579,7 @@ class ModelPULP:
                 if (
                     not hcn.is_fwd
                     # and self.sumAliveP[(j, t + 1)].value() > 0
-                    and sol(self.sumAliveP[(j, t + 1)].value())
+                    and sol(self.sumAliveP[(j, t + 1)])
                 ):  # phantoms should be kept
                     phantoms_to_keep = h_obj.phantoms
                     # for op in sub_op_list[::-1]:
@@ -1583,7 +1608,7 @@ class ModelPULP:
         for eidx, (k_, i) in enumerate(self.delete_list):
             # print(k_, i)
             # if k == k_ and self.delete[t, eidx].value()==1:
-            if k == k_ and sol(self.delete[t, eidx].value()):
+            if k == k_ and sol(self.delete[t, eidx]):
                 hdn = hgraph.list_HANs[i]
                 op_list.append(DeleteOp(Activation(hdn.anode)))
         return op_list
@@ -1648,7 +1673,7 @@ class ModelPULP:
                     # loss_op = Op(K_C_node("loss"))
 
                     op_list.append(ComputeOp(self.hgraph.cluster.loss_cnode))
-                if not sol(self.sumComp[t, k].value()):
+                if not sol(self.sumComp[t, k]):
                     continue
                 j = self.hcn2sub_c[k]
                 # if self.sumComp[t, k].value() == 1:
