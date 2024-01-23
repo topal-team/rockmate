@@ -55,6 +55,8 @@ class EnvironmentGenerator():
         return our_global
     
 
+
+
     @staticmethod
     def aux_generate_a_parameter_locally(
         param_node : base.ParameterNode,
@@ -78,15 +80,78 @@ class EnvironmentGenerator():
         tmp_local["all_parameters_names"].append(param_node.param_name)
 
 
+
+
     @staticmethod
     def generate_local_env_with_forward(
             fn_to_proceed : base.Node,
             forward_graph : base.Graph,
             our_global : dict,
             original_mod : torch.nn.Module,
+            current_device : torch.device,
             inspection_device : torch.device):
         assert type(fn_to_proceed).__name__ == "ForwardNode"
         assert type(forward_graph).__name__ == "ForwardGraph"
+        # 0) Generate required parameters
+        for param_node in fn_to_proceed.required_parameter_nodes:
+            EnvironmentGenerator.aux_generate_a_parameter_locally(
+                param_node,our_global,tmp_local,original_mod,
+                current_device,inspection_device)
+
+        # To generate an environment where to run raw_node's code,
+        # We generate fn's dependencies, either using their info 
+        # (type, shape, dtype etc) we previously collected, 
+        # or by running their code in case of view or inplace nodes, 
+        # in which case we first (i) generate their dependencies, 
+        # using previously collected info; and (ii) its random dependencies.
+        tmp_local = dict()
+        targets_done = set()
+        targets_ready = set()
+        nodes_todo = list(fn_to_proceed.deps)
+        while nodes_todo != []:
+            req_fn = nodes_todo[-1]
+            req_target = req_fn.target
+            if req_target in targets_done or req_target in our_global:
+                nodes_todo.pop()
+            else:
+                req_fn_info = forward_graph.dict_info[req_target]
+                if (req_fn_info.is_inplace 
+                or  req_fn_info.is_view
+                or  req_fn.fct == "getattr"):
+                    # For a view: we first generate its deps
+                    if req_target in targets_ready:
+                        # When all deps are done, then we run the viewing code
+                        # Don't forgot : param deps => in case of view over a param
+                        for param_node in req_fn.required_parameter_nodes:
+                            EnvironmentGenerator.aux_generate_a_parameter_locally(
+                                param_node,our_global,tmp_local,original_mod,
+                                current_device,inspection_device)
+                        # And required random stuff
+                        for req_rd in req_fn.required_random_tensors:
+                            if not req_rd in targets_done:
+                                code = ast_add_on.make_str_assign(
+                                    (req_rd,forward_graph.dict_rand[req_rd]))
+                                exec(code,our_global,tmp_local)
+                                targets_done.add(req_rd)
+                        # Exec the req_fn:
+                        exec(req_fn.get_code(),our_global,tmp_local)
+                        targets_done.add(req_target)
+                        nodes_todo.pop()
+                    else:
+                        nodes_todo.extend(list(req_fn.deps))
+                        targets_ready.add(req_target)
+                else:
+                    req_x = req_fn_info.generate_value(inspection_device)
+                    if isinstance(req_x,torch.Tensor):
+                        req_x = req_x.clone()
+                    tmp_local[req_target] = req_x
+                    targets_done.add(req_target)
+                    nodes_todo.pop()
+        return tmp_local
+    
+
+
+
 
     @staticmethod
     def generate_local_env_with_simplified(
@@ -201,6 +266,8 @@ class EnvironmentGenerator():
                     tmp_local[req_var_target] = req_var_info.generate_value(inspection_device)
             exec(body_code,our_global,tmp_local)
         return tmp_local
+
+
 
 
     @staticmethod

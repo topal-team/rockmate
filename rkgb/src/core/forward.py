@@ -219,50 +219,6 @@ class ForwardGraph(base.Graph):
         self.fix_requires_grad()
 
 
-    def generate_deep_tmp_local(self,raw_node,our_global):
-        # To generate an environment where to run raw_node's code,
-        # we generate its dependencies, either using the info 
-        # (about shape, dtype etc) we previously collected, 
-        # or by running their code in case of view or inplace nodes, 
-        # in which case we first (i) generate their dependencies, 
-        # using previously collected info; and (ii) its random dependencies.
-        tmp_local = dict()
-        done = set()
-        ready = set()
-        todo = list(raw_node.deps)
-        while todo != []:
-            req_rn = todo[-1]
-            req_target = req_rn.target
-            if req_target in done or req_target in our_global:
-                todo.pop()
-            else:
-                req_rn_info = self.dict_info[req_target]
-                if (req_rn_info.is_inplace 
-                or  req_rn_info.is_view
-                or  req_rn.fct == "getattr"):
-                    if req_target in ready:
-                        for req_rd in req_rn.required_random_tensors:
-                            if not req_rd in done:
-                                code = ast_add_on.make_str_assign(
-                                    (req_rd,self.dict_rand[req_rd]))
-                                exec(code,our_global,tmp_local)
-                                done.add(req_rd)
-                        exec(req_rn.get_code(),our_global,tmp_local)
-                        done.add(req_target)
-                        todo.pop()
-                    else:
-                        todo.extend(list(req_rn.deps))
-                        ready.add(req_target)
-                else:
-                    req_x = req_rn_info.generate_value(our_global["device"])
-                    if isinstance(req_x,torch.Tensor):
-                        req_x = req_x.clone()
-                    tmp_local[req_target] = req_x
-                    done.add(req_target)
-                    todo.pop()
-        return tmp_local
-    
-
     def detect_inplace_or_view(self,
             current_raw_node,
             current_forward_node,
@@ -270,12 +226,12 @@ class ForwardGraph(base.Graph):
             dict_forward_nodes):
         current_target = current_raw_node.target
         current_rn_value = tmp_local[current_target]
-        is_view    = False # by default
-        is_inplace = False
-        data_parents = set() # variables which have the same data_ptr
         all_parameters_data_ptr = [
             VariableInfo.get_data_ptr(param_value) 
             for param_value in tmp_local["all_parameters_values"]]
+        is_view    = False # by default
+        is_inplace = False
+        data_parents = set() # variables which have the same data_ptr
 
         # === FIRST WAY TO RECOGNIZE A VIEW ===
         # -> data_ptr
