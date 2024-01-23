@@ -107,7 +107,7 @@ class Op:
         Op type should be in Compute/Delete/Mapping/Allocate/Offload/Prefetch
         Compute/Delete/Mapping/Allocate happens in the main stream
         """
-        self.name = name
+        self._name = name
         self.disabled = disabled
         self.overhead = overhead
         self._time = time
@@ -118,6 +118,14 @@ class Op:
     @property
     def time(self):
         return self._time
+    
+    @property
+    def name(self):
+        return self._name
+
+    @name.setter
+    def name(self, value):
+        self._name = value
 
 class SynchronizeOp(Op):
     def __init__(self, name="", disabled=False):
@@ -126,7 +134,6 @@ class SynchronizeOp(Op):
 class ComputeOp(Op):
     def __init__(self, kcn, fast_forward=False, disabled=False, detach=True):
         super().__init__(kcn.name, disabled=disabled)
-        self.kcn = kcn
         self.fast_forward = fast_forward
         self.detach = detach
         self.target = kcn
@@ -155,6 +162,14 @@ class ComputeOp(Op):
     def time(self):
         # kcn can be replaced during translation
         return self.kcn.time if self.kcn.time is not None else 0
+    
+    @property
+    def name(self):
+        return self.kcn.name
+    
+    @property
+    def kcn(self):
+        return self.target
 
 
 class DeleteOp(Op):
@@ -166,10 +181,10 @@ class DeleteOp(Op):
     def __repr__(self):
         return "Disabled_"*self.disabled+"Delete_" + self.target.name+"grad"*self.grad
     
-    # @property
-    # def name(self):
-    #     # name changes with target is changed during translation
-    #     return "Delete_" + self.target.name
+    @property
+    def name(self):
+        # name changes with target is changed during translation
+        return "Delete_" + self.target.name
 
 
 class MappingOp(Op):
@@ -359,7 +374,7 @@ class OpSchedule:
         cluster=None,
         interfaces=None,
         refine=True,
-        correct_overhead=True,
+        correct_overhead=False,
         keep_alive_list=False,
         with_parameters=False,
         init_alive_status: dict = {},
@@ -416,11 +431,12 @@ class OpSchedule:
         ]  # all interface KDN's
         self.interface_names = [kdn.name for kdn in self.all_interfaces]
 
-        # self.op_name_list = [
-        #     (str(op) if not op.disabled else "") for op in self.op_list
-        # ]
+        self._op_name_list = [
+            (str(op) if not op.disabled else "") for op in self.op_list
+        ]
 
         if refine:
+            # print("start refine")
             self.refine()
 
         alive_list = self.create_alive_list(init_status=init_alive_status)
@@ -772,9 +788,7 @@ class OpSchedule:
                     # TODO: disabled wrong deletion of parameter
                     pass
 
-        # self.op_name_list = [
-        #     (str(op) if not op.disabled else "") for op in self.op_list
-        # ]
+        self.recreate_op_list()
 
     def __repr__(self):
         return (
@@ -837,16 +851,18 @@ class OpSchedule:
 
     @property
     def op_list(self):
+        return self._op_list
+
+    @property
+    def op_name_list(self):
+        return self._op_name_list
+
+    def recreate_op_list(self):
         if self.from_steps:
             op_list = []
             for step in self.steps:
                 op_list += step.op_list
-            return op_list
-        else:
-            return self._op_list
-
-    @property
-    def op_name_list(self):
-        return [
-                (str(op) if not op.disabled else "") for op in self.op_list
-            ]
+            self._op_list = op_list
+        self._op_name_list = [
+            (str(op) if not op.disabled else "") for op in self._op_list
+        ]

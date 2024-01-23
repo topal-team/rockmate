@@ -73,8 +73,7 @@ def H_cluster_method_translate_op_list(self, op_list):
             # ana_kn = translator_re.dict_name_to_ano_triplet[op.kcn.name]
             # op.kcn = translator.dict_ano_triplet_to_kcn[ana_kn]
             ana_kn = translator_re.to_ano(op.kcn)
-            op.kcn = translator.from_ano(ana_kn)
-            op.name = op.kcn.name
+            op.target = translator.from_ano(ana_kn)
     return translated_op_list
 
 
