@@ -944,7 +944,7 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
                 sub_cluster = PartitionedCluster(sub_graph._all_snodes,p_structure)
                 sub_cluster = sub_cluster.self_or_strictly_equal_cluster
                 pn.sub_cluster = sub_cluster
-                pn.name = "PN(sub_cluster.name)"
+                pn.name = f"PN({sub_cluster.name})"
                 pn.sub_graph = None # no longer dynamic
                 if sub_cluster.representee_cluster is sub_cluster:
                     sub_cluster.partitionings.append(sub_graph)
