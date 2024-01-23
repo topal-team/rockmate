@@ -6,14 +6,16 @@ import torch
 pip_editable_broken_imports = False
 if pip_editable_broken_imports:
     from utils.utils import Counter
-    from core import base
+    from lowlevel import ast_add_on
     from lowlevel.variable_info import VariableInfo
+    from core import base
     from core.simplified import SimplifiedGraph, SimplifiedNode
     from core.backward import ComputationNode, AllocationNode
 else:
     from rkgb.utils.utils import Counter
-    from rkgb.core import base
     from rkgb.lowlevel.variable_info import VariableInfo
+    from rkgb.lowlevel import ast_add_on
+    from rkgb.core import base
     from rkgb.core.simplified import SimplifiedGraph, SimplifiedNode
     from rkgb.core.backward import ComputationNode, AllocationNode
 
@@ -54,6 +56,10 @@ class SimplifiedNodeAnonymizationMaterial():
             if isinstance(a,ast.AST):
                 if isinstance(a,ast.Name):
                     handle_str(a.id)
+                elif isinstance(a,ast.Attribute):
+                    s = ast_add_on.ast_to_str(a)
+                    if 'self' in s:
+                        handle_str(s)
                 else:
                     for s in a._fields:
                         try: search_through(getattr(a,s))

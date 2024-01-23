@@ -230,7 +230,6 @@ class RawGraph(base.Graph):
                 )
 
         # II) Process all the assignments
-        # DEBUG
         assignment_codes = [
             code for code in whole_code_ast.body
             if (isinstance(code,ast.Assign)
@@ -268,13 +267,6 @@ class RawGraph(base.Graph):
             else:
                 raise Exception(f"Unknown Dynamo Node's operation type {dynamo_node.op}")
             
-        # DEBUG
-        # assignment_codes = [
-            # code for code in whole_code_ast.body
-            # if (isinstance(code,ast.Assign)
-            # and (not ast_add_on.is_constant(code.value)
-            # or code.value.value is not None))
-        # ]
         assert(len(dynamo_assignment_nodes)==len(assignment_codes))
         for dynamo_node,node_code in zip(
                 dynamo_assignment_nodes,
