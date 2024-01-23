@@ -141,13 +141,13 @@ class Compiler:
         recomputation = kn.name in self.op_name_list[:i]
 
         if not kn.proxy or (
-            kn.name.replace("fwd", "bwd") not in self.op_name_list[i:]
+            kn.name.replace("FWD", "BWD") not in self.op_name_list[i:]
         ):  # not prepared for BWD
             last_before_bwd = False  # if the forward operation is the last one before backward operations
             # print(kn.name.replace("fwd", "bwd"))
         else:
             next_bwd_idx = i + self.op_name_list[i:].index(
-                kn.name.replace("fwd", "bwd")
+                kn.name.replace("FWD", "BWD")
             )
             last_before_bwd = not (kn.name in self.op_name_list[i + 1 : next_bwd_idx])
         function_list = []
@@ -625,10 +625,10 @@ class Compiler:
 
     def fct_synchronize(self):
         def fct():
-            torch.cuda.synchronize()
-            # self.gd["prefetch_stream"].synchronize()
-            # self.gd["offload_stream"].synchronize()
-            # self.gd["main_stream"].synchronize()
+            # torch.cuda.synchronize()
+            self.gd["prefetch_stream"].synchronize()
+            self.gd["offload_stream"].synchronize()
+            self.gd["main_stream"].synchronize()
             # self.gd["prefetch_stream"].wait_stream(self.gd["offload_stream"])
             # self.gd["prefetch_stream"].wait_stream(self.gd["main_stream"])
             # self.gd["offload_stream"].wait_stream(self.gd["main_stream"])
@@ -690,10 +690,10 @@ class Compiler:
         var_name = var_name.removesuffix('_offload')
         if grad:
             def offload():
+                self.storage.ld[f"cpu_{var_name}"].grad = torch.empty_like(self.storage.ld[f"cpu_{var_name}"], 
+                                                                               pin_memory=True)
                 with torch.cuda.stream(stream):
                     # stream.wait_stream(self.gd["main_stream"])
-                    self.storage.ld[f"cpu_{var_name}"].grad = torch.empty_like(self.storage.ld[f"cpu_{var_name}"], 
-                                                                               pin_memory=True)
                     self.storage.ld[f"cpu_{var_name}"].grad.data.copy_(
                         self.storage.ld[var_name].grad,
                         non_blocking=True,
@@ -803,8 +803,8 @@ class Compiler:
             # self.gd["offload_stream"].synchronize()
 
             # optimizer = self.storage.ld["optimizers"][op.name]
-            if "cpu" not in op.name:
-                self.storage.ld["optimizers"][op.name].step()
+            # if "cpu" not in op.name:
+            self.storage.ld["optimizers"][op.name].step()
             for p in del_grad:
                 self.storage.ld[p].grad = None
             #     self.storage.ld[p.removeprefix("cpu_")].grad = None
