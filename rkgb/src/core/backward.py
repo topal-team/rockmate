@@ -158,6 +158,7 @@ class ForwardAndBackwardGraph(base.Graph):
     def __init__(self,
             simplified_graph : SimplifiedGraph = None,
             original_mod : torch.nn.Module = None,
+            current_device = None,
             inspection_device = None,
             do_inspection = True):
         # 2 constructors: if given a simplified_graph, 
