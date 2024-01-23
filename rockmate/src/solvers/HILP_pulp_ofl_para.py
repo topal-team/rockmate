@@ -118,7 +118,7 @@ class ModelPULP:
         cpu_optimize_kwargs = None,
         batch_multiplier = 1
     ):
-        self.gcd = gcd if gcd else 1
+        self.gcd = gcd if gcd else 1024**2
         self.peak_budget = peak_budget / self.gcd
         if save_budget:
             self.save_budget = save_budget / self.gcd
