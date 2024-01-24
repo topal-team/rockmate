@@ -432,6 +432,7 @@ class HRockmate(torch.nn.Module):
                 self._exec(l)
         
     def restore_exec(self, keep_grad=False):
+        if self.compiler.storage == None:return None
         self.zero_grad()
         for l in self.restore_fct_list:
             self._exec(l)
@@ -439,9 +440,15 @@ class HRockmate(torch.nn.Module):
             p.data = p.data.to("cpu")
 
         for k,v in self.op_sched.dict_alloc_param.items():
+            if v.pnode.is_buffer:
+                target = v.pnode.get_value(self.original_mod)
+                target.data = target.data.to("cpu")
+                continue
+
+            if v.pnode in self.minor_param_nodes:continue
             if v.grad:continue
             # target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
-            target = v.pnode.get_valule()
+            target = v.pnode.get_value(self.original_mod)
             target.data = self.compiler.storage.ld["cpu_"+k].data
             if keep_grad:
                 target.grad = self.compiler.storage.ld["cpu_"+k].grad
