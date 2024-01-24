@@ -20,6 +20,7 @@ else:
     from rkgb.lowlevel import jit_patch
     from rkgb.lowlevel import constants
     from rkgb.lowlevel import preprocess_samples
+    from rkgb.lowlevel.execution_environments import EnvironmentGenerator
     from rkgb.lowlevel.variable_info import VariableInfo
     from rkgb.core import base
     from rkgb.core.raw import RawNode,RawGraph
@@ -181,9 +182,9 @@ class ForwardGraph(base.Graph):
 
             # 3) Build the VariableInfo
             try:
-                fn.info = self.dict_info[rn.target] \
+                fn.info = self.dict_info[fn.target] \
                     = self.detect_inplace_or_view(
-                    rn,fn,tmp_local,
+                    fn,tmp_local,
                     dict_forward_nodes)
                 self.nodes.append(fn)
 
@@ -220,11 +221,10 @@ class ForwardGraph(base.Graph):
 
 
     def detect_inplace_or_view(self,
-            current_raw_node,
             current_forward_node,
             tmp_local,
             dict_forward_nodes):
-        current_target = current_raw_node.target
+        current_target = current_forward_node.target
         current_rn_value = tmp_local[current_target]
         all_parameters_data_ptr = [
             VariableInfo.get_data_ptr(param_value) 
@@ -236,7 +236,7 @@ class ForwardGraph(base.Graph):
         # === FIRST WAY TO RECOGNIZE A VIEW ===
         # -> data_ptr
         if (VariableInfo.has_a_data_ptr(current_rn_value)
-        and not (current_raw_node.fct is
+        and not (current_forward_node.fct is
                 constants.constructor_function_string)): # TO TEST
             current_rn_data_ptr = VariableInfo.get_data_ptr(current_rn_value)
             if current_rn_data_ptr in all_parameters_data_ptr:
@@ -255,15 +255,15 @@ class ForwardGraph(base.Graph):
         # === SECOND WAY TO RECOGNIZE A VIEW ===
         # -> main_fct is a view/inplace function
         if not (is_inplace or is_view):
-            if (current_raw_node.fct in constants.list_view_functions
-            or current_raw_node.fct in constants.list_inplace_functions):
+            if (current_forward_node.fct in constants.list_view_functions
+            or current_forward_node.fct in constants.list_inplace_functions):
                 data_parents = set()
-                for req_rn in current_raw_node.deps:
+                for req_rn in current_forward_node.deps:
                     req_rn_info = self.dict_info[req_rn.target]
                     if req_rn_info.variable_type is torch.Tensor:
                         data_parents.add(req_rn.mt)
                 if data_parents != set():
-                    if current_raw_node.fct in constants.list_inplace_functions:
+                    if current_forward_node.fct in constants.list_inplace_functions:
                         is_inplace = True
                     else:
                         is_view = True
@@ -271,10 +271,10 @@ class ForwardGraph(base.Graph):
         # === register ===
         if is_inplace or is_view:
             current_rn_deps_names = set(
-                req_rn.target for req_rn in current_raw_node.deps)
+                req_rn.target for req_rn in current_forward_node.deps)
             data_direct_parents = current_rn_deps_names.intersection(data_parents)
             if len(data_direct_parents) == 0:
-                for req_rn in current_raw_node.deps:
+                for req_rn in current_forward_node.deps:
                     for req_req_rn in req_rn.deps:
                         req_req_name = req_req_rn.target
                         if req_req_name in data_parents:

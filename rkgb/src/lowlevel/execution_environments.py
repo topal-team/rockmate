@@ -66,8 +66,10 @@ class EnvironmentGenerator():
         inspection_device
     ):
         if current_device == inspection_device:
-            # Nothing to do: the whole model is already in our_global !
+            # The whole model is already in our_global
+            # So no FakeMod to create, but simply run view code
             param_value = param_node.get_value(original_mod)
+            exec(param_node.get_code(),our_global,tmp_local)
         else:
             # Move to inspection device and FakeMod
             param_value = param_node.get_value(original_mod).to(inspection_device)
@@ -79,6 +81,16 @@ class EnvironmentGenerator():
         tmp_local["all_parameters_values"].append(param_value)
         tmp_local["all_parameters_names"].append(param_node.param_name)
 
+
+    @staticmethod
+    def _init_tmp_local(current_device,inspection_device):
+        tmp_local = dict()
+        if current_device != inspection_device:
+            tmp_local["self"] = FakeMod()
+        tmp_local["all_parameters_names"] = [] # to find them easily
+        tmp_local["all_parameters_values"] = []
+        tmp_local["all_inputs_values"] = set()
+        return tmp_local
 
 
 
@@ -92,6 +104,7 @@ class EnvironmentGenerator():
             inspection_device : torch.device):
         assert type(fn_to_proceed).__name__ == "ForwardNode"
         assert type(forward_graph).__name__ == "ForwardGraph"
+        tmp_local = EnvironmentGenerator._init_tmp_local(current_device,inspection_device)
         # 0) Generate required parameters
         for param_node in fn_to_proceed.required_parameter_nodes:
             EnvironmentGenerator.aux_generate_a_parameter_locally(
@@ -104,7 +117,6 @@ class EnvironmentGenerator():
         # or by running their code in case of view or inplace nodes, 
         # in which case we first (i) generate their dependencies, 
         # using previously collected info; and (ii) its random dependencies.
-        tmp_local = dict()
         targets_done = set()
         targets_ready = set()
         nodes_todo = list(fn_to_proceed.deps)
@@ -163,14 +175,10 @@ class EnvironmentGenerator():
             inspection_device : torch.device):
         assert type(sn_to_proceed).__name__ == "SimplifiedNode"
         assert type(simplified_graph).__name__ == "SimplifiedGraph"
-        tmp_local = dict()
-        tmp_local["self"] = FakeMod()
-        tmp_local["all_parameters_names"] = [] # to find them easily
-        tmp_local["all_parameters_values"] = []
+        tmp_local = EnvironmentGenerator._init_tmp_local(current_device,inspection_device)
         all_inputs = (
             simplified_graph.original_mod_input_targets
             + simplified_graph.input_targets)
-        tmp_local["all_inputs_values"] = set()
         # 1) Do we need to run the init_code:
         # - Generating the sizes related to init_code is free
         # so we can do it anyway, but if we require a tensor

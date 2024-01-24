@@ -88,12 +88,15 @@ class Result():
     def build_forward(self):
         if self.forward_graph is None:
             self.build_raw()
+            if self.inspection_device is None:
+                self.inspection_device = self.current_device
             self.start_time()
             self.forward_graph = ForwardGraph(
                 self.raw_graph,
                 self.original_mod,
                 self.example_inputs,
-                self.current_device)
+                self.current_device,
+                self.inspection_device)
             self.show_time("Forward")
             
     def build_simplified(self):
@@ -115,6 +118,7 @@ class Result():
             self.forward_and_backward_graph = ForwardAndBackwardGraph(
                 self.simplified_graph,
                 self.original_mod,
+                self.current_device,
                 self.inspection_device)
             self.show_time("ForwardAndBackward")
 
