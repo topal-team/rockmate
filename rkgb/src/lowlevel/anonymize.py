@@ -69,8 +69,12 @@ class SimplifiedNodeAnonymizationMaterial():
                 for sub_a in a: search_through(sub_a)
 
         search_through(sn_to_proceed.get_code_ast())
+        # TO IMPROVE : impose the order in which we explore required_parameter_nodes
         for param_node in sn_to_proceed.required_parameter_nodes:
             search_through(param_node.get_code_ast())
+        # TO IMPROVE : impose deps order
+        for req_sn in sn_to_proceed.deps:
+            search_through(req_sn.get_code_ast())
 
         # =======
         # SECOND : associate a number to 
@@ -166,13 +170,22 @@ class AnonymousHash():
     def simplified_node_anonymization_material(
             sn_ano_material : SimplifiedNodeAnonymizationMaterial):
         ano_repr = [sn_ano_material.anonymized_code]
-        for ano_tar,info in sn_ano_material.dict_ano_tar_to_variable_info.items():
+        # Targets:
+        list_ano_tars = list(sn_ano_material.dict_ano_tar_to_variable_info.items())
+        list_ano_tars.sort(key = lambda c : c[0]) # To ensure same order
+        for ano_tar,info in list_ano_tars:
             ano_repr.append(
                 (ano_tar,AnonymousHash.variable_info(info)))
-        for cst_ano_name,info in sn_ano_material.dict_cst_ano_name_to_variable_info.items():
+        # Constants:
+        list_ano_csts = list(sn_ano_material.dict_cst_ano_name_to_variable_info.items())
+        list_ano_csts.sort(key = lambda c : c[0]) # To ensure same order
+        for cst_ano_name,info in list_ano_csts:
             ano_repr.append(
                 (cst_ano_name,AnonymousHash.variable_info(info)))
-        for param_ano_name,info in sn_ano_material.dict_param_ano_name_to_variable_info.items():
+        # Parameters:
+        list_ano_params = list(sn_ano_material.dict_param_ano_name_to_variable_info.items())
+        list_ano_params.sort(key = lambda c : c[0]) # To ensure same order
+        for param_ano_name,info in list_ano_params:
             ano_repr.append(
                 (param_ano_name,AnonymousHash.variable_info(info)))
         return str(ano_repr)
