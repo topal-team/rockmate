@@ -7,7 +7,7 @@ from models import *
 from models.LLM import *
 from rockmate import HRockmate
 from rockmate.solvers.op_schedule import *
-from rkgb.Ptools import Partitioner_bottom_to_top
+# from rkgb.Ptools import Partitioner_bottom_to_top
 from rockmate.solvers.HILP_pulp_ofl_para import *
 from datetime import datetime
 # from deepspeed.ops.adam.cpu_adam import DeepSpeedCPUAdam
@@ -18,20 +18,21 @@ from deepspeed.ops.adam.cpu_adam import DeepSpeedCPUAdam
 import psutil
 from tmp_utils import *
 import rkgb
-from rkgb.utils import irotor
+from rkgb.lowlevel.measure import TimerCUDA
+
 import sys
 sys.setrecursionlimit(30000)
-timer = irotor.make_timer(torch.device("cuda"))
+timer = TimerCUDA(torch.device("cuda"))
 import tracemalloc
 tracemalloc.start()
 torch.random.manual_seed(0)
 
 def check_correctness(model, sample, budget=1e9, optim=torch.optim.Adam):
-    model_g = deepcopy(model).to("cuda")
-    sample_g = [s.to("cuda") for s in sample]
-    model_c = deepcopy(model).to("cpu")
-    sample_c = [s.to("cpu") for s in sample]
-    
+    dtype = torch.float64
+    model_g = deepcopy(model).to("cuda").to(dtype)
+    sample_g = [s.to("cuda").to(dtype) for s in sample]
+    model_c = deepcopy(model).to("cpu").to(dtype)
+    sample_c = [s.to("cpu").to(dtype) for s in sample]
     optimizer = optim(model_g.parameters())
     def optimize():
         optimizer.step()
@@ -80,19 +81,28 @@ def exec(model,
          optimize_fct=None,
          print_loss=True,
          print_mem=False,
+         zero_grad=True,
           **kwargs):
-    y = model(*sample)
+    torch.random.manual_seed(0)
+    def hook_fn(m, args, output):
+        # print(f"{output.mean()}")
+        return output
+    for x in model.children():
+        x.register_forward_hook(hook_fn)
+    y = model(*sample, **kwargs)[0]
     labels = torch.randn(y.shape).softmax(dim=1).to(sample[0].device)
     if print_mem:print(torch.cuda.memory_allocated())
     loss = Loss(y, labels)
+    if print_loss:print(f"loss: {loss}")
     loss.backward()
     if print_mem:print(torch.cuda.memory_allocated())
     if optimize_fct:optimize_fct()
     timer.start()
     for i in range(niters):
         if print_mem:print(torch.cuda.memory_allocated())
-        model.zero_grad()
-        y = model(*sample, **kwargs)
+        if zero_grad:model.zero_grad()
+        y = model(*sample, **kwargs)[0]
+        assert y.requires_grad
         loss = Loss(y, labels)
         if print_loss:print(f"loss: {loss}")
         loss.backward()
@@ -104,6 +114,7 @@ def exec(model,
         y.data = torch.empty(0)
         y.grad = None
         del y
+        
     timer.end()
     return timer.elapsed()
     
@@ -117,7 +128,7 @@ def exec_rk(model, sample, niters=10, device="cuda", **kwargs):
     mem = torch.cuda.memory_allocated()
     print(f"Memory allocated before exec {mem}")
     time = exec(model, sample, niters, optimize_fct=None, **kwargs)
-    peak_mem = torch.cuda.max_memory_allocated()# - mem
+    peak_mem = torch.cuda.max_memory_allocated() - mem
     return time, peak_mem
 
 def exec_pt(model, sample, optim=torch.optim.Adam, niters=10, device="cuda", **kwargs):
@@ -128,7 +139,7 @@ def exec_pt(model, sample, optim=torch.optim.Adam, niters=10, device="cuda", **k
     def optimize():
         optimizer.step()
     mem = torch.cuda.memory_allocated()
-    time = exec(model, sample, niters, optimize_fct=optimize, **kwargs)
+    time = exec(model, sample, niters, optimize_fct=optimize, zero_grad=True, **kwargs)
     peak_mem = torch.cuda.max_memory_allocated() - mem
     return time, peak_mem
 
@@ -163,10 +174,10 @@ def exp_rkmod(nlayers=1, exp_id=None):
                                 rkmod.rkgb_res.H_cluster.list_kdn_parameters)
     exp_stats["act_size"] = sum(kdn.mem for kdn in rkmod.rkgb_res.H_cluster.list_kdn
                                 if "grad" not in kdn.name)
-    exp_stats["cpu_optimize_stats"] = rkmod.gd["cpu_optimize_stats"]
+    exp_stats["optimize_stats"] = rkmod.gd["optimize_stats"]
     exp_stats["cpu_optim"] = str(rkmod.gd["cpu_optim"])
     exp_stats["gpu_optim"] = str(rkmod.gd["gpu_optim"])
-    exp_stats["cpu_optimize_stats"] = rkmod.gd["cpu_optimize_stats"]
+    exp_stats["gpu_type"] = torch.cuda.get_device_name()
 
     ### Solve schedule
     rkmod.solve_sched(budget, rec=True)

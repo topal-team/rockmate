@@ -13,6 +13,7 @@ from torch.nn.modules import ModuleList
 from torch.nn.modules.normalization import LayerNorm
 from transformers.models.llama.modeling_llama import LlamaMLP, LlamaConfig
 from transformers.models.bloom.modeling_bloom import BloomMLP, BloomConfig
+from transformers import LlamaModel, LlamaConfig
 
 class Conv1D(nn.Module):
     def __init__(self, nx, nf):
@@ -234,6 +235,8 @@ class Bloom(nn.Module):
             self.drop = nn.Dropout(dropout)
 
         self.ln = LayerNorm(self.hidden_size)
+        self.init_weights()
+
     def forward(self, inp):
         if self.embedding:
             pos_ids = torch.arange(
@@ -249,6 +252,23 @@ class Bloom(nn.Module):
         if self.embedding:
             inp = self.out(inp)
         return inp
+    
+    def init_weights(self):
+        # self.out.weight = self.wte.weight
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        if isinstance(module, (nn.Linear, nn.Embedding, Conv1D)):
+            # print(module)
+            module.weight.data.normal_(mean=0., std=0.2)
+            if (
+                isinstance(module, (nn.Linear, Conv1D))
+                and module.bias is not None
+            ):
+                module.bias.data.zero_()
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.normal_(mean=0., std=0.02)
     
 def get3Bllm(batch, seq_len, nlayers=30):
     #https://huggingface.co/bigscience/bloom-3b#model-details
@@ -270,3 +290,11 @@ def get7Bllm_embed(batch, seq_len, nlayers=32):
     sample = torch.randint(0, 600, [batch, seq_len])
     return Llama(nlayers=nlayers, hidden_size=4096, n_head=32, embedding=True), [sample]
 
+def get7Bllm_hf(batch, seq_len, nlayers=32):
+    #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
+    sample = torch.randint(0, 600, [batch, seq_len])
+    # Initializing a LLaMA llama-7b style configuration
+    configuration = LlamaConfig()
+    # Initializing a model from the llama-7b style configuration
+    model = LlamaModel(configuration)
+    return model, [sample]

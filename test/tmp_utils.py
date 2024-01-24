@@ -24,7 +24,8 @@ class LoraLinear(nn.Module):
         super().__init__(*args, **kwargs)
         self.linear = linear
         self.linear.weight.requires_grad = False
-        self.linear.bias.requires_grad = False
+        if self.linear.bias is not None:
+            self.linear.bias.requires_grad = False
         u = nn.Parameter(torch.randn(self.linear.weight.shape[0], num_adapters).T)
         v = nn.Parameter(torch.randn(num_adapters, self.linear.weight.shape[1]).T)
         self.register_parameter("u", u)
@@ -154,14 +155,20 @@ def create_steps(rkmod):
 def save_mem(rkmod):
     param_size = 0
     act_size = 0
+    view_params = []
+    for k,v in rkmod.op_sched.dict_alloc_param.items():
+        view_params += v.pnode.view_targets
     for k,v in rkmod.compiler.storage.ld.items():
-        if isinstance(v,torch.Tensor) and "parameter" in k and "cuda" in str(v.device):
+        if not isinstance(v,torch.Tensor):continue
+        if v.grad is not None and ("cuda" in str(v.device) or "cuda" in str(v.grad.device)):
+            print(k)
+        if "__" not in k and "cuda" in str(v.device):
             # if v.numel()>0:print(k,v.numel()*v.element_size())
             param_size += v.numel()*v.element_size()
             if v.grad is not None:
                 print(k)
                 param_size += v.grad.numel()*v.element_size()
-        if isinstance(v,torch.Tensor) and "parameter" not in k:# and "___" not in k:
+        if "__" in k and k not in view_params:# and "___" not in k:
             if v.numel()>0:print(k,v.numel()*v.element_size())
             act_size += v.numel()*v.element_size()
             # if v.grad is not None:
@@ -350,7 +357,7 @@ def alive_status_solution(rkmod, t, k):
     #     print(f"activation {i} is {(md.alive[t,k,i]).value():.1%} alive")
 
 
-def analyze_mem(rkmod, print_status=False, with_grad=True):
+def analyze_mem(rkmod, print_status=False, with_param=True, with_grad=True, details=False):
     md = rkmod.list_solvers[0].md
     mem = {}
     for t in range(md.T):
@@ -365,7 +372,7 @@ def analyze_mem(rkmod, print_status=False, with_grad=True):
                 else 0
             )
             mem[t, k] += sum(
-                md.mem[i_] * md.delete[t, eidx_d].value()
+                md.mem[i_] * md.delete[t, eidx_d].value() if hasattr(md.delete[t, eidx_d], "value") else md.delete[t, eidx_d]
                 for eidx_d, (k_, i_) in enumerate(md.delete_list)
                 if k == k_
             )
@@ -374,7 +381,8 @@ def analyze_mem(rkmod, print_status=False, with_grad=True):
                               else (1-md.param_multiplier.value()))
             
             mem[t, k] *= act_multiplier
-            mem[t, k] += md.all_param_mem(t, k, with_multiplier=False).value()
+            if with_param:
+                mem[t, k] += md.all_param_mem(t, k, with_multiplier=False).value()
 
             # for w in range(md.W):
             #     # mem[t,k] += 1*((md.AliveW[t,k,w]+md.PrfW[t,k,w]).value()>0)*md.parameter_size[w]
@@ -383,10 +391,10 @@ def analyze_mem(rkmod, print_status=False, with_grad=True):
     max_t, max_k = max(mem, key=mem.get)
     max_i = np.argmax(rkmod.op_sched.save_mem + rkmod.op_sched.interface_mem + rkmod.op_sched.overhead)
     grad_size = 0#max(md.parameter_size)
-    optimizer_states_mem = rkmod.op_sched.optimizer_states_size()*rkmod.gd['cpu_optimize_stats']['optimizer_states_size']
-    optimizer_states_mem += sum([p.numel()*p.element_size() for p in rkmod.minor_parameters])*rkmod.gd['cpu_optimize_stats']['optimizer_states_size']
+    optimizer_states_mem = rkmod.op_sched.optimizer_states_size()*rkmod.gd['optimize_stats']['optimizer_states_size']
+    optimizer_states_mem += sum([p.numel()*p.element_size() for p in rkmod.minor_parameters])*rkmod.gd['optimize_stats']['optimizer_states_size']
     print(
-        f"solution peak memory {(max(mem.values()) + with_grad*grad_size)/1024**2:.0f}MB at {max_t, max_k}"
+        f"solution peak memory {(max(mem.values())*md.gcd)/1024**2:.0f}MB at {max_t, max_k}"
     )
     print(
         f"op_sched peak memory {(rkmod.op_sched.get_peak_mem(with_interface=True, act_multiplier=act_multiplier) + optimizer_states_mem +with_grad*grad_size)/1024**2:.0f}MB"
