@@ -447,20 +447,12 @@ class OpSchedule:
         self.overhead = np.zeros(L)
         self.interface_mem = np.zeros(L)
 
-        def _sum_mem(alive_status_, ignore_list=[]):
-            mem = 0
-            for k, v in alive_status_.items():
-                if k not in ignore_list and v:
-                    d = self.dict_alloc[k]
-                    mem += d.mem
-            return mem
-
         def get_overhead_(save, overhead):
             return max(save + overhead) - save[-1]
 
         for i, (op, alive_status) in enumerate(zip(self.op_list, alive_list)):
-            self.save_mem[i] = _sum_mem(alive_status, self.interface_names)
-            self.interface_mem[i] = _sum_mem(alive_status) - self.save_mem[i]
+            self.save_mem[i] = self._sum_mem(alive_status, self.interface_names)
+            self.interface_mem[i] = self._sum_mem(alive_status) - self.save_mem[i]
             if op.disabled:
                 continue
             if isinstance(op, ComputeOp):
@@ -823,6 +815,14 @@ class OpSchedule:
         return sum(self.dict_alloc[a].mem*alive_status[a]
                                     *(1 if not isinstance(self.dict_alloc[a], Parameter) else 0)
                                     for a in alive_status)
+    
+    def _sum_mem(self,alive_status_, ignore_list=[]):
+            mem = 0
+            for k, v in alive_status_.items():
+                if k not in ignore_list and v:
+                    d = self.dict_alloc[k]
+                    mem += d.mem
+            return mem
     
     @property
     def simulation_overhead(self):
