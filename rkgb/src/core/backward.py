@@ -393,6 +393,8 @@ class ForwardAndBackwardGraph(base.Graph):
         # 1) Run the inspection
         if not do_inspection:
             inspection_result = inspection.InspectionResult()
+        elif sn_ano_material.anonymous_id in dict_sn_ano_id_to_inspection_result:
+            inspection_result = dict_sn_ano_id_to_inspection_result[sn_ano_material.anonymous_id]
         else:
             if inspection_device.type == "cpu":
                 timer = measure.TimerCPU()
@@ -414,6 +416,7 @@ class ForwardAndBackwardGraph(base.Graph):
                 original_mod
             )
             inspection_result = inspector.inspect()
+        dict_sn_ano_id_to_inspection_result[sn_ano_material.anonymous_id] = inspection_result
         
         # 2) Fill corresponding node attributes
         # - Forward Computation Node:
@@ -447,6 +450,8 @@ class ForwardAndBackwardGraph(base.Graph):
             #   print(f"For node {mt}: mem_diff : {exist_diff} "\
             #         f"and detection {exist_phs}")
     # ======= END OF MAIN LOOP =======
+
+
 
     # ===================================================
     # == Small methods to generate the last attributes ==
