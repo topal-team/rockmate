@@ -74,7 +74,8 @@ class EnvironmentGenerator():
             # Move to inspection device and FakeMod
             param_value = param_node.get_value(original_mod).to(inspection_device)
             if not param_node.is_buffer:
-                param_value = torch.nn.Parameter(param_value)
+                param_value = torch.nn.Parameter(param_value,
+                                                 requires_grad=param_node.get_value(original_mod).requires_grad)
             tmp_local["__value"] = param_value
             exec(f"{param_node.param_str} = __value ; {param_node.get_code()}",
                 our_global, tmp_local)
