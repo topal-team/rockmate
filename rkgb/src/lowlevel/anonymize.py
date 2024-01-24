@@ -10,14 +10,12 @@ if pip_editable_broken_imports:
     from lowlevel.variable_info import VariableInfo
     from core import base
     from core.simplified import SimplifiedGraph, SimplifiedNode
-    from core.backward import ComputationNode, AllocationNode
 else:
     from rkgb.utils.utils import Counter
     from rkgb.lowlevel.variable_info import VariableInfo
     from rkgb.lowlevel import ast_add_on
     from rkgb.core import base
     from rkgb.core.simplified import SimplifiedGraph, SimplifiedNode
-    from rkgb.core.backward import ComputationNode, AllocationNode
 
 
 class SimplifiedNodeAnonymizationMaterial():
@@ -30,6 +28,8 @@ class SimplifiedNodeAnonymizationMaterial():
     dict_ano_tar_to_variable_info : dict[str, VariableInfo] = None
     dict_cst_ano_name_to_variable_info : dict[str, VariableInfo] = None
     dict_param_ano_name_to_variable_info : dict[str, VariableInfo] = None
+    dict_to_ano_name : dict[str,str] = None
+    dict_from_ano_name : dict[str,str] = None 
 
     def __init__(self,
             sn_to_proceed : SimplifiedNode, 
@@ -69,6 +69,8 @@ class SimplifiedNodeAnonymizationMaterial():
                 for sub_a in a: search_through(sub_a)
 
         search_through(sn_to_proceed.get_code_ast())
+        for param_node in sn_to_proceed.required_parameter_nodes:
+            search_through(param_node.get_code_ast())
 
         # =======
         # SECOND : associate a number to 
@@ -121,6 +123,12 @@ class SimplifiedNodeAnonymizationMaterial():
             code_to_proceed = code_to_proceed.replace(cst_name,ano_name)
         for param_name,ano_name in self.dict_param_name_to_ano_name.items():
             code_to_proceed = code_to_proceed.replace(param_name,ano_name)
+
+        # =====
+        self.dict_to_ano_name = dict(self.dict_tar_to_ano_tar)
+        self.dict_to_ano_name.update(self.dict_param_name_to_ano_name)
+        self.dict_to_ano_name.update(self.dict_cst_name_to_ano_name)
+        self.dict_from_ano_name = dict((v,k) for (k,v) in self.dict_to_ano_name.items())
         self.anonymized_code = code_to_proceed
     # ============================
 
@@ -369,7 +377,6 @@ class ClusterTranslator():
     def enrich_with_cnodes_and_anodes(self,hierarchical_cluster):
         # 1) Computation Nodes
         for cnode in hierarchical_cluster.list_cnodes:
-            cnode : ComputationNode
             if cnode is hierarchical_cluster.loss_cnode:
                 ano = ("cnode","loss")
             else:
@@ -380,7 +387,6 @@ class ClusterTranslator():
 
         # 2) Allocation Nodes
         for anode in hierarchical_cluster.list_anodes:
-            anode : AllocationNode
             mt_ano = self.dict_to_ano[anode.mt]
             ano = ("anode",anode.allocation_type,mt_ano)
             self.dict_to_ano[anode] = ano

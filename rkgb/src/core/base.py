@@ -271,6 +271,8 @@ class ParameterNode():
                     unique_id_generator
                 )
         self.users = set()
+    def get_code_ast(self):
+        return ast_add_on.make_ast_list_assign(self.view_code)
     def get_code(self):
         return ast_add_on.make_str_list_assign(self.view_code)
     def get_value(self,model):

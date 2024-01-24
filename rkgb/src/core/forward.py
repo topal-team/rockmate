@@ -330,23 +330,6 @@ class ForwardGraph(base.Graph):
                 "Thus there is nothing to do.")
             raise constants.ExceptionModuleDoesNotReqGrad
 
-    # DEBUG TO REMOVE
-    """ 
-    def unplug_view_over_parameters(self,dict_view_on_params_to_unplug):
-        # Unplug all views over parameters, 
-        # and replace them by ParameterNodes
-        for view_param_fn,parent_param_node in dict_view_on_params_to_unplug.items():
-            view_param_fn : ForwardNode
-            parent_param_node : base.ParameterNode
-            for user_fn in view_param_fn.users:
-                user_fn : ForwardNode
-                user_fn.deps.remove(view_param_fn)
-                user_fn.deps.update(view_param_fn.deps)
-                for req_fn in view_param_fn.deps:
-                    req_fn.users.add(user_fn)
-                # => to ensure correct topo-order
-            parent_param_node.users.remove(view_param_fn)
-    """
 
     def fix_missing_edges_for_inplace_operations(self,dict_forward_nodes):
         # example: a = f(x) ; b = inplace(a) ; c = g(a)

@@ -7,14 +7,16 @@ import torch
 pip_editable_broken_imports = False
 if pip_editable_broken_imports:
     from lowlevel import measure
-    from lowlevel.execution_environments import EnvironmentGenerator
     from lowlevel.variable_info import VariableInfo
+    from lowlevel.execution_environments import EnvironmentGenerator
+    from lowlevel.anonymize import SimplifiedNodeAnonymizationMaterial
     from core import base
     from core.simplified import SimplifiedNode
 else:
     from rkgb.lowlevel import measure
-    from rkgb.lowlevel.execution_environments import EnvironmentGenerator
     from rkgb.lowlevel.variable_info import VariableInfo
+    from rkgb.lowlevel.execution_environments import EnvironmentGenerator
+    from rkgb.lowlevel.anonymize import SimplifiedNodeAnonymizationMaterial
     from rkgb.core import base
     from rkgb.core.simplified import SimplifiedNode
 
@@ -62,6 +64,7 @@ class Inspector(EnvironmentGenerator):
 class InspectorDefault(Inspector):
     def __init__(self,
             sn_to_proceed : SimplifiedNode,
+            current_device,
             inspection_device,
             our_global, 
             tmp_local,
@@ -71,6 +74,7 @@ class InspectorDefault(Inspector):
             simplified_graph,
             original_mod):
         self.sn_to_proceed = sn_to_proceed
+        self.current_device = current_device
         self.inspection_device = inspection_device
         self.our_global = our_global
         self.tmp_local = tmp_local
@@ -141,6 +145,7 @@ class InspectorDefault(Inspector):
             self.simplified_graph,
             self.our_global,
             self.original_mod,
+            self.current_device,
             self.inspection_device
         )
         # TO REPLACE by: Inspector.reset_tmp_local(...)
@@ -166,7 +171,7 @@ class InspectorDefault(Inspector):
 def trace_grad_fn(
         grad_fn,
         main_target="var",
-        all_parameters_names=[],
+        all_parameters_strs=[],
         all_parameters_values=[],
         all_inputs_values=set()):
     """
@@ -183,7 +188,7 @@ def trace_grad_fn(
         for param_value in all_parameters_values]
     explicit_vars  = set() # set of Tensors
     saved_tensors = set() # set of (name * value)
-    parameter_names_found = set()
+    parameter_strs_found = set()
     def trace(current_grad_fn,path_from_the_origin):
         if hasattr(current_grad_fn,"variable"):
             explicit_vars.add(current_grad_fn.variable)
@@ -194,9 +199,9 @@ def trace_grad_fn(
             and not attr_value in all_inputs_values):
                 attr_data_ptr=  VariableInfo.get_data_ptr(attr_value)
                 if attr_data_ptr in all_parameters_data_ptr:
-                    param_name = all_parameters_names[
+                    param_str = all_parameters_strs[
                         all_parameters_data_ptr.index(attr_data_ptr)]
-                    parameter_names_found.add(param_name)
+                    parameter_strs_found.add(param_str)
                 else:
                     path_str = [
                         f".next_functions[{k}][0]"
@@ -210,7 +215,7 @@ def trace_grad_fn(
             for k,next_grad_fn in enumerate(current_grad_fn.next_functions):
                 trace(next_grad_fn[0],path_from_the_origin+[k])
     trace(grad_fn,[])
-    return explicit_vars,saved_tensors,parameter_names_found
+    return explicit_vars,saved_tensors,parameter_strs_found
 
 
 
@@ -227,10 +232,10 @@ def get_relevant_dependencies_via_grad_fn(
     # 2) Search through grad_fn
     (explicit_vars_in_grad_fn,
      saved_tensors_names_and_values,
-     parameter_names_found) = trace_grad_fn(
+     parameter_strs_found) = trace_grad_fn(
         sn_value.grad_fn,
         sn_to_proceed.main_target,
-        tmp_local["all_parameters_names"],
+        tmp_local["all_parameters_strs"],
         tmp_local["all_parameters_values"],
         tmp_local["all_inputs_values"]
     )
@@ -287,8 +292,68 @@ def get_relevant_dependencies_via_grad_fn(
     return (bwd_real_dependencies,
         bool_bwd_requires_fwd_data,
         bool_exist_phantoms,
-        parameter_names_found,
+        parameter_strs_found,
         has_attribute__base
     )
+
+
+# =====================================================
+# Anonymization of the results to avoid running twice:
+
+def anonymize_tracing_result(
+        sn_ano_material : SimplifiedNodeAnonymizationMaterial,
+        tracing_result
+    ):
+    (   bwd_real_dependencies,
+        bool_bwd_requires_fwd_data,
+        bool_exist_phantoms,
+        parameter_strs_found,
+        has_attribute__base ) = tracing_result
+
+    ano_bwd_real_dependencies = set(
+        sn_ano_material.dict_to_ano_name[tar]
+        for tar in bwd_real_dependencies
+    )
+    ano_parameter_strs_found = set(
+        sn_ano_material.dict_to_ano_name[param_name]
+        for param_name in parameter_strs_found
+    )
+    return (
+        ano_bwd_real_dependencies,
+        bool_bwd_requires_fwd_data,
+        bool_exist_phantoms,
+        ano_parameter_strs_found,
+        has_attribute__base)
+    
+
+
+def reverse_translate_tracing_result(
+        sn_ano_material : SimplifiedNodeAnonymizationMaterial,
+        ano_tracing_result
+    ):
+    (   ano_bwd_real_dependencies,
+        bool_bwd_requires_fwd_data,
+        bool_exist_phantoms,
+        ano_parameter_strs_found,
+        has_attribute__base ) = ano_tracing_result
+
+    bwd_real_dependencies = set(
+        sn_ano_material.dict_from_ano_name[ano_tar]
+        for ano_tar in ano_bwd_real_dependencies
+    )
+    parameter_strs_found = set(
+        sn_ano_material.dict_from_ano_name[ano_param_name]
+        for ano_param_name in ano_parameter_strs_found
+    )
+    return (
+        bwd_real_dependencies,
+        bool_bwd_requires_fwd_data,
+        bool_exist_phantoms,
+        parameter_strs_found,
+        has_attribute__base)
+
+
+
+
 # ======================
 

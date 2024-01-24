@@ -79,7 +79,7 @@ class EnvironmentGenerator():
             exec(f"{param_node.param_str} = __value ; {param_node.get_code()}",
                 our_global, tmp_local)
         tmp_local["all_parameters_values"].append(param_value)
-        tmp_local["all_parameters_names"].append(param_node.param_name)
+        tmp_local["all_parameters_strs"].append(param_node.param_str)
 
 
     @staticmethod
@@ -87,7 +87,7 @@ class EnvironmentGenerator():
         tmp_local = dict()
         if current_device != inspection_device:
             tmp_local["self"] = FakeMod()
-        tmp_local["all_parameters_names"] = [] # to find them easily
+        tmp_local["all_parameters_strs"] = [] # to find them easily
         tmp_local["all_parameters_values"] = []
         tmp_local["all_inputs_values"] = set()
         return tmp_local

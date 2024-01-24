@@ -37,6 +37,7 @@ class Result():
             jit_impose_device = True,
             partitioners = None,
             print_time_in_each_stage = False,
+            do_inspection = True,
             ):
         self.original_mod = model
         self.inspection_device = inspection_device
@@ -45,6 +46,7 @@ class Result():
         self.partitioners = partitioners
         self.last_partitioners = None
         self.print_time_in_each_stage = print_time_in_each_stage
+        self.do_inspection = do_inspection
         self.last_time = 0
 
         # 0) See what we want
@@ -63,8 +65,8 @@ class Result():
         if bool_r: self.build_raw()
         if bool_f: self.build_forward()
         if bool_s: self.build_simplified()
-        if bool_fb: self.build_forward_and_backward()
         if bool_p: self.build_partitioned()
+        if bool_fb: self.build_forward_and_backward()
         if bool_h: self.build_hierarchical()
 
     def start_time(self):
@@ -109,19 +111,6 @@ class Result():
                 self.current_device)
             self.show_time("Simplifications")
 
-    def build_forward_and_backward(self):
-        if self.forward_and_backward_graph is None:
-            self.build_simplified()
-            self.start_time()
-            if self.inspection_device is None:
-                self.inspection_device = self.current_device
-            self.forward_and_backward_graph = ForwardAndBackwardGraph(
-                self.simplified_graph,
-                self.original_mod,
-                self.current_device,
-                self.inspection_device)
-            self.show_time("ForwardAndBackward")
-
     def build_partitioned(self,partitioners = None):
         partitioners = partitioners or self.partitioners
         if (self.partitioned_structure is None 
@@ -137,6 +126,30 @@ class Result():
             self.last_partitioners = partitioners
             self.show_time("Partitioning")
             
+    def build_forward_and_backward(self):
+        if self.forward_and_backward_graph is None:
+            self.build_simplified()
+            if self.partitioned_structure is None:
+                # Empty call to build_partitioned:
+                # We only want dict_mt_to_sn_ano_material
+                # to avoid inspecting twice equivalent nodes
+                partitioners = self.partitioners
+                self.partitioners = [partitioned.Partitioner()]
+                self.print_time_in_each_stage = False
+                self.build_partitioned()
+                self.partitioners = partitioners
+            if self.inspection_device is None:
+                self.inspection_device = self.current_device
+            self.start_time()
+            self.forward_and_backward_graph = ForwardAndBackwardGraph(
+                self.simplified_graph,
+                self.original_mod,
+                self.current_device,
+                self.inspection_device,
+                self.do_inspection,
+                self.partitioned_structure.dict_mt_to_sn_ano_material)
+            self.show_time("ForwardAndBackward")
+
     def build_hierarchical(self,partitioners = None):
         if self.hierarchical_structure is None or partitioners is not None:
             self.build_forward_and_backward()
