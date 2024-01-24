@@ -271,6 +271,8 @@ class ParameterNode():
                     unique_id_generator
                 )
         self.users = set()
+    def get_code_ast(self):
+        return ast_add_on.make_ast_list_assign(self.view_code)
     def get_code(self):
         return ast_add_on.make_str_list_assign(self.view_code)
     def get_value(self,model):
@@ -365,7 +367,7 @@ class Graph():
             setattr(self,attr,copy.copy(getattr(other_graph,attr)))
     # ===============================
 
-    def make_copy_of_globals(self,original_mod,device):
+    def make_simple_copy_of_globals(self,original_mod,device):
         our_global = globals().copy()
         our_global.update(self.dict_constants)
         our_global["self"] = original_mod

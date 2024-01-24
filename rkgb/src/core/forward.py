@@ -11,6 +11,7 @@ if pip_editable_broken_imports:
     from lowlevel import jit_patch
     from lowlevel import constants
     from lowlevel import preprocess_samples
+    from lowlevel.execution_environments import EnvironmentGenerator
     from lowlevel.variable_info import VariableInfo
     from core import base
     from core.raw import RawNode,RawGraph
@@ -19,6 +20,7 @@ else:
     from rkgb.lowlevel import jit_patch
     from rkgb.lowlevel import constants
     from rkgb.lowlevel import preprocess_samples
+    from rkgb.lowlevel.execution_environments import EnvironmentGenerator
     from rkgb.lowlevel.variable_info import VariableInfo
     from rkgb.core import base
     from rkgb.core.raw import RawNode,RawGraph
@@ -81,7 +83,8 @@ class ForwardGraph(base.Graph):
         raw_graph : RawGraph,
         original_mod : torch.nn.Module,
         example_inputs : preprocess_samples.ExampleInputs,
-        device,
+        current_device,
+        inspection_device,
         build_variable_info=True,
     ):
         super().__init__()
@@ -89,7 +92,8 @@ class ForwardGraph(base.Graph):
         # => dict_rand / dict_constants / output_targets 
         self.sources_req_grad = False # by default
         dict_forward_nodes = dict()
-        our_global = self.make_copy_of_globals(original_mod,device)
+        our_global = EnvironmentGenerator.generate_global_env(
+            self,current_device,inspection_device,original_mod)
 
         # Parameter nodes
         dict_param_str_to_node = dict()
@@ -110,12 +114,11 @@ class ForwardGraph(base.Graph):
                     param_node.requires_grad = param_info.requires_grad
                     param_node.mem = param_info.memsize
         self.parameter_nodes = dict_param_str_to_node.values()
-        all_param_data_ptrs = VariableInfo.find_all_data_ptr_of_params(original_mod)
-        dict_view_on_params_to_unplug = dict()
         # -> to recognize views over parameters
 
-        # Translate each node one by one following the topo-order
+        # === PART 1: Translate each node one by one following the topo-order ===
         rn : RawNode
+        all_f_nodes_except_inputs = []
         for rn in raw_graph.nodes:
             fn = ForwardNode(rn.target,rn.code_ast,rn.fct,
                 is_rand=rn.is_rand,
@@ -133,6 +136,8 @@ class ForwardGraph(base.Graph):
                 dict_forward_nodes[rn.target] = fn
                 self.nodes.append(fn)
                 continue
+            else:
+                all_f_nodes_except_inputs.append(fn)
             # deps:
             for req_rn in rn.deps:
                 req_fn = dict_forward_nodes[req_rn.target]
@@ -146,53 +151,65 @@ class ForwardGraph(base.Graph):
             )
             for required_param_node in fn.required_parameter_nodes:
                 required_param_node.users.add(fn)
+
+        # all_f_nodes_except_inputs != self.nodes
+        # as we will remove the views over parameters
+                
+        # == PART 2: Build fn's VariableInfo ==
+        fn : ForwardNode
+        for fn in all_f_nodes_except_inputs:
             # info :
             if not build_variable_info:
                 fn.info = self.dict_info[fn.target] = VariableInfo()
-            elif not rn.is_input:
-                # 1) Run node's code to generate the value
-                tmp_local = self.generate_deep_tmp_local(rn,our_global)
-                rn_code_str = rn.get_code(force_special_kwargs=True)
-                try: exec(rn_code_str,our_global,tmp_local)
-                except:
-                    if self.tracer_used == "jit":
-                        jit_patch.try_to_fix_dtype_in_returned_ast_code(
-                            rn_code_str,our_global,tmp_local
-                        )
-                    else:
-                        raise Exception(
-                            f"Sorry, we fail to execute the code we got from "\
-                            f"the tracer ({self.tracer_used}):\n{rn_code_str}."
-                        )
-                    
-                try:
-                    fn.info = self.dict_info[rn.target] \
-                        = self.detect_inplace_or_view(
-                        rn,fn,tmp_local,
-                        dict_forward_nodes,
-                        all_param_data_ptrs)
-                    self.nodes.append(fn)
-                except ExceptionViewOverParameter as exception_object:
-                    if fn.required_parameter_nodes != set():
-                        parent_param_node = fn.required_parameter_nodes.pop()
-                        # TO IMPROVE: in case of torch.expand_as => several
-                        # or torch.add(param1,param2) => should merge the param_nodes
-                    else:
-                        for req_fn in fn.deps:
-                            if req_fn in dict_view_on_params_to_unplug:
-                                parent_param_node = dict_view_on_params_to_unplug[req_fn]
-                    parent_param_node.view_targets.append(fn.target)
-                    parent_param_node.view_code.append((fn.target,fn.code_ast))
-                    dict_view_on_params_to_unplug[fn] = parent_param_node
-                    # => we will properly unplug it after all nodes have been proceed
-                    our_global[fn.target] = exception_object.view_value
-                    # We can store it as it takes no memory (as a view over a param)
-                    self.dict_info[fn.target] = VariableInfo(exception_object.view_value)
-                    # => In partitioned.py we need VariableInfo of all targets
-                del tmp_local
+            # 1) Generate local environment
+            tmp_local = EnvironmentGenerator.generate_local_env(
+                fn,self,our_global,original_mod,
+                current_device,inspection_device)
+            
+            # 2) Execute fn's code
+            fn_code_str = fn.get_code(force_special_kwargs=True)
+            try: exec(fn_code_str,our_global,tmp_local)
+            except:
+                if self.tracer_used == "jit":
+                    jit_patch.try_to_fix_dtype_in_returned_ast_code(
+                        fn_code_str,our_global,tmp_local
+                    )
+                else:
+                    raise Exception(
+                        f"Sorry, we fail to execute the code we got from "\
+                        f"the tracer ({self.tracer_used}):\n{fn_code_str}."
+                    )
 
-        self.unplug_view_over_parameters(dict_view_on_params_to_unplug)
+            # 3) Build the VariableInfo
+            try:
+                fn.info = self.dict_info[fn.target] \
+                    = self.detect_inplace_or_view(
+                    fn,tmp_local,
+                    dict_forward_nodes)
+                self.nodes.append(fn)
 
+            # 4) Special case: view over a parameter
+            except ExceptionViewOverParameter as exception_object:
+                assert(fn.required_parameter_nodes != set())
+                parent_param_node = fn.required_parameter_nodes.pop()
+                # TO IMPROVE: in case of torch.expand_as => several
+                # or torch.add(param1,param2) => should merge the param_nodes
+                parent_param_node.view_targets.append(fn.target)
+                parent_param_node.view_code.append((fn.target,fn.code_ast))
+                # Unplug pn = view over a param:
+                for user_fn in fn.users:
+                    user_fn.deps.remove(fn)
+                    user_fn.deps.update(fn.deps)
+                    user_fn.required_parameter_nodes.add(parent_param_node)
+                    parent_param_node.users.add(user_fn)
+                for req_fn in fn.deps:
+                    req_fn.users.remove(fn)
+                    req_fn.users.update(fn.users)
+                self.dict_info[fn.target] = VariableInfo(exception_object.view_value)
+                # => In partitioned.py we need VariableInfo of all targets
+            del tmp_local
+
+        # == PART 3: finish ==
         self.fix_missing_edges_for_inplace_operations(dict_forward_nodes)
         # -> Might change self.output_targets (previously inherited)
         self.output_nodes = [
@@ -200,62 +217,18 @@ class ForwardGraph(base.Graph):
             for output_tar in self.output_targets]
         self.nodes = self.get_sorted_nodes_by_following_deps_relation()
         self.check_if_output_requires_grad()
-
         self.fix_requires_grad()
 
 
-    def generate_deep_tmp_local(self,raw_node,our_global):
-        # To generate an environment where to run raw_node's code,
-        # we generate its dependencies, either using the info 
-        # (about shape, dtype etc) we previously collected, 
-        # or by running their code in case of view or inplace nodes, 
-        # in which case we first (i) generate their dependencies, 
-        # using previously collected info; and (ii) its random dependencies.
-        tmp_local = dict()
-        done = set()
-        ready = set()
-        todo = list(raw_node.deps)
-        while todo != []:
-            req_rn = todo[-1]
-            req_target = req_rn.target
-            if req_target in done or req_target in our_global:
-                todo.pop()
-            else:
-                req_rn_info = self.dict_info[req_target]
-                if (req_rn_info.is_inplace 
-                or  req_rn_info.is_view
-                or  req_rn.fct == "getattr"):
-                    if req_target in ready:
-                        for req_rd in req_rn.required_random_tensors:
-                            if not req_rd in done:
-                                code = ast_add_on.make_str_assign(
-                                    (req_rd,self.dict_rand[req_rd]))
-                                exec(code,our_global,tmp_local)
-                                done.add(req_rd)
-                        exec(req_rn.get_code(),our_global,tmp_local)
-                        done.add(req_target)
-                        todo.pop()
-                    else:
-                        todo.extend(list(req_rn.deps))
-                        ready.add(req_target)
-                else:
-                    req_x = req_rn_info.generate_value(our_global["device"])
-                    if isinstance(req_x,torch.Tensor):
-                        req_x = req_x.clone()
-                    tmp_local[req_target] = req_x
-                    done.add(req_target)
-                    todo.pop()
-        return tmp_local
-    
-
     def detect_inplace_or_view(self,
-            current_raw_node,
             current_forward_node,
             tmp_local,
-            dict_forward_nodes,
-            all_param_data_ptrs):
-        current_target = current_raw_node.target
+            dict_forward_nodes):
+        current_target = current_forward_node.target
         current_rn_value = tmp_local[current_target]
+        all_parameters_data_ptr = [
+            VariableInfo.get_data_ptr(param_value) 
+            for param_value in tmp_local["all_parameters_values"]]
         is_view    = False # by default
         is_inplace = False
         data_parents = set() # variables which have the same data_ptr
@@ -263,10 +236,10 @@ class ForwardGraph(base.Graph):
         # === FIRST WAY TO RECOGNIZE A VIEW ===
         # -> data_ptr
         if (VariableInfo.has_a_data_ptr(current_rn_value)
-        and not (current_raw_node.fct is
+        and not (current_forward_node.fct is
                 constants.constructor_function_string)): # TO TEST
             current_rn_data_ptr = VariableInfo.get_data_ptr(current_rn_value)
-            if current_rn_data_ptr in all_param_data_ptrs:
+            if current_rn_data_ptr in all_parameters_data_ptr:
                 raise ExceptionViewOverParameter(current_rn_value)
             else:
                 for o_name,o_value in tmp_local.items():
@@ -282,15 +255,15 @@ class ForwardGraph(base.Graph):
         # === SECOND WAY TO RECOGNIZE A VIEW ===
         # -> main_fct is a view/inplace function
         if not (is_inplace or is_view):
-            if (current_raw_node.fct in constants.list_view_functions
-            or current_raw_node.fct in constants.list_inplace_functions):
+            if (current_forward_node.fct in constants.list_view_functions
+            or current_forward_node.fct in constants.list_inplace_functions):
                 data_parents = set()
-                for req_rn in current_raw_node.deps:
+                for req_rn in current_forward_node.deps:
                     req_rn_info = self.dict_info[req_rn.target]
                     if req_rn_info.variable_type is torch.Tensor:
                         data_parents.add(req_rn.mt)
                 if data_parents != set():
-                    if current_raw_node.fct in constants.list_inplace_functions:
+                    if current_forward_node.fct in constants.list_inplace_functions:
                         is_inplace = True
                     else:
                         is_view = True
@@ -298,10 +271,10 @@ class ForwardGraph(base.Graph):
         # === register ===
         if is_inplace or is_view:
             current_rn_deps_names = set(
-                req_rn.target for req_rn in current_raw_node.deps)
+                req_rn.target for req_rn in current_forward_node.deps)
             data_direct_parents = current_rn_deps_names.intersection(data_parents)
             if len(data_direct_parents) == 0:
-                for req_rn in current_raw_node.deps:
+                for req_rn in current_forward_node.deps:
                     for req_req_rn in req_rn.deps:
                         req_req_name = req_req_rn.target
                         if req_req_name in data_parents:
@@ -357,22 +330,6 @@ class ForwardGraph(base.Graph):
                 "Thus there is nothing to do.")
             raise constants.ExceptionModuleDoesNotReqGrad
 
-    def unplug_view_over_parameters(self,dict_view_on_params_to_unplug):
-        """ Unplug all views over parameters, 
-        and replace them by ParameterNodes """
-        for view_param_fn,parent_param_node in dict_view_on_params_to_unplug.items():
-            view_param_fn : ForwardNode
-            parent_param_node : base.ParameterNode
-            for user_fn in view_param_fn.users:
-                user_fn : ForwardNode
-                user_fn.deps.remove(view_param_fn)
-                user_fn.deps.update(view_param_fn.deps)
-                for req_fn in view_param_fn.deps:
-                    req_fn.users.add(user_fn)
-                # => to ensure correct topo-order
-                user_fn.required_parameter_nodes.add(parent_param_node)
-                parent_param_node.users.add(user_fn)
-            parent_param_node.users.remove(view_param_fn)
 
     def fix_missing_edges_for_inplace_operations(self,dict_forward_nodes):
         # example: a = f(x) ; b = inplace(a) ; c = g(a)
@@ -503,7 +460,7 @@ class ForwardGraph(base.Graph):
                         self.__dict__[k] = v
             def forward(self,*args,**kwargs):
                 # 1) Prepare the environnement of exec
-                our_global = forward_graph.make_copy_of_globals(self,device)
+                our_global = forward_graph.make_simple_copy_of_globals(self,device)
                 example_inputs = preprocess_samples.ExampleInputs(original_mod,args,kwargs)
                 tmp_local = example_inputs.dict
                 # 2) exec each node one by one

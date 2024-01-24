@@ -8,6 +8,7 @@ if pip_editable_broken_imports:
     from lowlevel import ast_add_on
     from lowlevel import constants
     from lowlevel import measure
+    from lowlevel.anonymize import SimplifiedNodeAnonymizationMaterial
     from lowlevel import inspection
     from core import base
     from core.simplified import SimplifiedNode,SimplifiedGraph
@@ -15,6 +16,7 @@ else:
     from rkgb.lowlevel import ast_add_on
     from rkgb.lowlevel import constants
     from rkgb.lowlevel import measure
+    from rkgb.lowlevel.anonymize import SimplifiedNodeAnonymizationMaterial
     from rkgb.lowlevel import inspection
     from rkgb.core import base
     from rkgb.core.simplified import SimplifiedNode,SimplifiedGraph
@@ -158,8 +160,10 @@ class ForwardAndBackwardGraph(base.Graph):
     def __init__(self,
             simplified_graph : SimplifiedGraph = None,
             original_mod : torch.nn.Module = None,
+            current_device = None,
             inspection_device = None,
-            do_inspection = True):
+            do_inspection = True,
+            dict_mt_to_sn_ano_material = None):
         # 2 constructors: if given a simplified_graph, 
         # then move from S to FB => run inspection,
         # build the backward part and allocation nodes.
@@ -176,9 +180,12 @@ class ForwardAndBackwardGraph(base.Graph):
         self.dict_phantoms_anodes = dict()
         # => all: dict: main_targets => Node
         if simplified_graph is not None:
-            if original_mod is None or inspection_device is None: 
+            if any(x is None for x in [
+                    original_mod,
+                    current_device,inspection_device,
+                    dict_mt_to_sn_ano_material]):
                 raise Exception(
-                    "You need to pass original_mod and inspection_device"\
+                    "You need to pass all required args"\
                     "to ForwardAndBackwardGraph.__init__ (or let "\
                     "`simplified_graph` to None to get an empty graph")
             self.inherit_base_attributes(simplified_graph)
@@ -190,6 +197,10 @@ class ForwardAndBackwardGraph(base.Graph):
             # Note: these are backward.ParameterNodes not base.ParameterNodes
             dict_old_param_node_to_new_param_node = dict(
                 zip(simplified_graph.parameter_nodes,self.parameter_nodes))
+            
+            # To avoid running twice equivalent codes
+            dict_sn_ano_id_to_ano_tracing_result = dict()
+            dict_sn_ano_id_to_inspection_result = dict()
 
             for sn_to_proceed in simplified_graph.nodes:
                 self.process_and_inspect_node(
@@ -197,8 +208,12 @@ class ForwardAndBackwardGraph(base.Graph):
                     simplified_graph,
                     original_mod,
                     do_inspection,
+                    current_device,
                     inspection_device,
-                    dict_old_param_node_to_new_param_node)
+                    dict_old_param_node_to_new_param_node,
+                    dict_mt_to_sn_ano_material,
+                    dict_sn_ano_id_to_ano_tracing_result,
+                    dict_sn_ano_id_to_inspection_result)
             self.make_special_loss_and_output_nodes(simplified_graph)
             self.store_all_nodes()
             self.make_reciprocal_users_attributes()
@@ -212,15 +227,22 @@ class ForwardAndBackwardGraph(base.Graph):
             simplified_graph : SimplifiedGraph,
             original_mod : torch.nn.Module,
             do_inspection,
+            current_device,
             inspection_device,
-            dict_old_param_node_to_new_param_node):
+            dict_old_param_node_to_new_param_node,
+            dict_mt_to_sn_ano_material,
+            dict_sn_ano_id_to_ano_tracing_result,
+            dict_sn_ano_id_to_inspection_result):
         # 0) Create the execution environment
         our_global = inspection.Inspector.generate_global_env(
-            self,inspection_device)
+            self,current_device,inspection_device,original_mod)
         tmp_local = inspection.Inspector.generate_local_env(
             sn_to_proceed,simplified_graph,our_global,
-            original_mod,inspection_device
+            original_mod,
+            current_device,inspection_device
         )
+
+        sn_ano_material : SimplifiedNodeAnonymizationMaterial = dict_mt_to_sn_ano_material[sn_to_proceed.mt]
 
         # =====================================
         # == Part 1 : BUILD THE FORWARD PART ==
@@ -272,14 +294,21 @@ class ForwardAndBackwardGraph(base.Graph):
         # ======================================
         if sn_to_proceed.info.requires_grad:
             # 1) Open grad_fn and collect backward dependencies:
+            # + anonymization to avoid running twice on equivalent nodes
+            if sn_ano_material.anonymous_id in dict_sn_ano_id_to_ano_tracing_result:
+                ano_tracing_result = dict_sn_ano_id_to_ano_tracing_result[sn_ano_material.anonymous_id]
+                tracing_result = inspection.reverse_translate_tracing_result(sn_ano_material,ano_tracing_result)
+            else:
+                tracing_result = inspection.get_relevant_dependencies_via_grad_fn(
+                    sn_to_proceed,our_global,tmp_local)
+                ano_tracing_result = inspection.anonymize_tracing_result(sn_ano_material,tracing_result)
+                dict_sn_ano_id_to_ano_tracing_result[sn_ano_material.anonymous_id] = ano_tracing_result
+            # Results:
             (   bwd_real_dependencies,
                 bool_bwd_requires_fwd_data,
                 bool_exist_phantoms,
-                parameter_names_found,
-                has_attribute__base ) \
-                = inspection.get_relevant_dependencies_via_grad_fn(
-                    sn_to_proceed,our_global,tmp_local
-                )
+                parameter_strs_found,
+                has_attribute__base ) = tracing_result
             data_anode.has_attribute__base = has_attribute__base
             # - real deps
             bwd_cnode_deps_real = set(
@@ -298,7 +327,7 @@ class ForwardAndBackwardGraph(base.Graph):
             bwd_cnode_required_param_nodes_real = set(
                 param_node
                 for param_node in fwd_cnode_required_param_nodes
-                if param_node.param_name in parameter_names_found
+                if param_node.param_str in parameter_strs_found
             )
             # - fake param deps
             bwd_cnode_required_param_nodes_fake = (
@@ -364,6 +393,8 @@ class ForwardAndBackwardGraph(base.Graph):
         # 1) Run the inspection
         if not do_inspection:
             inspection_result = inspection.InspectionResult()
+        elif sn_ano_material.anonymous_id in dict_sn_ano_id_to_inspection_result:
+            inspection_result = dict_sn_ano_id_to_inspection_result[sn_ano_material.anonymous_id]
         else:
             if inspection_device.type == "cpu":
                 timer = measure.TimerCPU()
@@ -377,6 +408,7 @@ class ForwardAndBackwardGraph(base.Graph):
                     f"'cuda' but {inspection_device.type}")
             inspector = inspection.InspectorDefault(
                 sn_to_proceed,
+                current_device,
                 inspection_device,
                 our_global, tmp_local,
                 timer, memory_tracker,
@@ -384,6 +416,7 @@ class ForwardAndBackwardGraph(base.Graph):
                 original_mod
             )
             inspection_result = inspector.inspect()
+        dict_sn_ano_id_to_inspection_result[sn_ano_material.anonymous_id] = inspection_result
         
         # 2) Fill corresponding node attributes
         # - Forward Computation Node:
@@ -417,6 +450,8 @@ class ForwardAndBackwardGraph(base.Graph):
             #   print(f"For node {mt}: mem_diff : {exist_diff} "\
             #         f"and detection {exist_phs}")
     # ======= END OF MAIN LOOP =======
+
+
 
     # ===================================================
     # == Small methods to generate the last attributes ==
