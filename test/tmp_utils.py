@@ -26,15 +26,17 @@ class LoraLinear(nn.Module):
         self.linear.weight.requires_grad = False
         if self.linear.bias is not None:
             self.linear.bias.requires_grad = False
-        u = nn.Parameter(torch.randn(self.linear.weight.shape[0], num_adapters).T)
-        v = nn.Parameter(torch.randn(num_adapters, self.linear.weight.shape[1]).T)
+        u = nn.Parameter(torch.randn(num_adapters, self.linear.weight.shape[0]), requires_grad=True)
+        v = nn.Parameter(torch.randn(self.linear.weight.shape[1], num_adapters), requires_grad=True)
         self.register_parameter("u", u)
         self.register_parameter("v", v)
 
     def forward(self, x):
-        res = torch.matmul(x, self.v)
-        res = torch.matmul(res, self.u)
-        return self.linear(x)+res
+        res1 = torch.matmul(x, self.v)
+        res2 = torch.matmul(res1, self.u)
+        y = self.linear(x)
+        out = y+res2
+        return out
     
 # class LoraEmbedding(nn.Module):
 #     def __init__(self, linear, num_adapters=10, *args, **kwargs) -> None:
