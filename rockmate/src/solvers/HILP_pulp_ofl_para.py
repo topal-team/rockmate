@@ -34,35 +34,52 @@ from rkgb.core.hierarchical import HierarchicalGraph
 # from functools import lru_cache
 
 class knapsack:
-    def __init__(self, parameter_size: list):
-        size = [s[1] for s in parameter_size]
-        self.parameter_size = parameter_size
-        self.size = [s / sum(size) for s in size]
+    def __init__(self, parameter_sizes: list, pre_solve_size=10):
+        size = [s[1] for s in parameter_sizes]
+        self.parameter_sizes = parameter_sizes
+        self.sizes = [s / sum(size) for s in size]
+        self.pre_solve_size = pre_solve_size
 
-    def get_size(self, indices):
-        return sum(self.size[i] for i in indices)
+    def get_size(self, indices, sizes):
+        return sum(sizes[i] for i in indices)
 
     # @lru_cache(maxsize=4096 * 4096)
-    def solve(self, frac: float, i: int = 0):
+    def solve(self, frac: float, i: int = 0, sizes=[]):
+        sizes = sizes or self.sizes
         if frac < 0:
             return []
-        if i == len(self.size):
+        if i == len(sizes):
             return list(range(i))
-        res1 = self.solve(frac, i + 1)
-        res2 = self.solve(frac - self.size[i], i + 1)
+        res1 = self.solve(frac, i + 1, sizes)
+        res2 = self.solve(frac - sizes[i], i + 1, sizes)
         res2 = [i] + res2
-        if self.get_size(res1) <= self.get_size(res2) + self.size[i]:
+        if self.get_size(res1, sizes) <= self.get_size(res2, sizes) + sizes[i]:
             return res1
         else:
             return res2
 
     def select(self, frac: float):
-        indices = self.solve(frac)
-        return [self.parameter_size[i][0] for i in indices]
+        sizes = self.sizes.copy()
+        parameter_sizes = self.parameter_sizes.copy()
+        selections = []
+        while len(sizes) > self.pre_solve_size and frac>0:
+            sel_i = self.presolve(frac, sizes)
+            if sel_i is None:break
+            selections.append(parameter_sizes.pop(sel_i)[0])
+            frac -= sizes.pop(sel_i)
+        indices = self.solve(frac, sizes=sizes)
+        selections += [parameter_sizes[i][0] for i in indices]
+        return selections
 
     def select_size(self, size: int):
-        if not self.parameter_size:return []
-        return self.select(size / sum(s[1] for s in self.parameter_size))
+        if not self.parameter_sizes:return []
+        return self.select(size / sum(s[1] for s in self.parameter_sizes))
+    
+    def presolve(self, frac, sizes):
+        array = np.array(sizes)
+        sel_i = np.argmax(array*(array<frac))
+        if array[sel_i]>frac:return np.argmin(array)
+        return sel_i
 
 
 class RkLpVariable(LpVariable):
