@@ -662,8 +662,9 @@ class PartitionedStructure():
     min_size_to_trigger_partitioning = 4
     def __init__(self,
             simplified_graph : SimplifiedGraph,
-            original_mod : torch.nn.Module,
-            partitioners : list[Partitioner]):
+            partitioners : list[Partitioner],
+            dict_target_ano_id,
+            dict_mt_to_sn_ano_material):
         # 1) Initialize the structure
         self.sg = simplified_graph
         self.dict_info = simplified_graph.dict_info
@@ -673,9 +674,9 @@ class PartitionedStructure():
 
         # - Anonymizing stuff => to recognize equivalent clusters
         self.counter_nb_unique_clusters = Counter()
-        (self.dict_target_ano_id,
-         self.dict_mt_to_sn_ano_material ) \
-            = anonymize.build_anonymous_equivalence_classes(simplified_graph,original_mod)
+        self.dict_target_ano_id = dict_target_ano_id
+        self.dict_mt_to_sn_ano_material = dict_mt_to_sn_ano_material
+       
         self.dict_cluster_hash_to_cluster = dict()
         self.dict_cluster_ano_hash_to_ano_cluster_id = dict()
         self.dict_cluster_ano_id_to_representee_cluster = dict()
