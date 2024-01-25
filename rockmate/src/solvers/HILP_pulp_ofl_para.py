@@ -140,7 +140,7 @@ class ModelPULP:
         if cpu_optimize_kwargs and accurate_mem:
             self.cpu_optimize = True
             self.optimizer_states_factor = cpu_optimize_kwargs["optimizer_states_size"]#*weight size
-            self.cpu_optimize_speed = cpu_optimize_kwargs["cpu_optimize_speed"]/self.gcd#B/ms
+            self.cpu_optimize_speed = cpu_optimize_kwargs["cpu_optimize_speed"]#B/ms
             self.optimizer_overhead_factor = cpu_optimize_kwargs["optimizer_overhead"]#*weight size
             batch_multiplier = 4
             # self.BatMpl = RkLpVariable("BMpl", lowBound=0, upBound=self.batch_multiplier, cat="Integer")
@@ -468,11 +468,19 @@ class ModelPULP:
 
             for i,hcn in enumerate(hierarchical_nodes):
                 if not hasattr(hcn, "required_parameter_nodes_real"):continue
-                for pnode in hcn.required_parameter_nodes_real|hcn.required_parameter_nodes_fake:
+                if hcn.sub_cluster is not None and hasattr(hcn.sub_cluster, "parameter_nodes"):
+                    # if FWD/BWD hcns have different req_pnodes, parameters may be needed for recomputation
+                    req_pnodes = hcn.sub_cluster.parameter_nodes
+                else:
+                    req_pnodes = hcn.required_parameter_nodes_real|hcn.required_parameter_nodes_fake
+                for pnode in req_pnodes:
                     if pnode.is_buffer:continue
                     if pnode.mem < cpu_optimize_kwargs["minor_param_size"]:continue
                     # sub_c2params[sub_cluster.name].add(pnode.param_name)
-                    all_params[pnode.param_name] = pnode.original_param_node
+                    if hasattr(pnode, "original_param_node"):
+                        all_params[pnode.param_name] = pnode.original_param_node
+                    else:
+                        all_params[pnode.param_name] = pnode
                     if pnode.param_name not in param2sub_c:
                         param2sub_c[pnode.param_name] = {i}
                     else:
@@ -1364,7 +1372,7 @@ class ModelPULP:
             #         op.grad = True
             i = self.active_steps.index((t,k))+1# TODO: distribute cpu optimization based on time
             op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]),
-                            time=parameters[p].mem/self.cpu_optimize_speed/self.gcd,
+                            time=parameters[p].mem/self.cpu_optimize_speed,
                             )
             opt_ops.append((*self.active_steps[i], op))
             del_ops.append((*self.active_steps[i],DeleteOp(Parameter(parameters[p]), grad=True)))
