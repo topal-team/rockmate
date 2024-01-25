@@ -253,7 +253,7 @@ class ParameterNode():
                     "view_targets","view_code",
                     "requires_grad","is_buffer",
                     "unique_id","info","mem"]:
-                setattr(self,attr,copy.deepcopy(getattr(node_to_clone,attr)))
+                setattr(self,attr,getattr(node_to_clone,attr))
         else:
             assert param_str[:4] == "self"
             self.param_str = param_str
