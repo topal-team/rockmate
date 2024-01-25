@@ -7,6 +7,7 @@ from copy import deepcopy
 import warnings
 import numpy as np
 import torch
+from rkgb.lowlevel.ast_add_on import make_str_list_assign
 
 class Allocation:
     def __init__(self, name, alloc_type="", mem=0, info=dict(), dtype=torch.float32, size=None):
@@ -268,6 +269,11 @@ class OptimizeOp(Op):
         self.target = alloc or None
         self._time = time
 
+class ExecCodeOp(Op):
+    def __init__(self, name, code, time=0, disabled=False, overhead=0):
+        super().__init__(name, time, disabled, overhead)
+        self.code = code
+
 class ListOp(list):
     def __init__(self, ops):
         super(ListOp, self).__init__(ops)
@@ -320,6 +326,14 @@ class Step():
         self.prf_ops = ListOp(prf_ops)
         self.opt_ops = ListOp(opt_ops)
         self.comp_ops = ListOp(comp_ops)
+
+        if self.prf_ops:
+            # Assume prefetch ops will not change
+            code = ""
+            for op in self.prf_ops:
+                code += op.target.pnode.get_code()+"\n"
+            self.view_param = ExecCodeOp(f"view_{op.name}",
+                                        code=code)
     
     @property
     def op_list(self):
@@ -343,7 +357,15 @@ class Step():
             # opt_ops = self.opt_ops
         # cpu_ops = [OptimizeOp(f"cpu_{str(list_params[0])}", list_params=list_params)] if list_params else []
         # opt_ops = cpu_ops+gpu_ops
-        return self.alloc_ops+self.ofl_ops+self.prf_ops+self.comp_ops+opt_ops+self.del_ops
+        
+        return (self.alloc_ops
+                +self.ofl_ops
+                +self.prf_ops
+                +self.comp_ops
+                +opt_ops
+                +self.del_ops
+                +([self.view_param] if self.prf_ops else []))
+    
     @property
     def time(self):
         return max(self.ofl_ops.time, 
@@ -559,6 +581,7 @@ class OpSchedule:
                 self.loss_step = len(self.steps)
             step_op.append(op)
         self.steps.append(Step(step_op))
+        self.recreate_op_list()
             # print(op, op.time)
         
     def update_alive_list(self):
@@ -858,6 +881,7 @@ class OpSchedule:
         return self._op_name_list
 
     def recreate_op_list(self):
+        self.loss_op = self.op_list[self.loss_idx]
         if self.from_steps:
             op_list = []
             for step in self.steps:
@@ -866,3 +890,4 @@ class OpSchedule:
         self._op_name_list = [
             (str(op) if not op.disabled else "") for op in self._op_list
         ]
+        self.loss_idx = self._op_list.index(self.loss_op)

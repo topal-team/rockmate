@@ -355,23 +355,23 @@ class HRockmate(torch.nn.Module):
                                                     pin_memory=True)
                 
         for pnode in self.minor_param_nodes:
-            for t in pnode.view_targets:
-                storage.ld[t] = torch.empty(0, requires_grad=pnode.requires_grad)
+            # for t in pnode.view_targets:
+            #     storage.ld[t] = torch.empty(0, requires_grad=pnode.requires_grad)
             target = pnode.get_value(self.original_mod)
             target.data = target.data.to("cuda")
             storage.ld[pnode.param_name] = target
-            code = make_str_list_assign(pnode.view_code, suffix=".data")
-            exec(code, self.gd, storage.ld)
+            # code = make_str_list_assign(pnode.view_code, suffix=".data")
+            exec(pnode.get_code(), self.gd, storage.ld)
 
         for pnode in self.rkgb_res.hierarchical_cluster.parameter_nodes:
             if pnode.is_buffer:
-                for t in pnode.view_targets:
-                    storage.ld[t] = torch.empty(0, requires_grad=False)
+                # for t in pnode.view_targets:
+                #     storage.ld[t] = torch.empty(0, requires_grad=False)
                 target = pnode.get_value(self.original_mod)
                 target.data = target.data.to("cuda")
                 storage.ld[pnode.param_name] = target
-                code = make_str_list_assign(pnode.view_code, suffix=".data")
-                exec(code, self.gd, storage.ld)
+                # code = make_str_list_assign(pnode.view_code, suffix=".data")
+                exec(pnode.get_code(), self.gd, storage.ld)
                 # print(target.device, pnode.get_code())
         for k,v in self.op_sched.dict_alloc_param.items():
             if v.pnode.mem < self.gd["optimize_stats"]["minor_param_size"]:continue
@@ -423,6 +423,10 @@ class HRockmate(torch.nn.Module):
         
         for l in self.init_fct_list:
             self._exec(l)
+
+        for op in self.op_sched.init_op_list:
+            if isinstance(op, PrefetchOp):
+                exec(op.target.pnode.get_code(), self.gd, storage.ld)
         torch.cuda.synchronize()
         with torch.enable_grad():
             exec(self.init_code, self.gd, storage.ld)  # is compiler.gd

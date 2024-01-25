@@ -16,6 +16,7 @@ from .solvers.op_schedule import (
     SynchronizeOp,
     OptimizeOp,
     OpSchedule,
+    ExecCodeOp
 )
 
 # from .solvers.op_schedule import PrfOp, OflOp
@@ -397,13 +398,29 @@ class Compiler:
         function_list.append(self.fct_prefetch(op.target.param_name, 
                                                after_idx=after_idx, 
                                                indices=op.indices,
-                                               view_code=op.target.pnode.get_code()))
+                                               view_code=op.target.pnode.get_code(),
+                                               stream=self.gd["prefetch_stream"]))
         return function_list
 
     def get_offload(self, op: OffloadOp, before_idx=None, after_idx=None):
         function_list = []
-        function_list.append(self.fct_offload(op.target.param_name, after_idx=after_idx, indices=op.indices, grad=op.grad))
+        function_list.append(self.fct_offload(op.target.param_name, 
+                                              after_idx=after_idx, 
+                                              indices=op.indices, 
+                                              grad=op.grad,
+                                            #   stream=self.gd["main_stream"],
+                                              stream=self.gd["offload_stream"]
+                                              ))
         return function_list
+    
+    def get_exec_code(self, op: ExecCodeOp, wait_stream=None):
+        function_list = []
+        if wait_stream:
+            function_list.append(self.fct_wait_stream(self.gd["main_stream"],
+                                                      wait_stream))
+        function_list.append(self.fct_exec_code(op.code))
+        return function_list
+
     
     def compile_all_prefetch(self):
         fct_list = []
@@ -555,6 +572,8 @@ class Compiler:
                     fct_list.append([self.fct_synchronize()])
                 elif isinstance(op, OptimizeOp):
                     fct_list.append([self.fct_optimize(op)])
+                elif isinstance(op, ExecCodeOp):
+                    fct_list.append(self.get_exec_code(op, wait_stream=self.gd["prefetch_stream"]))
                 else:
                     fct_list.append([])
 
@@ -625,10 +644,10 @@ class Compiler:
 
     def fct_synchronize(self):
         def fct():
-            # torch.cuda.synchronize()
-            self.gd["prefetch_stream"].synchronize()
-            self.gd["offload_stream"].synchronize()
-            self.gd["main_stream"].synchronize()
+            torch.cuda.synchronize()
+            # self.gd["prefetch_stream"].synchronize()
+            # self.gd["offload_stream"].synchronize()
+            # self.gd["main_stream"].synchronize()
             # self.gd["prefetch_stream"].wait_stream(self.gd["offload_stream"])
             # self.gd["prefetch_stream"].wait_stream(self.gd["main_stream"])
             # self.gd["offload_stream"].wait_stream(self.gd["main_stream"])
@@ -649,9 +668,15 @@ class Compiler:
 
     def fct_wait_stream(self, stream, wait_stream):
         def fct():
-            stream.wait_stream(wait_stream)
+            # stream.wait_stream(wait_stream)
+            wait_stream.synchronize()
 
         return fct
+    
+    def fct_exec_code(self, code):
+        def exec_code():
+            exec(code, self.gd, self.storage.ld)
+        return exec_code
 
     def fct_prefetch(self, var_name, after_idx=None, stream=None, indices=[0,None],view_code=""):
         indices = indices
@@ -665,12 +690,10 @@ class Compiler:
                 # stream.wait_stream(self.gd["offload_stream"])
                 # self.storage.ld[var_name][indices[0]: indices[1]].data = self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"].to(device)
                 self.storage.ld[var_name].data.copy_(
-                    self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"][
-                        indices[0] : indices[1]
-                    ],
+                    self.storage.ld[f"cpu_{var_name.removesuffix('_prefetch')}"],
                     non_blocking=True,
                 )
-                exec(view_code, self.gd, self.storage.ld)
+                # exec(view_code, self.gd, self.storage.ld)
                 # self.storage.ld[f"_{var_name}"].data = self.storage.ld[
                 #     f"{var_name}"
                 # ].data
@@ -690,10 +713,9 @@ class Compiler:
         var_name = var_name.removesuffix('_offload')
         if grad:
             def offload():
-                self.storage.ld[f"cpu_{var_name}"].grad = torch.empty_like(self.storage.ld[f"cpu_{var_name}"], 
-                                                                               pin_memory=True)
                 with torch.cuda.stream(stream):
-                    # stream.wait_stream(self.gd["main_stream"])
+                    self.storage.ld[f"cpu_{var_name}"].grad = torch.empty_like(self.storage.ld[f"cpu_{var_name}"], 
+                                                                               pin_memory=True)
                     self.storage.ld[f"cpu_{var_name}"].grad.data.copy_(
                         self.storage.ld[var_name].grad,
                         non_blocking=True,
@@ -706,12 +728,11 @@ class Compiler:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
             with torch.cuda.stream(stream):
                 # stream.wait_stream(self.gd["main_stream"])
-                self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"][
-                    indices[0] : indices[1]
-                ].data.copy_(
-                    self.storage.ld[var_name][indices_[0] : indices_[1]],
+                self.storage.ld[f"cpu_{var_name}"].data.copy_(
+                    self.storage.ld[var_name].data,
                     non_blocking=True,
                 )
+                pass
                 # print(self.storage.ld[var_name].mean())
                 # if self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"].mean()<1e-7:
                 # print(f"cpu_{var_name.removesuffix('_offload')}", self.storage.ld[f"cpu_{var_name.removesuffix('_offload')}"].mean())
