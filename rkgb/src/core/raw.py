@@ -158,8 +158,9 @@ class RawGraph(base.Graph):
         self.tracer_used = "dynamo"
         # -- Prepare Call to Dynamo --
         ordered_example_inputs = example_inputs.to_list_args(original_mod)
-        # TO INCLUDE WHEN DYNAMO WILL BE FIXED
+        # TO INCLUDE WHEN DYNAMO WILL BE FIXED: 
         # Currently dynamic shapes are broken with HF models
+        # https://github.com/pytorch/pytorch/issues/117477
         # if dynamo_constraints is None:
             # dynamo_constraints = []
             # if dynamo_all_dynamic_shapes:
