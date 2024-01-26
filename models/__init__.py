@@ -166,12 +166,13 @@ def get_Bert(device):
 
 # =========================================================
 
-def get_LLAMA(device,num_hidden_layers=2):
+def get_LLAMA(device,config=None,num_hidden_layers=2):
     from transformers import LlamaModel, LlamaConfig
     # Initializing a LLaMA llama-7b style configuration
-    configuration = LlamaConfig(num_hidden_layers=num_hidden_layers)
+    if config is None:
+        config = LlamaConfig(num_hidden_layers=num_hidden_layers)
     # Initializing a model from the llama-7b style configuration
-    model = LlamaModel(configuration)
+    model = LlamaModel(config)
     model.to(device)
     sample = [torch.randint(0, 600, [3, 64])]
     return model,sample
