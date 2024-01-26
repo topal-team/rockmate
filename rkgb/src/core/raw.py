@@ -86,8 +86,10 @@ class RawGraph(base.Graph):
     def __init__(self,
             original_mod : torch.nn.Module,
             example_inputs : preprocess_samples.ExampleInputs,
+            # dynamo_all_dynamic_shapes = True,
+            # dynamo_constraints = None,
             use_jit_instead_of_dynamo = False,
-            jit_impose_device=True
+            jit_impose_device=True,
         ):
         super().__init__()
         if use_jit_instead_of_dynamo:
@@ -100,6 +102,8 @@ class RawGraph(base.Graph):
             self._init_using_dynamo(
                 original_mod,
                 example_inputs,
+                # dynamo_all_dynamic_shapes,
+                # dynamo_constraints
             )
         self.toposort_and_keep_only_useful_nodes()
         self.clear_redundancies_in_self_nodes()
@@ -149,11 +153,24 @@ class RawGraph(base.Graph):
     def _init_using_dynamo(self,
             original_mod : torch.nn.Module,
             example_inputs : preprocess_samples.ExampleInputs):
+            # dynamo_all_dynamic_shapes = True,
+            # dynamo_constraints = None):
         self.tracer_used = "dynamo"
-        # Call Dynamo's export
+        # -- Prepare Call to Dynamo --
         ordered_example_inputs = example_inputs.to_list_args(original_mod)
+        # TO INCLUDE WHEN DYNAMO WILL BE FIXED
+        # Currently dynamic shapes are broken with HF models
+        # if dynamo_constraints is None:
+            # dynamo_constraints = []
+            # if dynamo_all_dynamic_shapes:
+                # for inp in ordered_example_inputs:
+                    # if isinstance(inp,torch.Tensor):
+                        # for i in range(inp.dim()):
+                            # dynamo_constraints.append(torch.export.dynamic_dim(inp,i))
+        # Call Dynamo's export :
         dynamo_result : torch.export.ExportedProgram = torch.export.export(
             original_mod,args=ordered_example_inputs)
+            # constraints=dynamo_constraints)
         dynamo_graph = dynamo_result.graph
         dynamo_signature = dynamo_result.graph_signature
         whole_code_str = dynamo_graph.python_code("self").src

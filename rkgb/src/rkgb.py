@@ -36,6 +36,8 @@ class Result():
             model,model_args,model_kwargs=None,
             wanted_graphs = {"R","F","S","FB","P","H"},
             inspection_device = None,
+            # dynamo_all_dynamic_shapes = True,
+            # dynamo_constraints = None,
             use_jit_instead_of_dynamo = False,
             jit_impose_device = True,
             partitioners = None,
@@ -51,6 +53,8 @@ class Result():
         self.print_time_in_each_stage = print_time_in_each_stage
         self.do_inspection = do_inspection
         self.last_time = 0
+        # self.dynamo_all_dynamic_shapes = dynamo_all_dynamic_shapes
+        # self.dynamo_constraints = dynamo_constraints
 
         # 1) device and inputs
         self.example_inputs = preprocess_samples.ExampleInputs(model,model_args,model_kwargs)
@@ -78,6 +82,8 @@ class Result():
             self.raw_graph = RawGraph(
                 self.original_mod,
                 self.example_inputs,
+                # dynamo_all_dynamic_shapes=self.dynamo_all_dynamic_shapes,
+                # dynamo_constraints=self.dynamo_constraints,
                 use_jit_instead_of_dynamo=self.use_jit_instead_of_dynamo,
                 jit_impose_device=self.jit_impose_device)
             self.show_time("Raw")

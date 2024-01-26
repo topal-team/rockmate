@@ -465,12 +465,17 @@ class ForwardGraph(base.Graph):
                 tmp_local = example_inputs.dict
                 # 2) exec each node one by one
                 fn : ForwardNode
+                param_nodes_already_executed = set()
                 for fn in forward_graph.nodes:
                     for req_random in fn.required_random_tensors:
                         if req_random not in tmp_local:
                             code = ast_add_on.make_str_assign(
                                 (req_random,forward_graph.dict_rand[req_random]))
                             exec(code,our_global,tmp_local)
+                    for req_param in fn.required_parameter_nodes:
+                        if req_param not in param_nodes_already_executed:
+                            param_nodes_already_executed.add(req_param)
+                            exec(req_param.get_code(),our_global,tmp_local)
                     if not fn.is_input:
                         exec(
                             fn.get_code(force_special_kwargs=True),
