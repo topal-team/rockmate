@@ -464,17 +464,17 @@ class ModelPULP:
                     if k == max(_deps_d[i] + _users_d[i]) and k == t:
                         self.delete[t, d] = 1
                         pass
-                    # elif t<=self.loss_idx:
-                    else:
-                        self.delete[t, d] = 0
-                        pass
+                #     # elif t<=self.loss_idx:
+                #     else:
+                #         self.delete[t, d] = 0
+                #         pass
 
-                for c in range(Cr):
-                    (k, i) = self.create_list[c]
-                    if k == min(_deps_d[i]) and k == t:
-                        self.create[t, c] = 1
-                    else:
-                        self.create[t, c] = 0
+                # for c in range(Cr):
+                #     (k, i) = self.create_list[c]
+                #     if k == min(_deps_d[i]) and k == t:
+                #         self.create[t, c] = 1
+                #     else:
+                #         self.create[t, c] = 0
 
         self.W = W = len(self.sub_clusters)
         def get_parameters(hierarchical_nodes):
@@ -648,6 +648,7 @@ class ModelPULP:
             + ofl_cost
         )
 
+        print("adding constraints")
         ##### Time constraints
         for t in range(T):
             for k in self.krange(t):
@@ -1279,6 +1280,7 @@ class ModelPULP:
                     self.md += self.OflWProg[t, k, w] <= self.req_w()
                     self.md += self.OflGProg[t, k, w] <= self.accumC_grad(w)
                     self.md += self.OptCProg[t, k, w] <= self.max_OflGProg(t,k,w)
+                    self.md += self.OptCProg[t, k, w] <= self.PrfWProg[t, k, w]
                     self.md += (self.AliveW[t, k, w] + self.OflWProg[t, k, w]
                                 >= self.instant_opt(w))
                     self.md += (self.AliveG[t, k, w] + self.OflGProg[t, k, w] 
@@ -1387,12 +1389,12 @@ class ModelPULP:
             # for (t,k,op) in del_ops:
             #     if op.target.name == p:
             #         op.grad = True
+            del_ops.append((t,k,DeleteOp(Parameter(parameters[p]), grad=True)))
             i = self.active_steps.index((t,k))+1# TODO: distribute cpu optimization based on time
             op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]),
                             time=parameters[p].mem/self.cpu_optimize_speed,
                             )
             opt_ops.append((*self.active_steps[i], op))
-            del_ops.append((*self.active_steps[i],DeleteOp(Parameter(parameters[p]), grad=True)))
             self.cpu_optimized_steps[self.active_steps[i]].append(p)
             del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]))))
 
@@ -1438,8 +1440,14 @@ class ModelPULP:
                     for p, o in Offloaded.items()
                     if o < 1
                 }
+                if not candidates:
+                    if ofl_size<1024:
+                        ofl_size = 0
+                    else:
+                        raise ValueError
                 selector = knapsack(list(candidates.items()))
                 select_paras = selector.select_size(ofl_size)
+                # assert ofl_size==0 or sum(candidates[p] for p in select_paras)/ofl_size>0.99
                 # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-ofl_size>tol:
                 #     pass
                 for p in select_paras:
@@ -1454,9 +1462,14 @@ class ModelPULP:
                 for p, o in Offloaded.items():
                     if Alive[p]>0 and o>0:
                         candidates[p] = min(o, Alive[p])*parameters[p].mem
-
+                if not candidates:
+                    if del_size<1024:
+                        del_size = 0
+                    else:
+                        raise ValueError
                 selector = knapsack(list(candidates.items()))
                 select_paras = selector.select_size(del_size)
+                # assert del_size==0 or sum(candidates[p] for p in select_paras)/del_size>0.99
                 # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-del_size>tol:
                 #     pass
                 for p in select_paras:
@@ -1469,15 +1482,21 @@ class ModelPULP:
                     p: parameters[p].mem * (1 - a) for p, a in Alive.items() if a < 1
                 }
                 if not candidates:
-                    continue
+                    if prf_size<1024:
+                        prf_size=0
+                    else:
+                        raise ValueError
                 if self.sol(self.AliveW[(t_, k_, w)]):
                     select_paras = list(candidates.keys())
+                    # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size>0.99
                 else:
                     selector = knapsack(list(candidates.items()))
                     unselect_paras = selector.select_size(sum(candidates.values()) - prf_size)
+                    
                     select_paras = [
                         p for p in candidates.keys() if p not in unselect_paras
                     ]
+                    # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size<1.01
                 # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-prf_size>tol:
                 #     pass
                 for p in select_paras:
@@ -1496,6 +1515,7 @@ class ModelPULP:
                     p: parameters[p].mem * a for p, a in cpu_optimize_candidates.items() if a >0
                 }
         select_paras = []
+        # assert sum(candidates.values())/parameter_size >= self.sumOptC[w].value()-0.01
         
             # cpu_optimize_size = self.sumOptC[w].value()*parameter_size# size by subgraph
         if isinstance(self.param_multiplier, float):
@@ -1510,6 +1530,8 @@ class ModelPULP:
             # print(candidates, cpu_optimize_size)
             selector = knapsack(list(candidates.items()))
             select_paras = selector.select_size(cpu_optimize_size)
+            # if cpu_optimize_size>sum(candidates[p] for p in select_paras):
+            #     raise ValueError
             # print(select_paras)
             
         # Optimize parameters which requires grad
