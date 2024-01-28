@@ -148,7 +148,7 @@ class ModelPULP:
         self.solve_time = None
         self.with_parameters = accurate_mem
         self.with_grad = accurate_mem
-        self.with_optimizer_states = 0#accurate_mem
+        self.with_optimizer_states = 1#accurate_mem
         self.gradient_accumulation = 0# if 0, no gradient/optimizer states alive from previous iters
         self.single_fwd = accurate_mem#False
         self.single_bwd = accurate_mem
@@ -599,13 +599,27 @@ class ModelPULP:
                 lowBound=0,
                 upBound=1,
             )
-            self.UpdW = RkLpVariable.dicts(
-                "UpdW",
+            self.OflO = RkLpVariable.dicts(
+            "OflO",
+            [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
+            cat="Continuous",
+            lowBound=0,
+            upBound=1,
+            )
+            self.PrfO = RkLpVariable.dicts(
+                "PrfO",
                 [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
                 cat="Continuous",
                 lowBound=0,
                 upBound=1,
             )
+            # self.UpdW = RkLpVariable.dicts(
+            #     "UpdW",
+            #     [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
+            #     cat="Continuous",
+            #     lowBound=0,
+            #     upBound=1,
+            # )
             self.param_grad_mem = {(t,k):0 for t in range(T) for k in self.krange(t)}
             self.prefill()
 
@@ -620,7 +634,7 @@ class ModelPULP:
         prf_cost = (
             0.01
             * lpSum(
-                (self.PrfW[t, k, w] + self.PrfG[t, k, w])
+                (self.PrfW[t, k, w] + self.PrfG[t, k, w] + self.PrfO[t, k, w])
                 * self.parameter_size[w] / self.bandwidthPrf
                 for t in range(T)
                 for k in self.krange(t)
@@ -632,7 +646,7 @@ class ModelPULP:
         ofl_cost = (
             0.01
             * lpSum(
-                (self.OflW[t, k, w] + self.OflG[t, k, w])
+                (self.OflW[t, k, w] + self.OflG[t, k, w] + self.OflO[t, k, w])
                 * self.parameter_size[w] / self.bandwidthOfl
                 for t in range(T)
                 for k in self.krange(t)
@@ -1181,6 +1195,8 @@ class ModelPULP:
         if not self.with_optimizer_states:
             for (t,k,w) in self.AliveO:
                 self.AliveO[(t,k,w)] = (1-self.accumC_optimizer_states(w)- self.param_multiplier)
+                self.PrfO[(t,k,w)] = 0
+                self.OflO[(t,k,w)] = 0
         if self.grad_mode in ["free"]:
             # If gradient is freed ASAP, OflG will be merged into OflW
             for (t,k,w) in self.OflG:
@@ -1210,17 +1226,16 @@ class ModelPULP:
                 # TODO: add offload gradient variables for gradient accumulation
 
 
-    def add_parameter_constraints(self, 
-                                  with_grad=False,
-                                  with_optimizer_stats=False):
+    def add_parameter_constraints(self):
         # if with_grad, AliveG is a variable
         # if with_optimizer_states, AliveO is a variable
         self.OflWProg = dict()
         self.OflGProg = dict()
         self.OptCProg = dict()
-        self.UpdWProg = dict()
         self.PrfWProg = dict()
         self.PrfGProg = dict()
+        self.OflOProg = dict()
+        self.PrfOProg = dict()
         
         def get_progress(op, t, k, w):
             bwd_i = max(self.param2hcn[w])
@@ -1249,12 +1264,13 @@ class ModelPULP:
                 t_, k_ = self.next_index(t, k)
 
                 self.md += self.Time[t, k] >= lpSum(
-                    self.parameter_size[w] / self.bandwidthPrf * self.PrfW[t, k, w]
+                    self.parameter_size[w] / self.bandwidthPrf
+                    * (self.PrfW[t, k, w]+self.PrfG[t, k, w]+self.PrfO[t,k,w])
                     for w in range(self.W)
                 )
                 self.md += self.Time[t, k] >= lpSum(
                     self.parameter_size[w] / self.bandwidthOfl 
-                    * (self.OflW[t, k, w]+self.OflG[t, k, w])
+                    * (self.OflW[t, k, w]+self.OflG[t, k, w]+self.OflO[t,k,w])
                     + self.parameter_size[w]
                     / self.cpu_optimize_speed
                     * self.OptC[t, k, w]
@@ -1274,6 +1290,8 @@ class ModelPULP:
                     self.PrfGProg[t,k,w] = get_progress(self.PrfG, t, k, w)
                     self.OflWProg[t,k,w] = get_progress(self.OflW, t, k, w)
                     self.OflGProg[t,k,w] = get_progress(self.OflG, t, k, w)
+                    self.OflOProg[t,k,w] = get_progress(self.OflO, t, k, w)
+                    self.PrfOProg[t,k,w] = get_progress(self.PrfO, t, k, w)
                     self.OptCProg[t,k,w] = get_progress(self.OptC, t, k, w)
                     
                     self.md += (self.AliveW[t, k, w] <= self.req_w())
@@ -1296,7 +1314,12 @@ class ModelPULP:
                                            and k>self.loss_idx)#backward operations
                                            +self.PrfG[t, k, w])
 
-                    self.md += self.AliveO[t_, k_, w] - self.AliveO[t, k, w] <= 0#no prefetch now
+                    self.md += self.AliveO[t_, k_, w] - self.AliveO[t, k, w] <= self.PrfO[t,k,w]
+                    self.md += self.OflOProg[t, k, w] >= self.PrfOProg[t, k, w]
+                    self.md += (self.AliveO[t, k, w] + self.OflOProg[t, k, w]
+                                >= self.req_w() - self.sumOptC[w])
+                    self.md += (self.OflOProg[t, k, w]
+                                <= self.req_w() - self.sumOptC[w])
             
         for w in self.param2hcn:
             fwd_i = min(self.param2hcn[w])
@@ -1404,6 +1427,7 @@ class ModelPULP:
                             overhead=parameters[p].mem*self.optimizer_overhead_factor)
             opt_ops.append((bwd_i, bwd_i, op))# optimize after bwd
             del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]), grad=True)))
+            
 
         assert (bwd_i, bwd_i) in self.active_steps
         idx = self.active_steps.index((bwd_i, bwd_i))
@@ -1535,6 +1559,7 @@ class ModelPULP:
             # print(select_paras)
             
         # Optimize parameters which requires grad
+        gpu_optimze_param = []
         for p, pnode in parameters.items():
             if not pnode.info.requires_grad:continue
             if p in select_paras:
@@ -1542,7 +1567,119 @@ class ModelPULP:
                 apply_cpu_optimize(p)
             else:
                 apply_gpu_optimize(p)
+                gpu_optimze_param.append(pnode)
+        if self.with_optimizer_states and gpu_optimze_param:
+            ofl_ops_os, prf_ops_os, del_ops_os = self.group_optimizer_states(w, gpu_optimze_param)
+            ofl_ops += ofl_ops_os
+            prf_ops += prf_ops_os
+            del_ops += del_ops_os
         return ofl_ops, prf_ops, del_ops, opt_ops, init_ops, restore_ops
+
+    def group_optimizer_states(self, w, gpu_optimize_param):
+        # To offload and prefetch optimizer states witin the gpu_optimize_param
+        ofl_ops = []
+        prf_ops = []
+        del_ops = []
+        fwd_i = min(self.param2hcn[w])
+        bwd_i = max(self.param2hcn[w])
+        hcn = self.hgraph.list_HCNs[fwd_i]
+        parameters = {pnode.param_name: pnode for pnode in self.parameters[w]}
+        parameter_size = sum(pnode.mem for pnode in parameters.values())
+        gpu_optimize_size = sum(pnode.mem for pnode in gpu_optimize_param)
+
+        Alive = {pnode.param_name: 1 for pnode in gpu_optimize_param}
+        Offloaded = {pnode.param_name: False for pnode in gpu_optimize_param}
+        assert (bwd_i, bwd_i) in self.active_steps
+        idx = self.active_steps.index((bwd_i, bwd_i))
+        for t, k in self.active_steps[idx:] + self.active_steps[:idx]:
+            t_, k_ = self.next_index(t, k)
+            current_alive_size = sum(parameters[p].mem * a for p, a in Alive.items())
+            current_offloaded_size = sum(parameters[p].mem * a for p, a in Offloaded.items())
+            next_alive_size = min(gpu_optimize_size,
+                                  round((self.AliveO[(t_, k_, w)]).value() * parameter_size))
+            next_offloaded_size = min(gpu_optimize_size,
+                round((self.OflOProg[(t_, k_, w)]).value() * parameter_size))
+            
+            # assert current_alive_size <= round(self.AliveW[(t, k, w)].value() * parameter_size)
+            if next_offloaded_size > current_offloaded_size:
+                # print(t,k, next_offloaded_size, current_offloaded_size)
+                ofl_size = next_offloaded_size - current_offloaded_size
+                candidates = {
+                    p: parameters[p].mem * (1 - o)
+                    for p, o in Offloaded.items()
+                    if o < 1
+                }
+                if not candidates:
+                    if ofl_size<1024:
+                        ofl_size = 0
+                    else:
+                        raise ValueError
+                selector = knapsack(list(candidates.items()))
+                select_paras = selector.select_size(ofl_size)
+                # assert ofl_size==0 or sum(candidates[p] for p in select_paras)/ofl_size>0.99
+                # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-ofl_size>tol:
+                #     pass
+                for p in select_paras:
+                    op = OffloadOp(alloc=Parameter(parameters[p]), indices=(0, None),
+                                   time=parameters[p].mem/self.bandwidthOfl/self.gcd,
+                                   is_optimizer_states=True)
+                    ofl_ops.append((t, k, op))
+                    Offloaded[p] = 1
+
+            if current_alive_size > next_alive_size:
+                del_size = current_alive_size - next_alive_size
+                candidates = {}
+                for p, o in Offloaded.items():
+                    if Alive[p]>0 and o>0:
+                        candidates[p] = min(o, Alive[p])*parameters[p].mem
+                if not candidates:
+                    if del_size<1024:
+                        del_size = 0
+                    else:
+                        raise ValueError
+                selector = knapsack(list(candidates.items()))
+                select_paras = selector.select_size(del_size)
+                # assert del_size==0 or sum(candidates[p] for p in select_paras)/del_size>0.99
+                # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-del_size>tol:
+                #     pass
+                for p in select_paras:
+                    del_ops.append((t, k, DeleteOp(Parameter(parameters[p]),
+                                                   is_optimizer_states=True)))
+                    Alive[p] = 0
+            if current_alive_size < next_alive_size:
+                # prefetch should be smaller than solution
+                prf_size = next_alive_size - current_alive_size
+                candidates = {
+                    p: parameters[p].mem * (1 - a) for p, a in Alive.items() if a < 1
+                }
+                if not candidates:
+                    if prf_size<1024:
+                        prf_size=0
+                    else:
+                        raise ValueError
+                if self.sol(self.AliveO[(t_, k_, w)]+self.sumOptC[w]):
+                    select_paras = list(candidates.keys())
+                    # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size>0.99
+                else:
+                    selector = knapsack(list(candidates.items()))
+                    unselect_paras = selector.select_size(sum(candidates.values()) - prf_size)
+                    
+                    select_paras = [
+                        p for p in candidates.keys() if p not in unselect_paras
+                    ]
+                    # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size<1.01
+                # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-prf_size>tol:
+                #     pass
+                for p in select_paras:
+                    prf_ops.append((t, k, AllocateOp(Parameter(parameters[p]),
+                                                     is_optimizer_states=True)))
+                    op = PrefetchOp(alloc=Parameter(parameters[p]), indices=(0, None),
+                                    time=parameters[p].mem/self.bandwidthPrf/self.gcd,
+                                    is_optimizer_states=True)
+                    prf_ops.append((t, k, op))
+                    Alive[p] = 1
+
+        return ofl_ops, prf_ops, del_ops
 
 
     def schedule(self, hgraph=None, check_valid=False):
@@ -1737,19 +1874,23 @@ class ModelPULP:
                     op_list.extend(prefetch_ops[0])
                     prefetch_list.extend(prefetch_ops[1])
                 op_list += self.schedule_compute(t,k,hgraph)
-                wait_op = []
+                wait_op_1 = []
+                wait_op_2 = []
                 for w in range(W):
                     if k in self.param2hcn[w]:
-                        wait_op.extend(self.create_offload_ops(t, k, w))
-                        wait_op.extend(self.create_optimize_ops(t, k, w))
-                        wait_op.extend(self.create_delete_ops(t, k, w))
+                        wait_op_1.extend(self.create_optimize_ops(t, k, w))
+                        wait_op_2.extend(self.create_offload_ops(t, k, w))
+                        wait_op_2.extend(self.create_delete_ops(t, k, w))
                         # op_list.extend(self.create_prefetch_ops(t,k,w))
                     else:
                         op_list.extend(self.create_offload_ops(t, k, w))
                         op_list.extend(self.create_delete_ops(t, k, w))
                         op_list.extend(self.create_optimize_ops(t, k, w))
-                if wait_op:# for the current layer, need to synchronize first
-                    op_list.extend([SynchronizeOp(str(k))]+wait_op)
+                if wait_op_1:# for the current layer, need to synchronize first
+                    op_list.extend([SynchronizeOp(str(k))]+wait_op_1)
+                if wait_op_2:# for the current layer, need to synchronize first
+                    op_list.extend([SynchronizeOp(str(k))]+wait_op_2)
+
                 op_list.extend(prefetch_list)
         return op_list, init_alive_status, init_op_list, restore_op_list
 

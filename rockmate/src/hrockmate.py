@@ -417,6 +417,11 @@ class HRockmate(torch.nn.Module):
             if isinstance(op, OptimizeOp):
                 optim = self.gd["cpu_optim"] if "cpu" in op.name else self.gd["gpu_optim"]
                 storage.ld["optimizers"][op.name] = optim([storage.ld[p] for p in op.list_params], **self.gd["opt_kwargs"])
+            if isinstance(op, OffloadOp) and op.is_optimizer_states:
+                var_name = op.target.param_name
+                var = storage.ld[var_name]
+                storage.ld["optimizers"][f"exp_avg_{var_name}"] = torch.zeros_like(var, pin_memory=True, device="cpu")
+                storage.ld["optimizers"][f"exp_avg_sq_{var_name}"] = torch.zeros_like(var, pin_memory=True, device="cpu")
 
         if self.minor_parameters:
             storage.ld["optimizers"]["minors"] = self.gd["gpu_optim"](self.minor_parameters, **self.gd["opt_kwargs"])
@@ -432,6 +437,7 @@ class HRockmate(torch.nn.Module):
             exec(self.init_code, self.gd, storage.ld)  # is compiler.gd
             for l,op in zip(self.fwd_fct_list, self.op_sched.op_list[:self.op_sched.loss_idx+1]):
                 if isinstance(op, OffloadOp) and op.grad:continue#first iteration without grad offload
+                if isinstance(op, OffloadOp) and op.is_optimizer_states:continue#first iteration without grad offload
                 if isinstance(op, OptimizeOp):continue#first iteration no need to optimize
                 self._exec(l)
         

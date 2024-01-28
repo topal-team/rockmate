@@ -174,13 +174,14 @@ class ComputeOp(Op):
 
 
 class DeleteOp(Op):
-    def __init__(self, alloc: Allocation, disabled=False, grad=False):
+    def __init__(self, alloc: Allocation, disabled=False, grad=False, is_optimizer_states=False):
         super().__init__("Delete_" + alloc.name+"_grad"*grad, disabled=disabled)
         self.target = alloc
         self.grad = grad
+        self.is_optimizer_states = is_optimizer_states
 
     def __repr__(self):
-        return "Disabled_"*self.disabled+"Delete_" + self.target.name+"grad"*self.grad
+        return "Disabled_"*self.disabled+"Delete_" + self.target.name+"grad"*self.grad+"_optim_stats"*self.is_optimizer_states
     
     @property
     def name(self):
@@ -212,10 +213,10 @@ class MappingOp(Op):
 
 
 class AllocateOp(Op):
-    def __init__(self, alloc: Allocation, disabled=False):
+    def __init__(self, alloc: Allocation, disabled=False, is_optimizer_states=False):
         super().__init__("Allocate_" + alloc.name, disabled=disabled)
         self.target = alloc
-
+        self.is_optimizer_states=is_optimizer_states
 
 class OffloadOp(Op):
     def __init__(
@@ -226,6 +227,7 @@ class OffloadOp(Op):
         after: Op = None,
         disabled: bool = False,
         grad:bool = False,
+        is_optimizer_states:bool = False,
         time:float = 0,
     ):
         super().__init__("Offload_" + alloc.name+"_grad"*grad, disabled=disabled)
@@ -235,10 +237,11 @@ class OffloadOp(Op):
         self.before = before
         self.after = after
         self.grad = grad
+        self.is_optimizer_states = is_optimizer_states
         self._time = time
 
     def __repr__(self):
-        return "Disabled" * self.disabled + f"Offload_{self.target}" +"_grad"*self.grad
+        return "Disabled" * self.disabled + f"Offload_{self.target}" +"_grad"*self.grad+"_optim_stats"*self.is_optimizer_states
 
 
 class PrefetchOp(Op):
@@ -249,6 +252,7 @@ class PrefetchOp(Op):
         before: Op = None,
         after: Op = None,
         disabled: bool = False,
+        is_optimizer_states:bool = False,
         time:float = 0,
     ):
         super().__init__("Prefetch_" + alloc.name, disabled=disabled)
@@ -257,10 +261,11 @@ class PrefetchOp(Op):
         self.disabled = disabled
         self.before = before
         self.after = after
+        self.is_optimizer_states = is_optimizer_states
         self._time = time
 
-    # def __repr__(self):
-    #     return "Disabled" * self.disabled + f"Prefetch_{self.target}"
+    def __repr__(self):
+        return "Disabled" * self.disabled + f"Prefetch_{self.target}"+"_optim_stats"*self.is_optimizer_states
 
 class OptimizeOp(Op):
     def __init__(self, name, list_params, alloc=None, disabled=False,time=0, overhead=0):
@@ -331,6 +336,7 @@ class Step():
             # Assume prefetch ops will not change
             code = ""
             for op in self.prf_ops:
+                if op.is_optimizer_states:continue
                 code += op.target.pnode.get_code()+"\n"
             self.view_param = ExecCodeOp(f"view_{op.name}",
                                         code=code)
@@ -351,10 +357,10 @@ class Step():
             opt_ops = []
         else:
             list_params = [p for op in self.opt_ops for p in op.list_params]
-            opt_ops = [OptimizeOp(f"cpu_{str(list_params[0])}", 
-                                list_params=list_params,
-                                time=sum(op.time for op in self.opt_ops))]
-            # opt_ops = self.opt_ops
+            # opt_ops = [OptimizeOp(f"cpu_{str(list_params[0])}", 
+            #                     list_params=list_params,
+            #                     time=sum(op.time for op in self.opt_ops))]
+            opt_ops = self.opt_ops
         # cpu_ops = [OptimizeOp(f"cpu_{str(list_params[0])}", list_params=list_params)] if list_params else []
         # opt_ops = cpu_ops+gpu_ops
         
