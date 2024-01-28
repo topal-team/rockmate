@@ -569,6 +569,7 @@ class OpSchedule:
                 break
         self.alive_list = self.create_alive_list()
         self.refine()
+        self.recreate_op_list()
 
     def create_steps(self):
         self.steps = []
