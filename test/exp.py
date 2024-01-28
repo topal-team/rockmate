@@ -13,9 +13,9 @@ from datetime import datetime
 device = torch.device("cuda")
 import pickle
 from time import sleep
-from deepspeed.ops.adam.cpu_adam import DeepSpeedCPUAdam
+# from deepspeed.ops.adam.cpu_adam import DeepSpeedCPUAdam
 import psutil
-from tmp_utils import *
+# from tmp_utils import *
 import rkgb
 from rkgb.lowlevel.measure import TimerCUDA
 from rkgb.core.partitioned import PartitionerBottomToTop, PartitionerSequence
@@ -108,7 +108,7 @@ def manual_lora(model:nn.Module, target_modules, num_adapters=10, freeze_all=Tru
             raise TypeError(f"manual lora does not work with {type(module)}")
         # setattr(model, module_name, new_module)
 
-        atoms: List[str] = module_name.split(".")
+        atoms = module_name.split(".")
         mod: torch.nn.Module = model
 
         for item in atoms:
@@ -270,7 +270,8 @@ def exp_rkmod(nlayers=1, exp_id=None, num_adapters=None, id="7B"):
     rkmod.solve_sched(budget, rec=False)
     md = rkmod.list_solvers[0].md
     if md.feasible:
-        analyze_mem(rkmod)
+        # analyze_mem(rkmod)
+        pass
     else:
         raise ValueError
     print(md.solving_time)
