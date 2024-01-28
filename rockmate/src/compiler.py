@@ -97,6 +97,7 @@ class Compiler:
 
     def __init__(self, gd):
         self.gd = gd
+        # self.no_save_dict = {}
 
     def get_val(self, val):
         if val in self.storage.ld:
@@ -213,6 +214,10 @@ class Compiler:
                 for kdn_name in candidates:
                     if "Delete_"+kdn_name in self.op_name_list[i:next_bwd_idx]:
                         no_save_list.append(kdn_name.split(" ")[0])
+                for pnode in kn.required_parameter_nodes_real|kn.required_parameter_nodes_fake:
+                    no_save_list.append(pnode.param_name)
+                    
+                # self.no_save_dict[kn.name] = no_save_list
 
                 for (
                     target
@@ -714,12 +719,13 @@ class Compiler:
         if grad:
             def offload():
                 with torch.cuda.stream(stream):
-                    self.storage.ld[f"cpu_{var_name}"].grad = torch.empty_like(self.storage.ld[f"cpu_{var_name}"], 
-                                                                               pin_memory=True)
+                    # self.storage.ld[f"cpu_{var_name}"].grad = torch.zeros_like(self.storage.ld[f"cpu_{var_name}"], 
+                    #                                                            pin_memory=True)
                     self.storage.ld[f"cpu_{var_name}"].grad.data.copy_(
                         self.storage.ld[var_name].grad,
                         non_blocking=True,
                     )
+                    # print(f"{var_name}, {self.storage.ld[var_name].grad[0,0]}")
                     pass
             return offload
 
@@ -728,6 +734,7 @@ class Compiler:
             #     stream.wait_event(self.storage.ld["events"][after_idx])
             with torch.cuda.stream(stream):
                 # stream.wait_stream(self.gd["main_stream"])
+                # assert self.storage.ld[f"cpu_{var_name}"].data.stride() == self.storage.ld[var_name].data.stride()
                 self.storage.ld[f"cpu_{var_name}"].data.copy_(
                     self.storage.ld[var_name].data,
                     non_blocking=True,
@@ -827,7 +834,8 @@ class Compiler:
             # if "cpu" not in op.name:
             self.storage.ld["optimizers"][op.name].step()
             for p in del_grad:
-                self.storage.ld[p].grad = None
+                # self.storage.ld[p].grad = None
+                self.storage.ld[p].grad.zero_()
             #     self.storage.ld[p.removeprefix("cpu_")].grad = None
             # torch.cuda.synchronize()
             pass
@@ -908,7 +916,7 @@ class Compiler:
         return fct
 
     def fct_run_forward_with_grad(self, code, no_save_list=[]):
-        no_save_list.extend(list(self.parameters.keys()))
+        # no_save_list.extend(list(self.parameters.keys()))
 
         def fct():
             with torch.cuda.stream(self.gd["main_stream"]):
