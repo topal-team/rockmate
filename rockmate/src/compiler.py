@@ -18,7 +18,7 @@ from .solvers.op_schedule import (
     OpSchedule,
     ExecCodeOp
 )
-
+import psutil
 # from .solvers.op_schedule import PrfOp, OflOp
 
 
@@ -548,7 +548,7 @@ class Compiler:
                         if op.grad:
                             fct_list.append(self.get_del_grad(op.target.pnode.param_name, i))
                         elif op.is_optimizer_states:
-                            fct_list.append([])
+                            fct_list.append([self.fct_del_optimizer_states(op.target.pnode.param_name)])
                         else:
                             fct_list.append(self.get_del_parameter(op.target.pnode, i))
                     elif isinstance(op.target, Buffer):
@@ -563,7 +563,10 @@ class Compiler:
                     #     fct_list[-1].append(self.fct_synchronize())
                 elif isinstance(op, AllocateOp):
                     if op.is_optimizer_states:
-                        fct_list.append([])
+                        fct_list.append([self.fct_mem_alloc(op.target.pnode.param_name,
+                                                            shape=op.target.info.tensor_size,
+                                                            dtype=op.target.dtype, 
+                                                            is_optimizer_states=True)])
                     else:
                         fct_list.append(self.get_allocation(op.target))
                 elif isinstance(op, PrefetchOp):
@@ -700,12 +703,11 @@ class Compiler:
                 with torch.cuda.stream(stream):
                     # self.storage.ld[f"cpu_{var_name}"].grad = torch.zeros_like(self.storage.ld[f"cpu_{var_name}"], 
                     #                                                            pin_memory=True)
-                    # torch.cuda.synchronize()
                     # mem = torch.cuda.memory_allocated()
                     for k,v in self.storage.ld["optimizers"][f"Optimize_{var_name}"].state.items():
                         if self.storage.ld["optimizers"][f"exp_avg_{var_name}"].mean() == 0:continue
-                        v["exp_avg"].data = torch.zeros_like(self.storage.ld["optimizers"][f"exp_avg_{var_name}"], device=self.gd["device"])
-                        v["exp_avg_sq"].data = torch.zeros_like(self.storage.ld["optimizers"][f"exp_avg_sq_{var_name}"], device=self.gd["device"])
+                        # v["exp_avg"].data = torch.zeros_like(self.storage.ld["optimizers"][f"exp_avg_{var_name}"], device=self.gd["device"])
+                        # v["exp_avg_sq"].data = torch.zeros_like(self.storage.ld["optimizers"][f"exp_avg_sq_{var_name}"], device=self.gd["device"])
                         v["exp_avg"].copy_(self.storage.ld["optimizers"][f"exp_avg_{var_name}"], non_blocking=True)
                         v["exp_avg_sq"].copy_(self.storage.ld["optimizers"][f"exp_avg_sq_{var_name}"], non_blocking=True)
                     #     x = self.storage.ld["optimizers"][f"exp_avg_{var_name}"]
@@ -766,8 +768,8 @@ class Compiler:
                     for k,v in self.storage.ld["optimizers"][f"Optimize_{var_name}"].state.items():
                         self.storage.ld["optimizers"][f"exp_avg_{var_name}"].copy_(v["exp_avg"], non_blocking=True)
                         self.storage.ld["optimizers"][f"exp_avg_sq_{var_name}"].copy_(v["exp_avg_sq"], non_blocking=True)
-                        v["exp_avg"].data = torch.empty(0)
-                        v["exp_avg_sq"].data = torch.empty(0)
+                        # v["exp_avg"].data = torch.empty(0)
+                        # v["exp_avg_sq"].data = torch.empty(0)
                     # torch.cuda.synchronize()
                     # x = self.storage.ld["optimizers"][f"exp_avg_{var_name}"]
                     # assert (mem - torch.cuda.memory_allocated()) == x.element_size()*x.numel()*2
@@ -793,7 +795,8 @@ class Compiler:
 
         return offload
 
-    def fct_mem_alloc(self, var_name, shape, dtype, stream=None, gd=False):
+    def fct_mem_alloc(self, var_name, shape, dtype, stream=None, gd=False,
+                      is_optimizer_states=False):
         stream = stream or self.gd["main_stream"]
         if gd:
 
@@ -802,6 +805,11 @@ class Compiler:
                     self.gd[var_name].data = torch.empty(
                         shape, dtype=dtype, device=self.gd["device"]
                     )
+        elif is_optimizer_states:
+            def mem_alloc():
+                for k,v in self.storage.ld["optimizers"][f"Optimize_{var_name}"].state.items():
+                    v["exp_avg"].data = torch.zeros_like(self.storage.ld["optimizers"][f"exp_avg_{var_name}"], device=self.gd["device"])
+                    v["exp_avg_sq"].data = torch.zeros_like(self.storage.ld["optimizers"][f"exp_avg_sq_{var_name}"], device=self.gd["device"])
 
         else:
 
@@ -886,8 +894,10 @@ class Compiler:
             #     if "exp_avg" in v:
             #         first = False
             #         assert v["exp_avg"].mean() != 0
-        
+            # print(op.name, psutil.virtual_memory())
             self.storage.ld["optimizers"][op.name].step()
+            # print(psutil.virtual_memory())
+
             # torch.cuda.synchronize()
             # if not first: assert mem == torch.cuda.memory_allocated()
             for p in del_grad:
@@ -1090,6 +1100,13 @@ class Compiler:
         def fct():
             self.gd[tensor_name].data = torch.empty(0, device=self.gd["device"])
 
+        return fct
+
+    def fct_del_optimizer_states(self, var_name):
+        def fct():
+            for k,v in self.storage.ld["optimizers"][f"Optimize_{var_name}"].state.items():
+                        v["exp_avg"].data = torch.empty(0)
+                        v["exp_avg_sq"].data = torch.empty(0)
         return fct
 
     # endregion

@@ -36,7 +36,7 @@ from .solvers import HILP
 from .solvers.hilp import default_time_limit
 # from .solvers.HILP_gurobi import *
 from .compiler import Compiler, RK_Storage, make_gd
-
+import psutil
 
 class HRockmate(torch.nn.Module):
     compiler = None
@@ -379,19 +379,23 @@ class HRockmate(torch.nn.Module):
             # target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
             target = v.pnode.get_value(self.original_mod)
             target.grad = None
-            storage.ld["cpu_"+k] = torch.empty_like(target, 
-                                                dtype=target.dtype, 
-                                                device=torch.device("cpu"),
-                                                pin_memory=True)
-            storage.ld["cpu_"+k].copy_(target.data)
-            if v.pnode.requires_grad:
-                storage.ld["cpu_"+k].grad = torch.empty_like(storage.ld["cpu_"+k], pin_memory=True)
+            # if (f"Optimize_cpu_{k}" in self.op_sched.op_name_list
+            #     or f"Offload_{k}" in self.op_sched.op_name_list):
+            if True:
+                storage.ld["cpu_"+k] = torch.empty_like(target, 
+                                                    dtype=target.dtype, 
+                                                    device=torch.device("cpu"),
+                                                    pin_memory=True)
+                storage.ld["cpu_"+k].copy_(target.data)
+                if v.pnode.requires_grad and f"Offload_{k}_grad" in self.op_sched.op_name_list:
+                    storage.ld["cpu_"+k].grad = torch.empty_like(storage.ld["cpu_"+k], pin_memory=True)
             # if v.pnode.is_buffer:
             #     storage.ld[k] = target.to("cuda")
             # else:
             target.data = torch.empty(0)
             storage.ld[k] = target
         gc.collect()
+        print(psutil.virtual_memory())
         # for k, v in self.op_sched.dict_alloc.items():
         #     if isinstance(v, Activation):
         #         continue
@@ -420,9 +424,10 @@ class HRockmate(torch.nn.Module):
                 storage.ld["optimizers"][op.name] = optim([storage.ld[p] for p in op.list_params], **self.gd["opt_kwargs"])
             if isinstance(op, OffloadOp) and op.is_optimizer_states:
                 var_name = op.target.param_name
-                var = storage.ld[f"cpu_{var_name}"]
+                var = storage.ld[f"cpu_{var_name}"] if f"cpu_{var_name}" in storage.ld else storage.ld[var_name]
                 storage.ld["optimizers"][f"exp_avg_{var_name}"] = torch.zeros_like(var, pin_memory=True, device="cpu")
                 storage.ld["optimizers"][f"exp_avg_sq_{var_name}"] = torch.zeros_like(var, pin_memory=True, device="cpu")
+        print(psutil.virtual_memory())
 
         if self.minor_parameters:
             storage.ld["optimizers"]["minors"] = self.gd["gpu_optim"](self.minor_parameters, **self.gd["opt_kwargs"])
