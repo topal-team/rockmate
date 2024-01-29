@@ -1268,18 +1268,20 @@ class ModelPULP:
                     * (self.PrfW[t, k, w]+self.PrfG[t, k, w]+self.PrfO[t,k,w])
                     for w in range(self.W)
                 )
-                self.md += self.Time[t, k] >= lpSum(
+                self.md += self.Time[t, k] >= (lpSum(
                     self.parameter_size[w] / self.bandwidthOfl 
                     * (self.OflW[t, k, w]+self.OflG[t, k, w]+self.OflO[t,k,w])
-                    + self.parameter_size[w]
-                    / self.cpu_optimize_speed
+                    for w in range(self.W))
+                    + lpSum(self.parameter_size[w]
+                    / self.cpu_optimize_speed*self.gcd
+                    * self.OptC[t, k, w]
+                    for w in self.hcn2param[k]))
+                self.md += self.Time[t, k] >= lpSum(
+                    self.parameter_size[w] 
+                    / self.cpu_optimize_speed*self.gcd
                     * self.OptC[t, k, w]
                     for w in range(self.W)
                 )
-                # self.md += self.Time[t, k] >= lpSum(
-                #     self.parameter_size[w] / self.cpu_optimize_speed * self.OptC[t, k, w]
-                #     for w in range(self.W)
-                # )
                 self.param_grad_mem[t,k] += lpSum(
                                 self.AliveG[t, k, w]
                                 * self.parameter_gradient_size[w]
@@ -1546,16 +1548,21 @@ class ModelPULP:
             multiplier = self.param_multiplier
         else:
             multiplier = self.param_multiplier.value()
-        cpu_optimize_size = (sum(self.sumOptC[w_].value() * 
-                                self.parameter_gradient_size[w_] *self.gcd
-                                for w_ in range(w, self.W)) / (1-multiplier)
-                            - sum(self.cpu_optimized_params.values()))# size by all graphs
+        # cpu_optimize_size = (sum(self.sumOptC[w_].value() * 
+        #                         self.parameter_gradient_size[w_] *self.gcd
+        #                         for w_ in range(w, self.W)) / (1-multiplier)
+        #                     - sum(self.cpu_optimized_params.values()))# size by all graphs
+        cpu_optimize_size = min(sum(candidates.values()),
+                                (self.sumOptC[w].value() * 
+                                self.parameter_gradient_size[w] *self.gcd
+                             ) / (1-multiplier))
+        
         if candidates and cpu_optimize_size>0:
             # print(candidates, cpu_optimize_size)
             selector = knapsack(list(candidates.items()))
             select_paras = selector.select_size(cpu_optimize_size)
-            # if cpu_optimize_size>sum(candidates[p] for p in select_paras):
-            #     raise ValueError
+            if cpu_optimize_size>sum(candidates[p] for p in select_paras):
+                raise ValueError
             # print(select_paras)
             
         # Optimize parameters which requires grad
@@ -1583,7 +1590,7 @@ class ModelPULP:
         fwd_i = min(self.param2hcn[w])
         bwd_i = max(self.param2hcn[w])
         hcn = self.hgraph.list_HCNs[fwd_i]
-        parameters = {pnode.param_name: pnode for pnode in self.parameters[w]}
+        parameters = {pnode.param_name: pnode for pnode in self.parameters[w] if pnode.requires_grad}
         parameter_size = sum(pnode.mem for pnode in parameters.values())
         gpu_optimize_size = sum(pnode.mem for pnode in gpu_optimize_param)
 
@@ -1599,7 +1606,9 @@ class ModelPULP:
                                   round((self.AliveO[(t_, k_, w)]).value() * parameter_size))
             next_offloaded_size = min(gpu_optimize_size,
                 round((self.OflOProg[(t_, k_, w)]).value() * parameter_size))
-            
+            if parameter_size * (1-self.sumOptC[w]).value()<gpu_optimize_size:
+                next_offloaded_size += gpu_optimize_size - parameter_size * (1-self.sumOptC[w]).value()
+
             # assert current_alive_size <= round(self.AliveW[(t, k, w)].value() * parameter_size)
             if next_offloaded_size > current_offloaded_size:
                 # print(t,k, next_offloaded_size, current_offloaded_size)
@@ -1876,11 +1885,12 @@ class ModelPULP:
                 op_list += self.schedule_compute(t,k,hgraph)
                 wait_op_1 = []
                 wait_op_2 = []
+                wait_op_3 = []
                 for w in range(W):
                     if k in self.param2hcn[w]:
                         wait_op_1.extend(self.create_optimize_ops(t, k, w))
                         wait_op_2.extend(self.create_offload_ops(t, k, w))
-                        wait_op_2.extend(self.create_delete_ops(t, k, w))
+                        wait_op_3.extend(self.create_delete_ops(t, k, w))
                         # op_list.extend(self.create_prefetch_ops(t,k,w))
                     else:
                         op_list.extend(self.create_offload_ops(t, k, w))
@@ -1890,6 +1900,8 @@ class ModelPULP:
                     op_list.extend([SynchronizeOp(str(k))]+wait_op_1)
                 if wait_op_2:# for the current layer, need to synchronize first
                     op_list.extend([SynchronizeOp(str(k))]+wait_op_2)
+                if wait_op_3:# for the current layer, need to synchronize first
+                    op_list.extend([SynchronizeOp(str(k))]+wait_op_3)
 
                 op_list.extend(prefetch_list)
         return op_list, init_alive_status, init_op_list, restore_op_list

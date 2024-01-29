@@ -7,7 +7,7 @@ from torch import tensor
 import time
 from datetime import datetime
 import warnings
-
+import gc
 import rkgb
 # from rkgb.main import make_inputs, make_all_graphs, make_late_partitioning
 # from rkgb.utils import print_debug, np, irotor
@@ -389,8 +389,9 @@ class HRockmate(torch.nn.Module):
             # if v.pnode.is_buffer:
             #     storage.ld[k] = target.to("cuda")
             # else:
+            target.data = torch.empty(0)
             storage.ld[k] = target
-
+        gc.collect()
         # for k, v in self.op_sched.dict_alloc.items():
         #     if isinstance(v, Activation):
         #         continue
@@ -419,7 +420,7 @@ class HRockmate(torch.nn.Module):
                 storage.ld["optimizers"][op.name] = optim([storage.ld[p] for p in op.list_params], **self.gd["opt_kwargs"])
             if isinstance(op, OffloadOp) and op.is_optimizer_states:
                 var_name = op.target.param_name
-                var = storage.ld[var_name]
+                var = storage.ld[f"cpu_{var_name}"]
                 storage.ld["optimizers"][f"exp_avg_{var_name}"] = torch.zeros_like(var, pin_memory=True, device="cpu")
                 storage.ld["optimizers"][f"exp_avg_sq_{var_name}"] = torch.zeros_like(var, pin_memory=True, device="cpu")
 
