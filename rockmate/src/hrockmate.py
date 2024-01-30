@@ -376,9 +376,12 @@ class HRockmate(torch.nn.Module):
                 # code = make_str_list_assign(pnode.view_code, suffix=".data")
                 exec(pnode.get_code(), self.gd, storage.ld)
                 # print(target.device, pnode.get_code())
+        gc.collect()
+        print(psutil.virtual_memory())
         for k,v in self.op_sched.dict_alloc_param.items():
             if v.pnode.mem < self.gd["optimize_stats"]["minor_param_size"]:continue
             if v.grad:continue
+            if v.is_optimizer_states:continue
             # target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
             target = v.pnode.get_value(self.original_mod)
             target.grad = None
@@ -430,6 +433,11 @@ class HRockmate(torch.nn.Module):
                 var = storage.ld[f"cpu_{var_name}"] if f"cpu_{var_name}" in storage.ld else storage.ld[var_name]
                 storage.ld["optimizers"][f"exp_avg_{var_name}"] = torch.zeros_like(var, pin_memory=True, device="cpu")
                 storage.ld["optimizers"][f"exp_avg_sq_{var_name}"] = torch.zeros_like(var, pin_memory=True, device="cpu")
+        for k,v in self.op_sched.dict_alloc_param.items():
+            if v.pnode.mem < self.gd["optimize_stats"]["minor_param_size"]:continue
+            if v.grad:continue
+            target.data = torch.empty(0)
+        
         print(psutil.virtual_memory())
 
         if self.minor_parameters:
