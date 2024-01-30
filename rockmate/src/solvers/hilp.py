@@ -124,10 +124,10 @@ class HILP(Solver):
                     weights.append(len(hcn.sub_cluster.list_cnodes))
 
         for i, (hcn, w) in enumerate(zip(hg.list_HCNs, weights)):
-            # if i<len(hg.list_HCNs)//2-2 and hcn.sub_cluster is not None:
-            #     hcn.list_sched = [min(hcn.sub_cluster.representee_cluster.list_schedules,
-            #                key=lambda x: x.mem)]
-            #     continue
+            if i<len(hg.list_HCNs)//2-2 and hcn.sub_cluster is not None:
+                hcn.list_sched = [min(hcn.sub_cluster.representee_cluster.list_schedules,
+                           key=lambda x: x.mem)]
+                continue
             nb_sched = max(
                 self.config.nb_total_sched * w // sum(weights), 1
             )  # at least 1 sched

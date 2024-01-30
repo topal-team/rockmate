@@ -395,7 +395,7 @@ class HRockmate(torch.nn.Module):
             # if v.pnode.is_buffer:
             #     storage.ld[k] = target.to("cuda")
             # else:
-            target.data = torch.empty(0)
+            # target.data = torch.empty(0)
             storage.ld[k] = target
         gc.collect()
         print(psutil.virtual_memory())

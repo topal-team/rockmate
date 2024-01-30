@@ -828,7 +828,7 @@ class OpSchedule:
         else:
             save_mem = []
             for i,alive_status in enumerate(self.alive_list):
-                save_mem.append(self.param_mem(i, act_multiplier=act_multiplier)+self.act_param(i))
+                save_mem.append(self.param_mem(i, act_multiplier=act_multiplier)+self.act_mem(i))
             overhead = self.overhead*act_multiplier
         if with_interface:
             return max(np.array(save_mem) + overhead+ self.interface_mem)

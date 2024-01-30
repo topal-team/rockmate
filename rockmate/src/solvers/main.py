@@ -463,7 +463,15 @@ def get_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
     for i in range(niter):
         with torch.cuda.stream(torch.cuda.Stream()):
             a_c.copy_(a_g, non_blocking=True)
+            a_c.copy_(a_g, non_blocking=True)
+            a_c.copy_(a_g, non_blocking=True)
+            a_c.copy_(a_g, non_blocking=True)
+            a_c.copy_(a_g, non_blocking=True)
         with torch.cuda.stream(torch.cuda.Stream()):
+            b_g.copy_(b_c, non_blocking=True)
+            b_g.copy_(b_c, non_blocking=True)
+            b_g.copy_(b_c, non_blocking=True)
+            b_g.copy_(b_c, non_blocking=True)
             b_g.copy_(b_c, non_blocking=True)
         optimizer.step()
     timer.end()

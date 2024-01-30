@@ -772,6 +772,7 @@ class Compiler:
                         # v["exp_avg_sq"].data = torch.empty(0)
                     # torch.cuda.synchronize()
                     # x = self.storage.ld["optimizers"][f"exp_avg_{var_name}"]
+                    # assert self.storage.ld["optimizers"][f"exp_avg_{var_name}"].numel()>0
                     # assert (mem - torch.cuda.memory_allocated()) == x.element_size()*x.numel()*2
                     # print(f"{var_name}, {self.storage.ld[var_name].grad[0,0]}")
                     pass
@@ -896,6 +897,7 @@ class Compiler:
             #         assert v["exp_avg"].mean() != 0
             # print(op.name, psutil.virtual_memory())
             # if  "cpu" in op.name:
+            #     torch.cuda.synchronize()
             # if  "cpu" not in op.name:
             self.storage.ld["optimizers"][op.name].step()
             pass
@@ -1110,6 +1112,7 @@ class Compiler:
             for k,v in self.storage.ld["optimizers"][f"Optimize_{var_name}"].state.items():
                         v["exp_avg"].data = torch.empty(0)
                         v["exp_avg_sq"].data = torch.empty(0)
+            pass
         return fct
 
     # endregion

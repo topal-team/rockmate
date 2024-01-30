@@ -163,7 +163,7 @@ class ModelPULP:
             # self.BatMpl = RkLpVariable("BMpl", lowBound=0, upBound=self.batch_multiplier, cat="Integer")
             # self.param_multiplier = 1-self.BatMpl*1/self.batch_multiplier
             self.param_multiplier = RkLpVariable("BMpl", lowBound=0, upBound=1-1/batch_multiplier, cat="Continuous")
-            # self.param_multiplier = 0.
+            self.param_multiplier = 0.
 
         #############################
         self.hgraph = hgraph
@@ -1264,19 +1264,33 @@ class ModelPULP:
             for k in self.krange(t):
                 t_, k_ = self.next_index(t, k)
 
-                self.md += self.Time[t, k] >= lpSum(
-                    self.parameter_size[w] / self.bandwidthPrf
-                    * (self.PrfW[t, k, w]+self.PrfG[t, k, w]+self.PrfO[t,k,w])
-                    for w in range(self.W)
-                )
-                self.md += self.Time[t, k] >= (lpSum(
-                    self.parameter_size[w] / self.bandwidthOfl 
-                    * (self.OflW[t, k, w]+self.OflG[t, k, w]+self.OflO[t,k,w])
+                self.md += self.Time[t, k] >= 1/ self.bandwidthOfl *lpSum(
+                    self.parameter_size[w] 
+                    * self.PrfW[t, k, w]
+                       +self.parameter_gradient_size[w] *
+                       self.optimizer_states_factor*self.PrfO[t,k,w]
+                    for w in range(self.W))
+                self.md += self.Time[t, k] >= (1/ self.bandwidthOfl *lpSum(
+                    self.parameter_size[w] 
+                    * self.OflW[t, k, w]
+                       +self.parameter_gradient_size[w] *
+                       (self.OflG[t, k, w]+
+                        self.optimizer_states_factor*self.OflO[t,k,w])
                     for w in range(self.W))
                     + lpSum(self.parameter_size[w]
                     / self.cpu_optimize_speed*self.gcd
                     * self.OptC[t, k, w]
                     for w in self.hcn2param[k]))
+                self.md += self.Time[t, k] >= (lpSum(self.Comp[t, k, o] * self.time[k][o] 
+                                                     for o in range(self.nR[k]))
+                + 1/ self.bandwidthOfl *lpSum(
+                    self.parameter_size[w] 
+                    * self.OflW[t, k, w]
+                       +self.parameter_gradient_size[w] *
+                       (self.OflG[t, k, w]+
+                        self.optimizer_states_factor*self.OflO[t,k,w])
+                    for w in self.hcn2param[k])# current layer offload
+                    )
                 self.md += self.Time[t, k] >= lpSum(
                     self.parameter_size[w] 
                     / self.cpu_optimize_speed*self.gcd
@@ -1634,7 +1648,7 @@ class ModelPULP:
                 #     pass
                 for p in select_paras:
                     op = OffloadOp(alloc=Parameter(parameters[p]), indices=(0, None),
-                                   time=parameters[p].mem/self.bandwidthOfl/self.gcd,
+                                   time=parameters[p].mem/self.bandwidthOfl/self.gcd*self.optimizer_states_factor,
                                    is_optimizer_states=True)
                     ofl_ops.append((t, k, op))
                     Offloaded[p] = 1
@@ -1670,7 +1684,7 @@ class ModelPULP:
                         prf_size=0
                     else:
                         raise ValueError
-                if self.sol(self.AliveO[(t_, k_, w)]+self.sumOptC[w]):
+                if self.sol(self.AliveO[(t_, k_, w)]+self.sumOptC[w]-self.req_w()+1):
                     select_paras = list(candidates.keys())
                     # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size>0.99
                 else:
@@ -1687,7 +1701,7 @@ class ModelPULP:
                     prf_ops.append((t, k, AllocateOp(Parameter(parameters[p]),
                                                      is_optimizer_states=True)))
                     op = PrefetchOp(alloc=Parameter(parameters[p]), indices=(0, None),
-                                    time=parameters[p].mem/self.bandwidthPrf/self.gcd,
+                                    time=parameters[p].mem/self.bandwidthPrf/self.gcd*self.optimizer_states_factor,
                                     is_optimizer_states=True)
                     prf_ops.append((t, k, op))
                     Alive[p] = 1
