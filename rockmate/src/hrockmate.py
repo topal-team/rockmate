@@ -56,7 +56,8 @@ class HRockmate(torch.nn.Module):
         solve_sched=True,
         verbose=False,
         ilp_solver="gurobi",
-        ilp_time_limit=60 * 60,
+        ilp_time_limit=1 * 60,
+        ilp_time_limit_top=10 * 60,
         model_kwargs=None,
         partitioners=None,
         max_size_S_graph_for_no_partitioning=40,
@@ -74,6 +75,7 @@ class HRockmate(torch.nn.Module):
         ref_verbose[0] = verbose
         # solver_name[0] = ilp_solver
         default_time_limit[0] = ilp_time_limit
+        self.ilp_time_limit_top = ilp_time_limit_top
         list_solvers = list_solvers or [HILP(ilp_solver=ilp_solver)]
 
         self.device = torch.device("cuda")# Not obtaining from model
@@ -258,6 +260,7 @@ class HRockmate(torch.nn.Module):
         for solver in list_solvers:
             if isinstance(solver, HILP):
                 solver.config.solve_top_level = True
+                solver.config.time_limit_top = self.ilp_time_limit_top
                 solver.config.cpu_optimize_kwargs = self.gd["optimize_stats"]
                 # print("temporarily changing total_nodes for top level hilp")
                 list_solutions.extend(

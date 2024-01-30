@@ -895,7 +895,10 @@ class Compiler:
             #         first = False
             #         assert v["exp_avg"].mean() != 0
             # print(op.name, psutil.virtual_memory())
+            # if  "cpu" in op.name:
+            # if  "cpu" not in op.name:
             self.storage.ld["optimizers"][op.name].step()
+            pass
             # print(psutil.virtual_memory())
 
             # torch.cuda.synchronize()

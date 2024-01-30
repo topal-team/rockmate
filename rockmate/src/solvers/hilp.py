@@ -54,6 +54,7 @@ class HILP(Solver):
             self.nb_bdg_peak = nb_bdg_peak
             self.solve_top_level = False
             self.time_limit_ = time_limit
+            self.time_limit_top = time_limit
             self.cpu_optimize_kwargs = {}
 
         @property
@@ -222,7 +223,10 @@ class HILP(Solver):
             save_budget = [save_budget]
         # start = time.time()
         ilp_solver_params = self.config.ilp_solver_params
-        ilp_solver_params["TimeLimit"] = self.config.time_limit
+        if accurate_mem: 
+            ilp_solver_params["TimeLimit"] = self.config.time_limit_top
+        else:
+            ilp_solver_params["TimeLimit"] = self.config.time_limit
 
         def solve_md(ilp_solver_params=ilp_solver_params, 
                      model_ilp = self.model_ilp,

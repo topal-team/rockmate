@@ -148,7 +148,7 @@ class ModelPULP:
         self.solve_time = None
         self.with_parameters = accurate_mem
         self.with_grad = accurate_mem
-        self.with_optimizer_states = 1#accurate_mem
+        self.with_optimizer_states = accurate_mem#optimizer states will be offloaded
         self.gradient_accumulation = 0# if 0, no gradient/optimizer states alive from previous iters
         self.single_fwd = accurate_mem#False
         self.single_bwd = accurate_mem
@@ -163,7 +163,7 @@ class ModelPULP:
             # self.BatMpl = RkLpVariable("BMpl", lowBound=0, upBound=self.batch_multiplier, cat="Integer")
             # self.param_multiplier = 1-self.BatMpl*1/self.batch_multiplier
             self.param_multiplier = RkLpVariable("BMpl", lowBound=0, upBound=1-1/batch_multiplier, cat="Continuous")
-            self.param_multiplier = 0.
+            # self.param_multiplier = 0.
 
         #############################
         self.hgraph = hgraph
@@ -1132,7 +1132,8 @@ class ModelPULP:
         return 1-self.sumOptC[w]- self.param_multiplier
     
     def max_OflGProg(self, t, k, w):
-        return (self.OflGProg[t, k, w]+self.OflWProg[t, k, w]*(self.grad_mode=="free"))
+        return self.OflGProg[t, k, w]+(self.OflWProg[t, k, w]*(self.grad_mode=="free")
+                                      *self.parameter_size[w]/self.parameter_gradient_size[w])
 
     def all_param_mem(self, t, k, with_multiplier=True):
         return (self.parameter_mem(t,k) 
@@ -1300,14 +1301,17 @@ class ModelPULP:
                     self.md += self.OflWProg[t, k, w] <= self.req_w()
                     self.md += self.OflGProg[t, k, w] <= self.accumC_grad(w)
                     self.md += self.OptCProg[t, k, w] <= self.max_OflGProg(t,k,w)
-                    self.md += self.OptCProg[t, k, w] <= self.PrfWProg[t, k, w]
+                    self.md += self.OptCProg[t, k, w] <= self.PrfWProg[t, k, w]*self.parameter_size[w]/self.parameter_gradient_size[w]
                     self.md += (self.AliveW[t, k, w] + self.OflWProg[t, k, w]
                                 >= self.instant_opt(w))
                     self.md += (self.AliveG[t, k, w] + self.OflGProg[t, k, w] 
                                 >= self.req_w() - self.instant_opt(w))
                     self.md += (self.AliveW[t_, k_, w] + self.PrfW[t_, k_, w] <= 
-                                self.req_w() - self.sumOptC[w]# update on GPU
-                                + self.OptCProg[t, k, w])
+                                self.req_w()
+                                + (self.OptCProg[t, k, w] - self.sumOptC[w])
+                                *self.parameter_gradient_size[w]/self.parameter_size[w]
+                                # size that not yet finished updating cannot be prefetched
+                                 )
                     diffW = self.AliveW[t_, k_, w] - self.AliveW[t, k, w]
                     self.md += diffW <= self.PrfW[t, k, w]
 
@@ -1829,7 +1833,9 @@ class ModelPULP:
         self.params_vars = [self.AliveW, self.OflWProg, self.OflW, 
                             self.PrfW, self.PrfWProg, self.OptC,
                             self.AliveG, self.OflGProg, self.OflG,
-                            self.PrfG, self.PrfGProg, self.AliveO
+                            self.PrfG, self.PrfGProg, self.AliveO,
+                            self.OflO, self.OflOProg, self.PrfO, 
+                            self.PrfOProg
                             ]
         if isinstance(self.param_multiplier, float):
             multiplier = self.param_multiplier
