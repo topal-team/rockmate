@@ -28,7 +28,7 @@ timer = TimerCUDA(torch.device("cuda"))
 import tracemalloc
 tracemalloc.start()
 torch.random.manual_seed(0)
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:16"
 
 def get7Bllama(batch, seq_len, nlayers=32, dtype=torch.float32):
     #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
@@ -136,7 +136,7 @@ def add_sched_stats(stats, rkmod):
     stats[f"Schedule_time_from_waiting_offload"] = sum((step.time - step.max2nd()) for step in rkmod.op_sched.steps if step.time == step.ofl_ops.time)
     stats[f"Schedule_time_from_waiting_prefetch"] = sum((step.time - step.max2nd()) for step in rkmod.op_sched.steps if step.time == step.prf_ops.time)
 
-def Loss(y, labels):
+def Loss(y, labels=None):
     return y.mean()
     return torch.nn.CrossEntropyLoss()(y, labels)
 
@@ -155,9 +155,9 @@ def exec(model,
     for x in model.children():
         x.register_forward_hook(hook_fn)
     y = model(*sample, **kwargs)[0]
-    labels = torch.randn(y.shape).softmax(dim=1).to(sample[0].device)
+    # labels = torch.randn(y.shape).softmax(dim=1).to(sample[0].device)
     if print_mem:print(torch.cuda.memory_allocated())
-    loss = Loss(y, labels)
+    loss = Loss(y)
     if print_loss:print(f"loss: {loss}")
     loss.backward()
     if print_mem:print(torch.cuda.memory_allocated())
@@ -168,18 +168,18 @@ def exec(model,
         if zero_grad:model.zero_grad()
         y = model(*sample, **kwargs)[0]
         assert y.requires_grad
-        loss = Loss(y, labels)
+        loss = Loss(y)
         if print_loss:print(f"loss: {loss}")
         loss.backward()
         # torch.cuda.synchronize()
         # print(f"grad: {model.wte.weight.grad[0,0]}")
-        # if optimize_fct:optimize_fct()
+        if optimize_fct:optimize_fct()
         # for s in sample:
         #     s.grad = None
         y.data = torch.empty(0)
         y.grad = None
         del y
-        
+        torch.cuda.empty_cache()
     timer.end()
     return timer.elapsed()
     
@@ -208,10 +208,50 @@ def exec_pt(model, sample, optim=torch.optim.Adam, niters=10, device="cuda", **k
     peak_mem = torch.cuda.max_memory_allocated() - mem
     return time, peak_mem
 
+def exp_pt(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B", optim=torch.optim.Adam):
+    model, sample = get7Bllama(batch_size, 512, nlayers=nlayers)
+    if num_adapters:
+        manual_lora(model, target_modules=[f"layers.{i}.self_attn.q_proj" for i in range(nlayers)]
+                +[f"layers.{i}.self_attn.k_proj" for i in range(nlayers)]
+                +[f"layers.{i}.self_attn.v_proj" for i in range(nlayers)]
+                # +[f"layers.{i}.self_attn.o_proj" for i in range(nlayers)]
+                # +[f"layers.{i}.mlp.gate_proj" for i in range(nlayers)]
+                # +[f"layers.{i}.mlp.up_proj" for i in range(nlayers)]
+                # +[f"layers.{i}.mlp.down_proj" for i in range(nlayers)]
+                ,
+                num_adapters=num_adapters,
+                freeze_all=True)
+    niters = 5
+    exp_stats = {}
+    exp_stats["nlayer"] = nlayers
+    exp_stats["input_size"] = [s.shape for s in sample]
 
-def exp_rkmod(nlayers=1, exp_id=None, num_adapters=None, id="7B"):
+    exp_stats["model_size"] = sum(p.numel()*p.element_size() for p in model.parameters())
+    exp_stats["model_gradient_size"] = sum(p.numel()*p.element_size() for p in model.parameters()
+                                           if p.requires_grad)
+    # exp_stats["optimize_stats"] = rkmod.gd["optimize_stats"]
+    exp_stats["cpu_optim"] = str(optim)
+    exp_stats["gpu_optim"] = str(optim)
+    exp_stats["gpu_type"] = torch.cuda.get_device_name()
+
+    time, mem = exec_pt(model.to("cuda"), sample, niters=niters, optim=optim)
+    torch.cuda.synchronize()
+    print(time, mem)
+
+    exp_stats["time"] = time/niters
+    exp_stats["peak_mem"] = mem
+    print(exp_stats)
+    # rkmod.compiler.storage.ld[rkmod.output.name.split(" ")[0]].data = torch.empty(0)
+    # rkmod.compiler.storage.ld["_"+rkmod.output.name.split(" ")[0]].data = torch.empty(0)
+    if exp_id:
+        os.makedirs(os.path.dirname(f"exp_results/{exp_id}/"), exist_ok=True)
+        print("dump result")
+        with open(f"exp_results/{exp_id}/res_{id}_pt.pkl", "wb") as f:
+            pickle.dump(exp_stats, f)
+
+def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B"):
     # model, sample = get3Bllm_embed(3,512, nlayers=nlayers)
-    model, sample = get7Bllama(2, 512, nlayers=nlayers)
+    model, sample = get7Bllama(batch_size, 512, nlayers=nlayers)
     if num_adapters:
         manual_lora(model, target_modules=[f"layers.{i}.self_attn.q_proj" for i in range(nlayers)]
                 +[f"layers.{i}.self_attn.k_proj" for i in range(nlayers)]
@@ -224,8 +264,9 @@ def exp_rkmod(nlayers=1, exp_id=None, num_adapters=None, id="7B"):
                 num_adapters=num_adapters,
                 freeze_all=True)
 
-    budget = 9 * 1024**3
-    niters = 10
+    # budget = 8 * 1024**3
+    budget = torch.cuda.get_device_properties(0).total_memory - 3*1024**3#to avoid fragmentation
+    niters = 5
     partitioners = [rkgb.partitioned.PartitionerRecognizeRepetitivePattern(
         strict_max_number_of_top_level_nodes=nlayers+4,
         max_number_of_patterns=nlayers+2,
@@ -239,7 +280,6 @@ def exp_rkmod(nlayers=1, exp_id=None, num_adapters=None, id="7B"):
                     optim_kwargs = {"lr":1e-4},
                     ilp_time_limit=10*60,
                     minor_param_size=4*1024**2,
-
                     )
     
     print(f"number of HCN: {len(rkmod.rkgb_res.hierarchical_cluster.partitionings[0].list_HCNs)}")
@@ -288,10 +328,10 @@ def exp_rkmod(nlayers=1, exp_id=None, num_adapters=None, id="7B"):
     rkmod.op_sched.refine_optimize()
     exp_stats["After_refine"] = {}
     add_sched_stats(exp_stats["After_refine"], rkmod)
-
+    print(exp_stats["After_refine"])
     # rkmod.op_sched.alive_list = rkmod.op_sched.create_alive_list()
     # rkmod.op_sched.refine()
-    rkmod.get_compiled_fct(new_compiler=False)
+    rkmod.get_compiled_fct()
 
     # sleep(5)
     time, mem = exec_rk(rkmod, sample, niters=niters)
@@ -308,6 +348,7 @@ def exp_rkmod(nlayers=1, exp_id=None, num_adapters=None, id="7B"):
     # rkmod.restore_exec()
     del rkmod
     gc.collect()
+    print(exp_stats)
     # rkmod.compiler.storage.ld[rkmod.output.name.split(" ")[0]].data = torch.empty(0)
     # rkmod.compiler.storage.ld["_"+rkmod.output.name.split(" ")[0]].data = torch.empty(0)
     if exp_id:
@@ -321,18 +362,26 @@ def exp_rkmod(nlayers=1, exp_id=None, num_adapters=None, id="7B"):
 if __name__=="__main__":
     # exp_id = datetime.now().strftime('llama-7b')
     # exp_id = "llama-7b-ds"
-    a = torch.empty(2560,1024,1024,device="cuda")
-    a.data = torch.empty(0)
+    # a = torch.empty(2560,1024,1024,device="cuda")
+    # a.data = torch.empty(0)
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp_id", metavar=datetime.now().strftime('%d_%m_%H_%M'), type=str)
     parser.add_argument("--nlayers", metavar=32, type=int)
     parser.add_argument("--num_adapters", metavar=256, type=int)
     parser.add_argument("--id", metavar=None, type=str)
+    parser.add_argument("--rk", metavar=1, type=int)
+    parser.add_argument("--batch_size", metavar=3, type=int)
 
     args = parser.parse_args()
     exp_id = args.exp_id
     nlayers = args.nlayers
     num_adapters = args.num_adapters
     id = args.id if args.id is not None else f"{nlayers}_{num_adapters}"
-    exp_rkmod(nlayers=nlayers, exp_id=exp_id, num_adapters=num_adapters, id=id)
+    rk = args.rk
+    batch_size = args.batch_size
+    if rk:
+        # print("exp on rockmate")
+        exp_rkmod(nlayers=nlayers, batch_size=batch_size, exp_id=exp_id, num_adapters=num_adapters, id=id)
+    else:
+        exp_pt(nlayers=nlayers, batch_size=batch_size, exp_id=exp_id, num_adapters=num_adapters, id=id)
     
