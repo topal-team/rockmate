@@ -1158,7 +1158,7 @@ class ModelPULP:
     #     return grad_mem
     
     def optimizer_states_mem(self, t, k, with_overhead=True):    
-        optimizer_states_mem = lpSum((self.AliveO[t, k, w]*
+        optimizer_states_mem = lpSum(((self.AliveO[t, k, w]+self.PrfO[t, k, w])*
                     self.parameter_gradient_size[w] *
                     self.optimizer_states_factor)
                     for w in range(self.W))
@@ -1647,7 +1647,8 @@ class ModelPULP:
                 # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-ofl_size>tol:
                 #     pass
                 for p in select_paras:
-                    op = OffloadOp(alloc=Parameter(parameters[p]), indices=(0, None),
+                    op = OffloadOp(alloc=Parameter(parameters[p],
+                                                   is_optimizer_states=True), indices=(0, None),
                                    time=parameters[p].mem/self.bandwidthOfl/self.gcd*self.optimizer_states_factor,
                                    is_optimizer_states=True)
                     ofl_ops.append((t, k, op))
@@ -1670,7 +1671,8 @@ class ModelPULP:
                 # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-del_size>tol:
                 #     pass
                 for p in select_paras:
-                    del_ops.append((t, k, DeleteOp(Parameter(parameters[p]),
+                    del_ops.append((t, k, DeleteOp(Parameter(parameters[p],
+                                                             is_optimizer_states=True),
                                                    is_optimizer_states=True)))
                     Alive[p] = 0
             if current_alive_size < next_alive_size:
@@ -1698,7 +1700,8 @@ class ModelPULP:
                 # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-prf_size>tol:
                 #     pass
                 for p in select_paras:
-                    prf_ops.append((t, k, AllocateOp(Parameter(parameters[p]),
+                    prf_ops.append((t, k, AllocateOp(Parameter(parameters[p],
+                                                               is_optimizer_states=True),
                                                      is_optimizer_states=True)))
                     op = PrefetchOp(alloc=Parameter(parameters[p]), indices=(0, None),
                                     time=parameters[p].mem/self.bandwidthPrf/self.gcd*self.optimizer_states_factor,

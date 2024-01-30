@@ -61,16 +61,17 @@ class Activation(Allocation):
 
 
 class Parameter(Allocation):
-    def __init__(self, pnode, grad=False):
+    def __init__(self, pnode, grad=False, is_optimizer_states=False):
         super().__init__(
-            name=pnode.param_name + "_grad"*grad,
+            name=pnode.param_name + "_grad"*grad+"_optim_states"*is_optimizer_states,
             alloc_type="Parameter",
-            mem=pnode.mem,
+            mem=pnode.mem + pnode.mem*is_optimizer_states,
             info=pnode.info,
             dtype=pnode.info.dtype,
         )
         self.pnode = pnode
         self.grad = grad
+        self.is_optimizer_states = is_optimizer_states
     
     def __copy__(self):
         cls = self.__class__
@@ -449,6 +450,11 @@ class OpSchedule:
                     [Parameter(kdn, grad=True) for kdn in cluster.parameter_nodes
                      if kdn.info.requires_grad]
                 )# add parameter grad allocation
+                self.list_alloc.extend(
+                    [Parameter(kdn, is_optimizer_states=True)
+                     for kdn in cluster.parameter_nodes
+                     if kdn.info.requires_grad]
+                )# add parameter grad allocation
                 self.list_alloc.extend(self.create_buffer_list())
         self.dict_alloc = {alloc.name: alloc for alloc in self.list_alloc}
         self.dict_alloc_param = {alloc.name: alloc 
@@ -652,8 +658,10 @@ class OpSchedule:
                     kcn_name = kcn.name
                     if kcn_name in self.bwd2param:
                         self.bwd2param[kcn_name].append(alloc.pnode.param_name+"_grad")
+                        self.bwd2param[kcn_name].append(alloc.pnode.param_name)
                     else:
                         self.bwd2param[kcn_name] = [alloc.pnode.param_name+"_grad"]
+                        self.bwd2param[kcn_name].append(alloc.pnode.param_name)
                 
         alive_list = []
         for op in self.op_list:
@@ -661,7 +669,8 @@ class OpSchedule:
                 alive_list.append(alive_status.copy())
                 continue
             if isinstance(op, DeleteOp):
-                alive_status[op.target.name+"_grad"*op.grad] = False
+                alive_status[op.target.name+"_grad"*op.grad#+"_optim_states"*op.is_optimizer_states
+                             ] = False
             elif isinstance(op, ComputeOp):
                 # compute op should not be disabled except loss which is useful for alive status
                 for kdn in op.kcn.users:
