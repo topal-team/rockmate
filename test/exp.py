@@ -30,6 +30,53 @@ tracemalloc.start()
 torch.random.manual_seed(0)
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:16"
 
+
+def analyze_mem(rkmod, print_status=False, with_param=True, with_grad=True, details=False):
+    md = rkmod.list_solvers[0].md
+    mem = {}
+    for t in range(md.T):
+        for k in md.krange(t):
+            mem[t, k] = md.U[t, k].value()
+            mem[t, k] += (
+                sum(
+                    md.Comp[t, k, o].value() * md.overhead[k][o]
+                    for o in range(md.nR[k])
+                )
+                if md.sol(md.sumComp[t, k].value())
+                else 0
+            )
+            mem[t, k] += sum(
+                md.mem[i_] * md.delete[t, eidx_d].value() if hasattr(md.delete[t, eidx_d], "value") else md.delete[t, eidx_d]
+                for eidx_d, (k_, i_) in enumerate(md.delete_list)
+                if k == k_
+            )
+            act_multiplier = 1/((1-md.param_multiplier) 
+                              if isinstance(md.param_multiplier, float) 
+                              else (1-md.param_multiplier.value()))
+            
+            mem[t, k] *= act_multiplier
+            if with_param:
+                mem[t, k] += md.all_param_mem(t, k, with_multiplier=False).value()
+
+            # for w in range(md.W):
+            #     # mem[t,k] += 1*((md.AliveW[t,k,w]+md.PrfW[t,k,w]).value()>0)*md.parameter_size[w]
+            #     mem[t,k] += (md.AliveW[t,k,w]+md.PrfW[t,k,w]).value()*md.parameter_size[w]
+
+    max_t, max_k = max(mem, key=mem.get)
+    max_i = np.argmax(rkmod.op_sched.save_mem + rkmod.op_sched.interface_mem + rkmod.op_sched.overhead)
+    grad_size = 0#max(md.parameter_size)
+    optimizer_states_mem = 0#rkmod.op_sched.optimizer_states_size()*rkmod.gd['optimize_stats']['optimizer_states_size']
+    optimizer_states_mem += sum([p.numel()*p.element_size() for p in rkmod.minor_parameters])*rkmod.gd['optimize_stats']['optimizer_states_size']
+    print(
+        f"solution peak memory {(max(mem.values())*md.gcd)/1024**2:.0f}MB at {max_t, max_k}"
+    )
+    print(
+        f"op_sched peak memory {(rkmod.op_sched.get_peak_mem(with_interface=True) + optimizer_states_mem +with_grad*grad_size)/1024**2:.0f}MB"
+    )
+    # return (max_i, max_t, max_k)
+    return max(mem.values())*md.gcd, rkmod.op_sched.get_peak_mem(with_interface=True)
+
+
 def get7Bllama(batch, seq_len, nlayers=32, dtype=torch.float32):
     #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
     sample = torch.randint(0, 600, [batch, seq_len])
@@ -265,7 +312,7 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B"):
                 freeze_all=True)
 
     # budget = 8 * 1024**3
-    budget = torch.cuda.get_device_properties(0).total_memory - 3*1024**3#to avoid fragmentation
+    budget = torch.cuda.get_device_properties(0).total_memory - 2*1024**3#to avoid fragmentation
     niters = 5
     partitioners = [rkgb.partitioned.PartitionerRecognizeRepetitivePattern(
         strict_max_number_of_top_level_nodes=nlayers+4,
@@ -316,6 +363,9 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B"):
         raise ValueError
     print(md.solving_time)
     exp_stats["solving_time"] = str(md.solving_time)
+    mem_ilp, mem_sched = analyze_mem(rkmod)
+    exp_stats["Mem_ILP"] = mem_ilp
+    exp_stats["Mem_sched"] = mem_sched
 
     exp_stats["Before_refine"] = {}
     add_sched_stats(exp_stats["Before_refine"], rkmod)
