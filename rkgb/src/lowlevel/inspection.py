@@ -227,7 +227,9 @@ def get_relevant_dependencies_via_grad_fn(
         sn_to_proceed.get_code(force_special_kwargs=True), 
         our_global, tmp_local)
     sn_value = tmp_local[sn_to_proceed.main_target]
-    has_attribute__base = not (sn_value._base is None)
+    has_attribute__base = (
+        hasattr(sn_value._base,"data_ptr") 
+        and sn_value._base.data_ptr() == sn_value.data_ptr())
 
     # 2) Search through grad_fn
     (explicit_vars_in_grad_fn,
