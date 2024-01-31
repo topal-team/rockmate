@@ -663,6 +663,17 @@ class OpSchedule:
                         self.bwd2param[kcn_name] = [alloc.pnode.param_name+"_grad"]
                         self.bwd2param[kcn_name].append(alloc.pnode.param_name)
                 
+        for op in self.op_list:
+            if isinstance(op, DeleteOp):
+                alive_status[op.target.name+"_grad"*op.grad#+"_optim_states"*op.is_optimizer_states
+                             ] = False
+            elif isinstance(op, ComputeOp):
+                if op.kcn.name in self.bwd2param:
+                    for kdn_name in self.bwd2param[op.kcn.name]:
+                        alive_status[kdn_name] = True
+            elif isinstance(op, AllocateOp):
+                alive_status[op.target.name] = True
+
         alive_list = []
         for op in self.op_list:
             if op.disabled:

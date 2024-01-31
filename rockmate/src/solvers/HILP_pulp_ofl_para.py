@@ -158,6 +158,7 @@ class ModelPULP:
             self.cpu_optimize = True
             self.optimizer_states_factor = cpu_optimize_kwargs["optimizer_states_size"]#*weight size
             self.cpu_optimize_speed = cpu_optimize_kwargs["cpu_optimize_speed"]#B/ms
+            self.gpu_optimize_speed = cpu_optimize_kwargs["gpu_optimize_speed"]#B/ms
             self.optimizer_overhead_factor = cpu_optimize_kwargs["optimizer_overhead"]#*weight size
             batch_multiplier = 4
             # self.BatMpl = RkLpVariable("BMpl", lowBound=0, upBound=self.batch_multiplier, cat="Integer")
@@ -623,8 +624,8 @@ class ModelPULP:
             self.param_grad_mem = {(t,k):0 for t in range(T) for k in self.krange(t)}
             self.prefill()
 
-            self.bandwidthOfl = cpu_optimize_kwargs["bandwidth"]/self.gcd#6 * 1024**2  # byte/ms
-            self.bandwidthPrf = cpu_optimize_kwargs["bandwidth"]/self.gcd#6 * 1024**2  # byte/ms
+            self.bandwidthOfl = cpu_optimize_kwargs["bandwidth"]/self.gcd  # byte/ms
+            self.bandwidthPrf = cpu_optimize_kwargs["bandwidth"]/self.gcd  # byte/ms
 
         self.Time = RkLpVariable.dicts(
             "Time", [(t, k) for t in range(T) for k in self.krange(t)], cat="Continuous"
@@ -1277,7 +1278,7 @@ class ModelPULP:
                        (self.OflG[t, k, w]+
                         self.optimizer_states_factor*self.OflO[t,k,w])
                     for w in range(self.W))
-                    + lpSum(self.parameter_size[w]
+                    + lpSum(self.parameter_gradient_size[w]
                     / self.cpu_optimize_speed*self.gcd
                     * self.OptC[t, k, w]
                     for w in self.hcn2param[k]))
@@ -1286,11 +1287,15 @@ class ModelPULP:
                 + 1/ self.bandwidthOfl *lpSum(
                     self.parameter_size[w] 
                     * self.OflW[t, k, w]
-                       +self.parameter_gradient_size[w] *
-                       (self.OflG[t, k, w]+
-                        self.optimizer_states_factor*self.OflO[t,k,w])
+                       +self.parameter_gradient_size[w]
+                       * (self.OflG[t, k, w]
+                    + self.optimizer_states_factor*self.OflO[t,k,w])
                     for w in self.hcn2param[k])# current layer offload
-                    )
+                    + 1/self.gpu_optimize_speed*self.gcd
+                    * lpSum(self.parameter_gradient_size[w]
+                    * (self.req_w() - self.sumOptC[w])
+                    for w in self.hcn2param[k]
+                    ))
                 self.md += self.Time[t, k] >= lpSum(
                     self.parameter_size[w] 
                     / self.cpu_optimize_speed*self.gcd
@@ -1444,6 +1449,7 @@ class ModelPULP:
             #if cpu optimize, do not keep w after bwd
         def apply_gpu_optimize(p):
             op = OptimizeOp(name=p,list_params=[p], alloc=Parameter(parameters[p]),
+                            time = parameters[p].mem/self.gpu_optimize_speed,
                             overhead=parameters[p].mem*self.optimizer_overhead_factor)
             opt_ops.append((bwd_i, bwd_i, op))# optimize after bwd
             del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]), grad=True)))

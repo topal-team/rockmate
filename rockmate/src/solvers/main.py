@@ -436,11 +436,12 @@ def get_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
     optimizer = gpu_optim([p], **optim_kwargs)
     torch.cuda.reset_peak_memory_stats()
     mem = torch.cuda.memory_allocated()
-    # timer.start()
-    for i in range(3):
+    timer.start()
+    for i in range(niter):
         optimizer.step()
-    # timer.end()
+    timer.end()
     mem_after = torch.cuda.memory_allocated()
+    gpu_optimize_speed = size*p.element_size()*niter/timer.elapsed()
     opt_size = mem_after - mem
     opt_overhead = torch.cuda.max_memory_allocated() - mem_after
 
@@ -478,6 +479,7 @@ def get_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
     optimize_stats = {"optimizer_states_size": round(opt_size//size/p.element_size()),
                           "optimizer_overhead":round(opt_overhead//size/p.element_size()),
                           "cpu_optimize_speed": size*p.element_size()*niter/timer.elapsed(),
+                          "gpu_optimize_speed":gpu_optimize_speed,
                           "bandwidth": bandwidth}
     return optimize_stats
 

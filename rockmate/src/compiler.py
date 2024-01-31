@@ -1110,8 +1110,8 @@ class Compiler:
     def fct_del_optimizer_states(self, var_name):
         def fct():
             for k,v in self.storage.ld["optimizers"][f"Optimize_{var_name}"].state.items():
-                        v["exp_avg"].data = torch.empty(0)
-                        v["exp_avg_sq"].data = torch.empty(0)
+                v["exp_avg"].data = torch.empty(0)
+                v["exp_avg_sq"].data = torch.empty(0)
             pass
         return fct
 

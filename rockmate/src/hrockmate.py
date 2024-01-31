@@ -600,7 +600,7 @@ class HRockmate(torch.nn.Module):
                 # ]
 
                 outs = []
-                for out_node in self.rkgb_res.forward_graph.output_nodes:
+                for out_node in self.rkgb_res.forward_graph.output_nodes[:1]:
                     # print(kdn)
                     RkMod.compiler.get_val(f"out_{out_node.main_target}").data = RkMod.compiler.get_val(out_node.main_target)
                     o = RkMod.compiler.get_val(f"out_{out_node.main_target}")#.detach().requires_grad_()
@@ -654,7 +654,10 @@ class HRockmate(torch.nn.Module):
                                 out.shape, out.stride(), out.storage_offset()
                             )
                     out_grad.data = torch.empty(0)
-
+                for out_node in self.rkgb_res.forward_graph.output_nodes:
+                        # print(kdn)
+                        RkMod.compiler.get_val(f"out_{out_node.main_target}").data = torch.empty(0)
+                    
                 #  * record_mem stuff *
                 if RkMod.exec_with_record_mem:
                     RkMod.output_size = tensor_memory_size(
