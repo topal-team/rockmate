@@ -181,6 +181,7 @@ class HRockmate(torch.nn.Module):
             for pnode in self.rkgb_res.hierarchical_cluster.parameter_nodes:
                 if pnode.mem < minor_param_size and not pnode.is_buffer:
                     self.minor_param_nodes.append(pnode)
+            self.minor_param_nodes += self.rkgb_res.S.init_node.required_parameter_nodes
             self.gd = make_gd(
                 self.device, 
                 self.original_mod, 
@@ -654,9 +655,9 @@ class HRockmate(torch.nn.Module):
                                 out.shape, out.stride(), out.storage_offset()
                             )
                     out_grad.data = torch.empty(0)
-                for out_node in self.rkgb_res.forward_graph.output_nodes:
-                        # print(kdn)
-                        RkMod.compiler.get_val(f"out_{out_node.main_target}").data = torch.empty(0)
+                # for out_node in self.rkgb_res.forward_graph.output_nodes:
+                #         # print(kdn)
+                #         RkMod.compiler.get_val(f"out_{out_node.main_target}").data = torch.empty(0)
                     
                 #  * record_mem stuff *
                 if RkMod.exec_with_record_mem:

@@ -97,7 +97,7 @@ class Compiler:
 
     def __init__(self, gd):
         self.gd = gd
-        # self.no_save_dict = {}
+        self.no_save_dict = {}
 
     def get_val(self, val):
         if val in self.storage.ld:
@@ -217,7 +217,7 @@ class Compiler:
                 for pnode in kn.required_parameter_nodes_real|kn.required_parameter_nodes_fake:
                     no_save_list.append(pnode.param_name)
                     
-                # self.no_save_dict[kn.name] = no_save_list
+                self.no_save_dict[kn.name] = no_save_list
 
                 for (
                     target
@@ -486,7 +486,8 @@ class Compiler:
         op_sched.alive_list = op_sched.create_alive_list()
         self.alive_list = op_sched.alive_list
         self.parameters = {k:alloc for k, alloc in op_sched.dict_alloc.items() if (
-                           isinstance(alloc, Parameter) and not alloc.grad)}
+                           isinstance(alloc, Parameter) and not alloc.grad 
+                           and not alloc.is_optimizer_states)}
         # print(self.parameters)
         # self.prf_list = op_sched.prf_list
         # self.ofl_list = op_sched.ofl_list

@@ -1134,7 +1134,11 @@ class ModelPULP:
     
     def max_OflGProg(self, t, k, w):
         return self.OflGProg[t, k, w]+(self.OflWProg[t, k, w]*(self.grad_mode=="free")
-                                      *self.parameter_size[w]/self.parameter_gradient_size[w])
+                                      *self.w_by_wg(w))
+
+    def w_by_wg(self, w):
+        if self.parameter_gradient_size[w]==0:return 0
+        return self.parameter_size[w]/self.parameter_gradient_size[w]
 
     def all_param_mem(self, t, k, with_multiplier=True):
         return (self.parameter_mem(t,k) 
@@ -1320,7 +1324,7 @@ class ModelPULP:
                     self.md += self.OflWProg[t, k, w] <= self.req_w()
                     self.md += self.OflGProg[t, k, w] <= self.accumC_grad(w)
                     self.md += self.OptCProg[t, k, w] <= self.max_OflGProg(t,k,w)
-                    self.md += self.OptCProg[t, k, w] <= self.PrfWProg[t, k, w]*self.parameter_size[w]/self.parameter_gradient_size[w]
+                    self.md += self.OptCProg[t, k, w] <= self.PrfWProg[t, k, w]*self.w_by_wg(w)
                     self.md += (self.AliveW[t, k, w] + self.OflWProg[t, k, w]
                                 >= self.instant_opt(w))
                     self.md += (self.AliveG[t, k, w] + self.OflGProg[t, k, w] 
@@ -1661,6 +1665,7 @@ class ModelPULP:
                     Offloaded[p] = 1
 
             if current_alive_size > next_alive_size:
+                if k_ ==bwd_i:continue
                 del_size = current_alive_size - next_alive_size
                 candidates = {}
                 for p, o in Offloaded.items():
@@ -1681,7 +1686,8 @@ class ModelPULP:
                                                              is_optimizer_states=True),
                                                    is_optimizer_states=True)))
                     Alive[p] = 0
-            if current_alive_size < next_alive_size:
+            if current_alive_size < next_alive_size or k_==bwd_i:
+                # if w == 15:print(self.active_steps[k_]==bwd_i)
                 # prefetch should be smaller than solution
                 prf_size = next_alive_size - current_alive_size
                 candidates = {
@@ -1692,7 +1698,8 @@ class ModelPULP:
                         prf_size=0
                     else:
                         raise ValueError
-                if self.sol(self.AliveO[(t_, k_, w)]+self.sumOptC[w]-self.req_w()+1):
+                if self.sol(self.AliveO[(t_, k_, w)]+self.sumOptC[w]-self.req_w()+1) or k_==bwd_i:
+                    
                     select_paras = list(candidates.keys())
                     # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size>0.99
                 else:
@@ -1714,6 +1721,7 @@ class ModelPULP:
                                     is_optimizer_states=True)
                     prf_ops.append((t, k, op))
                     Alive[p] = 1
+            if k_==bwd_i:assert 0 not in Alive.values()
 
         return ofl_ops, prf_ops, del_ops
 
