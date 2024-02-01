@@ -189,7 +189,7 @@ class ForwardAndBackwardGraph(base.Graph):
                     "to ForwardAndBackwardGraph.__init__ (or let "\
                     "`simplified_graph` to None to get an empty graph")
             self.inherit_base_attributes(simplified_graph)
-            self.init_code = simplified_graph.init_node.get_code_ast()
+            self.init_code = simplified_graph.init_code
 
             self.parameter_nodes = [
                 ParameterNode(node_to_clone=param_node)

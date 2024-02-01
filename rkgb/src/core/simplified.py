@@ -425,6 +425,7 @@ class SimplifiedGraph(base.Graph):
             self.make_users_attribute_of_param_nodes()
             self.make_inputs()
             self.unplug_init_node()
+            self.make_init_code()
             self.make_dict_output_viewing_code()
             self.set_node_topological_numbers()
             self.assert_ready()
@@ -606,6 +607,19 @@ class SimplifiedGraph(base.Graph):
             if (self.init_node,first_sn) not in self.dict_of_labels_on_edges:
                 self.dict_of_labels_on_edges[(self.init_node,first_sn)] = set()
                 self.dict_of_labels_on_edges[(first_sn,self.init_node)] = set()
+
+
+    def make_init_code(self):
+        core = self.init_node.get_code_ast()
+        if core is None: return None
+        params_code = [
+            param_node.get_code_ast() 
+            for param_node in self.init_node.required_parameter_nodes]
+        if params_code == []:
+            self.init_code = core
+        else:
+            self.init_code = ast_add_on.make_ast_module(params_code+[core])
+
 
     def make_dict_output_viewing_code(self):
         """
@@ -909,7 +923,7 @@ class SimplifiedGraph(base.Graph):
 
         # 3) init node
         if only_function_name: label = "INPUT"
-        else: label = "INPUT\n"+self.init_node.get_code()
+        else: label = "INPUT\n"+self.init_code
         dot.node(self.init_node.main_target,
             label,
             color=color_special,
@@ -968,7 +982,7 @@ class SimplifiedGraph(base.Graph):
             if block_id == 0:
                 node(block_id,
                     self.init_node.main_target,
-                    "GLOBAL INPUT\n"+self.init_node.get_code(),
+                    "GLOBAL INPUT\n"+self.init_code,
                     color=color_special,
                     style="dashed")
             else:
@@ -1095,7 +1109,7 @@ class SimplifiedGraph(base.Graph):
             # 1) preliminary_code
             if block_id == 0:
                 # Special case for first block: Preliminary code
-                preliminary_code = init_node.get_code()
+                preliminary_code = self.init_code
                 if self.is_sequentialization_aggressive: 
                     # otherwise no need for such weird thing
                     for input_target in init_node.all_targets:
