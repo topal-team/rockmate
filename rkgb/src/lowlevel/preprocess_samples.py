@@ -18,6 +18,7 @@ class ExampleInputs():
         pos_params = [
             p[0] for p in params
             if (p[1].default is inspect._empty
+            and "*" not in repr(p[1])
             and p[0] not in original_mod_kwargs)]
         # -- build positional inputs --
         if isinstance(original_mod_args,dict):

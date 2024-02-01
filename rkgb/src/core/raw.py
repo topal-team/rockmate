@@ -157,7 +157,7 @@ class RawGraph(base.Graph):
             # dynamo_constraints = None):
         self.tracer_used = "dynamo"
         # -- Prepare Call to Dynamo --
-        ordered_example_inputs = example_inputs.to_list_args(original_mod)
+        # ordered_example_inputs = example_inputs.to_list_args(original_mod) # UNUSED
         # TO INCLUDE WHEN DYNAMO WILL BE FIXED: 
         # Currently dynamic shapes are broken with HF models
         # https://github.com/pytorch/pytorch/issues/117477
@@ -170,7 +170,11 @@ class RawGraph(base.Graph):
                             # dynamo_constraints.append(torch.export.dynamic_dim(inp,i))
         # Call Dynamo's export :
         dynamo_result : torch.export.ExportedProgram = torch.export.export(
-            original_mod,args=ordered_example_inputs)
+            original_mod,
+            # args=ordered_example_inputs, # UNUSED
+            args = tuple(),
+            kwargs=example_inputs.dict
+            )
             # constraints=dynamo_constraints)
         dynamo_graph = dynamo_result.graph
         dynamo_signature = dynamo_result.graph_signature
