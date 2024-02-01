@@ -297,12 +297,19 @@ class ForwardAndBackwardGraph(base.Graph):
             # + anonymization to avoid running twice on equivalent nodes
             if sn_ano_material.anonymous_id in dict_sn_ano_id_to_ano_tracing_result:
                 ano_tracing_result = dict_sn_ano_id_to_ano_tracing_result[sn_ano_material.anonymous_id]
-                tracing_result = inspection.reverse_translate_tracing_result(sn_ano_material,ano_tracing_result)
+                try:
+                    tracing_result = inspection.reverse_translate_tracing_result(sn_ano_material,ano_tracing_result)
+                except: # not exactly exactly equivalent nodes => some weird unused names
+                    tracing_result = inspection.get_relevant_dependencies_via_grad_fn(
+                    sn_to_proceed,our_global,tmp_local)
             else:
                 tracing_result = inspection.get_relevant_dependencies_via_grad_fn(
                     sn_to_proceed,our_global,tmp_local)
-                ano_tracing_result = inspection.anonymize_tracing_result(sn_ano_material,tracing_result)
-                dict_sn_ano_id_to_ano_tracing_result[sn_ano_material.anonymous_id] = ano_tracing_result
+                try:
+                    ano_tracing_result = inspection.anonymize_tracing_result(sn_ano_material,tracing_result)
+                    dict_sn_ano_id_to_ano_tracing_result[sn_ano_material.anonymous_id] = ano_tracing_result
+                except:
+                    pass
             # Results:
             (   bwd_real_dependencies,
                 bool_bwd_requires_fwd_data,
