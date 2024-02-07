@@ -14,13 +14,9 @@ try:
     has_graphviz = True
 except ModuleNotFoundError:
     has_graphviz = False
-pip_editable_broken_imports = False
-if pip_editable_broken_imports:
-    from lowlevel import ast_add_on
-    from lowlevel import variable_info
-else:
-    from rkgb.lowlevel import ast_add_on
-    from rkgb.lowlevel import variable_info
+
+from rkgb.lowlevel import ast_add_on
+from rkgb.lowlevel import variable_info
 
 # ==============================================
 # = Auxiliary class : Node_unique_id_generator =

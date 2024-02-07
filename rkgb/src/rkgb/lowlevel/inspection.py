@@ -4,21 +4,12 @@
 
 import gc
 import torch
-pip_editable_broken_imports = False
-if pip_editable_broken_imports:
-    from lowlevel import measure
-    from lowlevel.variable_info import VariableInfo
-    from lowlevel.execution_environments import EnvironmentGenerator
-    from lowlevel.anonymize import SimplifiedNodeAnonymizationMaterial
-    from core import base
-    from core.simplified import SimplifiedNode
-else:
-    from rkgb.lowlevel import measure
-    from rkgb.lowlevel.variable_info import VariableInfo
-    from rkgb.lowlevel.execution_environments import EnvironmentGenerator
-    from rkgb.lowlevel.anonymize import SimplifiedNodeAnonymizationMaterial
-    from rkgb.core import base
-    from rkgb.core.simplified import SimplifiedNode
+from rkgb.lowlevel import measure
+from rkgb.lowlevel.variable_info import VariableInfo
+from rkgb.lowlevel.execution_environments import EnvironmentGenerator
+from rkgb.lowlevel.anonymize import SimplifiedNodeAnonymizationMaterial
+from rkgb.core import base
+from rkgb.core.simplified import SimplifiedNode
 
 
 # ==========================

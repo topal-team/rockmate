@@ -5,19 +5,12 @@
 import warnings
 import ast
 import torch
-pip_editable_broken_imports = False
-if pip_editable_broken_imports:
-    from lowlevel import ast_add_on
-    from lowlevel import constants
-    from lowlevel.variable_info import VariableInfo
-    from core import base
-    from core.forward import ForwardNode,ForwardGraph
-else:
-    from rkgb.lowlevel import ast_add_on
-    from rkgb.lowlevel import constants
-    from rkgb.lowlevel.variable_info import VariableInfo
-    from rkgb.core import base
-    from rkgb.core.forward import ForwardNode,ForwardGraph
+
+from rkgb.lowlevel import ast_add_on
+from rkgb.lowlevel import constants
+from rkgb.lowlevel.variable_info import VariableInfo
+from rkgb.core import base
+from rkgb.core.forward import ForwardNode,ForwardGraph
 
 
 

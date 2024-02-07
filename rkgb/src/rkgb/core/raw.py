@@ -27,19 +27,12 @@ import inspect
 import ast
 import torch
 from torch import Tensor
-pip_editable_broken_imports = False
-if pip_editable_broken_imports:
-    from lowlevel import ast_add_on
-    from lowlevel import constants
-    from lowlevel import preprocess_samples
-    from lowlevel import jit_patch
-    from core import base
-else:
-    from rkgb.lowlevel import ast_add_on
-    from rkgb.lowlevel import constants
-    from rkgb.lowlevel import preprocess_samples
-    from rkgb.lowlevel import jit_patch
-    from rkgb.core import base
+
+from rkgb.lowlevel import ast_add_on
+from rkgb.lowlevel import constants
+from rkgb.lowlevel import preprocess_samples
+from rkgb.lowlevel import jit_patch
+from rkgb.core import base
 
 
 class RawNode(base.Node):
@@ -278,7 +271,7 @@ class RawGraph(base.Graph):
                         "Please notify us about this case:\n",
                         ast_add_on.ast_to_str(code))
                 assignment_codes.remove(code)
-                assert(code.value,ast.Attribute)
+                assert(isinstance(code.value,ast.Attribute))
                 attr = code.value.attr
                 assert(hasattr(dynamo_result.graph_module,attr))
                 cst_name = parser.get_constant_name(dynamo_node.name)
@@ -556,7 +549,7 @@ class RawJitParserVariable:
         Take care of the "deps" relation
         """
         if self.is_attr_of_self:
-            calling_node.required_parameters.add(self._value_ast.id)
+            calling_node.required_parameters.add(self._value_ast.value.id)
         elif self.has_node:
             calling_node.deps.add(self.node)
         elif self.is_rand:

@@ -6,17 +6,11 @@ import warnings
 import inspect
 import math
 import torch
-pip_editable_broken_imports = False
-if pip_editable_broken_imports:
-    from utils.utils import Counter
-    from lowlevel import anonymize
-    from core import base
-    from core.simplified import SimplifiedGraph, SimplifiedNode
-else:
-    from rkgb.utils.utils import Counter
-    from rkgb.lowlevel import anonymize
-    from rkgb.core import base
-    from rkgb.core.simplified import SimplifiedGraph, SimplifiedNode
+
+from rkgb.utils.utils import Counter
+from rkgb.lowlevel import anonymize
+from rkgb.core import base
+from rkgb.core.simplified import SimplifiedGraph, SimplifiedNode
 
 
 class PartitionedNode(base.Node):

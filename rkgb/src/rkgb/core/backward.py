@@ -3,23 +3,13 @@
 # ==========================
 
 import torch
-pip_editable_broken_imports = False
-if pip_editable_broken_imports:
-    from lowlevel import ast_add_on
-    from lowlevel import constants
-    from lowlevel import measure
-    from lowlevel.anonymize import SimplifiedNodeAnonymizationMaterial
-    from lowlevel import inspection
-    from core import base
-    from core.simplified import SimplifiedNode,SimplifiedGraph
-else:
-    from rkgb.lowlevel import ast_add_on
-    from rkgb.lowlevel import constants
-    from rkgb.lowlevel import measure
-    from rkgb.lowlevel.anonymize import SimplifiedNodeAnonymizationMaterial
-    from rkgb.lowlevel import inspection
-    from rkgb.core import base
-    from rkgb.core.simplified import SimplifiedNode,SimplifiedGraph
+from rkgb.lowlevel import ast_add_on
+from rkgb.lowlevel import constants
+from rkgb.lowlevel import measure
+from rkgb.lowlevel.anonymize import SimplifiedNodeAnonymizationMaterial
+from rkgb.lowlevel import inspection
+from rkgb.core import base
+from rkgb.core.simplified import SimplifiedNode,SimplifiedGraph
 
 class ComputationNode(base.Node):
     _topological_number = None

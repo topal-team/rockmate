@@ -3,15 +3,9 @@
 # ==========================
 
 import torch
-pip_editable_broken_imports = False
-if pip_editable_broken_imports:
-    from utils.utils import all_non_private_attributes
-    from lowlevel import constants
-    from lowlevel import measure
-else:
-    from rkgb.utils.utils import all_non_private_attributes
-    from rkgb.lowlevel import constants
-    from rkgb.lowlevel import measure
+from rkgb.utils.utils import all_non_private_attributes
+from rkgb.lowlevel import constants
+from rkgb.lowlevel import measure
 
 # -> all the info concerning a variable/tensor which might be useful
 # -> e.g. to regenerate it, using def_info.generate_value(info,device)

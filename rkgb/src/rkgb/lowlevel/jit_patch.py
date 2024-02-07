@@ -2,11 +2,7 @@ import sys
 import warnings
 import torch
 import ast
-pip_editable_broken_imports = False
-if pip_editable_broken_imports:
-    from lowlevel import ast_add_on
-else:
-    from rkgb.lowlevel import ast_add_on
+from rkgb.lowlevel import ast_add_on
 
 torchscript_dtype_numbers = [
     torch.uint8,

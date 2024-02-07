@@ -1,13 +1,6 @@
-
-
 import torch
-pip_editable_broken_imports = False
-if pip_editable_broken_imports:
-    from lowlevel import ast_add_on
-    from core import base
-else:
-    from rkgb.lowlevel import ast_add_on
-    from rkgb.core import base
+from rkgb.lowlevel import ast_add_on
+from rkgb.core import base
 
 
 class FakeMod():

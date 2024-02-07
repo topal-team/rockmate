@@ -5,25 +5,15 @@
 import ast
 import warnings
 import torch
-pip_editable_broken_imports = False
-if pip_editable_broken_imports:
-    from lowlevel import ast_add_on
-    from lowlevel import jit_patch
-    from lowlevel import constants
-    from lowlevel import preprocess_samples
-    from lowlevel.execution_environments import EnvironmentGenerator
-    from lowlevel.variable_info import VariableInfo
-    from core import base
-    from core.raw import RawNode,RawGraph
-else:
-    from rkgb.lowlevel import ast_add_on
-    from rkgb.lowlevel import jit_patch
-    from rkgb.lowlevel import constants
-    from rkgb.lowlevel import preprocess_samples
-    from rkgb.lowlevel.execution_environments import EnvironmentGenerator
-    from rkgb.lowlevel.variable_info import VariableInfo
-    from rkgb.core import base
-    from rkgb.core.raw import RawNode,RawGraph
+
+from rkgb.lowlevel import ast_add_on
+from rkgb.lowlevel import jit_patch
+from rkgb.lowlevel import constants
+from rkgb.lowlevel import preprocess_samples
+from rkgb.lowlevel.execution_environments import EnvironmentGenerator
+from rkgb.lowlevel.variable_info import VariableInfo
+from rkgb.core import base
+from rkgb.core.raw import RawNode,RawGraph
 
 class ExceptionViewOverParameter(Exception):
     def __init__(self,view_value):
