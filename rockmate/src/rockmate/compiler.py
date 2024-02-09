@@ -1,6 +1,4 @@
-# from rkgb.utils.ast_add_on import make_str_assign, make_str_list_assign
 from rkgb.lowlevel.ast_add_on import make_str_assign, make_str_list_assign
-# from rkgb.utils import np, torch
 import torch
 import numpy as np
 from .solvers.op_schedule import (
@@ -19,7 +17,6 @@ from .solvers.op_schedule import (
     ExecCodeOp
 )
 import psutil
-# from .solvers.op_schedule import PrfOp, OflOp
 
 
 class RngState:
@@ -80,6 +77,7 @@ class RK_Storage:
         self.shapes = dict()
         self.dtypes = dict()
         self.rng_state = RngState()
+        self.gd = dict()
 
     def add_val(self, val, x):
         self.ld[val] = x
@@ -1117,3 +1115,361 @@ class Compiler:
         return fct
 
     # endregion
+
+"""
+New structure:
+    RK_storage will contain ld and gd, ld is for the 
+    temporary storage like activations and tensors generated
+    for execution (including the views of params).
+    If not parameter offloading, we assume the activations 
+    should be released by the end of each iteration. 
+    Therefore ld.clear() can be called after each iteration.
+    The parameters should be returned back to the nn.module. 
+    Optimizer states are generated during the iteration, 
+    but they are used for future potential training thus
+    should be allowed to be kept after iterations.
+    By default, it should be released during reinit process.
+"""
+
+class RK_Fct:
+    def __init__(self, storage:RK_Storage, **kwargs):
+        self.storage = storage
+        for k,v in kwargs.items():
+            setattr(self, k, v)
+
+# class Fct_del_optim_stat(RK_Fct):
+#     """
+#     Function to delete optimizer states.
+#     Only tested for PyTorch Adam so far. 
+#     """
+#     def __init__(self, storage:RK_Storage, target_name: str):
+#         super().__init__(storage, target_name=target_name)
+    
+#     def __call__(self):
+#         for k,v in self.storage.ld["optimizers"][f"Optimize_{self.target_name}"].state.items():
+#             v["exp_avg"].data = torch.empty(0)
+#             v["exp_avg_sq"].data = torch.empty(0)
+
+# class Fct_del_grad(RK_Fct):
+#     def __init__(self, storage:RK_Storage, target_name: str):
+#         super().__init__(storage, target_name=target_name)
+#         self.target_name = target_name
+    
+#     def __call__(self):
+#         self.storage.ld[self.target_name].grad = None
+    
+# class Fct_del_data(RK_Fct):
+#     def __init__(self, storage:RK_Storage, target_name: str):
+#         super().__init__(storage, target_name=target_name)
+#         self.target_name = target_name
+    
+#     def __call__(self):
+#         self.storage.ld[self.target_name].data = torch.empty(0)
+    
+# class Fct_del_base(RK_Fct):
+#     def __init__(self, storage:RK_Storage, target_name: str):
+#         super().__init__(storage, target_name=target_name)
+#         self.target_name = target_name
+    
+#     def __call__(self):
+#         self.storage.ld[self.target_name]._base.data = torch.empty(0)
+
+# class Fct_del_var(RK_Fct):
+#     def __init__(self, storage:RK_Storage, target_name: str):
+#         super().__init__(storage, target_name=target_name)
+#         self.target_name = target_name
+    
+#     def __call__(self):
+#         self.storage.ld[self.target_name] = torch.empty(0)
+
+class Fct_del(RK_Fct):
+    def __init__(self, storage:RK_Storage, target_name: str, del_mode="data"):
+        super().__init__(storage, target_name=target_name)
+        self.target_name = target_name
+        self.del_fcts = {
+            "data":self.del_data,
+            "base":self.del_base,
+            "grad":self.del_grad,
+            "var":self.del_var,
+            "optim_states":self.del_optim_states}
+        self.del_mode = del_mode
+    
+    def __call__(self):
+        self.del_fcts[self.del_mode]()
+
+    def del_data(self):
+        self.storage.ld[self.target_name].data = torch.empty(0)
+    def del_grad(self):
+        self.storage.ld[self.target_name].grad = None
+    def del_base(self):
+        self.storage.ld[self.target_name]._base.data = torch.empty(0)
+    def del_var(self):
+        self.storage.ld[self.target_name] = torch.empty(0)
+    def del_optim_states(self):
+            for k,v in self.storage.ld["optimizers"][f"Optimize_{self.target_name}"].state.items():
+                v["exp_avg"].data = torch.empty(0)
+                v["exp_avg_sq"].data = torch.empty(0)
+
+class Fct_gen_fake_data(RK_Fct):
+    def __init__(self, storage:RK_Storage, target_name: str):
+        super().__init__(storage, target_name=target_name)
+        self.target_name = target_name
+    
+    def __call__(self):
+        with torch.cuda.stream(self.gd["main_stream"]):
+            m = (
+                self.storage.gd["cmeta"]
+                if self.storage.dtypes[self.target_name].is_complex
+                else self.storage.gd["meta"]
+            )
+            s = self.storage.shapes[self.target_name]
+            if s == torch.Size([]):
+                x = m.sum()  # easy way to obtain a Tensor of shape []
+            else:
+                x = m.expand(np.prod(s)).view(s)
+            self.storage.ld[self.target_name].data = x
+
+class Fct_detach(RK_Fct):
+    def __init__(self, storage:RK_Storage, target_name: str):
+        super().__init__(storage, target_name=target_name)
+        self.target_name = target_name
+
+    def fake_detach(self):
+        """
+        For certain in-place operations, detach could lead to wrong memory usage.
+        Fake detach is to solve it by merging the operations.
+        TODO: test on ResNet
+        """
+        self.storage.ld[self.target_name] = self.storage.ld[f"_{self.target_name}"]
+        self.storage.ld[f"_{self.target_name}"] = torch.empty(0)
+    
+    def __call__(self):
+        with torch.cuda.stream(self.gd["main_stream"]):
+            self.storage.ld[self.target_name].data = self.storage.ld[f"_{self.target_name}"].data
+
+class Fct_run_bwd(RK_Fct):
+    def __init__(self, 
+                 storage:RK_Storage, 
+                 target_name: str, 
+                 retain_graph=False, 
+                 input_names=[], 
+                 **kwargs):
+        super().__init__(storage, **kwargs)
+        self.target_name = target_name,
+        self.retain_graph = retain_graph,
+        self.input_names = input_names,
+
+    def __call__(self):
+        with torch.cuda.stream(self.storage.gd["main_stream"]):
+            inputs = [self.storage.ld[name] for name in self.input_names]
+            self.storage.ld[f"_{self.target_name}"].backward(
+                self.storage.ld[self.target_name].grad,
+                inputs=inputs,
+                retain_graph=self.retain_graph,
+            )
+
+class Fct_run_fwd(RK_Fct):
+    def __init__(self, 
+                 storage:RK_Storage, 
+                 target_name: str, 
+                 code,
+                 no_save_list=[],
+                 fwd_mode = "with_grad",
+                 **kwargs):
+        super().__init__(storage, **kwargs)
+        self.target_name = target_name,
+        self.code = code,
+        self.no_save_list = no_save_list
+        self.fwd_fct = {"with_grad":self.fwd_with_grad,
+                        "no_grad":self.fwd_no_grad}
+        self.fwd_mode = fwd_mode
+    
+    def fwd_with_grad(self):
+        with torch.autograd.graph.saved_tensors_hooks(
+                self.fct_get_pack(self.no_save_list), self.fct_get_unpack()
+            ):
+            exec(self.code, self.storage.gd, self.storage.ld)
+
+    def fwd_no_grad(self):
+        with torch.no_grad():
+            exec(self.code, self.storage.gd, self.storage.ld)
+    
+    def __call__(self):
+        with torch.cuda.stream(self.storage.gd["main_stream"]):
+            self.fwd_fct[self.fwd_mode]()
+
+    def fct_get_pack(self, no_save_list, sanity_check=False):
+        # no_save_list contains a list of names
+        def pack(x):
+            for i, c in enumerate(no_save_list):
+                if self.storage.ld[c].data_ptr() == x.data_ptr():
+                    # print(c)
+                    if sanity_check:
+                        assert torch.equal(
+                            self.storage.ld[c].data.as_strided_(
+                                x.shape, x.stride(), x.storage_offset()
+                            ),
+                            x,
+                        )
+                    return (
+                        c,
+                        x.shape,
+                        x.stride(),
+                        x.storage_offset(),
+                        # x.clone(),
+                    )
+            return x
+
+        return pack
+
+    def fct_get_unpack(self):
+        def unpack(x):
+            if isinstance(x, tuple):
+                return self.storage.ld[x[0]].data.as_strided_(*x[1:4])
+            return x
+
+        return unpack
+
+
+class Fct_get_shape(RK_Fct):
+    def __init__(self, 
+                 storage:RK_Storage, 
+                 target_name: str, 
+                 **kwargs):
+        super().__init__(storage, **kwargs)
+        self.target_name = target_name
+
+    def __call__(self):
+        with torch.cuda.stream(self.storage.gd["main_stream"]):
+            self.storage.shapes[self.target_name] = self.storage.ld[self.target_name].shape
+            self.storage.dtypes[self.target_name] = self.storage.ld[self.target_name].dtype
+
+class Fct_optimize(RK_Fct):
+    def __init__(self, 
+                 storage:RK_Storage, 
+                 target_name: str, 
+                 del_grad_list: list = [],
+                 **kwargs):
+        super().__init__(storage, **kwargs)
+        self.target_name = target_name
+        self.del_grad_list = del_grad_list
+
+    def __call__(self):
+        self.storage.ld["optimizers"][self.target_name].step()
+
+
+class Fct_mem_alloc(RK_Fct):
+    def __init__(self, 
+                 storage:RK_Storage, 
+                 target_name: str, 
+                 alloc_mode = "tensor",
+                 **kwargs):
+        super().__init__(storage, **kwargs)
+        self.target_name = target_name,
+        self.alloc_fct = {"tensor":self.alloc_tensor,
+                          "optim_states":self.alloc_optim_states}
+        self.alloc_mode = alloc_mode
+    
+    def alloc_optim_states(self):
+        for k,v in self.storage.ld["optimizers"][f"Optimize_{self.target_name}"].state.items():
+            v["exp_avg"].data = torch.zeros_like(self.storage.ld["optimizers"][f"exp_avg_{self.target_name}"], device=self.gd["device"])
+            v["exp_avg_sq"].data = torch.zeros_like(self.storage.ld["optimizers"][f"exp_avg_sq_{self.target_name}"], device=self.gd["device"])
+
+    def alloc_tensor(self):
+        self.storage.ld[self.target_name].data = torch.empty(
+                    self.storage.shapes[self.target_name], 
+                    dtype=self.storage.dtypes[self.target_name], device=self.gd["device"]
+                )
+        
+    def __call__(self):
+         with torch.cuda.stream(self.storage.gd["main_stream"]):
+            self.alloc[self.alloc_mode]()
+
+
+class Fct_offload(RK_Fct):
+    def __init__(self, 
+                 storage:RK_Storage, 
+                 target_name: str, 
+                 offload_mode = "param",
+                 stream = "offload_stream",
+                 **kwargs):
+        super().__init__(storage, **kwargs)
+        self.target_name = target_name,
+        self.offload_fct = {"param":self.offload_param,
+                          "grad":self.offload_grad,
+                          "optim_states":self.offload_optim_states}
+        self.offload_mode = offload_mode
+        self.stream = stream
+
+    def offload_param(self):
+        self.storage.ld[f"cpu_{self.target_name}"].data.copy_(
+                self.storage.ld[self.target_name].data,
+                non_blocking=True,
+            )
+    def offload_grad(self):
+        self.storage.ld[f"cpu_{self.target_name}"].grad.data.copy_(
+                    self.storage.ld[self.target_name].grad,
+                    non_blocking=True,
+                )
+            
+    def offload_optim_states(self):
+        for k,v in self.storage.ld["optimizers"][f"Optimize_{self.target_name}"].state.items():
+            self.storage.ld["optimizers"][f"exp_avg_{self.target_name}"].copy_(v["exp_avg"], non_blocking=True)
+            self.storage.ld["optimizers"][f"exp_avg_sq_{self.target_name}"].copy_(v["exp_avg_sq"], non_blocking=True)
+
+    def __call__(self):
+         with torch.cuda.stream(self.storage.gd[self.stream]):
+            self.offload_fct[self.offload_mode]()
+
+                    
+class Fct_prefetch(RK_Fct):
+    def __init__(self, 
+                 storage:RK_Storage, 
+                 target_name: str, 
+                 prefetch_mode = "param",
+                 stream = "prefetch_stream",
+                 **kwargs):
+        super().__init__(storage, **kwargs)
+        self.target_name = target_name,
+        self.prefetch_fct = {"param":self.prefetch_param,
+                          "optim_states":self.prefetch_optim_states}
+        self.prefetch_mode = prefetch_mode
+        self.stream = stream
+
+    def prefetch_param(self):
+        self.storage.ld[f"cpu_{self.target_name}"].data.copy_(
+                self.storage.ld[self.target_name].data,
+                non_blocking=True,
+            )
+    # def prefetch_grad(self):
+    #     self.storage.ld[f"cpu_{self.target_name}"].grad.data.copy_(
+    #                 self.storage.ld[self.target_name].grad,
+    #                 non_blocking=True,
+    #             )
+    def prefetch_optim_states(self):
+        for k,v in self.storage.ld["optimizers"][f"Optimize_{self.target_name}"].state.items():
+            self.storage.ld["optimizers"][f"exp_avg_{self.target_name}"].copy_(v["exp_avg"], non_blocking=True)
+            self.storage.ld["optimizers"][f"exp_avg_sq_{self.target_name}"].copy_(v["exp_avg_sq"], non_blocking=True)
+    
+    def __call__(self):
+         with torch.cuda.stream(self.storage.gd[self.stream]):
+            self.prefetch_fct[self.prefetch_mode]()
+
+class Fct_synchronize(RK_Fct):
+    def __init__(self, storage: RK_Storage, 
+                 stream=None,
+                 **kwargs):
+        super().__init__(storage, **kwargs)
+        self.stream = stream
+
+    def wait_stream(self):
+        torch.cuda.stream(self.storage.gd[self.stream]).synchronize()
+
+    def sync_all(self):
+        torch.cuda.synchronize()
+
+    def __call__(self):
+        if self.stream: 
+            self.wait_stream()
+        else:
+            self.sync_all()
