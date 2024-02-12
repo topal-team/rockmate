@@ -2,6 +2,8 @@
 # from rkgb.Ptools import P_graph, P_node
 # from rkgb.Ktools import K_graph, K_C_node, K_D_node
 # from rkgb.Htools import *
+from rkgb.core.base import Node
+from rkgb.core.backward import ComputationNode, AllocationNode
 from collections import namedtuple
 from copy import deepcopy
 import warnings
@@ -10,12 +12,12 @@ import torch
 from rkgb.lowlevel.ast_add_on import make_str_list_assign
 
 class Allocation:
-    def __init__(self, name, alloc_type="", mem=0, info=dict(), dtype=torch.float32, size=None):
+    def __init__(self, target_name, alloc_type="", mem=0, info=dict(), dtype=torch.float32, size=None):
         """
         Allocation type should be in activation/paramters/buffer
         """
-        self.name = name
-        self.allo_type = alloc_type
+        self.target_name = target_name
+        self._alloc_type = alloc_type
         self.mem = mem
         self.info = info
         self.dtype = dtype
@@ -26,21 +28,17 @@ class Allocation:
         else:
             self.size = round(self.mem/self.itemsize)#element size
 
+    @property
+    def name(self):
+        return f"{self.target_name}"
+
+    @property
+    def alloc_type(self):
+        return self._alloc_type
+
     def __repr__(self):
         return self.name
-
-
-class Activation(Allocation):
-    def __init__(self, kdn, dtype=torch.float32):
-        super().__init__(
-            name=kdn.name,
-            alloc_type="Activation",
-            mem=kdn.mem,
-            info=kdn.info,
-            dtype=dtype,
-        )
-        self.kdn = kdn
-
+    
     def __copy__(self):
         cls = self.__class__
         result = cls.__new__(cls)
@@ -52,7 +50,7 @@ class Activation(Allocation):
         result = cls.__new__(cls)
         memo[id(self)] = result
         for k, v in self.__dict__.items():
-            if k == "kdn":  # do not deepcopy kn
+            if isinstance(v, Node):
                 setattr(result, k, v)
             else:
                 setattr(result, k, deepcopy(v, memo))
@@ -60,40 +58,40 @@ class Activation(Allocation):
         return result
 
 
+class Activation(Allocation):
+    def __init__(self, 
+                 anode:AllocationNode,
+                 dtype=torch.float32):
+        super().__init__(
+            target_name=anode.name,
+            alloc_type="activation",
+            mem=anode.mem,
+            info=anode.info,
+            dtype=dtype,
+        )
+        self.kdn = anode
+        self.anode = anode
+
 class Parameter(Allocation):
     def __init__(self, pnode, grad=False, is_optimizer_states=False):
         super().__init__(
-            name=pnode.param_name + "_grad"*grad+"_optim_states"*is_optimizer_states,
-            alloc_type="Parameter",
+            target_name=pnode.param_name,
+            alloc_type="param",# + "_grad"*grad+"_optim_states"*is_optimizer_states,
             mem=pnode.mem + pnode.mem*is_optimizer_states,
             info=pnode.info,
             dtype=pnode.info.dtype,
         )
         self.pnode = pnode
-        self.grad = grad
+        self.is_grad = grad
         self.is_optimizer_states = is_optimizer_states
-    
-    def __copy__(self):
-        cls = self.__class__
-        result = cls.__new__(cls)
-        result.__dict__.update(self.__dict__)
-        return result
-
-    def __deepcopy__(self, memo):
-        cls = self.__class__
-        result = cls.__new__(cls)
-        memo[id(self)] = result
-        for k, v in self.__dict__.items():
-            if k == "pnode":  # do not deepcopy kn
-                setattr(result, k, v)
-            else:
-                setattr(result, k, deepcopy(v, memo))
-
-        return result
     
     @property
     def param_name(self):
         return self.pnode.param_name
+    
+    @property
+    def alloc_type(self):
+        return "param"# + "_grad"*self.grad+"_optim_states"*self.is_optimizer_states
 
 class Buffer(Allocation):
     def __init__(self, name, mem=0, info=dict(), dtype=torch.float32, size=None):
@@ -104,44 +102,49 @@ class Buffer(Allocation):
 
 
 class Op:
-    def __init__(self, name, time=0, disabled=False, overhead=0):
+    def __init__(self, target_name, time=0, disabled=False, overhead=0):
         """
         Op type should be in Compute/Delete/Mapping/Allocate/Offload/Prefetch
         Compute/Delete/Mapping/Allocate happens in the main stream
         """
-        self._name = name
+        self._target_name = target_name
         self.disabled = disabled
         self.overhead = overhead
         self._time = time
+        self.fct_list = []
+        self._op_type = type(self).__name__
 
     def __repr__(self):
-        return "Disabled_"*self.disabled + self.name
+        return f"{'Disabled_'*self.disabled}{self.name}"
     
+    @property
+    def target_name(self):
+        return self._target_name
+
     @property
     def time(self):
         return self._time
     
     @property
     def name(self):
-        return self._name
+        return f"{self.op_type}({self.target_name})"
 
-    @name.setter
-    def name(self, value):
-        self._name = value
+    # @name.setter
+    # def name(self, value):
+    #     self._name = value
 
-class SynchronizeOp(Op):
-    def __init__(self, name="", disabled=False):
-        super().__init__("Sync_"+name, disabled=disabled)
+    @property
+    def op_type(self):
+        return self._op_type
 
-class ComputeOp(Op):
-    def __init__(self, kcn, fast_forward=False, disabled=False, detach=True):
-        super().__init__(kcn.name, disabled=disabled)
-        self.fast_forward = fast_forward
-        self.detach = detach
-        self.target = kcn
-        self.overhead = kcn.mem_overhead
-        # self.time = kcn.time if kcn.time is not None else 0
+    @op_type.setter
+    def op_type(self, value):
+        self._op_type = value
 
+    def __call__(self):
+        for f in self.fct_list:
+            f()
+    
     def __copy__(self):
         cls = self.__class__
         result = cls.__new__(cls)
@@ -153,41 +156,64 @@ class ComputeOp(Op):
         result = cls.__new__(cls)
         memo[id(self)] = result
         for k, v in self.__dict__.items():
-            if k == "kcn" or k=="target":  # do not deepcopy kn
+            if isinstance(v, Node):
                 setattr(result, k, v)
             else:
                 setattr(result, k, deepcopy(v, memo))
 
         return result
-    
+
+
+class SynchronizeOp(Op):
+    def __init__(self, name="", disabled=False):
+        super().__init__(name, disabled=disabled)
+        self.op_type = "Synchronize"
+
+class ComputeOp(Op):
+    def __init__(self, 
+                 cnode: ComputationNode,
+                 fast_forward=False, disabled=False, detach=True):
+        super().__init__(cnode.main_target, disabled=disabled)
+        self.fast_forward = fast_forward
+        self.detach = detach
+        self.target = cnode
+        self.overhead = cnode.mem_overhead
+
     @property
     def time(self):
-        # kcn can be replaced during translation
-        return self.kcn.time if self.kcn.time is not None else 0
-    
-    @property
-    def name(self):
-        return self.kcn.name
+        # cnode can be replaced during translation
+        return self.target.time if self.target.time is not None else 0
     
     @property
     def kcn(self):
+        # TODO: deprecated attribute
         return self.target
+    
+    @property
+    def op_type(self):
+        cnode_type = "FWD" if self.target.is_fwd else "BWD"
+        return f"Compute_{cnode_type}"
+
+    @property
+    def target_name(self):
+        return self.target.main_target
 
 
 class DeleteOp(Op):
-    def __init__(self, alloc: Allocation, disabled=False, grad=False, is_optimizer_states=False):
-        super().__init__("Delete_" + alloc.name+"_grad"*grad, disabled=disabled)
+    def __init__(self, alloc: Allocation, disabled=False):
+        super().__init__(alloc.name, disabled=disabled)
         self.target = alloc
-        self.grad = grad
-        self.is_optimizer_states = is_optimizer_states
+        self.op_type = f"Delete_{alloc.alloc_type}"
+        # self.grad = grad
+        # self.is_optimizer_states = is_optimizer_states
 
-    def __repr__(self):
-        return "Disabled_"*self.disabled+"Delete_" + self.target.name+"grad"*self.grad+"_optim_stats"*self.is_optimizer_states
+    # def __repr__(self):
+    #     return "Disabled_"*self.disabled+"Delete_" + self.target.name+"grad"*self.grad+"_optim_stats"*self.is_optimizer_states
     
-    @property
-    def name(self):
-        # name changes with target is changed during translation
-        return "Delete_" + self.target.name
+    # @property
+    # def name(self):
+    #     # name changes with target is changed during translation
+    #     return "Delete_" + self.target.name
 
 
 class MappingOp(Op):
@@ -215,8 +241,9 @@ class MappingOp(Op):
 
 class AllocateOp(Op):
     def __init__(self, alloc: Allocation, disabled=False, is_optimizer_states=False):
-        super().__init__("Allocate_" + alloc.name, disabled=disabled)
+        super().__init__(alloc.name, disabled=disabled)
         self.target = alloc
+        self.op_type = f"Allocate_{alloc.alloc_type}"
         self.is_optimizer_states=is_optimizer_states
 
 class OffloadOp(Op):
@@ -224,56 +251,55 @@ class OffloadOp(Op):
         self,
         alloc: Allocation,
         indices: tuple = (0,None),
-        before: Op = None,
-        after: Op = None,
         disabled: bool = False,
-        grad:bool = False,
-        is_optimizer_states:bool = False,
+        # grad: bool = False,
+        # is_optimizer_states: bool = False,
         time:float = 0,
     ):
-        super().__init__("Offload_" + alloc.name+"_grad"*grad, disabled=disabled)
+        super().__init__(alloc.name, disabled=disabled)
         self.target = alloc
         self.indices = indices
         self.disabled = disabled
-        self.before = before
-        self.after = after
-        self.grad = grad
-        self.is_optimizer_states = is_optimizer_states
+        # self.grad = grad
+        # self.is_optimizer_states = is_optimizer_states
         self._time = time
-
-    def __repr__(self):
-        return "Disabled" * self.disabled + f"Offload_{self.target}" +"_grad"*self.grad+"_optim_stats"*self.is_optimizer_states
-
+        self.op_type = f"Offload_{alloc.alloc_type}"
 
 class PrefetchOp(Op):
     def __init__(
         self,
         alloc: Allocation,
         indices: tuple = (0,None),
-        before: Op = None,
-        after: Op = None,
         disabled: bool = False,
-        is_optimizer_states:bool = False,
+        # is_optimizer_states: bool = False,
         time:float = 0,
     ):
-        super().__init__("Prefetch_" + alloc.name, disabled=disabled)
+        super().__init__(alloc.name, disabled=disabled)
         self.target = alloc
         self.indices = indices
         self.disabled = disabled
-        self.before = before
-        self.after = after
-        self.is_optimizer_states = is_optimizer_states
+        # self.is_optimizer_states = is_optimizer_states
         self._time = time
-
-    def __repr__(self):
-        return "Disabled" * self.disabled + f"Prefetch_{self.target}"+"_optim_stats"*self.is_optimizer_states
-
+        self.op_type = f"Prefetch_{alloc.alloc_type}"
+    
 class OptimizeOp(Op):
-    def __init__(self, name, list_params, alloc=None, disabled=False,time=0, overhead=0):
-        super().__init__("Optimize_" + name, disabled=disabled, overhead=overhead)
+    def __init__(self, 
+                 list_params, 
+                 cpu=False,
+                 alloc=None, 
+                 disabled=False,
+                 time=0, 
+                 overhead=0,
+                 ):
         self.list_params = list_params
+        super().__init__(self.target_name, disabled=disabled, overhead=overhead)
         self.target = alloc or None
         self._time = time
+        self.op_type = f"Optimize_{'cpu'*cpu}"
+
+    @property
+    def target_name(self):
+        return f"{','.join(self.list_params)}"
 
 class ExecCodeOp(Op):
     def __init__(self, name, code, time=0, disabled=False, overhead=0):
@@ -337,8 +363,9 @@ class Step():
             # Assume prefetch ops will not change
             code = ""
             for op in self.prf_ops:
-                if op.is_optimizer_states:continue
-                code += op.target.pnode.get_code()+"\n"
+                # if op.is_optimizer_states:continue
+                if isinstance(op.target, Parameter) and not op.target.is_optimizer_states:
+                    code += op.target.pnode.get_code()+"\n"
             self.view_param = ExecCodeOp(f"view_{op.name}",
                                         code=code)
     
@@ -665,8 +692,7 @@ class OpSchedule:
                 
         for op in self.op_list:
             if isinstance(op, DeleteOp):
-                alive_status[op.target.name+"_grad"*op.grad#+"_optim_states"*op.is_optimizer_states
-                             ] = False
+                alive_status[op.target.name] = False
             elif isinstance(op, ComputeOp):
                 if op.kcn.name in self.bwd2param:
                     for kdn_name in self.bwd2param[op.kcn.name]:
@@ -680,8 +706,7 @@ class OpSchedule:
                 alive_list.append(alive_status.copy())
                 continue
             if isinstance(op, DeleteOp):
-                alive_status[op.target.name+"_grad"*op.grad#+"_optim_states"*op.is_optimizer_states
-                             ] = False
+                alive_status[op.target.name] = False
             elif isinstance(op, ComputeOp):
                 # compute op should not be disabled except loss which is useful for alive status
                 for kdn in op.kcn.users:

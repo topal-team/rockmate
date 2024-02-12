@@ -1441,9 +1441,9 @@ class ModelPULP:
             # for (t,k,op) in del_ops:
             #     if op.target.name == p:
             #         op.grad = True
-            del_ops.append((t,k,DeleteOp(Parameter(parameters[p]), grad=True)))
+            del_ops.append((t,k,DeleteOp(Parameter(parameters[p], grad=True))))
             i = self.active_steps.index((t,k))+1# TODO: distribute cpu optimization based on time
-            op = OptimizeOp(name="cpu_"+p,list_params=["cpu_"+p], alloc=Parameter(parameters[p]),
+            op = OptimizeOp(list_params=[p], cpu=True, alloc=Parameter(parameters[p]),
                             time=parameters[p].mem/self.cpu_optimize_speed,
                             )
             opt_ops.append((*self.active_steps[i], op))
@@ -1452,11 +1452,11 @@ class ModelPULP:
 
             #if cpu optimize, do not keep w after bwd
         def apply_gpu_optimize(p):
-            op = OptimizeOp(name=p,list_params=[p], alloc=Parameter(parameters[p]),
+            op = OptimizeOp(list_params=[p], alloc=Parameter(parameters[p]),
                             time = parameters[p].mem/self.gpu_optimize_speed,
                             overhead=parameters[p].mem*self.optimizer_overhead_factor)
             opt_ops.append((bwd_i, bwd_i, op))# optimize after bwd
-            del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]), grad=True)))
+            del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p], grad=True))))
             
 
         assert (bwd_i, bwd_i) in self.active_steps
