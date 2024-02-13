@@ -296,6 +296,7 @@ class OptimizeOp(Op):
         self.target = alloc or None
         self._time = time
         self.op_type = f"Optimize_{'cpu'*cpu}"
+        self.is_cpu = cpu
 
     @property
     def target_name(self):
