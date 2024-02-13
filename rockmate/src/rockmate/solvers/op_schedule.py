@@ -420,6 +420,91 @@ class Step():
         return max(t)
 
 
+class AliveStatus():
+    """
+    Dynamic alive status of different allocations.
+    Functions: 
+    1. Easy to check if one allocation is alive for a range of steps
+    2. East to update when operations are changed
+    3. Return peak memory fast.
+    Assumption:
+    1. Number of operations will not be changed (operations can be disabled).
+    2. Number of allocations will not be changed.
+    """
+    def __init__(self, alive_list, dict_alloc, alloc_categories={}):
+        self.dict_alloc = dict_alloc
+        self.alloc_names = [alloc_name for alloc_name in alive_list[0].keys()]
+        self.name2key = {
+            alloc_name:i for i, alloc_name in enumerate(self.alloc_names)
+            }
+        alloc_categories["activation"] = [alloc_name for alloc_name in alive_list[0].keys()
+                                            if isinstance(self.dict_alloc[alloc_name], Activation)]
+        alloc_categories["parameter"] = [alloc_name for alloc_name in alive_list[0].keys()
+                                            if isinstance(self.dict_alloc[alloc_name], Parameter)]
+        self.categories = {}
+        for k,v in alloc_categories:
+            self.categories[k] = np.array([self.alloc_names.index(alloc_name) for alloc_name in v])
+        self.length = len(alive_list)
+        self.alloc_mem_np = np.array([self.dict_alloc[alloc_name].mem 
+                                      for alloc_name in self.alloc_names])
+        self.alive_np = np.array([self.length, ])
+
+    def _alive(self, key:int, idx_range:range):
+        if isinstance(idx_range, int):
+            idx_range = range(idx_range, idx_range+1)
+        return self.alive_np[idx_range, key]
+    
+    # def _mem(self, idx:int, category=None):
+    #     if category:
+    #         return np.sum((self.alive_np[idx]*self.alloc_mem_np)[self.categories[category]])
+    #     return np.matmul(self.alive_np[idx], self.alloc_mem_np)
+    
+    def _mem(self, idx_range:range, category=None):
+        """
+        Return a (idx_range,)-shape array of memory over the steps range.
+        """
+        if category:
+            if isinstance(idx_range, int):
+                idx_range = range(idx_range, idx_range+1)
+            return np.sum((self.alive_np[idx_range]*
+                           self.alloc_mem_np)[:, self.categories[category]], 
+                           axis=1)
+        return np.matmul(self.alive_np[idx_range], self.alloc_mem_np)
+
+    def act_mem(self, idx_range, category="activation"):
+        return self._mem(idx_range, category=category)
+
+    def param_mem(self, idx_range, category="parameter"):
+        return self._mem(idx_range, category=category)
+
+    def save_mem(self, idx_range = None, act_multiplier=1):
+        if idx_range is None:
+            idx_range = range(0, self.length+1)
+        return act_multiplier*self.act_mem(idx_range)+self.param_mem(idx_range)
+    
+    def _alive(self, key:int, idx_range:range):
+        if isinstance(idx_range, int):
+            idx_range = range(idx_range, idx_range+1)
+        return self.alive_np[idx_range, key]
+
+    def alive_once(self, key:int, idx_range:range):
+        # being alive AT LEAST once
+        if isinstance(idx_range, int):
+            idx_range = range(idx_range, idx_range+1)
+        if isinstance(key, str):
+            key = self.name2key[key]
+        return bool(max(self._alive[key, idx_range]))
+
+    def alive_always(self, key:int, idx_range:range):
+        # being alive AT LEAST once
+        if isinstance(idx_range, int):
+            idx_range = range(idx_range, idx_range+1)
+        if isinstance(key, str):
+            key = self.name2key[key]
+        return bool(min(self._alive[key, idx_range]))
+        
+    
+    
 class OpSchedule:
     solver = None
 
