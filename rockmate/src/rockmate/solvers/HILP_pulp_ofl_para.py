@@ -1658,9 +1658,9 @@ class ModelPULP:
                 #     pass
                 for p in select_paras:
                     op = OffloadOp(alloc=Parameter(parameters[p],
-                                                   is_optimizer_states=True), indices=(0, None),
+                                                   is_optim_states=True), indices=(0, None),
                                    time=parameters[p].mem/self.bandwidthOfl/self.gcd*self.optimizer_states_factor,
-                                   is_optimizer_states=True)
+                                   is_optim_states=True)
                     ofl_ops.append((t, k, op))
                     Offloaded[p] = 1
 
@@ -1683,8 +1683,8 @@ class ModelPULP:
                 #     pass
                 for p in select_paras:
                     del_ops.append((t, k, DeleteOp(Parameter(parameters[p],
-                                                             is_optimizer_states=True),
-                                                   is_optimizer_states=True)))
+                                                             is_optim_states=True),
+                                                   is_optim_states=True)))
                     Alive[p] = 0
             if current_alive_size < next_alive_size or k_==bwd_i:
                 # if w == 15:print(self.active_steps[k_]==bwd_i)
@@ -1714,11 +1714,11 @@ class ModelPULP:
                 #     pass
                 for p in select_paras:
                     prf_ops.append((t, k, AllocateOp(Parameter(parameters[p],
-                                                               is_optimizer_states=True),
-                                                     is_optimizer_states=True)))
+                                                               is_optim_states=True),
+                                                     is_optim_states=True)))
                     op = PrefetchOp(alloc=Parameter(parameters[p]), indices=(0, None),
                                     time=parameters[p].mem/self.bandwidthPrf/self.gcd*self.optimizer_states_factor,
-                                    is_optimizer_states=True)
+                                    is_optim_states=True)
                     prf_ops.append((t, k, op))
                     Alive[p] = 1
             if k_==bwd_i:assert 0 not in Alive.values()
