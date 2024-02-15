@@ -112,6 +112,10 @@ class RkLpVariable(LpVariable):
         if self.varValue:return str(self.varValue)
         return super().__repr__()
 
+    def prefill(self, value):
+        self.setInitialValue(value)
+        self.fixValue()
+
 class ModelPULP:
     """
     Build the ILP model by given Hgraph and budget.
@@ -339,8 +343,8 @@ class ModelPULP:
             for k in range(T):
                 if k not in self.krange(t):
                     for o in range(self.nR[k]):
-                        self.Comp[t, k, o] = 0
-                    self.sumComp[t, k] = 0
+                        self.Comp[t, k, o].prefill(0)
+                    self.sumComp[t, k].prefill(0)
 
         # Sp for saved Phantoms, option-related
         # self.AliveP = [
@@ -366,7 +370,7 @@ class ModelPULP:
         for j, list_sched in enumerate(self.list_list_sched):
             for o in range(len(list_sched)):
                 if (0,j,o) not in self.AliveP:
-                    self.AliveP[0,j,o] = 0
+                    self.AliveP[0,j,o].prefill(0)
                 for t in range(1,T + 1):
                     if (t,j,o) not in self.AliveP:
                         self.AliveP[t,j,o] = self.AliveP[t-1,j,o]
@@ -385,7 +389,7 @@ class ModelPULP:
         self.sumAliveP = {}
         for j in range(J):
             for t in range(T + 1):
-                self.sumAliveP[j, t] = lpSum(
+                self.sumAliveP[t,j] = lpSum(
                     self.AliveP[t, j, o] for o in range(len(self.list_list_sched[j]))
                 )
         self.active_stages = dict()
@@ -405,7 +409,7 @@ class ModelPULP:
                        if t-1 in self.active_stages[i]], cat="Binary"
         )  # activation
         for c, (k, i) in enumerate(self.create_list):
-            self.AliveA[0,c] = 0
+            self.AliveA[0,c].prefill(0)
             for t in range(1, self.T):
                 if (t,c) not in self.AliveA:
                     self.AliveA[t,c] = self.AliveA[t-1,c]
@@ -426,7 +430,7 @@ class ModelPULP:
         )  # tensor that can be shared by acts
         for i in range(I):
             if (0,i) not in self.AliveT:
-                self.AliveT[0,i] = 0
+                self.AliveT[0,i].prefill(0)
             for t in range(1, self.T):
                 if (t,i) not in self.AliveT:
                     self.AliveT[t,i] = self.AliveT[t-1,i]
@@ -454,10 +458,10 @@ class ModelPULP:
         for t in range(T):
             for i in range(Cr):
                 if self.create_list[i][0] not in self.krange(t):
-                    self.create[t, i] = 0
+                    self.create[t, i].prefill(0)
             for i in range(De):
                 if self.delete_list[i][0] not in self.krange(t):
-                    self.delete[t, i] = 0
+                    self.delete[t, i].prefill(0)
             if self.single_fwd:
                 for d in range(De):
                     (k, i) = self.delete_list[d]
@@ -467,7 +471,7 @@ class ModelPULP:
                         pass
                 #     # elif t<=self.loss_idx:
                 #     else:
-                #         self.delete[t, d] = 0
+                #         self.delete[t, d].prefill(0)
                 #         pass
 
                 # for c in range(Cr):
@@ -475,7 +479,7 @@ class ModelPULP:
                 #     if k == min(_deps_d[i]) and k == t:
                 #         self.create[t, c] = 1
                 #     else:
-                #         self.create[t, c] = 0
+                #         self.create[t, c].prefill(0)
 
         self.W = W = len(self.sub_clusters)
         def get_parameters(hierarchical_nodes):
@@ -609,6 +613,20 @@ class ModelPULP:
             )
             self.PrfO = RkLpVariable.dicts(
                 "PrfO",
+                [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
+                cat="Continuous",
+                lowBound=0,
+                upBound=1,
+            )
+            self.OflP = RkLpVariable.dicts(
+            "OflP",
+            [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
+            cat="Continuous",
+            lowBound=0,
+            upBound=1,
+            )
+            self.PrfP = RkLpVariable.dicts(
+                "PrfP",
                 [(t, k, w) for t in range(T) for k in self.krange(t) for w in range(W)],
                 cat="Continuous",
                 lowBound=0,
@@ -752,7 +770,7 @@ class ModelPULP:
         for t in range(T + 1):
             for j in range(J):
                 self.md += (
-                    self.sumAliveP[j, t] <= 1
+                    self.sumAliveP[t,j] <= 1
                 )  # assuming two copies of saved tensors won't be kept at the same time
 
         #### Option-free constraints: from rk-checkmate
@@ -833,7 +851,7 @@ class ModelPULP:
         # self.md += (self.create[12,58] == 0)
         #### Offload constraints
         if self.with_parameters:
-            self.add_parameter_constraints()
+            self.add_offload_constraints()
 
         ##### Memory constraints
         # we don't keep eyes on the alive status all the time
@@ -1181,14 +1199,14 @@ class ModelPULP:
             for k in range(self.T):                
                 for w in range(self.W):
                     if k not in self.krange(t):
-                        self.PrfW[t, k, w] = 0
-                        self.OflW[t, k, w] = 0
+                        self.PrfW[t, k, w].prefill(0)
+                        self.OflW[t, k, w].prefill(0)
                     
                     # fwd_i, bwd_i = self.param2hcn[w]
                     fwd_i = min(self.param2hcn[w])
                     bwd_i = max(self.param2hcn[w])
                     if k not in self.krange(t) or (t>fwd_i and t<bwd_i):
-                        self.OptC[t, k, w] = 0
+                        self.OptC[t, k, w].prefill(0)
 
         self.sumOptC = dict()
         for w in self.param2hcn:
@@ -1196,21 +1214,21 @@ class ModelPULP:
 
         if not self.gradient_accumulation:
             for k in self.PrfG:
-                self.PrfG[k] = 0
+                self.PrfG[k].prefill(0)
 
         if not self.with_optimizer_states:
             for (t,k,w) in self.AliveO:
                 self.AliveO[(t,k,w)] = (1-self.accumC_optimizer_states(w)- self.param_multiplier)
-                self.PrfO[(t,k,w)] = 0
-                self.OflO[(t,k,w)] = 0
+                self.PrfO[(t,k,w)].prefill(0)
+                self.OflO[(t,k,w)].prefill(0)
         if self.grad_mode in ["free"]:
             # If gradient is freed ASAP, OflG will be merged into OflW
             for (t,k,w) in self.OflG:
-                self.OflG[(t,k,w)] = 0
+                self.OflG[(t,k,w)].prefill(0)
             for (t,k,w) in self.AliveG:
                 grad_size = self.parameter_gradient_size[w]
                 if len(self.param2hcn[w]) <= 2:
-                    self.AliveG[(t,k,w)] = 0
+                    self.AliveG[(t,k,w)].prefill(0)
                     if k == max(self.param2hcn[w]):
                         # self.overhead[k] = [v+grad_size for v in self.overhead[k]]
                         self.param_grad_mem[t,k] += grad_size * self.req_w()
@@ -1218,7 +1236,7 @@ class ModelPULP:
                     bwd_first = min(x for x in self.param2hcn[w] if x>self.loss_idx)
                     bwd_last = max(self.param2hcn[w])
                     if t<=bwd_first or t>bwd_last:#assume single bwd
-                        self.AliveG[(t,k,w)] = 0
+                        self.AliveG[(t,k,w)].prefill(0)
                     else:
                         self.AliveG[(t,k,w)] = 1
                         if k in self.param2hcn[w] and k>bwd_first:
@@ -1232,7 +1250,7 @@ class ModelPULP:
                 # TODO: add offload gradient variables for gradient accumulation
 
 
-    def add_parameter_constraints(self):
+    def add_offload_constraints(self):
         # if with_grad, AliveG is a variable
         # if with_optimizer_states, AliveO is a variable
         self.OflWProg = dict()
@@ -1528,7 +1546,7 @@ class ModelPULP:
                 #     pass
                 for p in select_paras:
                     del_ops.append((t, k, DeleteOp(Parameter(parameters[p]))))
-                    Alive[p] = 0
+                    Alive[p].prefill(0)
             if current_alive_size < next_alive_size:
                 # prefetch should be smaller than solution
                 prf_size = next_alive_size - current_alive_size
@@ -1685,7 +1703,7 @@ class ModelPULP:
                     del_ops.append((t, k, DeleteOp(Parameter(parameters[p],
                                                              is_optim_states=True),
                                                    is_optim_states=True)))
-                    Alive[p] = 0
+                    Alive[p].prefill(0)
             if current_alive_size < next_alive_size or k_==bwd_i:
                 # if w == 15:print(self.active_steps[k_]==bwd_i)
                 # prefetch should be smaller than solution
@@ -1814,7 +1832,7 @@ class ModelPULP:
                 if (
                     not hcn.is_fwd
                     # and self.sumAliveP[(j, t + 1)].value() > 0
-                    and sol(self.sumAliveP[(j, t + 1)])
+                    and sol(self.sumAliveP[t + 1, j])
                 ):  # phantoms should be kept
                     phantoms_to_keep = h_obj.phantoms
                     # for op in sub_op_list[::-1]:
