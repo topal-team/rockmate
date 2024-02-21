@@ -415,7 +415,7 @@ class Compiler:
                                                indices=op.indices,
                                                view_code=op.target.pnode.get_code(),
                                                stream=self.gd["prefetch_stream"],
-                                               is_optimizer_states=op.is_optimizer_states))
+                                               is_optim_states=op.is_optim_states))
         return function_list
 
     def get_offload(self, op: OffloadOp, before_idx=None, after_idx=None):
@@ -426,7 +426,7 @@ class Compiler:
                                               grad=op.grad,
                                             #   stream=self.gd["main_stream"],
                                               stream=self.gd["offload_stream"],
-                                              is_optimizer_states=op.is_optimizer_states
+                                              is_optim_states=op.is_optim_states
                                               ))
         return function_list
     
@@ -497,7 +497,7 @@ class Compiler:
         self.alive_list = op_sched.alive_list
         self.parameters = {k:alloc for k, alloc in op_sched.dict_alloc.items() if (
                            isinstance(alloc, Parameter) and not alloc.grad 
-                           and not alloc.is_optimizer_states)}
+                           and not alloc.is_optim_states)}
         # print(self.parameters)
         # self.prf_list = op_sched.prf_list
         # self.ofl_list = op_sched.ofl_list
@@ -536,7 +536,7 @@ class Compiler:
                     elif isinstance(op.target, Parameter):
                         if op.grad:
                             fct_list.append(self.get_del_grad(op.target.pnode.param_name, i))
-                        elif op.is_optimizer_states:
+                        elif op.is_optim_states:
                             fct_list.append([self.fct_del_optimizer_states(op.target.pnode.param_name)])
                         else:
                             fct_list.append(self.get_del_parameter(op.target.pnode, i))
@@ -551,11 +551,11 @@ class Compiler:
                     # if "merge" in op.name:
                     #     fct_list[-1].append(self.fct_synchronize())
                 elif isinstance(op, AllocateOp):
-                    if op.is_optimizer_states:
+                    if op.is_optim_states:
                         fct_list.append([self.fct_mem_alloc(op.target.pnode.param_name,
                                                             shape=op.target.info.tensor_size,
                                                             dtype=op.target.dtype, 
-                                                            is_optimizer_states=True)])
+                                                            is_optim_states=True)])
                     else:
                         fct_list.append(self.get_allocation(op.target))
                 elif isinstance(op, PrefetchOp):
@@ -683,11 +683,11 @@ class Compiler:
         return exec_code
 
     def fct_prefetch(self, var_name, after_idx=None, stream=None, indices=[0,None],view_code="",
-                     is_optimizer_states=False):
+                     is_optim_states=False):
         indices = indices
         device = self.gd["device"]
         stream = stream or self.gd["prefetch_stream"]
-        if is_optimizer_states:
+        if is_optim_states:
             def prefetch():
                 with torch.cuda.stream(stream):
                     # self.storage.ld[f"cpu_{var_name}"].grad = torch.zeros_like(self.storage.ld[f"cpu_{var_name}"], 
@@ -728,7 +728,7 @@ class Compiler:
         return prefetch
 
     def fct_offload(self, var_name, after_idx=None, stream=None, indices=[0,None], 
-                    grad=False, is_optimizer_states=False):
+                    grad=False, is_optim_states=False):
         indices = indices
         indices_ = [0, None] if "offload" in var_name else indices
         device = self.gd["device"]
@@ -747,7 +747,7 @@ class Compiler:
                     pass
             return offload
         
-        elif is_optimizer_states:
+        elif is_optim_states:
             def offload():
                 with torch.cuda.stream(stream):
                     # self.storage.ld[f"cpu_{var_name}"].grad = torch.zeros_like(self.storage.ld[f"cpu_{var_name}"], 
@@ -786,7 +786,7 @@ class Compiler:
         return offload
 
     def fct_mem_alloc(self, var_name, shape, dtype, stream=None, gd=False,
-                      is_optimizer_states=False):
+                      is_optim_states=False):
         stream = stream or self.gd["main_stream"]
         if gd:
 
@@ -795,7 +795,7 @@ class Compiler:
                     self.gd[var_name].data = torch.empty(
                         shape, dtype=dtype, device=self.gd["device"]
                     )
-        elif is_optimizer_states:
+        elif is_optim_states:
             def mem_alloc():
                 for k,v in self.storage.ld["optimizers"][f"Optimize_{var_name}"].state.items():
                     v["exp_avg"].data = torch.zeros_like(self.storage.ld["optimizers"][f"exp_avg_{var_name}"], device=self.gd["device"])
@@ -1126,238 +1126,237 @@ class Compiler:
     def __init__(self, storage):
         self.storage = storage
         self.compile_op = {
-            "Compute_FWD":self.Compute_FWD,
-            "Compute_BWD":self.Compute_BWD,
-            "Delete_activation":self.Delete_activation,
-            "Delete_param":self.Delete_param,
-            "Delete_param":self.Delete_param,
+            "ComputeOp":self.Compute,
+            "DeleteOp":self.Delete,
+            "OffloadOp":self.Offload,
+            "PrefetchOp":self.Prefetch,
+            "AllocateOp":self.Allocate,
+            "OptimizeOp":self.Optimize,
             }
 
     def compile_sched(self, op_sched:OpSchedule):
-        pass
-
-    def compile_op_list(self, op_list):
-        for i, op in enumerate(op_list):
+        for i, op in enumerate(op_sched.init_op_list):
+            self.compile_op[op.__class__.__name__](op)
+        for i, op in enumerate(op_sched.op_list):
             if op.disabled: continue
-            pos_info = self.pos_info(op_list, i)
+            # pos_info = self.pos_info(op_sched, i)
             op_type = op.__class__.__name__
             if op_type not in self.compile_op:
                 raise SyntaxWarning(f"Unrecognized operation type {op_type}")
-            self.compile_op[op_type](op, pos_info)
+            self.compile_op[op_type](op)
 
-    def pos_info(self, op_list, i):
-        """
-        To get the positional information of the operation in the list.
-        """
-        if not isinstance(op_list[i], ComputeOp):
-            return dict()
-        pos_info = {
-            "index":i,
-            "next_bwd_idx":None,
-            "last_before_bwd":False,
-            "first_occurrence":True,
-            "last_occurrence":True,
-            }
-        return pos_info
+    # def pos_info(self, op_sched:OpSchedule, i):
+    #     """
+    #     To get the positional information of the operation in the list.
+    #     """
+    #     op_list = op_sched.op_list
+    #     if not isinstance(op_list[i], ComputeOp):
+    #         return dict()
+    #     pos_info = {
+    #         "index":i,
+    #         "first_occurrence":True,
+    #         "last_occurrence":True,
+    #         }
+    #     if op_list[i].target.is_fwd:
+    #         pos_info["next_bwd_idx"] = None
+    #         pos_info["last_before_bwd"] = False
+    #     else:
+    #         pos_info["temporary_tensor_names"] = []
+    #         pos_info["input_names"] = []
+        
+    #     return pos_info
 
     
-    def Compute_FWD(self, 
-                    op:ComputeOp, 
-                    pos_info):
-        op.fct_list.append(Fct_RNG_state(op.name,
-                                         get_state=pos_info["first_occurrence"]))
-        cnode: ComputationNode = op.target
-        if not cnode.info.requires_grad:
-            op.fct_list.append(Fct_run_fwd(
-                                           target_name=cnode.main_target,
-                                           code=cnode.get_code()))
-            return None
-        
-        inplace_code = make_str_list_assign(
-                cnode.inplace_code, force_special_kwargs=not pos_info["first_occurrence"]
-            )
-        body_code = ""
-        for bc in cnode.body_code:
-            suffix = ""
-            if not pos_info["first_occurrence"] and (bc[0] in cnode.tensor_targets):
-                suffix = ".data"
-            body_code += (
+    def Compute(self, op:ComputeOp):
+        if op.target.is_fwd:
+            op.fct_list.append(Fct_RNG_state(op.name,
+                                            get_state=op.pos_info["first_occurrence"]))
+            cnode: ComputationNode = op.target
+            if not cnode.info.requires_grad:
+                op.fct_list.append(Fct_run_fwd(
+                                            target_name=cnode.main_target,
+                                            code=cnode.get_code()))
+                return None
+            
+            inplace_code = make_str_list_assign(
+                    cnode.inplace_code, force_special_kwargs=not op.pos_info["first_occurrence"]
+                )
+            body_code = ""
+            for bc in cnode.body_code:
+                suffix = ""
+                if not op.pos_info["first_occurrence"] and (bc[0] in cnode.tensor_targets):
+                    suffix = ".data"
+                body_code += (
+                    make_str_assign(
+                        bc, suffix=suffix, force_special_kwargs=not op.pos_info["first_occurrence"]
+                    )
+                    + "\n"
+                )
+            # suffix = ""
+            main_code = (
                 make_str_assign(
-                    bc, suffix=suffix, force_special_kwargs=not pos_info["first_occurrence"]
+                    cnode.main_code, #suffix=suffix, 
+                    force_special_kwargs=not op.pos_info["first_occurrence"]
                 )
                 + "\n"
             )
-        # suffix = ""
-        main_code = (
-            make_str_assign(
-                cnode.main_code, #suffix=suffix, 
-                force_special_kwargs=not pos_info["first_occurrence"]
-            )
-            + "\n"
-        )
-        main_code = main_code.replace(cnode.main_target, f"_{cnode.main_target}")
+            main_code = main_code.replace(cnode.main_target, f"_{cnode.main_target}")
 
-        if not pos_info["last_before_bwd"]:
-            for target in cnode.tensor_targets:
-                inplace_code = inplace_code.replace(target, "_" + target)
-        else:
-            no_save_list = []
-            candidates = list(cnode.deps_real) + list(cnode.users)
-            candidates = self._get_names(candidates)
-            for kdn_name in candidates:
-                if "Delete_"+kdn_name in self.op_name_list[pos_info["index"]:pos_info["next_bwd_idx"]]:
-                    no_save_list.append(kdn_name.split(" ")[0])
-            for pnode in cnode.required_parameter_nodes_real|cnode.required_parameter_nodes_fake:
-                no_save_list.append(pnode.param_name)
+            if not op.pos_info["last_before_bwd"]:
+                for target in cnode.tensor_targets:
+                    inplace_code = inplace_code.replace(target, "_" + target)
+                op.fct_list.append(Fct_run_fwd(cnode.main_target,
+                                            main_code,
+                                            fwd_mode="no_grad"))
+
+            else:
+                # no_save_list = []
+                # candidates = list(cnode.deps_real) + list(cnode.users)
+                # candidates = self._get_names(candidates)
+                # for kdn_name in candidates:
+                #     if "Delete_"+kdn_name in self.op_name_list[op.pos_info["index"]:op.pos_info["next_bwd_idx"]]:
+                #         no_save_list.append(kdn_name.split(" ")[0])
+                # for pnode in cnode.required_parameter_nodes_real|cnode.required_parameter_nodes_fake:
+                #     no_save_list.append(pnode.param_name)
+                no_save_list = (list(cnode.deps_real) 
+                                + list(cnode.users) 
+                                + list(cnode.required_parameter_nodes_real)
+                                + list(cnode.required_parameter_nodes_fake))
+                    
+                for (target) in cnode.tensor_targets:  # cnode.tensor_targets is Tensor of pytorch
+                    inplace_code = inplace_code.replace(target, "_" + target)
                 
-            for (target) in cnode.tensor_targets:  # cnode.tensor_targets is Tensor of pytorch
-                inplace_code = inplace_code.replace(target, "_" + target)
-            
-            op.fct_list.append(Fct_run_fwd(cnode.main_target,main_code))
-        op.fct_list.append(Fct_run_fwd(cnode.main_target,inplace_code))
-        for inplace_target in cnode.inplace_targets:
-                if inplace_target != cnode.main_target:
-                    op.fct_list.append(
-                        Fct_del(f"_{inplace_target}",
-                                del_mode="data"
+                op.fct_list.append(Fct_run_fwd(cnode.main_target,
+                                            main_code,
+                                            no_save_list=no_save_list,
+                                            fwd_mode="with_grad"))
+            op.fct_list.append(Fct_run_fwd(cnode.main_target,inplace_code))
+            for inplace_target in cnode.inplace_targets:
+                    if inplace_target != cnode.main_target:
+                        op.fct_list.append(
+                            Fct_del(f"_{inplace_target}",
+                                    del_mode="data"
+                            )
                         )
-                    )
-        if True:#TODO:fake detach
-            op.fct_list.append(Fct_detach(cnode.main_target))
-        op.fct_list.append(Fct_run_fwd(cnode.main_target, body_code))
-        if pos_info["first_occurrence"]:
-            # op.fct_list.append(Fct_get_shape(cnode.main_target))
-            for target_name in cnode.tensor_targets:
-                op.fct_list.append(Fct_get_shape(target_name))
-    
-    def Compute_BWD(self, 
-                    op:ComputeOp, 
-                    pos_info):
-        # if not detach:
-        #     return []
-        target: Activation = op.target
-        anode: AllocationNode = target.anode
-        delete_tensor_function_list = []
-        op.fct_list.append(Fct_RNG_state(
-                                         op.name,
-                                         get_state=pos_info["first_occurrence"]))
-        
-        # temporary_tensor_names = [
-        #     kdn_name.split(" ")[0]
-        #     for kdn_name in self._get_names(anode.deps_fake)
-        #     if not self._is_alive(kdn_name, i)
-        # ]
-        # if anode.main_target in temporary_tensor_names:
-        #     temporary_tensor_names.append(f"_{anode.main_target}")
-
-        # for tensor_name in temporary_tensor_names:
-        for target_name in pos_info["temporary_tensor_names"]:
-            op.fct_list.append(Fct_gen_fake_data(target_name))
-            delete_tensor_function_list.append(Fct_del(target_name, del_mode="data"))
-
-        # prev_i = i - self.op_name_list[:i][::-1].index(anode.name) - 1
-        # input_names = []
-        # for kdn in anode.users_global:
-        #     if f"{kdn.name}" in self.op_name_list[prev_i:i]:
-        #         input_names.append(kdn.name.split(" ")[0])
+            if True:#TODO:fake detach
+                op.fct_list.append(Fct_detach(cnode.main_target))
+            op.fct_list.append(Fct_run_fwd(cnode.main_target, body_code))
+            if op.pos_info["first_occurrence"]:
+                # op.fct_list.append(Fct_get_shape(cnode.main_target))
+                for target_name in cnode.tensor_targets:
+                    op.fct_list.append(Fct_get_shape(target_name))
+        else:
+            target: Activation = op.target
+            anode: AllocationNode = target.anode
+            delete_tensor_function_list = []
+            op.fct_list.append(Fct_RNG_state(
+                                            op.name,
+                                            get_state=op.pos_info["first_occurrence"]))
             
-        op.fct_list.append(
-            Fct_run_bwd(
-                    target_name=anode.main_target,
-                    retain_graph=(not pos_info["last_occurrence"]),
-                    input_names=pos_info["input_names"],
-                )
-        )
+            # temporary_tensor_names = [
+            #     kdn_name.split(" ")[0]
+            #     for kdn_name in self._get_names(anode.deps_fake)
+            #     if not self._is_alive(kdn_name, i)
+            # ]
+            # if anode.main_target in temporary_tensor_names:
+            #     temporary_tensor_names.append(f"_{anode.main_target}")
 
-    def Delete_activation(self,
-                          op:DeleteOp, 
-                          pos_info={}):
-        alloc:Activation = op.target
-        if alloc.anode.allocation_type == "grad":
+            # for tensor_name in temporary_tensor_names:
+            for target_name in op.pos_info["temporary_tensor_names"]:
+                op.fct_list.append(Fct_gen_fake_data(target_name))
+                delete_tensor_function_list.append(Fct_del(target_name, del_mode="data"))
+
+            # prev_i = i - self.op_name_list[:i][::-1].index(anode.name) - 1
+            # input_names = []
+            # for kdn in anode.users_global:
+            #     if f"{kdn.name}" in self.op_name_list[prev_i:i]:
+            #         input_names.append(kdn.name.split(" ")[0])
+                
+            op.fct_list.append(
+                Fct_run_bwd(
+                        target_name=anode.main_target,
+                        retain_graph=(not op.pos_info["last_occurrence"]),
+                        input_names=op.pos_info["input_names"],
+                    )
+            )
+
+    def Delete(self, op:DeleteOp):
+        if isinstance(op.target, Activation):
+            alloc:Activation = op.target
+            if alloc.anode.allocation_type == "grad":
+                op.fct_list.append(Fct_del(
+                                    target_name=alloc.anode.main_target,
+                                    del_mode=alloc.anode.allocation_type
+                                    ))
+            elif alloc.anode.allocation_type == "data":
+                op.fct_list.append(Fct_del(
+                                    target_name=alloc.anode.main_target,
+                                    del_mode=alloc.anode.allocation_type
+                                    ))
+                if alloc.anode.info is not None and alloc.anode.info.requires_grad:
+                    op.fct_list.append(Fct_del(
+                                    target_name=f"_{alloc.anode.main_target}",
+                                    del_mode="data"
+                                    ))
+                if alloc.anode.has_attribute__base:
+                    op.fct_list.append(Fct_del(
+                                    target_name=alloc.anode.main_target,
+                                    del_mode="base"
+                                    ))
+                for v in alloc.anode.tensor_targets:
+                    op.fct_list.append(Fct_del(
+                                    target_name=v,
+                                    del_mode="base"
+                                    ))
+                for v in alloc.anode.container_targets:
+                    op.fct_list.append(Fct_del(
+                                    target_name=v,
+                                    del_mode="var"
+                                    ))
+        elif isinstance(op.target, Parameter):
+            alloc:Parameter = op.target
+            del_mode = "data"
+            if alloc.is_grad: del_mode = "grad"
+            if alloc.is_optim_states: del_mode = "optim_states"
             op.fct_list.append(Fct_del(
-                                   target_name=alloc.anode.main_target,
-                                   del_mode=alloc.anode.allocation_type
-                                   ))
-        elif alloc.anode.allocation_type == "data":
-            op.fct_list.append(Fct_del(
-                                   target_name=alloc.anode.main_target,
-                                   del_mode=alloc.anode.allocation_type
-                                   ))
-            if alloc.anode.info is not None and alloc.anode.info.requires_grad:
-                op.fct_list.append(Fct_del(
-                                   target_name=f"_{alloc.anode.main_target}",
-                                   del_mode="data"
-                                   ))
-            if alloc.anode.has_attribute__base:
-                op.fct_list.append(Fct_del(
-                                   target_name=alloc.anode.main_target,
-                                   del_mode="base"
-                                   ))
-            for v in alloc.anode.tensor_targets:
-                op.fct_list.append(Fct_del(
-                                   target_name=v,
-                                   del_mode="base"
-                                   ))
-            for v in alloc.anode.container_targets:
-                op.fct_list.append(Fct_del(
-                                   target_name=v,
-                                   del_mode="var"
-                                   ))
+                                    target_name=alloc.param_name,
+                                    del_mode=del_mode
+                                    ))
 
-    def Delete_param(self, 
-                     op:DeleteOp, 
-                     pos_info={}):
-        alloc:Parameter = op.target
-        del_mode = "data"
-        if alloc.is_grad: del_mode = "grad"
-        if alloc.is_optimizer_states: del_mode = "optim_states"
-        op.fct_list.append(Fct_del(
-                                   target_name=alloc.param_name,
-                                   del_mode=del_mode
-                                   ))
-
-    def Offload_param(self, 
-                      op: OffloadOp, 
-                      pos_info):
+    def Offload(self, op: OffloadOp):
         target: Parameter = op.target
         offload_mode = "param"
         if target.is_grad:offload_mode = "grad"
-        if target.is_optimizer_states:offload_mode = "optim_states"
+        if target.is_optim_states:offload_mode = "optim_states"
         op.fct_list.append(Fct_offload(
                                        target.param_name,
                                        offload_mode=offload_mode))
 
-    def Prefetch_param(self, 
-                       op: PrefetchOp, 
-                       pos_info):
+    def Prefetch(self, op: PrefetchOp):
         target: Parameter = op.target
         prefetch_mode = "param"
-        if target.is_optimizer_states:prefetch_mode = "optim_states"
+        if target.is_optim_states:prefetch_mode = "optim_states"
         op.fct_list.append(Fct_prefetch(
                                        target.param_name,
                                        prefetch_mode=prefetch_mode))
         pass
 
-    def Allocate_param(self, 
-                       op: AllocateOp, 
-                       pos_info):
+    def Allocate(self, op: AllocateOp):
         target: Parameter = op.target
         alloc_mode = "tensor"
-        if target.is_optimizer_states:alloc_mode = "optim_states"
+        if target.is_optim_states:alloc_mode = "optim_states"
         op.fct_list.append(Fct_mem_alloc(
                                        target.param_name,
                                        alloc_mode=alloc_mode))
 
-    def Optimize(self, 
-                 op:OptimizeOp, 
-                 pos_info):
+    def Optimize(self, op:OptimizeOp):
         op.fct_list.append(Fct_optimize(
                                         op.name,
                                         del_grad_list=op.list_params if op.is_cpu else []))
 
 
 class RK_Fct:
-    storage = None
+    storage = RK_Storage()
     def __init__(self, **kwargs):
         for k,v in kwargs.items():
             setattr(self, k, v)
