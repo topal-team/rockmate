@@ -6,6 +6,7 @@ from rkgb.core.base import Node
 from rkgb.core.backward import ComputationNode, AllocationNode
 from collections import namedtuple
 from copy import deepcopy
+from typing import List
 import warnings
 import numpy as np
 import torch
@@ -14,7 +15,7 @@ from rkgb.lowlevel.ast_add_on import make_str_list_assign
 class Allocation:
     def __init__(self, target_name, alloc_type="", mem=0, info=dict(), dtype=torch.float32, size=None):
         """
-        Allocation type should be in activation/paramters/buffer
+        Allocation type should be in activation/parameters/buffer
         """
         self.target_name = target_name
         self._alloc_type = alloc_type
@@ -30,7 +31,7 @@ class Allocation:
 
     @property
     def name(self):
-        return f"{self.target_name}"
+        return f"{self.target_name} {self.alloc_type}"
 
     @property
     def alloc_type(self):
@@ -63,8 +64,8 @@ class Activation(Allocation):
                  anode:AllocationNode,
                  dtype=torch.float32):
         super().__init__(
-            target_name=anode.name,
-            alloc_type="activation",
+            target_name=anode.main_target,
+            alloc_type=anode.allocation_type,
             mem=anode.mem,
             info=anode.info,
             dtype=dtype,
@@ -73,25 +74,29 @@ class Activation(Allocation):
         self.anode = anode
 
 class Parameter(Allocation):
-    def __init__(self, pnode, grad=False, is_optimizer_states=False):
+    """
+    There is not paramter grad/optim_states nodes from rkgb.
+    Need to handle the dependency manually for Allocation.
+    """
+    def __init__(self, pnode, grad=False, is_optim_states=False):
+        self.pnode = pnode
+        self.is_grad = grad
+        self.is_optim_states = is_optim_states
         super().__init__(
             target_name=pnode.param_name,
-            alloc_type="param",# + "_grad"*grad+"_optim_states"*is_optimizer_states,
-            mem=pnode.mem + pnode.mem*is_optimizer_states,
+            alloc_type= "param",# + "_grad"*grad+"_optim_states"*is_optim_states,
+            mem=pnode.mem + pnode.mem*is_optim_states,
             info=pnode.info,
             dtype=pnode.info.dtype,
         )
-        self.pnode = pnode
-        self.is_grad = grad
-        self.is_optimizer_states = is_optimizer_states
-    
+
     @property
     def param_name(self):
         return self.pnode.param_name
     
     @property
     def alloc_type(self):
-        return "param"# + "_grad"*self.grad+"_optim_states"*self.is_optimizer_states
+        return "param" + "_grad"*self.is_grad+"_optim_states"*self.is_optim_states
 
 class Buffer(Allocation):
     def __init__(self, name, mem=0, info=dict(), dtype=torch.float32, size=None):
@@ -178,6 +183,7 @@ class ComputeOp(Op):
         self.detach = detach
         self.target:ComputationNode = cnode
         self.overhead = cnode.mem_overhead
+        self.pos_info = {}#positional information to be filled before compiling
 
     @property
     def time(self):
@@ -205,10 +211,10 @@ class DeleteOp(Op):
         self.target = alloc
         self.op_type = f"Delete_{alloc.alloc_type}"
         # self.grad = grad
-        # self.is_optimizer_states = is_optimizer_states
+        # self.is_optim_states = is_optim_states
 
     # def __repr__(self):
-    #     return "Disabled_"*self.disabled+"Delete_" + self.target.name+"grad"*self.grad+"_optim_stats"*self.is_optimizer_states
+    #     return "Disabled_"*self.disabled+"Delete_" + self.target.name+"grad"*self.grad+"_optim_stats"*self.is_optim_states
     
     # @property
     # def name(self):
@@ -240,11 +246,11 @@ class MappingOp(Op):
 
 
 class AllocateOp(Op):
-    def __init__(self, alloc: Allocation, disabled=False, is_optimizer_states=False):
+    def __init__(self, alloc: Allocation, disabled=False, is_optim_states=False):
         super().__init__(alloc.name, disabled=disabled)
         self.target = alloc
         self.op_type = f"Allocate_{alloc.alloc_type}"
-        self.is_optimizer_states=is_optimizer_states
+        self.is_optim_states=is_optim_states
 
 class OffloadOp(Op):
     def __init__(
@@ -253,7 +259,7 @@ class OffloadOp(Op):
         indices: tuple = (0,None),
         disabled: bool = False,
         # grad: bool = False,
-        # is_optimizer_states: bool = False,
+        # is_optim_states: bool = False,
         time:float = 0,
     ):
         super().__init__(alloc.name, disabled=disabled)
@@ -261,7 +267,7 @@ class OffloadOp(Op):
         self.indices = indices
         self.disabled = disabled
         # self.grad = grad
-        # self.is_optimizer_states = is_optimizer_states
+        # self.is_optim_states = is_optim_states
         self._time = time
         self.op_type = f"Offload_{alloc.alloc_type}"
 
@@ -271,14 +277,14 @@ class PrefetchOp(Op):
         alloc: Allocation,
         indices: tuple = (0,None),
         disabled: bool = False,
-        # is_optimizer_states: bool = False,
+        # is_optim_states: bool = False,
         time:float = 0,
     ):
         super().__init__(alloc.name, disabled=disabled)
         self.target = alloc
         self.indices = indices
         self.disabled = disabled
-        # self.is_optimizer_states = is_optimizer_states
+        # self.is_optim_states = is_optim_states
         self._time = time
         self.op_type = f"Prefetch_{alloc.alloc_type}"
     
@@ -330,7 +336,7 @@ class ListOp(list):
         return self._insert(i,op)
 
 class Step():
-    def __init__(self, op_list:list) -> None:
+    def __init__(self, op_list:List[Op]) -> None:
 
         ofl_ops = []
         prf_ops = []
@@ -364,8 +370,8 @@ class Step():
             # Assume prefetch ops will not change
             code = ""
             for op in self.prf_ops:
-                # if op.is_optimizer_states:continue
-                if isinstance(op.target, Parameter) and not op.target.is_optimizer_states:
+                # if op.is_optim_states:continue
+                if isinstance(op.target, Parameter) and not op.target.is_optim_states:
                     code += op.target.pnode.get_code()+"\n"
             self.view_param = ExecCodeOp(f"view_{op.name}",
                                         code=code)
@@ -437,17 +443,19 @@ class AliveStatus():
         self.name2key = {
             alloc_name:i for i, alloc_name in enumerate(self.alloc_names)
             }
-        alloc_categories["activation"] = [alloc_name for alloc_name in alive_list[0].keys()
+        alloc_categories["activation"] = [alloc_name for alloc_name in self.alloc_names
                                             if isinstance(self.dict_alloc[alloc_name], Activation)]
-        alloc_categories["parameter"] = [alloc_name for alloc_name in alive_list[0].keys()
+        alloc_categories["parameter"] = [alloc_name for alloc_name in self.alloc_names
                                             if isinstance(self.dict_alloc[alloc_name], Parameter)]
         self.categories = {}
-        for k,v in alloc_categories:
+        for k,v in alloc_categories.items():
             self.categories[k] = np.array([self.alloc_names.index(alloc_name) for alloc_name in v])
         self.length = len(alive_list)
         self.alloc_mem_np = np.array([self.dict_alloc[alloc_name].mem 
                                       for alloc_name in self.alloc_names])
-        self.alive_np = np.array([self.length, ])
+        self.alive_np = np.array([[1 if alive_list[i][alloc_name] else 0 
+                                      for alloc_name in self.alloc_names]
+                                      for i ,_ in enumerate(alive_list)])
 
     def _alive(self, key:int, idx_range:range):
         if isinstance(idx_range, int):
@@ -479,7 +487,7 @@ class AliveStatus():
 
     def save_mem(self, idx_range = None, act_multiplier=1):
         if idx_range is None:
-            idx_range = range(0, self.length+1)
+            idx_range = range(0, self.length)
         return act_multiplier*self.act_mem(idx_range)+self.param_mem(idx_range)
     
     def _alive(self, key:int, idx_range:range):
@@ -510,7 +518,7 @@ class OpSchedule:
 
     def __init__(
         self,
-        op_list,
+        op_list:List[Op],
         prf_list=[],
         ofl_list=[],
         loss_idx=None,
@@ -541,7 +549,7 @@ class OpSchedule:
         if loss_idx is None:
             # Find the last loss op before the first bwd
             for i, op in enumerate(self._op_list):
-                if "loss" == op.main_target:
+                if "loss" in op.name:
                     self.loss_idx = i
                 if isinstance(op, ComputeOp) and not op.target.is_fwd:
                     break
@@ -565,7 +573,7 @@ class OpSchedule:
                      if anode.info.requires_grad]
                 )# add parameter grad allocation
                 self.list_alloc.extend(
-                    [Parameter(anode, is_optimizer_states=True)
+                    [Parameter(anode, is_optim_states=True)
                      for anode in cluster.parameter_nodes
                      if anode.info.requires_grad]
                 )# add parameter grad allocation
@@ -689,7 +697,7 @@ class OpSchedule:
                 steps[j].opt_ops.remove(op)
 
         for i, op in enumerate(self.op_list):
-            if "loss" == op.main_target:
+            if "loss" in op.name:
                 self.loss_idx = i
             if isinstance(op, ComputeOp) and not op.target.is_fwd:
                 break
@@ -770,12 +778,12 @@ class OpSchedule:
                 for cnode in alloc.pnode.users_real:
                     if cnode.is_fwd:continue
                     cnode_name = cnode.name
-                    if cnode_name in self.bwd2param:
-                        self.bwd2param[cnode_name].append(alloc.pnode.param_name+"_grad")
-                        self.bwd2param[cnode_name].append(alloc.pnode.param_name)
-                    else:
-                        self.bwd2param[cnode_name] = [alloc.pnode.param_name+"_grad"]
-                        self.bwd2param[cnode_name].append(alloc.pnode.param_name)
+                    # if cnode_name in self.bwd2param:
+                    #     self.bwd2param[cnode_name].append(alloc.pnode.param_name+"_grad")
+                    #     self.bwd2param[cnode_name].append(alloc.pnode.param_name)
+                    # else:
+                    #     self.bwd2param[cnode_name] = [alloc.pnode.param_name+"_grad"]
+                    #     self.bwd2param[cnode_name].append(alloc.pnode.param_name)
                 
         for op in self.op_list:
             if isinstance(op, DeleteOp):
@@ -913,7 +921,7 @@ class OpSchedule:
     def refine(self):
         for i, op in enumerate(self.op_list):
             if op.disabled:continue
-            if "loss" == op.main_target:
+            if "loss" in op.name:
                 op.disabled = True
             if isinstance(op, DeleteOp):
                 if isinstance(op.target, Activation):
