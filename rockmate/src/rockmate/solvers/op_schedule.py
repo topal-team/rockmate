@@ -4,6 +4,7 @@
 # from rkgb.Htools import *
 from rkgb.core.base import Node
 from rkgb.core.backward import ComputationNode, AllocationNode
+from rkgb.core.hierarchical import HierarchicalCluster
 from collections import namedtuple
 from copy import deepcopy
 from typing import List
@@ -78,9 +79,9 @@ class Parameter(Allocation):
     There is not paramter grad/optim_states nodes from rkgb.
     Need to handle the dependency manually for Allocation.
     """
-    def __init__(self, pnode, grad=False, is_optim_states=False):
+    def __init__(self, pnode, is_grad=False, is_optim_states=False):
         self.pnode = pnode
-        self.is_grad = grad
+        self.is_grad = is_grad
         self.is_optim_states = is_optim_states
         super().__init__(
             target_name=pnode.param_name,
@@ -167,6 +168,11 @@ class Op:
                 setattr(result, k, deepcopy(v, memo))
 
         return result
+    
+    def __eq__(self, op):
+        if not type(self)==type(op):
+            return False
+        return op.name == self.name and self.disabled==op.disabled
 
 
 class SynchronizeOp(Op):
@@ -430,33 +436,42 @@ class AliveStatus():
     """
     Dynamic alive status of different allocations.
     Functions: 
-    1. Easy to check if one allocation is alive for a range of steps
-    2. East to update when operations are changed
-    3. Return peak memory fast.
+    1. Easy to check if one allocation is alive for a range of steps.
+    2. Easy to update when operations are changed.
+    3. Easy to translate allocations for anonymized cluster.
+    4. Return peak memory fast.
     Assumption:
     1. Number of operations will not be changed (operations can be disabled).
     2. Number of allocations will not be changed.
     """
     def __init__(self, alive_list, dict_alloc, alloc_categories={}):
-        self.dict_alloc = dict_alloc
-        self.alloc_names = [alloc_name for alloc_name in alive_list[0].keys()]
-        self.name2key = {
-            alloc_name:i for i, alloc_name in enumerate(self.alloc_names)
-            }
-        alloc_categories["activation"] = [alloc_name for alloc_name in self.alloc_names
-                                            if isinstance(self.dict_alloc[alloc_name], Activation)]
-        alloc_categories["parameter"] = [alloc_name for alloc_name in self.alloc_names
-                                            if isinstance(self.dict_alloc[alloc_name], Parameter)]
-        self.categories = {}
-        for k,v in alloc_categories.items():
-            self.categories[k] = np.array([self.alloc_names.index(alloc_name) for alloc_name in v])
+        self.update_dict_alloc(dict_alloc)
         self.length = len(alive_list)
         self.alloc_mem_np = np.array([self.dict_alloc[alloc_name].mem 
                                       for alloc_name in self.alloc_names])
         self.alive_np = np.array([[1 if alive_list[i][alloc_name] else 0 
-                                      for alloc_name in self.alloc_names]
-                                      for i ,_ in enumerate(alive_list)])
+                                   for alloc_name in self.alloc_names]
+                                   for i ,_ in enumerate(alive_list)],
+                                   dtype=bool)
+        
+        self.categories = {}
+        self.categories["activation"] = [alloc_name for alloc_name in self.alloc_names
+                                         if isinstance(self.dict_alloc[alloc_name], Activation)]
+        self.categories["parameter"] = [alloc_name for alloc_name in self.alloc_names
+                                        if isinstance(self.dict_alloc[alloc_name], Parameter)]
+        for k,v in alloc_categories.items():
+            self.categories[k] = np.array([self.alloc_names.index(alloc_name) for alloc_name in v])
 
+    def update_dict_alloc(self, dict_alloc):
+        """
+        For translation: need to ensure the dict_alloc to appear in the same list
+        """
+        self.dict_alloc = dict_alloc
+        self.alloc_names = [alloc_name for alloc_name in sorted(dict_alloc.keys())]
+        self.name2key = {
+            alloc_name:i for i, alloc_name in enumerate(self.alloc_names)
+            }
+        
     def _alive(self, key:int, idx_range:range):
         if isinstance(idx_range, int):
             idx_range = range(idx_range, idx_range+1)
@@ -511,9 +526,163 @@ class AliveStatus():
             key = self.name2key[key]
         return bool(min(self._alive[key, idx_range]))
         
-    
-    
 class OpSchedule:
+    solver = None
+
+    def __init__(
+        self,
+        op_list:List[Op],
+        cluster: HierarchicalCluster,
+        loss_idx=None,
+        with_parameters=False,
+        init_alive_status: dict = {},
+        init_op_list: list = [],
+        restore_op_list: list = []
+    ):
+        """
+        OpSchedule contains the operation list and automatically
+        compute the alive status given the HierarchicalCluster.
+        """
+        self.op_list = op_list
+        self.loss_idx = loss_idx
+        self.init_alive_status = init_alive_status
+        self.init_op_list = init_op_list
+        self.restore_op_list = restore_op_list
+        self.with_parameters = with_parameters
+
+        self.interfaces = cluster.interfaces
+        self.create_list_alloc(cluster)
+        # self.create_alive_list()
+        self.get_sched_info()# get the schedule information for higher level solving
+    
+    def _sum_mem(self,alive_status_, ignore_list=[]):
+        mem = 0
+        for k, v in alive_status_.items():
+            if k not in ignore_list and v:
+                d = self.dict_alloc[k]
+                mem += d.mem
+        return mem
+
+
+    def get_sched_info(self):
+        """
+        To get schedule information for higher level solving:
+        - .mem: saved activation memory at the loss step, without interface activations
+        - .fwd_time: time of forward operations
+        - .bwd_time: time of backward operations
+        - .fwd_overhead: during forward, the excess over the ending memory from the peak
+        - .bwd_overhead: during backward, the excess over the ending memory from the peak
+        - .phantoms: saved anodes at the loss step
+        """
+        # self.save_mem = self.alive_status.save_mem
+        alive_list = self.create_alive_list()
+
+        L = len(self.op_list)
+        self.time = np.zeros(L)
+        self.save_mem = np.zeros(L)
+        self.overhead = np.zeros(L)
+        self.interface_mem = np.zeros(L)
+
+        def get_overhead_(save, overhead):
+            return max(save + overhead) - save[-1]
+
+        for i, (op, alive_status) in enumerate(zip(self.op_list, alive_list)):
+            self.save_mem[i] = self._sum_mem(alive_status, self.interface_names)
+            self.interface_mem[i] = self._sum_mem(alive_status) - self.save_mem[i]
+            if op.disabled:
+                continue
+            self.time[i] = op.time
+            self.overhead[i] = op.overhead
+            
+        self.mem = self.save_mem[self.loss_idx]
+        self.fwd_time = np.sum(self.time[: self.loss_idx + 1])
+        self.bwd_time = np.sum(self.time[self.loss_idx + 1 :])
+
+        self.phantoms = set()
+        for anode in self.list_anodes:
+            if alive_list[self.loss_idx][anode.name] and not anode in self.all_interfaces:
+                self.phantoms.add(anode)
+
+        self.fwd_overhead = get_overhead_(
+            self.save_mem[: self.loss_idx + 1],
+            self.overhead[: self.loss_idx + 1],
+        )
+        if self.loss_idx < len(self.op_list) - 1:  # bwd is not empty
+            self.bwd_overhead = get_overhead_(
+                self.save_mem[self.loss_idx + 1 :],
+                self.overhead[self.loss_idx + 1 :],
+            )
+
+        self.dep_interfaces_data = set()
+        for i, op in enumerate(self.op_list[self.loss_idx + 1 :]):
+            if op.disabled or not isinstance(op, ComputeOp):
+                continue
+            for anode in op.target.deps_real:
+                if anode in self.interfaces["input_data_anodes"]:
+                    self.dep_interfaces_data.add(self.list_anodes.index(anode))
+                if anode in self.interfaces["output_data_anodes"]:
+                    for cnode in anode.deps:
+                        if (
+                            ComputeOp(cnode) in self.op_list[self.loss_idx + 1 :][:i]
+                            # cnode.name not in self.op_name_list[self.loss_idx + 1 :][:i]
+                        ):  # if not generated during bwd
+                            self.dep_interfaces_data.add(self.list_anodes.index(anode))
+
+
+    def create_list_alloc(self, cluster: HierarchicalCluster):
+        self.all_interfaces = [
+            anode for inter in self.interfaces.values() for anode in inter
+        ]  # all interface KDN's
+        self.interface_names = [anode.name for anode in self.all_interfaces]
+
+        self.list_alloc = [Activation(anode) for anode in cluster.list_anodes]
+        self.list_anodes = cluster.list_anodes
+        if self.with_parameters:
+            self.list_alloc.extend(
+                [Parameter(anode) for anode in cluster.parameter_nodes]
+            )
+            self.list_alloc.extend(
+                [Parameter(anode, is_grad=True) for anode in cluster.parameter_nodes
+                    if anode.info.requires_grad]
+            )# add parameter grad allocation
+            self.list_alloc.extend(
+                [Parameter(anode, is_optim_states=True)
+                    for anode in cluster.parameter_nodes
+                    if anode.info.requires_grad]
+            )# add parameter grad allocation
+            self.dict_alloc_param = {alloc.name: alloc 
+                                 for alloc in self.list_alloc
+                                 if isinstance(alloc, Parameter)}
+        self.dict_alloc = {alloc.name: alloc for alloc in self.list_alloc}
+
+    def create_alive_list(self):
+        alive_status = {alloc.name: False for alloc in self.list_alloc}
+        
+        for alloc_name, is_alive in self.init_alive_status.items():
+            alive_status[alloc_name] = is_alive
+
+        alive_list = []
+        for op in self.op_list:
+            if op.disabled:
+                alive_list.append(alive_status.copy())
+                continue
+            if isinstance(op, DeleteOp):
+                alive_status[op.target.name] = False
+            elif isinstance(op, ComputeOp):
+                # compute op should not be disabled except loss which is useful for alive status
+                for anode in op.target.users:
+                    if not ("phantoms" == anode.allocation_type and op.fast_forward):
+                        alive_status[anode.name] = True
+                if self.with_parameters and not op.target.is_fwd:# assume grad of parameters required by bwd will be generated
+                    for pnode in op.target.required_parameter_nodes_real:
+                        alive_status[Parameter(pnode).name] = True
+            elif isinstance(op, AllocateOp):
+                alive_status[op.target.name] = True
+            alive_list.append(alive_status.copy())
+        return alive_list
+
+    
+class OpSchedule_old:
     solver = None
 
     def __init__(
@@ -569,7 +738,7 @@ class OpSchedule:
                     [Parameter(anode) for anode in cluster.parameter_nodes]
                 )
                 self.list_alloc.extend(
-                    [Parameter(anode, grad=True) for anode in cluster.parameter_nodes
+                    [Parameter(anode, is_grad=True) for anode in cluster.parameter_nodes
                      if anode.info.requires_grad]
                 )# add parameter grad allocation
                 self.list_alloc.extend(
@@ -719,8 +888,6 @@ class OpSchedule:
         self.recreate_op_list()
             # print(op, op.time)
         
-    def update_alive_list(self):
-        pass
 
     def create_alive_np_array(self):
         alive_list = self.alive_list or self.create_alive_list()

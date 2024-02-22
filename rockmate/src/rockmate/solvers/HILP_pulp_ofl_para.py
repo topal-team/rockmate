@@ -1770,7 +1770,7 @@ class ModelPULP:
         init_op_list = []
         restore_op_list = []
         init_alive_status = {}
-
+        loss_op = ComputeOp(self.hgraph.cluster.loss_cnode)
         if self.with_parameters:
             W = len(self.parameter_size)
             (
@@ -1785,7 +1785,7 @@ class ModelPULP:
             for t in range(T):
                 for k in self.krange(t):
                     if t == self.loss_idx and k == self.loss_idx:
-                        op_list.append(ComputeOp(self.hgraph.cluster.loss_cnode))
+                        op_list.append(loss_op)
                     op_list += self.schedule_compute(t,k,hgraph)
         
         print("finish scheduling")
@@ -1795,7 +1795,7 @@ class ModelPULP:
             op_list,
             # ofl_list=ofl_list,
             # prf_list=prf_list,
-            loss_idx=None,
+            loss_idx=op_list.index(loss_op),
             cluster=self.hgraph.cluster,
             init_alive_status=init_alive_status,
             init_op_list=init_op_list,
