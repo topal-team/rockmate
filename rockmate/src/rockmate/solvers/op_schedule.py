@@ -184,7 +184,7 @@ class ComputeOp(Op):
     def __init__(self, 
                  cnode: ComputationNode,
                  fast_forward=False, disabled=False, detach=True):
-        super().__init__(cnode.main_target, disabled=disabled)
+        super().__init__(cnode.name, disabled=disabled)
         self.fast_forward = fast_forward
         self.detach = detach
         self.target:ComputationNode = cnode
@@ -204,18 +204,18 @@ class ComputeOp(Op):
     @property
     def op_type(self):
         cnode_type = "FWD" if self.target.is_fwd else "BWD"
-        return f"Compute_{cnode_type}"
+        return f"Compute"
 
     @property
     def target_name(self):
-        return self.target.main_target
+        return self.target.name
 
 
 class DeleteOp(Op):
     def __init__(self, alloc: Allocation, disabled=False):
         super().__init__(alloc.name, disabled=disabled)
         self.target = alloc
-        self.op_type = f"Delete_{alloc.alloc_type}"
+        self.op_type = f"Delete"
         # self.grad = grad
         # self.is_optim_states = is_optim_states
 
@@ -679,7 +679,52 @@ class OpSchedule:
             elif isinstance(op, AllocateOp):
                 alive_status[op.target.name] = True
             alive_list.append(alive_status.copy())
+        # assert alive_status == self.init_alive_status# cyclic alive status
+        for k,v in self.init_alive_status.items():
+            assert alive_status[k] == v
         return alive_list
+
+    def add_pos_info(self):
+        """
+        Add positional information of each operation, necessary for compiling.
+        """
+        if not hasattr(self, "alive_list"):
+            self.alive_list = self.create_alive_list()
+        for i, op in enumerate(self.op_list):
+            if not isinstance(op, ComputeOp):
+                continue
+            op.pos_info = {
+                "index":i,
+                "first_occurrence":not op in self.op_list[:i],
+                "last_occurrence":not op in self.op_list[i+1:],
+                }
+            if op.target.is_fwd:
+                last_before_bwd = True
+                for j, _op in enumerate(self.op_list[i+1:]):
+                    if (isinstance(_op, ComputeOp)
+                        and op.target.main_target==_op.target.main_target):
+                        if _op.target.is_fwd:
+                            last_before_bwd = False
+                        else:
+                            op.pos_info["next_bwd_idx"] = i+1+j
+                            op.pos_info["last_before_bwd"] = last_before_bwd
+            else:
+                op.pos_info["temporary_tensor_names"] = []
+                for anode in op.target.deps_fake:
+                    if not self.alive_list[i][anode.name]:
+                        op.pos_info["temporary_tensor_names"].append(anode.name)
+                op.pos_info["input_names"] = []
+                if not op.pos_info["first_occurrence"]:
+                    prev_i = i - self.op_list[:i][::-1].index(op) - 1
+                    for anode in op.target.users:
+                        if DeleteOp(Activation(anode)) in self.op_list[prev_i:i]:
+                            op.pos_info["input_names"].append(anode.main_target)
+
+                    for pnode in op.target.required_parameter_nodes_real:
+                        if DeleteOp(Parameter(pnode)) in self.op_list[prev_i:i]:
+                            op.pos_info["input_names"].append(pnode.param_name)
+        
+
 
     
 class OpSchedule_old:
