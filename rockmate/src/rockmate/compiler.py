@@ -1132,6 +1132,7 @@ class Compiler:
             "PrefetchOp":self.Prefetch,
             "AllocateOp":self.Allocate,
             "OptimizeOp":self.Optimize,
+            "SynchronizeOp":self.Synchronize,
             }
 
     def compile_sched(self, op_sched:OpSchedule):
@@ -1218,10 +1219,12 @@ class Compiler:
                 #         no_save_list.append(kdn_name.split(" ")[0])
                 # for pnode in cnode.required_parameter_nodes_real|cnode.required_parameter_nodes_fake:
                 #     no_save_list.append(pnode.param_name)
-                no_save_list = (list(cnode.deps_real) 
+                no_save_list = (op.pos_info["no_save_list"] 
+                                if "no_save_list" in op.pos_info else
+                                (list(cnode.deps_real) 
                                 + list(cnode.users) 
                                 + list(cnode.required_parameter_nodes_real)
-                                + list(cnode.required_parameter_nodes_fake))
+                                + list(cnode.required_parameter_nodes_fake)))
                     
                 for (target) in cnode.tensor_targets:  # cnode.tensor_targets is Tensor of pytorch
                     inplace_code = inplace_code.replace(target, "_" + target)
@@ -1246,8 +1249,7 @@ class Compiler:
                 for target_name in cnode.tensor_targets:
                     op.fct_list.append(Fct_get_shape(target_name))
         else:
-            target: Activation = op.target
-            anode: AllocationNode = target.anode
+            cnode: ComputationNode = op.target
             delete_tensor_function_list = []
             op.fct_list.append(Fct_RNG_state(
                                             op.name,
@@ -1274,7 +1276,7 @@ class Compiler:
                 
             op.fct_list.append(
                 Fct_run_bwd(
-                        target_name=anode.main_target,
+                        target_name=cnode.main_target,
                         retain_graph=(not op.pos_info["last_occurrence"]),
                         input_names=op.pos_info["input_names"],
                     )
@@ -1353,6 +1355,9 @@ class Compiler:
         op.fct_list.append(Fct_optimize(
                                         op.name,
                                         del_grad_list=op.list_params if op.is_cpu else []))
+        
+    def Synchronize(self, op:SynchronizeOp):
+        op.fct_list.append(Fct_synchronize())
 
 
 class RK_Fct:

@@ -281,23 +281,26 @@ class ORockmate(torch.nn.Module):
             self.op_sched = list_solutions[
                 np.argmin([sum(op_sched.time) for op_sched in list_solutions])
             ]
+            self.op_sched.add_pos_info()
+            self.op_list = self.op_sched.op_list
             self.get_compiled_fct()
         self.list_solutions.extend(list_solutions)
 
     def get_compiled_fct(self, new_compiler=True):
         if new_compiler:
             self.compiler = Compiler(self.gd)
-        self.fct_list, self.init_fct_list, self.restore_fct_list = self.compiler.compile_from_schedule(self.op_sched)
+        # self.fct_list, self.init_fct_list, self.restore_fct_list = 
+        self.compiler.compile_sched(self.op_sched)
         loss_idx = self.op_sched.loss_idx
 
-        self.fwd_fct_list = self.fct_list[:loss_idx]
-        self.bwd_fct_list = self.fct_list[loss_idx:]
-        l = [self.compiler.fct_del_var(v) for v in self.output.tensor_targets]
-        self.bwd_fct_list.append(l)
+        # self.fwd_fct_list = self.fct_list[:loss_idx]
+        # self.bwd_fct_list = self.fct_list[loss_idx:]
+        # l = [self.compiler.fct_del_var(v) for v in self.output.tensor_targets]
+        # self.bwd_fct_list.append(l)
         self.minor_parameters = []
         # for n, p in self.original_mod.named_parameters():
         #     if n in self.minor_param_nodes.append(pnode)
-        #     # if n not in [kdn.param_name for kdn in self.rkgb_res.hierarchical_cluster.parameter_nodes]:
+        #     # if n not in [anode.param_name for anode in self.rkgb_res.hierarchical_cluster.parameter_nodes]:
         #         self.minor_parameters.append(p)
                 # p.data = p.data.to("cuda")
         
@@ -310,18 +313,20 @@ class ORockmate(torch.nn.Module):
                 for pnode in self.minor_param_nodes:
                     code = make_str_list_assign(pnode.view_code, suffix=".data")
                     exec(code, self.gd, self.compiler.storage.ld)
-            self.bwd_fct_list.append([optimize])
+            # self.bwd_fct_list.append([optimize])
+            self.op_list[-1].fct_list.append([optimize])
         
         self.define_autograd_Function()
         self.inherits_original_mod_attributes_and_methods()
 
-    def _exec(self, fct_list):
+    def _exec(self, op:Op):
         if self.exec_with_record_mem:
             torch.cuda.reset_peak_memory_stats()
             self.mem_before = torch.cuda.memory_allocated()
             self.max_before = torch.cuda.max_memory_allocated()
-            for fct in fct_list:
-                fct()
+            # for fct in fct_list:
+            #     fct()
+            op()
             torch.cuda.synchronize()
             allo_mem = torch.cuda.memory_allocated() - self.mem_before
             peak_mem = torch.cuda.max_memory_allocated() - self.max_before
@@ -334,11 +339,11 @@ class ORockmate(torch.nn.Module):
     def init_fwd_exec(self):
         #  -> Initialize the storage
         storage = self.compiler.storage
-        for kdn in self.rkgb_res.forward_and_backward_graph.allocation_nodes:
-            storage.ld[kdn.main_target] = torch.empty(
+        for anode in self.rkgb_res.forward_and_backward_graph.allocation_nodes:
+            storage.ld[anode.main_target] = torch.empty(
                 0,
                 device=self.device,
-                requires_grad=kdn.info.requires_grad,
+                requires_grad=anode.info.requires_grad,
             )
 
         for out_node in self.rkgb_res.forward_graph.output_nodes:
@@ -382,7 +387,7 @@ class ORockmate(torch.nn.Module):
         for k,v in self.op_sched.dict_alloc_param.items():
             if v.pnode.mem < self.gd["optimize_stats"]["minor_param_size"]:continue
             if v.grad:continue
-            if v.is_optimizer_states:continue
+            if v.is_optim_states:continue
             # target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
             target = v.pnode.get_value(self.original_mod)
             target.grad = None
@@ -429,7 +434,7 @@ class ORockmate(torch.nn.Module):
             if isinstance(op, OptimizeOp):
                 optim = self.gd["cpu_optim"] if "cpu" in op.name else self.gd["gpu_optim"]
                 storage.ld["optimizers"][op.name] = optim([storage.ld[p] for p in op.list_params], **self.gd["opt_kwargs"])
-            if isinstance(op, OffloadOp) and op.is_optimizer_states:
+            if isinstance(op, OffloadOp) and op.is_optim_states:
                 var_name = op.target.param_name
                 var = storage.ld[f"cpu_{var_name}"] if f"cpu_{var_name}" in storage.ld else storage.ld[var_name]
                 storage.ld["optimizers"][f"exp_avg_{var_name}"] = torch.zeros_like(var, pin_memory=True, device="cpu")
@@ -455,9 +460,10 @@ class ORockmate(torch.nn.Module):
             exec(self.init_code, self.gd, storage.ld)  # is compiler.gd
             for l,op in zip(self.fwd_fct_list, self.op_sched.op_list[:self.op_sched.loss_idx+1]):
                 if isinstance(op, OffloadOp) and op.grad:continue#first iteration without grad offload
-                if isinstance(op, OffloadOp) and op.is_optimizer_states:continue#first iteration without grad offload
+                if isinstance(op, OffloadOp) and op.is_optim_states:continue#first iteration without grad offload
                 if isinstance(op, OptimizeOp):continue#first iteration no need to optimize
-                self._exec(l)
+                # self._exec(l)
+                self._exec(op)
         
     def restore_exec(self, keep_grad=False):
         if self.compiler.storage == None:return None
@@ -538,7 +544,7 @@ class ORockmate(torch.nn.Module):
         # output of the last primitive operation inside the module. And we need
         # to be able to backward the last node using its standard backward
         # function. So we must not overwrite last node's output backward
-        # function, otherwise last_kcn.backward will call the following lines.
+        # function, otherwise last_cnode.backward will call the following lines.
         # SO we need to return a detached copy of the outputs.
         #  Thus, the last node's output backward isn't affected, and
         # we properly redefine HRockmate's output backward.
@@ -602,7 +608,7 @@ class ORockmate(torch.nn.Module):
 
                 outs = []
                 for out_node in self.rkgb_res.forward_graph.output_nodes[:1]:
-                    # print(kdn)
+                    # print(anode)
                     RkMod.compiler.get_val(f"out_{out_node.main_target}").data = RkMod.compiler.get_val(out_node.main_target)
                     o = RkMod.compiler.get_val(f"out_{out_node.main_target}")#.detach().requires_grad_()
                     # print(o.grad_fn)
@@ -656,7 +662,7 @@ class ORockmate(torch.nn.Module):
                             )
                     out_grad.data = torch.empty(0)
                 # for out_node in self.rkgb_res.forward_graph.output_nodes:
-                #         # print(kdn)
+                #         # print(anode)
                 #         RkMod.compiler.get_val(f"out_{out_node.main_target}").data = torch.empty(0)
                     
                 #  * record_mem stuff *
@@ -689,7 +695,7 @@ class ORockmate(torch.nn.Module):
                     #  -> Clear the compiler (and Autograd clears ctx)
                     # RkMod.compiler.storage = None
                     for out_node in self.rkgb_res.forward_graph.output_nodes:
-                        # print(kdn)
+                        # print(anode)
                         RkMod.compiler.get_val(f"out_{out_node.main_target}").data = torch.empty(0)
                         
                     return grads
@@ -778,8 +784,8 @@ class ORockmate(torch.nn.Module):
         acc_mem = np.zeros(len(self.fwd_seq.seq))
         # alive_dict = {}
         # for kg in self.list_kg:
-        #     for kdn in kg.list_kdn:
-        #         alive_dict[kdn.name] = (0, kdn.mem)
+        #     for anode in kg.list_anode:
+        #         alive_dict[anode.name] = (0, anode.mem)
         for i, seq in enumerate(self.fwd_seq.seq + self.bwd_seq.seq):
             op_sched = seq.op_sched
             for a, op in zip(op_sched.alive_list, op_sched.op_list):
@@ -826,7 +832,7 @@ class ORockmate(torch.nn.Module):
         self.original_mod.zero_grad(set_to_none=set_to_none)
 
     def print_sched_results(self):
-        t = sum(kcn.time for kcn in self.rkgb_res.hierarchical_cluster.list_cnodes if kcn.time)
+        t = sum(cnode.time for cnode in self.rkgb_res.hierarchical_cluster.list_cnodes if cnode.time)
         print(f"Original module iter time {t}")
         t = sum(step.time for step in self.op_sched.steps)
         print(f"Schedule: total time {t}")

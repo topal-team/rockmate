@@ -1467,7 +1467,7 @@ class ModelPULP:
                             )
             opt_ops.append((*self.active_steps[i], op))
             self.cpu_optimized_steps[self.active_steps[i]].append(p)
-            del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]))))
+            # del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]))))
 
             #if cpu optimize, do not keep w after bwd
         def apply_gpu_optimize(p):
@@ -1770,7 +1770,7 @@ class ModelPULP:
         init_op_list = []
         restore_op_list = []
         init_alive_status = {}
-        loss_op = ComputeOp(self.hgraph.cluster.loss_cnode)
+        loss_op = ComputeOp(self.hgraph.cluster.loss_cnode, disabled=True)
         if self.with_parameters:
             W = len(self.parameter_size)
             (
@@ -1788,7 +1788,7 @@ class ModelPULP:
                         op_list.append(loss_op)
                     op_list += self.schedule_compute(t,k,hgraph)
         
-        print("finish scheduling")
+        # print("finish scheduling")
         for anode in self.hgraph.cluster.interfaces["input_data_anodes"]:
             init_alive_status[anode.name] = True  # anode share the name as alloc
         op_sched = OpSchedule(
@@ -1829,9 +1829,6 @@ class ModelPULP:
             if opt > -1:
                 h_obj = self.list_list_sched[j][opt]
                 if hcn.is_fwd:
-                    # sub_op_list = deepcopy(
-                    #     h_obj.op_list[: h_obj.loss_idx]
-                    # )
                     sub_op_list = h_obj.op_list[: h_obj.loss_idx]
                 else:
                     sub_op_list = h_obj.op_list[h_obj.loss_idx + 1 :]
@@ -1944,7 +1941,7 @@ class ModelPULP:
                     # loss_idx = len(op_list)
                     # loss_op = Op(K_C_node("loss"))
 
-                    op_list.append(ComputeOp(self.hgraph.cluster.loss_cnode))
+                    op_list.append(ComputeOp(self.hgraph.cluster.loss_cnode, disabled=True))
                 if not sol(self.sumComp[t, k]):
                     continue
                 j = self.hcn2sub_c[k]
