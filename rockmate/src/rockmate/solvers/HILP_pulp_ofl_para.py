@@ -343,8 +343,8 @@ class ModelPULP:
             for k in range(T):
                 if k not in self.krange(t):
                     for o in range(self.nR[k]):
-                        self.Comp[t, k, o].prefill(0)
-                    self.sumComp[t, k].prefill(0)
+                        self.Comp[t, k, o] = 0
+                    self.sumComp[t, k] = 0
 
         # Sp for saved Phantoms, option-related
         # self.AliveP = [
@@ -370,7 +370,7 @@ class ModelPULP:
         for j, list_sched in enumerate(self.list_list_sched):
             for o in range(len(list_sched)):
                 if (0,j,o) not in self.AliveP:
-                    self.AliveP[0,j,o].prefill(0)
+                    self.AliveP[0,j,o] = 0
                 for t in range(1,T + 1):
                     if (t,j,o) not in self.AliveP:
                         self.AliveP[t,j,o] = self.AliveP[t-1,j,o]
@@ -409,7 +409,7 @@ class ModelPULP:
                        if t-1 in self.active_stages[i]], cat="Binary"
         )  # activation
         for c, (k, i) in enumerate(self.create_list):
-            self.AliveA[0,c].prefill(0)
+            self.AliveA[0,c] = 0
             for t in range(1, self.T):
                 if (t,c) not in self.AliveA:
                     self.AliveA[t,c] = self.AliveA[t-1,c]
@@ -430,7 +430,7 @@ class ModelPULP:
         )  # tensor that can be shared by acts
         for i in range(I):
             if (0,i) not in self.AliveT:
-                self.AliveT[0,i].prefill(0)
+                self.AliveT[0,i] = 0
             for t in range(1, self.T):
                 if (t,i) not in self.AliveT:
                     self.AliveT[t,i] = self.AliveT[t-1,i]
@@ -458,10 +458,10 @@ class ModelPULP:
         for t in range(T):
             for i in range(Cr):
                 if self.create_list[i][0] not in self.krange(t):
-                    self.create[t, i].prefill(0)
+                    self.create[t, i] = 0
             for i in range(De):
                 if self.delete_list[i][0] not in self.krange(t):
-                    self.delete[t, i].prefill(0)
+                    self.delete[t, i] = 0
             if self.single_fwd:
                 for d in range(De):
                     (k, i) = self.delete_list[d]
@@ -471,7 +471,7 @@ class ModelPULP:
                         pass
                 #     # elif t<=self.loss_idx:
                 #     else:
-                #         self.delete[t, d].prefill(0)
+                #         self.delete[t, d] = 0
                 #         pass
 
                 # for c in range(Cr):
@@ -479,7 +479,7 @@ class ModelPULP:
                 #     if k == min(_deps_d[i]) and k == t:
                 #         self.create[t, c] = 1
                 #     else:
-                #         self.create[t, c].prefill(0)
+                #         self.create[t, c] = 0
 
         self.W = W = len(self.sub_clusters)
         def get_parameters(hierarchical_nodes):
@@ -1199,14 +1199,14 @@ class ModelPULP:
             for k in range(self.T):                
                 for w in range(self.W):
                     if k not in self.krange(t):
-                        self.PrfW[t, k, w].prefill(0)
-                        self.OflW[t, k, w].prefill(0)
+                        self.PrfW[t, k, w] = 0
+                        self.OflW[t, k, w] = 0
                     
                     # fwd_i, bwd_i = self.param2hcn[w]
                     fwd_i = min(self.param2hcn[w])
                     bwd_i = max(self.param2hcn[w])
                     if k not in self.krange(t) or (t>fwd_i and t<bwd_i):
-                        self.OptC[t, k, w].prefill(0)
+                        self.OptC[t, k, w] = 0
 
         self.sumOptC = dict()
         for w in self.param2hcn:
@@ -1214,21 +1214,21 @@ class ModelPULP:
 
         if not self.gradient_accumulation:
             for k in self.PrfG:
-                self.PrfG[k].prefill(0)
+                self.PrfG[k] = 0
 
         if not self.with_optimizer_states:
             for (t,k,w) in self.AliveO:
                 self.AliveO[(t,k,w)] = (1-self.accumC_optimizer_states(w)- self.param_multiplier)
-                self.PrfO[(t,k,w)].prefill(0)
-                self.OflO[(t,k,w)].prefill(0)
+                self.PrfO[(t,k,w)] = 0
+                self.OflO[(t,k,w)] = 0
         if self.grad_mode in ["free"]:
             # If gradient is freed ASAP, OflG will be merged into OflW
             for (t,k,w) in self.OflG:
-                self.OflG[(t,k,w)].prefill(0)
+                self.OflG[(t,k,w)] = 0
             for (t,k,w) in self.AliveG:
                 grad_size = self.parameter_gradient_size[w]
                 if len(self.param2hcn[w]) <= 2:
-                    self.AliveG[(t,k,w)].prefill(0)
+                    self.AliveG[(t,k,w)] = 0
                     if k == max(self.param2hcn[w]):
                         # self.overhead[k] = [v+grad_size for v in self.overhead[k]]
                         self.param_grad_mem[t,k] += grad_size * self.req_w()
@@ -1236,7 +1236,7 @@ class ModelPULP:
                     bwd_first = min(x for x in self.param2hcn[w] if x>self.loss_idx)
                     bwd_last = max(self.param2hcn[w])
                     if t<=bwd_first or t>bwd_last:#assume single bwd
-                        self.AliveG[(t,k,w)].prefill(0)
+                        self.AliveG[(t,k,w)] = 0
                     else:
                         self.AliveG[(t,k,w)] = 1
                         if k in self.param2hcn[w] and k>bwd_first:
@@ -1449,6 +1449,7 @@ class ModelPULP:
         opt_ops = []
         init_ops = []
         restore_ops = []
+        init_alive = []
         cpu_optimize_candidates = {p: 0 for p in parameters.keys()}
 
         def apply_cpu_optimize(p):
@@ -1459,7 +1460,7 @@ class ModelPULP:
             # for (t,k,op) in del_ops:
             #     if op.target.name == p:
             #         op.grad = True
-            del_ops.append((t,k,DeleteOp(Parameter(parameters[p], grad=True))))
+            del_ops.append((t,k,DeleteOp(Parameter(parameters[p], is_grad=True))))
             i = self.active_steps.index((t,k))+1# TODO: distribute cpu optimization based on time
             op = OptimizeOp(list_params=[p], cpu=True, alloc=Parameter(parameters[p]),
                             time=parameters[p].mem/self.cpu_optimize_speed,
@@ -1474,7 +1475,7 @@ class ModelPULP:
                             time = parameters[p].mem/self.gpu_optimize_speed,
                             overhead=parameters[p].mem*self.optimizer_overhead_factor)
             opt_ops.append((bwd_i, bwd_i, op))# optimize after bwd
-            del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p], grad=True))))
+            del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p], is_grad=True))))
             
 
         assert (bwd_i, bwd_i) in self.active_steps
@@ -1491,18 +1492,20 @@ class ModelPULP:
             if (t, k) == (0, 0):  # init
                 for p, a in Alive.items():
                     if a:
-                        init_ops.append((t, k, AllocateOp(Parameter(parameters[p]))))
+                        p_alloc = Parameter(parameters[p])
+                        init_ops.append((t, k, AllocateOp(p_alloc)))
+                        init_alive.append(p_alloc)
                         op = PrefetchOp(
-                            alloc=Parameter(parameters[p]), indices=(0, None), 
+                            alloc=p_alloc, indices=(0, None), 
                             time=parameters[p].mem/self.bandwidthPrf/self.gcd
                         )
                         init_ops.append((t, k, op))
                         op = OffloadOp(
-                            alloc=Parameter(parameters[p]), indices=(0, None),
+                            alloc=p_alloc, indices=(0, None),
                             time=parameters[p].mem/self.bandwidthOfl/self.gcd
                         )
                         restore_ops.append((t, k, op))
-                        restore_ops.append((t, k, DeleteOp(Parameter(parameters[p]))))
+                        restore_ops.append((t, k, DeleteOp(p_alloc)))
 
             if next_offloaded_size > current_offloaded_size:
                 # print(t,k, next_offloaded_size, current_offloaded_size)
@@ -1546,7 +1549,7 @@ class ModelPULP:
                 #     pass
                 for p in select_paras:
                     del_ops.append((t, k, DeleteOp(Parameter(parameters[p]))))
-                    Alive[p].prefill(0)
+                    Alive[p] = 0
             if current_alive_size < next_alive_size:
                 # prefetch should be smaller than solution
                 prf_size = next_alive_size - current_alive_size
@@ -1622,17 +1625,19 @@ class ModelPULP:
                 apply_gpu_optimize(p)
                 gpu_optimze_param.append(pnode)
         if self.with_optimizer_states and gpu_optimze_param:
-            ofl_ops_os, prf_ops_os, del_ops_os = self.group_optimizer_states(w, gpu_optimze_param)
+            ofl_ops_os, prf_ops_os, del_ops_os, init_alive_os = self.group_optimizer_states(w, gpu_optimze_param)
             ofl_ops += ofl_ops_os
             prf_ops += prf_ops_os
             del_ops += del_ops_os
-        return ofl_ops, prf_ops, del_ops, opt_ops, init_ops, restore_ops
+            init_alive += init_alive_os
+        return ofl_ops, prf_ops, del_ops, opt_ops, init_ops, restore_ops, init_alive
 
     def group_optimizer_states(self, w, gpu_optimize_param):
         # To offload and prefetch optimizer states witin the gpu_optimize_param
         ofl_ops = []
         prf_ops = []
         del_ops = []
+        init_alive = []
         fwd_i = min(self.param2hcn[w])
         bwd_i = max(self.param2hcn[w])
         hcn = self.hgraph.list_HCNs[fwd_i]
@@ -1645,6 +1650,11 @@ class ModelPULP:
         assert (bwd_i, bwd_i) in self.active_steps
         idx = self.active_steps.index((bwd_i, bwd_i))
         for t, k in self.active_steps[idx:] + self.active_steps[:idx]:
+            if (t, k) == (0, 0):  # init
+                for p, a in Alive.items():
+                    if a:
+                        init_alive.append(Parameter(parameters[p],is_optim_states=True))
+
             t_, k_ = self.next_index(t, k)
             current_alive_size = sum(parameters[p].mem * a for p, a in Alive.items())
             current_offloaded_size = sum(parameters[p].mem * a for p, a in Offloaded.items())
@@ -1703,7 +1713,7 @@ class ModelPULP:
                     del_ops.append((t, k, DeleteOp(Parameter(parameters[p],
                                                              is_optim_states=True),
                                                    is_optim_states=True)))
-                    Alive[p].prefill(0)
+                    Alive[p] = 0
             if current_alive_size < next_alive_size or k_==bwd_i:
                 # if w == 15:print(self.active_steps[k_]==bwd_i)
                 # prefetch should be smaller than solution
@@ -1741,7 +1751,7 @@ class ModelPULP:
                     Alive[p] = 1
             if k_==bwd_i:assert 0 not in Alive.values()
 
-        return ofl_ops, prf_ops, del_ops
+        return ofl_ops, prf_ops, del_ops, init_alive
 
 
     def schedule(self, hgraph=None, check_valid=False):
@@ -1768,7 +1778,7 @@ class ModelPULP:
                 init_alive_status,
                 init_op_list,
                 restore_op_list,
-            ) = self.greedy_post_processing(hgraph)
+            ) = self.schedule_offload(hgraph)
         else:
             op_list = []
             
@@ -1779,7 +1789,8 @@ class ModelPULP:
                     op_list += self.schedule_compute(t,k,hgraph)
         
         print("finish scheduling")
-        
+        for anode in self.hgraph.cluster.interfaces["input_data_anodes"]:
+            init_alive_status[anode.name] = True  # anode share the name as alloc
         op_sched = OpSchedule(
             op_list,
             # ofl_list=ofl_list,
@@ -1866,7 +1877,7 @@ class ModelPULP:
                 op_list.append(DeleteOp(Activation(hdn.anode)))
         return op_list
 
-    def greedy_post_processing(self, hgraph=None):
+    def schedule_offload(self, hgraph=None):
         """
         V1: self.grouping = False:
         merge every cluster, ofl/prf/del partially, high memory overhead
@@ -1903,22 +1914,28 @@ class ModelPULP:
         self.cpu_optimized_steps = {step:[] for step in self.active_steps}
         init_op_list = []
         restore_op_list = []
+        init_alive_status = dict()
         if self.grouping:
             for w in range(self.W)[::-1]:
-                o_l, p_l, d_l, t_l, i_l, r_l = self.group(w)
+                o_l, p_l, d_l, t_l, i_l, r_l, init_alive = self.group(w)
                 self.ofl_ops.extend(o_l)
                 self.prf_ops.extend(p_l)
                 self.del_ops.extend(d_l)
                 self.opt_ops.extend(t_l)
                 init_op_list.extend([ops[2] for ops in i_l])
                 restore_op_list.extend([ops[2] for ops in r_l])
+                for alloc in init_alive:
+                    init_alive_status[alloc.name] = True
         # else:
         #     init_op_list = self.schedule_init_op_list()
 
         sol = self.sol
         # offload_buffers = {w:[] for w in range(W)}
         op_list = []
-        init_alive_status = dict()
+        
+        # for op in init_op_list:
+        #     if isinstance(op, AllocateOp):
+        #         init_alive_status[op.target] = True
         
         for t in range(T):
             for k in self.krange(t):
