@@ -3,6 +3,7 @@ from rkgb.core.backward import ComputationNode, AllocationNode
 import torch
 import numpy as np
 from .solvers.op_schedule import (
+    Allocation,
     Activation,
     Parameter,
     Buffer,
@@ -1339,7 +1340,7 @@ class Compiler:
         prefetch_mode = "param"
         if target.is_optim_states:prefetch_mode = "optim_states"
         op.fct_list.append(Fct_prefetch(
-                                       target.param_name,
+                                       target,
                                        prefetch_mode=prefetch_mode))
         pass
 
@@ -1603,17 +1604,22 @@ class Fct_offload(RK_Fct):
                     
 class Fct_prefetch(RK_Fct):
     def __init__(self, 
-                 target_name: str, 
+                 target: Allocation, 
                  prefetch_mode = "param",
                  stream = "prefetch_stream",
                  **kwargs):
         super().__init__(**kwargs)
-        self.target_name = target_name,
+        self.target = target
+        self.target_name = target.target_name,
         self.prefetch_fct = {"param":self.prefetch_param,
                           "optim_states":self.prefetch_optim_states}
+        self.post_process = {"param":self.post_process_param,
+                          "optim_states":self.post_process_optim_states}
         self.prefetch_mode = prefetch_mode
         self.stream = stream
-
+        self.post_process_code = ""
+        if isinstance(target, Parameter):
+            self.post_process_code = target.pnode.get_code()
     def prefetch_param(self):
         self.storage.ld[f"cpu_{self.target_name}"].data.copy_(
                 self.storage.ld[self.target_name].data,
@@ -1628,10 +1634,18 @@ class Fct_prefetch(RK_Fct):
         for k,v in self.storage.ld["optimizers"][f"Optimize_{self.target_name}"].state.items():
             self.storage.ld["optimizers"][f"exp_avg_{self.target_name}"].copy_(v["exp_avg"], non_blocking=True)
             self.storage.ld["optimizers"][f"exp_avg_sq_{self.target_name}"].copy_(v["exp_avg_sq"], non_blocking=True)
+
+    def post_process_param(self):
+        exec(self.post_process_code, self.storage.gd, self.storage.ld)
+
+    def post_process_optim_states(self):
+        pass
     
     def __call__(self):
-         with torch.cuda.stream(self.storage.gd[self.stream]):
+        with torch.cuda.stream(self.storage.gd[self.stream]):
             self.prefetch_fct[self.prefetch_mode]()
+        with torch.cuda.stream(self.storage.gd["main_stream"]):
+            self.post_process[self.prefetch_mode]()
 
 class Fct_synchronize(RK_Fct):
     def __init__(self,
