@@ -150,7 +150,8 @@ class ORockmate(torch.nn.Module):
                         HILP.Config(
                             nb_total_nodes_top_level=max_size_S_graph_for_no_partitioning
                             + 1
-                        )
+                        ),
+                        ilp_solver=ilp_solver
                     )
                 ]
             else:
@@ -288,7 +289,9 @@ class ORockmate(torch.nn.Module):
 
     def get_compiled_fct(self, new_compiler=True):
         if new_compiler:
-            self.compiler = Compiler(self.gd)
+            storage = RK_Storage()
+            storage.init(self.gd)
+            self.compiler = Compiler(storage)
         # self.fct_list, self.init_fct_list, self.restore_fct_list = 
         self.compiler.compile_sched(self.op_sched)
         loss_idx = self.op_sched.loss_idx
@@ -333,8 +336,9 @@ class ORockmate(torch.nn.Module):
             self.max_mem.append(peak_mem - allo_mem)
             self.allo_mem.append(allo_mem)
         else:
-            for fct in fct_list:
-                fct()
+            op()
+            # for fct in fct_list:
+            #     fct()
 
     def init_fwd_exec(self):
         #  -> Initialize the storage
@@ -559,13 +563,16 @@ class ORockmate(torch.nn.Module):
             def forward(ctx, dummy_input, *args):
                 if RkMod.compiler.storage is not None:
                     ctx.RK_Storage = storage = RkMod.compiler.storage
+                    storage.init(RkMod.gd)
                     ctx.name_of_inputs_which_req_grad = (
                         RkMod.name_of_inputs_which_req_grad_buffer
                     )
                     with torch.enable_grad():
                         exec(RkMod.init_code, RkMod.gd, storage.ld)  # is compiler.gd
-                        for l in RkMod.fwd_fct_list:
-                            RkMod._exec(l)
+                        # for l in RkMod.fwd_fct_list:
+                        #     RkMod._exec(l)
+                        for op in self.op_list:
+                            self._exec(op)
                 else:
                     # *** INITIALIZATION PART ***
                     #  -> Get the inputs using the buffer (Rem 1)
@@ -573,6 +580,7 @@ class ORockmate(torch.nn.Module):
                     RkMod.dict_inputs_buffer = None
                     #  -> Create the RK_Storage for this run, and store it in ctx
                     ctx.RK_Storage = storage = RK_Storage()
+                    storage.init(RkMod.gd)
                     RkMod.compiler.storage = storage
                     #  -> Store what we need to return inputs' grad (Rem 1)
                     ctx.name_of_inputs_which_req_grad = (
@@ -818,7 +826,8 @@ class ORockmate(torch.nn.Module):
         if remain_for_offload:
             remains = []
             for k,v in self.op_sched.dict_alloc_param.items():
-                if v.grad and self.op_sched.alive_list[-1][k]:
+                # if v.grad and self.op_sched.alive_list[-1][k]:
+                if v.grad and self.op_sched.init_alive_status[k]:
                     remains.append(v.pnode.param_name)
             for k,p in self.original_mod.named_parameters():
                 if k not in remains:

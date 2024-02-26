@@ -493,8 +493,8 @@ class Compiler:
             (str(op) if not op.disabled else "") for op in op_sched.op_list
         ]
         # if op_sched.alive_list == []:
-        op_sched.alive_list = op_sched.create_alive_list()
-        self.alive_list = op_sched.alive_list
+        # op_sched.alive_list = op_sched.create_alive_list()
+        # self.alive_list = op_sched.alive_list
         self.parameters = {k:alloc for k, alloc in op_sched.dict_alloc.items() if (
                            isinstance(alloc, Parameter) and not alloc.grad 
                            and not alloc.is_optim_states)}
@@ -1459,8 +1459,8 @@ class Fct_run_fwd(RK_Fct):
                  fwd_mode = "with_grad",
                  **kwargs):
         super().__init__(**kwargs)
-        self.target_name = target_name,
-        self.code = code,
+        self.target_name = target_name
+        self.code = code
         self.no_save_list = no_save_list
         self.fwd_fct = {"with_grad":self.fwd_with_grad,
                         "no_grad":self.fwd_no_grad}
