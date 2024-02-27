@@ -317,7 +317,7 @@ class ORockmate(torch.nn.Module):
                     code = make_str_list_assign(pnode.view_code, suffix=".data")
                     exec(code, self.gd, self.compiler.storage.ld)
             # self.bwd_fct_list.append([optimize])
-            self.op_list[-1].fct_list.append([optimize])
+            self.op_list[-1].fct_list.append(optimize)
         
         self.define_autograd_Function()
         self.inherits_original_mod_attributes_and_methods()
@@ -337,6 +337,7 @@ class ORockmate(torch.nn.Module):
             self.allo_mem.append(allo_mem)
         else:
             op()
+            # torch.cuda.synchronize()
             # for fct in fct_list:
             #     fct()
 
@@ -385,31 +386,35 @@ class ORockmate(torch.nn.Module):
                 storage.ld[pnode.param_name] = target
                 # code = make_str_list_assign(pnode.view_code, suffix=".data")
                 exec(pnode.get_code(), self.gd, storage.ld)
+                
                 # print(target.device, pnode.get_code())
         gc.collect()
         print(psutil.virtual_memory())
         for k,v in self.op_sched.dict_alloc_param.items():
             if v.pnode.mem < self.gd["optimize_stats"]["minor_param_size"]:continue
-            if v.grad:continue
+            if v.is_grad:continue
             if v.is_optim_states:continue
             # target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
             target = v.pnode.get_value(self.original_mod)
+            storage.shapes[v.pnode.param_name] = target.shape
+            storage.dtypes[v.pnode.param_name] = target.dtype
             target.grad = None
             # if (f"Optimize_cpu_{k}" in self.op_sched.op_name_list
             #     or f"Offload_{k}" in self.op_sched.op_name_list):
             if True:
-                storage.ld["cpu_"+k] = torch.empty_like(target, 
+                storage.ld["cpu_"+v.target_name] = torch.empty_like(target, 
                                                     dtype=target.dtype, 
                                                     device=torch.device("cpu"),
                                                     pin_memory=True)
-                storage.ld["cpu_"+k].copy_(target.data)
-                if v.pnode.requires_grad and f"Offload_{k}_grad" in self.op_sched.op_name_list:
-                    storage.ld["cpu_"+k].grad = torch.empty_like(storage.ld["cpu_"+k], pin_memory=True)
+                storage.ld["cpu_"+v.target_name].copy_(target.data)
+                # TODO: get info from op_sched
+                if v.pnode.requires_grad: #and f"Offload_{k}_grad" in self.op_sched.op_name_list:
+                    storage.ld["cpu_"+v.target_name].grad = torch.empty_like(storage.ld["cpu_"+v.target_name], pin_memory=True)
             # if v.pnode.is_buffer:
             #     storage.ld[k] = target.to("cuda")
             # else:
             # target.data = torch.empty(0)
-            storage.ld[k] = target
+            storage.ld[v.target_name] = target
         gc.collect()
         print(psutil.virtual_memory())
         # for k, v in self.op_sched.dict_alloc.items():
@@ -438,14 +443,16 @@ class ORockmate(torch.nn.Module):
             if isinstance(op, OptimizeOp):
                 optim = self.gd["cpu_optim"] if "cpu" in op.name else self.gd["gpu_optim"]
                 storage.ld["optimizers"][op.name] = optim([storage.ld[p] for p in op.list_params], **self.gd["opt_kwargs"])
-            if isinstance(op, OffloadOp) and op.is_optim_states:
+            if isinstance(op, OffloadOp) and isinstance(op.target, Parameter) and op.target.is_optim_states:
                 var_name = op.target.param_name
                 var = storage.ld[f"cpu_{var_name}"] if f"cpu_{var_name}" in storage.ld else storage.ld[var_name]
                 storage.ld["optimizers"][f"exp_avg_{var_name}"] = torch.zeros_like(var, pin_memory=True, device="cpu")
                 storage.ld["optimizers"][f"exp_avg_sq_{var_name}"] = torch.zeros_like(var, pin_memory=True, device="cpu")
         for k,v in self.op_sched.dict_alloc_param.items():
+            target = v.pnode.get_value(self.original_mod)
             if v.pnode.mem < self.gd["optimize_stats"]["minor_param_size"]:continue
-            if v.grad:continue
+            if v.is_grad:continue
+            
             target.data = torch.empty(0)
         
         print(psutil.virtual_memory())
@@ -453,24 +460,27 @@ class ORockmate(torch.nn.Module):
         if self.minor_parameters:
             storage.ld["optimizers"]["minors"] = self.gd["gpu_optim"](self.minor_parameters, **self.gd["opt_kwargs"])
         
-        for l in self.init_fct_list:
-            self._exec(l)
+        # for l in self.init_fct_list:
+        #     self._exec(l)
 
         for op in self.op_sched.init_op_list:
-            if isinstance(op, PrefetchOp):
-                exec(op.target.pnode.get_code(), self.gd, storage.ld)
+            op()
+        #     if isinstance(op, PrefetchOp):
+        #         exec(op.target.pnode.get_code(), self.gd, storage.ld)
         torch.cuda.synchronize()
         with torch.enable_grad():
             exec(self.init_code, self.gd, storage.ld)  # is compiler.gd
-            for l,op in zip(self.fwd_fct_list, self.op_sched.op_list[:self.op_sched.loss_idx+1]):
-                if isinstance(op, OffloadOp) and op.grad:continue#first iteration without grad offload
-                if isinstance(op, OffloadOp) and op.is_optim_states:continue#first iteration without grad offload
+            # for l,op in zip(self.fwd_fct_list, self.op_sched.op_list[:self.op_sched.loss_idx+1]):
+            for op in self.op_list[:self.op_sched.loss_idx+1]:
+                if isinstance(op, OffloadOp) and isinstance(op.target, Parameter):
+                    if op.target.is_grad or op.target.is_optim_states:continue#first iteration without grad offload
                 if isinstance(op, OptimizeOp):continue#first iteration no need to optimize
                 # self._exec(l)
                 self._exec(op)
+                torch.cuda.synchronize()
         
     def restore_exec(self, keep_grad=False):
-        if self.compiler.storage == None:return None
+        if self.compiler.storage.ld == {}:return None
         self.zero_grad()
         for l in self.restore_fct_list:
             self._exec(l)
@@ -487,11 +497,11 @@ class ORockmate(torch.nn.Module):
             if v.grad:continue
             # target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
             target = v.pnode.get_value(self.original_mod)
-            target.data = self.compiler.storage.ld["cpu_"+k].data
+            target.data = self.compiler.storage.ld[v.target_name].data
             if keep_grad:
-                target.grad = self.compiler.storage.ld["cpu_"+k].grad
+                target.grad = self.compiler.storage.ld[v.target_name].grad
 
-        self.compiler.storage = None
+        self.compiler.storage.ld = {}
         torch.cuda.synchronize()
 
     def define_autograd_Function(self):
@@ -561,9 +571,8 @@ class ORockmate(torch.nn.Module):
             # === OUR FORWARD FUNCTION ===
             @staticmethod
             def forward(ctx, dummy_input, *args):
-                if RkMod.compiler.storage is not None:
+                if RkMod.compiler.storage.ld != {}:
                     ctx.RK_Storage = storage = RkMod.compiler.storage
-                    storage.init(RkMod.gd)
                     ctx.name_of_inputs_which_req_grad = (
                         RkMod.name_of_inputs_which_req_grad_buffer
                     )
@@ -689,9 +698,11 @@ class ORockmate(torch.nn.Module):
                         with torch.enable_grad():
                             RkMod._exec(l)
                 else:
-                    for l in RkMod.bwd_fct_list:
-                        with torch.enable_grad():
-                            RkMod._exec(l)
+                    # for l in RkMod.bwd_fct_list:
+                    #     with torch.enable_grad():
+                    #         RkMod._exec(l)
+                    for op in RkMod.op_list[RkMod.op_sched.loss_idx+1:]:
+                        RkMod._exec(op)
                     if RkMod.exec_with_record_mem and RkMod.backward_add_output_grad:
                         RkMod.allo_mem[loss_idx] += RkMod.output_size
                     #  -> return grad of dummy input + inputs' which req grad (Rem 1)

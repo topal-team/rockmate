@@ -86,7 +86,7 @@ class RK_Storage:
         return cls._instance
 
     def init(self, gd):
-        self.ld = {"events": {}}
+        self.ld = dict()
         self.shapes = dict()
         self.dtypes = dict()
         self.rng_state = RngState()
@@ -1136,6 +1136,14 @@ class Compiler:
             "SynchronizeOp":self.Synchronize,
             }
 
+    def get_val(self, val):
+        if val in self.storage.ld:
+            return self.storage.ld[val]
+        elif val in self.storage.gd:
+            return self.storage.gd[val]
+        else:
+            raise Exception(f"{val} not defined in executing RK_Env")
+
     def compile_sched(self, op_sched:OpSchedule):
         for i, op in enumerate(op_sched.init_op_list):
             self.compile_op[op.__class__.__name__](op)
@@ -1212,14 +1220,6 @@ class Compiler:
                                             fwd_mode="no_grad"))
 
             else:
-                # no_save_list = []
-                # candidates = list(cnode.deps_real) + list(cnode.users)
-                # candidates = self._get_names(candidates)
-                # for kdn_name in candidates:
-                #     if "Delete_"+kdn_name in self.op_name_list[op.pos_info["index"]:op.pos_info["next_bwd_idx"]]:
-                #         no_save_list.append(kdn_name.split(" ")[0])
-                # for pnode in cnode.required_parameter_nodes_real|cnode.required_parameter_nodes_fake:
-                #     no_save_list.append(pnode.param_name)
                 no_save_list = (op.pos_info["no_save_list"] 
                                 if "no_save_list" in op.pos_info else
                                 (list(cnode.deps_real) 
@@ -1232,7 +1232,9 @@ class Compiler:
                 
                 op.fct_list.append(Fct_run_fwd(cnode.main_target,
                                             main_code,
-                                            no_save_list=no_save_list,
+                                            no_save_list=[anode.main_target if hasattr(anode, "main_target")
+                                                          else anode.param_name
+                                                          for anode in no_save_list],
                                             fwd_mode="with_grad"))
             op.fct_list.append(Fct_run_fwd(cnode.main_target,inplace_code))
             for inplace_target in cnode.inplace_targets:
@@ -1256,25 +1258,11 @@ class Compiler:
                                             op.name,
                                             get_state=op.pos_info["first_occurrence"]))
             
-            # temporary_tensor_names = [
-            #     kdn_name.split(" ")[0]
-            #     for kdn_name in self._get_names(anode.deps_fake)
-            #     if not self._is_alive(kdn_name, i)
-            # ]
-            # if anode.main_target in temporary_tensor_names:
-            #     temporary_tensor_names.append(f"_{anode.main_target}")
-
-            # for tensor_name in temporary_tensor_names:
             for target_name in op.pos_info["temporary_tensor_names"]:
-                op.fct_list.append(Fct_gen_fake_data(target_name))
+                op.fct_list.append(Fct_gen_fake_data(target_name, 
+                                                     with_proxy=(cnode.main_target==target_name)))
                 delete_tensor_function_list.append(Fct_del(target_name, del_mode="data"))
-
-            # prev_i = i - self.op_name_list[:i][::-1].index(anode.name) - 1
-            # input_names = []
-            # for kdn in anode.users_global:
-            #     if f"{kdn.name}" in self.op_name_list[prev_i:i]:
-            #         input_names.append(kdn.name.split(" ")[0])
-                
+    
             op.fct_list.append(
                 Fct_run_bwd(
                         target_name=cnode.main_target,
@@ -1309,7 +1297,7 @@ class Compiler:
                 for v in alloc.anode.tensor_targets:
                     op.fct_list.append(Fct_del(
                                     target_name=v,
-                                    del_mode="base"
+                                    del_mode="data"
                                     ))
                 for v in alloc.anode.container_targets:
                     op.fct_list.append(Fct_del(
@@ -1384,6 +1372,7 @@ class Fct_del(RK_Fct):
 
     def del_data(self):
         self.storage.ld[self.target_name].data = torch.empty(0)
+        # pass
     def del_grad(self):
         self.storage.ld[self.target_name].grad = None
     def del_base(self):
@@ -1396,12 +1385,13 @@ class Fct_del(RK_Fct):
                 v["exp_avg_sq"].data = torch.empty(0)
 
 class Fct_gen_fake_data(RK_Fct):
-    def __init__(self, target_name: str):
+    def __init__(self, target_name: str, with_proxy=False):
         super().__init__(target_name=target_name)
         self.target_name = target_name
+        self.with_proxy = with_proxy
     
     def __call__(self):
-        with torch.cuda.stream(self.gd["main_stream"]):
+        with torch.cuda.stream(self.storage.gd["main_stream"]):
             m = (
                 self.storage.gd["cmeta"]
                 if self.storage.dtypes[self.target_name].is_complex
@@ -1413,6 +1403,8 @@ class Fct_gen_fake_data(RK_Fct):
             else:
                 x = m.expand(np.prod(s)).view(s)
             self.storage.ld[self.target_name].data = x
+            if self.with_proxy:
+                self.storage.ld[f"_{self.target_name}"].data = x
 
 class Fct_detach(RK_Fct):
     def __init__(self, target_name: str):
@@ -1429,7 +1421,7 @@ class Fct_detach(RK_Fct):
         self.storage.ld[f"_{self.target_name}"] = torch.empty(0)
     
     def __call__(self):
-        with torch.cuda.stream(self.gd["main_stream"]):
+        with torch.cuda.stream(self.storage.gd["main_stream"]):
             self.storage.ld[self.target_name].data = self.storage.ld[f"_{self.target_name}"].data
 
 class Fct_run_bwd(RK_Fct):
@@ -1439,13 +1431,15 @@ class Fct_run_bwd(RK_Fct):
                  input_names=[], 
                  **kwargs):
         super().__init__(**kwargs)
-        self.target_name = target_name,
-        self.retain_graph = retain_graph,
-        self.input_names = input_names,
+        self.target_name = target_name
+        self.retain_graph = retain_graph
+        self.input_names = input_names
 
     def __call__(self):
         with torch.cuda.stream(self.storage.gd["main_stream"]):
             inputs = [self.storage.ld[name] for name in self.input_names]
+            if not inputs:
+                inputs = None
             self.storage.ld[f"_{self.target_name}"].backward(
                 self.storage.ld[self.target_name].grad,
                 inputs=inputs,
@@ -1537,8 +1531,8 @@ class Fct_optimize(RK_Fct):
 
     def __call__(self):
         self.storage.ld["optimizers"][self.target_name].step()
-        for p in self.del_grad_list:
-            self.storage.ld[p].grad.zero_()
+        # for p in self.del_grad_list:
+        #     self.storage.ld[p].grad.zero_()
 
 class Fct_mem_alloc(RK_Fct):
     def __init__(self,
@@ -1546,25 +1540,26 @@ class Fct_mem_alloc(RK_Fct):
                  alloc_mode = "tensor",
                  **kwargs):
         super().__init__(**kwargs)
-        self.target_name = target_name,
+        # self.target = target
+        self.target_name = target_name
         self.alloc_fct = {"tensor":self.alloc_tensor,
                           "optim_states":self.alloc_optim_states}
         self.alloc_mode = alloc_mode
     
     def alloc_optim_states(self):
         for k,v in self.storage.ld["optimizers"][f"Optimize_{self.target_name}"].state.items():
-            v["exp_avg"].data = torch.zeros_like(self.storage.ld["optimizers"][f"exp_avg_{self.target_name}"], device=self.gd["device"])
-            v["exp_avg_sq"].data = torch.zeros_like(self.storage.ld["optimizers"][f"exp_avg_sq_{self.target_name}"], device=self.gd["device"])
+            v["exp_avg"].data = torch.zeros_like(self.storage.ld["optimizers"][f"exp_avg_{self.target_name}"], device=self.storage.gd["device"])
+            v["exp_avg_sq"].data = torch.zeros_like(self.storage.ld["optimizers"][f"exp_avg_sq_{self.target_name}"], device=self.storage.gd["device"])
 
     def alloc_tensor(self):
         self.storage.ld[self.target_name].data = torch.empty(
                     self.storage.shapes[self.target_name], 
-                    dtype=self.storage.dtypes[self.target_name], device=self.gd["device"]
+                    dtype=self.storage.dtypes[self.target_name], device=self.storage.gd["device"]
                 )
         
     def __call__(self):
          with torch.cuda.stream(self.storage.gd["main_stream"]):
-            self.alloc[self.alloc_mode]()
+            self.alloc_fct[self.alloc_mode]()
 
 
 class Fct_offload(RK_Fct):
@@ -1574,7 +1569,7 @@ class Fct_offload(RK_Fct):
                  stream = "offload_stream",
                  **kwargs):
         super().__init__(**kwargs)
-        self.target_name = target_name,
+        self.target_name = target_name
         self.offload_fct = {"param":self.offload_param,
                           "grad":self.offload_grad,
                           "optim_states":self.offload_optim_states}
@@ -1610,7 +1605,7 @@ class Fct_prefetch(RK_Fct):
                  **kwargs):
         super().__init__(**kwargs)
         self.target = target
-        self.target_name = target.target_name,
+        self.target_name = target.target_name
         self.prefetch_fct = {"param":self.prefetch_param,
                           "optim_states":self.prefetch_optim_states}
         self.post_process = {"param":self.post_process_param,
@@ -1621,8 +1616,8 @@ class Fct_prefetch(RK_Fct):
         if isinstance(target, Parameter):
             self.post_process_code = target.pnode.get_code()
     def prefetch_param(self):
-        self.storage.ld[f"cpu_{self.target_name}"].data.copy_(
-                self.storage.ld[self.target_name].data,
+        self.storage.ld[self.target_name].data.copy_(
+                self.storage.ld[f"cpu_{self.target_name}"].data,
                 non_blocking=True,
             )
     # def prefetch_grad(self):

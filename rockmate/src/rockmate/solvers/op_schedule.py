@@ -554,6 +554,13 @@ class OpSchedule:
         self.create_list_alloc(cluster)
         # self.create_alive_list()
         self.get_sched_info()# get the schedule information for higher level solving
+
+    def simulate_update(self):
+        simulator = Simulator(self.op_list)
+        simulator.update()# assume init_op_list remains the same
+        self.op_list = simulator.op_list
+        self.loss_idx = simulator.loss_idx
+        self.get_sched_info()
     
     def _sum_mem(self,alive_status_, ignore_list=[]):
         mem = 0
@@ -710,9 +717,11 @@ class OpSchedule:
                             op.pos_info["last_before_bwd"] = last_before_bwd
             else:
                 op.pos_info["temporary_tensor_names"] = []
-                for anode in op.target.deps_fake:
+                for anode in op.target.deps_fake|op.target.deps_real:
                     if not self.alive_list[i][anode.name]:
-                        op.pos_info["temporary_tensor_names"].append(anode.name)
+                        op.pos_info["temporary_tensor_names"].append(anode.main_target)
+                        # if anode.main_target == op.target.main_target:
+                        #     op.pos_info["temporary_tensor_names"].append(f"_{anode.main_target}")
                 op.pos_info["input_names"] = []
                 if not op.pos_info["first_occurrence"]:
                     prev_i = i - self.op_list[:i][::-1].index(op) - 1
@@ -723,9 +732,9 @@ class OpSchedule:
                     for pnode in op.target.required_parameter_nodes_real:
                         if DeleteOp(Parameter(pnode)) in self.op_list[prev_i:i]:
                             op.pos_info["input_names"].append(pnode.param_name)
-        
-
-
+                    if not op.pos_info["input_names"]:
+                        op.disabled = True
+                        raise Warning(f"{op.name} is recomputed but no target inputs")
     
 class OpSchedule_old:
     solver = None
@@ -806,7 +815,7 @@ class OpSchedule_old:
         ]
 
         if refine:
-            # print("start refine")
+            print("start refine")
             self.refine()
 
         alive_list = self.create_alive_list(init_status=init_alive_status)
