@@ -389,7 +389,7 @@ class ORockmate(torch.nn.Module):
                 
                 # print(target.device, pnode.get_code())
         gc.collect()
-        print(psutil.virtual_memory())
+        # print(psutil.virtual_memory())
         for k,v in self.op_sched.dict_alloc_param.items():
             if v.pnode.mem < self.gd["optimize_stats"]["minor_param_size"]:continue
             if v.is_grad:continue
@@ -416,7 +416,7 @@ class ORockmate(torch.nn.Module):
             # target.data = torch.empty(0)
             storage.ld[v.target_name] = target
         gc.collect()
-        print(psutil.virtual_memory())
+        # print(psutil.virtual_memory())
         # for k, v in self.op_sched.dict_alloc.items():
         #     if isinstance(v, Activation):
         #         continue
@@ -455,7 +455,7 @@ class ORockmate(torch.nn.Module):
             
             target.data = torch.empty(0)
         
-        print(psutil.virtual_memory())
+        # print(psutil.virtual_memory())
 
         if self.minor_parameters:
             storage.ld["optimizers"]["minors"] = self.gd["gpu_optim"](self.minor_parameters, **self.gd["opt_kwargs"])
@@ -580,7 +580,7 @@ class ORockmate(torch.nn.Module):
                         exec(RkMod.init_code, RkMod.gd, storage.ld)  # is compiler.gd
                         # for l in RkMod.fwd_fct_list:
                         #     RkMod._exec(l)
-                        for op in self.op_list:
+                        for op in self.op_list[:self.op_sched.loss_idx]:
                             self._exec(op)
                 else:
                     # *** INITIALIZATION PART ***

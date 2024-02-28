@@ -320,7 +320,7 @@ class ExecCodeOp(Op):
         self.code = code
 
 class ListOp(list):
-    def __init__(self, ops):
+    def __init__(self, ops: List[Op]):
         super(ListOp, self).__init__(ops)
         self._pop = super(ListOp, self).pop
         self._remove = super(ListOp, self).remove
@@ -331,13 +331,13 @@ class ListOp(list):
     def pop(self,index):
         self.time -= self[index].time
         return self._pop(index)
-    def remove(self,op):
+    def remove(self,op: Op):
         self.time -= op.time
         return self._remove(op)
-    def append(self,op):
+    def append(self,op: Op):
         self.time += op.time
         return self._append(op)
-    def insert(self,i,op):
+    def insert(self,i,op: Op):
         self.time += op.time
         return self._insert(i,op)
 
@@ -372,15 +372,15 @@ class Step():
         self.opt_ops = ListOp(opt_ops)
         self.comp_ops = ListOp(comp_ops)
 
-        if self.prf_ops:
-            # Assume prefetch ops will not change
-            code = ""
-            for op in self.prf_ops:
-                # if op.is_optim_states:continue
-                if isinstance(op.target, Parameter) and not op.target.is_optim_states:
-                    code += op.target.pnode.get_code()+"\n"
-            self.view_param = ExecCodeOp(f"view_{op.name}",
-                                        code=code)
+        # if self.prf_ops:
+        #     # Assume prefetch ops will not change
+        #     code = ""
+        #     for op in self.prf_ops:
+        #         # if op.is_optim_states:continue
+        #         if isinstance(op.target, Parameter) and not op.target.is_optim_states:
+        #             code += op.target.pnode.get_code()+"\n"
+        #     self.view_param = ExecCodeOp(f"view_{op.name}",
+        #                                 code=code)
     
     @property
     def op_list(self):
@@ -411,7 +411,8 @@ class Step():
                 +self.comp_ops
                 +opt_ops
                 +self.del_ops
-                +([self.view_param] if self.prf_ops else []))
+                # +([self.view_param] if self.prf_ops else [])
+                )
     
     @property
     def time(self):
@@ -432,7 +433,7 @@ class Step():
         return max(t)
 
 
-class AliveStatus():
+class AliveSimulator():
     """
     Dynamic alive status of different allocations.
     Functions: 
@@ -525,6 +526,7 @@ class AliveStatus():
         if isinstance(key, str):
             key = self.name2key[key]
         return bool(min(self._alive[key, idx_range]))
+
         
 class OpSchedule:
     solver = None
@@ -556,8 +558,8 @@ class OpSchedule:
         self.get_sched_info()# get the schedule information for higher level solving
 
     def simulate_update(self):
-        simulator = Simulator(self.op_list)
-        simulator.update()# assume init_op_list remains the same
+        simulator = Simulator(self)
+        simulator.refine()# assume init_op_list remains the same
         self.op_list = simulator.op_list
         self.loss_idx = simulator.loss_idx
         self.get_sched_info()
@@ -569,7 +571,6 @@ class OpSchedule:
                 d = self.dict_alloc[k]
                 mem += d.mem
         return mem
-
 
     def get_sched_info(self):
         """
@@ -693,7 +694,7 @@ class OpSchedule:
 
     def add_pos_info(self):
         """
-        Add positional information of each operation, necessary for compiling.
+        Prepare positional information of each operation for compiling.
         """
         if not hasattr(self, "alive_list"):
             self.alive_list = self.create_alive_list()
@@ -735,7 +736,118 @@ class OpSchedule:
                     if not op.pos_info["input_names"]:
                         op.disabled = True
                         raise Warning(f"{op.name} is recomputed but no target inputs")
-    
+
+
+class Simulator:
+    """
+    With steps and np-alive status, simulator allows efficient
+    simulation of swapping/changing operations. The final output
+    of operation list can be used in op_sched updatation.
+    """
+    def __init__(self, op_sched: OpSchedule):
+        self.op_list: List[Op] = op_sched.op_list
+        alive_list = op_sched.alive_list if hasattr(op_sched, "alive_list") else op_sched.create_alive_list()
+        self.alive_list = AliveSimulator(alive_list, dict_alloc=op_sched.dict_alloc)
+        self.create_steps()
+
+    def refine_optimize(self):
+        steps = self.steps
+        for j in range(len(steps)-1, self.loss_step, -1):
+            opt_ops: List[OptimizeOp] = list(steps[j].opt_ops)
+            opt2user_step = {op.name:None for op in opt_ops}
+            steps_avail = {op:steps[j:] for op in opt_ops}
+
+            for i,step in enumerate(steps[:]):
+                if None not in opt2user_step.values():break
+                for opt_op in opt_ops:
+                    if opt2user_step[opt_op.name] is not None:continue
+                    # for usr in opt_op.target.pnode.users_real:
+                    #     if usr.name in [str(op) for op in step.comp_ops]:
+                    for prf_op in step.prf_ops:
+                        if prf_op.target.param_name == opt_op.target.pnode.param_name:
+                            # print(opt_op.name)
+                            opt2user_step[opt_op.name] = i
+                            steps_avail[opt_op].extend(steps[:i])
+                            # located_ops.append(opt_op)
+                            # opt_ops.remove(opt_op)
+            for op, avail in steps_avail.items():
+                avail_step = max(avail, key=lambda x:x.time-x.opt_ops.time)
+                # print(avail_step.time,avail_step.opt_ops.time)
+                # print(steps[j].time,steps[j].opt_ops.time)
+                if avail_step.time<avail_step.opt_ops.time:continue
+                if steps[j].opt_ops.time<steps[j].time:continue
+                if (avail_step.opt_ops.time+op.time-avail_step.time>
+                    steps[j].opt_ops.time-steps[j].max2nd()):continue
+                
+                # print(avail_step.time, avail_step.opt_ops.time)
+                avail_step.opt_ops.append(op)
+                steps[j].opt_ops.remove(op)
+
+        self.refine()
+        self.recreate_op_list()
+
+    def create_steps(self):
+        self.steps: List[Step] = []
+        step_op = []
+        for i,op in enumerate(self._op_list):
+            if isinstance(op, SynchronizeOp):
+                if step_op:self.steps.append(Step(step_op))
+                step_op = []
+            if i == self.loss_idx:
+                self.loss_step = len(self.steps)
+            step_op.append(op)
+        self.steps.append(Step(step_op))
+        self.recreate_op_list()
+        
+    def recreate_op_list(self):
+        self.loss_op = self.op_list[self.loss_idx]
+        op_list = []
+        for step in self.steps:
+            op_list += step.op_list
+        self.op_list = op_list
+        self.loss_idx = self.op_list.index(self.loss_op)
+        
+    def refine(self):
+        """
+        Disable deletion to avoid infeasible operations in the list.
+        """
+        for i, op in enumerate(self.op_list):
+            if op.disabled:continue
+            if "loss" in op.name:
+                op.disabled = True
+            if isinstance(op, DeleteOp):
+                if isinstance(op.target, Activation):
+                    # try to delete KDN
+                    src_i = []  # indices of source KCN's after i
+                    for cnode in op.target.anode.deps:
+                        c_op = ComputeOp(cnode)
+                        if c_op in self.op_list[i:]:
+                            src_i.append(self.op_list[i:].index(c_op) + i)
+                        else:
+                            src_i.append(len(self.op_list))
+                    src_i = src_i or [len(self.op_list)]
+
+                    next_used_i = len(self.op_list)  # the next index to use KDN
+                    for cnode in op.target.anode.users_real:
+                        c_op = ComputeOp(cnode)
+                        if c_op in self.op_list[i:]:
+                            next_used_i = min(
+                                self.op_list[i:].index(c_op) + i,
+                                next_used_i,
+                            )
+
+                    if max(src_i) > next_used_i:  # try to use before regenerate
+                        # print(f"refine {op} for {self.op_name_list[next_used_i]}")
+                        op.disabled = True
+
+                elif isinstance(op.target, Parameter):
+                    # TODO: disabled wrong deletion of parameter
+                    pass
+
+        self.recreate_op_list()
+
+
+
 class OpSchedule_old:
     solver = None
 
