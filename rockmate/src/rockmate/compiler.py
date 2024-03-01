@@ -1359,7 +1359,11 @@ class Compiler:
                 op.fct_list.append(Fct_run_fwd(
                                             target_name=cnode.main_target,
                                             code=cnode.get_code()))
-                return None
+                if op.pos_info["first_occurrence"]:
+                    # op.fct_list.append(Fct_get_shape(cnode.main_target))
+                    for target_name in cnode.tensor_targets:
+                        op.fct_list.append(Fct_get_shape(target_name))
+                return
             
             inplace_code = make_str_list_assign(
                     cnode.inplace_code, force_special_kwargs=not op.pos_info["first_occurrence"]
@@ -1528,6 +1532,9 @@ class RK_Fct:
         for k,v in kwargs.items():
             setattr(self, k, v)
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}_{self.target_name}"
+
 class Fct_del(RK_Fct):
     def __init__(self, target_name: str, del_mode="data"):
         super().__init__(target_name=target_name)
@@ -1549,6 +1556,8 @@ class Fct_del(RK_Fct):
     def del_grad(self):
         self.storage.ld[self.target_name].grad = None
     def del_base(self):
+        if self.storage.ld[self.target_name]._base is None:
+            return
         self.storage.ld[self.target_name]._base.data = torch.empty(0)
     def del_var(self):
         self.storage.ld[self.target_name] = torch.empty(0)
@@ -1675,7 +1684,8 @@ class Fct_run_fwd(RK_Fct):
     def fct_get_unpack(self):
         def unpack(x):
             if isinstance(x, tuple):
-                return self.storage.ld[x[0]].data.as_strided_(*x[1:4])
+                target = self.storage.ld[x[0]]
+                return target.as_strided(*x[1:4])
             return x
 
         return unpack
@@ -1859,6 +1869,7 @@ class Fct_synchronize(RK_Fct):
                  **kwargs):
         super().__init__(**kwargs)
         self.stream = stream
+        self.target_name = f"Synchronize_{stream}"
 
     def wait_stream(self):
         torch.cuda.stream(self.storage.gd[self.stream]).synchronize()

@@ -563,6 +563,8 @@ class OpSchedule:
         self.op_list = simulator.op_list
         self.loss_idx = simulator.loss_idx
         self.get_sched_info()
+        self.add_pos_info()
+
     
     def _sum_mem(self,alive_status_, ignore_list=[]):
         mem = 0
@@ -718,7 +720,7 @@ class OpSchedule:
                             op.pos_info["last_before_bwd"] = last_before_bwd
             else:
                 op.pos_info["temporary_tensor_names"] = []
-                for anode in op.target.deps_fake|op.target.deps_real:
+                for anode in op.target.deps_fake:#|op.target.deps_real:
                     if not self.alive_list[i][anode.name]:
                         op.pos_info["temporary_tensor_names"].append(anode.main_target)
                         # if anode.main_target == op.target.main_target:
