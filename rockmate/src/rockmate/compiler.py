@@ -1135,6 +1135,7 @@ class Compiler:
             "AllocateOp":self.Allocate,
             "OptimizeOp":self.Optimize,
             "SynchronizeOp":self.Synchronize,
+            "Op":lambda x:None
             }
 
     def get_val(self, val):
@@ -1154,9 +1155,10 @@ class Compiler:
             op_type = op.__class__.__name__
             if op_type not in self.compile_op:
                 raise SyntaxWarning(f"Unrecognized operation type {op_type}")
+            op.fct_list = []
             self.compile_op[op_type](op)
 
-    def compile_preparation(self, cluster, op_sched, minor_param_nodes):
+    def compile_preparation(self, cluster, op_sched, minor_param_nodes, output_nodes):
         op_list = op_sched.op_list
         init_op_list = op_sched.init_op_list
         storage: RK_Storage = self.storage
@@ -1174,12 +1176,13 @@ class Compiler:
             #     requires_grad=anode.info.requires_grad,
             # )
             
-        for anode in cluster.interfaces["output_data_anodes"]:
-            prep_op.fct_list.append(Fct_mem_alloc(f"out_{anode.main_target}",
+        # for anode in cluster.interfaces["output_data_anodes"]:
+        for out_node in output_nodes:
+            prep_op.fct_list.append(Fct_mem_alloc(f"out_{out_node.main_target}",
                                                   shape = 0,
                                                   dtype=torch.float32,
                                                   alloc_mode="tensor",
-                                                  requires_grad=anode.info.requires_grad))
+                                                  requires_grad=out_node.info.requires_grad))
         # for out_node in self.rkgb_res.forward_graph.output_nodes:
         #     storage.ld[f"out_{out_node.main_target}"] = torch.empty(
         #         0,

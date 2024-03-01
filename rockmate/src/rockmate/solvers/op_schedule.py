@@ -548,7 +548,7 @@ class OpSchedule:
         self.op_list = op_list
         self.loss_idx = loss_idx
         self.init_alive_status = init_alive_status
-        self.init_op_list = init_op_list
+        self.init_op_list = init_op_list# Place to prepare items in storage
         self.restore_op_list = restore_op_list
         self.with_parameters = with_parameters
 
@@ -746,6 +746,7 @@ class Simulator:
     """
     def __init__(self, op_sched: OpSchedule):
         self.op_list: List[Op] = op_sched.op_list
+        self.loss_idx = op_sched.loss_idx
         alive_list = op_sched.alive_list if hasattr(op_sched, "alive_list") else op_sched.create_alive_list()
         self.alive_list = AliveSimulator(alive_list, dict_alloc=op_sched.dict_alloc)
         self.create_steps()
@@ -789,7 +790,7 @@ class Simulator:
     def create_steps(self):
         self.steps: List[Step] = []
         step_op = []
-        for i,op in enumerate(self._op_list):
+        for i,op in enumerate(self.op_list):
             if isinstance(op, SynchronizeOp):
                 if step_op:self.steps.append(Step(step_op))
                 step_op = []

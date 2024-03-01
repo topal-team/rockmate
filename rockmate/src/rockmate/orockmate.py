@@ -284,7 +284,7 @@ class ORockmate(torch.nn.Module):
             ]
             self.op_sched.add_pos_info()
             self.op_list = self.op_sched.op_list
-            self.get_compiled_fct()
+            # self.get_compiled_fct()
         self.list_solutions.extend(list_solutions)
 
     def get_compiled_fct(self, new_compiler=True):
@@ -323,7 +323,8 @@ class ORockmate(torch.nn.Module):
         self.inherits_original_mod_attributes_and_methods()
         self.compiler.compile_preparation(self.rkgb_res.hierarchical_cluster,
                                           self.op_sched,
-                                          self.minor_param_nodes)
+                                          self.minor_param_nodes,
+                                          self.rkgb_res.forward_graph.output_nodes)
 
     def _exec(self, op:Op):
         if self.exec_with_record_mem:
@@ -725,8 +726,8 @@ class ORockmate(torch.nn.Module):
         if remain_for_offload:
             remains = []
             for k,v in self.op_sched.dict_alloc_param.items():
-                # if v.grad and self.op_sched.alive_list[-1][k]:
-                if v.grad and self.op_sched.init_alive_status[k]:
+                if v.is_grad and self.op_sched.alive_list[-1][k]:
+                # if v.is_grad and self.op_sched.init_alive_status[k]:
                     remains.append(v.pnode.param_name)
             for k,p in self.original_mod.named_parameters():
                 if k not in remains:
