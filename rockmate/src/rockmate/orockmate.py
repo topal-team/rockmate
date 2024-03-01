@@ -311,7 +311,7 @@ class ORockmate(torch.nn.Module):
             self.minor_parameters = [self.original_mod.get_parameter(pnode.param_name) 
                                 for pnode in self.minor_param_nodes]
             def optimize():
-                self.compiler.storage.ld["optimizers"]["minors"].step()
+                self.compiler.storage.ld["optimizer_minors"].step()
                 for p in self.minor_parameters:p.grad=None
                 for pnode in self.minor_param_nodes:
                     code = make_str_list_assign(pnode.view_code, suffix=".data")
@@ -321,6 +321,9 @@ class ORockmate(torch.nn.Module):
         
         self.define_autograd_Function()
         self.inherits_original_mod_attributes_and_methods()
+        self.compiler.compile_preparation(self.rkgb_res.hierarchical_cluster,
+                                          self.op_sched,
+                                          self.minor_param_nodes)
 
     def _exec(self, op:Op):
         if self.exec_with_record_mem:
@@ -336,140 +339,25 @@ class ORockmate(torch.nn.Module):
             self.max_mem.append(peak_mem - allo_mem)
             self.allo_mem.append(allo_mem)
         else:
-            op()
+            try:
+                op()
+            except Exception as e:
+                print(f"Failed to execute {op}")
+                raise e
             # torch.cuda.synchronize()
             # for fct in fct_list:
             #     fct()
 
     def init_fwd_exec(self):
         #  -> Initialize the storage
-        storage = self.compiler.storage
-        for anode in self.rkgb_res.forward_and_backward_graph.allocation_nodes:
-            storage.ld[anode.main_target] = torch.empty(
-                0,
-                device=self.device,
-                requires_grad=anode.info.requires_grad,
-            )
-
-        for out_node in self.rkgb_res.forward_graph.output_nodes:
-            storage.ld[f"out_{out_node.main_target}"] = torch.empty(
-                0,
-                device=self.device,
-                requires_grad=out_node.info.requires_grad,
-            )
-            
-
+        
         for op in self.op_sched.init_op_list:
-            if isinstance(op, MappingOp) and len(op.targets)==1:
-                # to create the full size buffer
-                target = op.targets[0]
-                storage.ld["cpu_"+target.name.strip("cpu_")] = torch.empty(target.size, 
-                                                    dtype=target.dtype, 
-                                                    device=torch.device("cpu"),
-                                                    pin_memory=True)
-                
-        for pnode in self.minor_param_nodes:
-            # for t in pnode.view_targets:
-            #     storage.ld[t] = torch.empty(0, requires_grad=pnode.requires_grad)
-            target = pnode.get_value(self.original_mod)
-            target.data = target.data.to("cuda")
-            storage.ld[pnode.param_name] = target
-            # code = make_str_list_assign(pnode.view_code, suffix=".data")
-            exec(pnode.get_code(), self.gd, storage.ld)
-
-        for pnode in self.rkgb_res.hierarchical_cluster.parameter_nodes:
-            if pnode.is_buffer:
-                # for t in pnode.view_targets:
-                #     storage.ld[t] = torch.empty(0, requires_grad=False)
-                target = pnode.get_value(self.original_mod)
-                target.data = target.data.to("cuda")
-                storage.ld[pnode.param_name] = target
-                # code = make_str_list_assign(pnode.view_code, suffix=".data")
-                exec(pnode.get_code(), self.gd, storage.ld)
-                
-                # print(target.device, pnode.get_code())
-        gc.collect()
-        # print(psutil.virtual_memory())
-        for k,v in self.op_sched.dict_alloc_param.items():
-            if v.pnode.mem < self.gd["optimize_stats"]["minor_param_size"]:continue
-            if v.is_grad:continue
-            if v.is_optim_states:continue
-            # target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
-            target = v.pnode.get_value(self.original_mod)
-            storage.shapes[v.pnode.param_name] = target.shape
-            storage.dtypes[v.pnode.param_name] = target.dtype
-            target.grad = None
-            # if (f"Optimize_cpu_{k}" in self.op_sched.op_name_list
-            #     or f"Offload_{k}" in self.op_sched.op_name_list):
-            if True:
-                storage.ld["cpu_"+v.target_name] = torch.empty_like(target, 
-                                                    dtype=target.dtype, 
-                                                    device=torch.device("cpu"),
-                                                    pin_memory=True)
-                storage.ld["cpu_"+v.target_name].copy_(target.data)
-                # TODO: get info from op_sched
-                if v.pnode.requires_grad: #and f"Offload_{k}_grad" in self.op_sched.op_name_list:
-                    storage.ld["cpu_"+v.target_name].grad = torch.empty_like(storage.ld["cpu_"+v.target_name], pin_memory=True)
-            # if v.pnode.is_buffer:
-            #     storage.ld[k] = target.to("cuda")
-            # else:
-            # target.data = torch.empty(0)
-            storage.ld[v.target_name] = target
-        gc.collect()
-        # print(psutil.virtual_memory())
-        # for k, v in self.op_sched.dict_alloc.items():
-        #     if isinstance(v, Activation):
-        #         continue
-                
-        #     if isinstance(v, Parameter):
-        #         if v.grad:continue
-        #         target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
-        #         storage.ld["cpu_"+k] = torch.empty_like(target, 
-        #                                             dtype=target.dtype, 
-        #                                             device=torch.device("cpu"),
-        #                                             pin_memory=True)
-        #         storage.ld["cpu_"+k].copy_(self.gd["self"].get_parameter(k.removesuffix(" parameter")).data)
-        #         storage.ld["cpu_"+k].grad = torch.empty_like(storage.ld["cpu_"+k], pin_memory=True)
-        #         storage.ld[k] = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
-                
-        #     elif isinstance(v, Buffer):
-        #         storage.ld[k] = torch.empty(0, device=self.gd["device"])
-                
-        #     else:
-        #         print(f"Unrecognized type {type(v)}")
-        
-        storage.ld["optimizers"] = {}
-        for op in self.op_sched.op_list:
-            if isinstance(op, OptimizeOp):
-                optim = self.gd["cpu_optim"] if "cpu" in op.name else self.gd["gpu_optim"]
-                storage.ld["optimizers"][op.name] = optim([storage.ld[p] for p in op.list_params], **self.gd["opt_kwargs"])
-            if isinstance(op, OffloadOp) and isinstance(op.target, Parameter) and op.target.is_optim_states:
-                var_name = op.target.param_name
-                var = storage.ld[f"cpu_{var_name}"] if f"cpu_{var_name}" in storage.ld else storage.ld[var_name]
-                storage.ld["optimizers"][f"exp_avg_{var_name}"] = torch.zeros_like(var, pin_memory=True, device="cpu")
-                storage.ld["optimizers"][f"exp_avg_sq_{var_name}"] = torch.zeros_like(var, pin_memory=True, device="cpu")
-        for k,v in self.op_sched.dict_alloc_param.items():
-            target = v.pnode.get_value(self.original_mod)
-            if v.pnode.mem < self.gd["optimize_stats"]["minor_param_size"]:continue
-            if v.is_grad:continue
-            
-            target.data = torch.empty(0)
-        
-        # print(psutil.virtual_memory())
-
-        if self.minor_parameters:
-            storage.ld["optimizers"]["minors"] = self.gd["gpu_optim"](self.minor_parameters, **self.gd["opt_kwargs"])
-        
-        # for l in self.init_fct_list:
-        #     self._exec(l)
-
-        for op in self.op_sched.init_op_list:
-            op()
+            self._exec(op)
         #     if isinstance(op, PrefetchOp):
         #         exec(op.target.pnode.get_code(), self.gd, storage.ld)
         torch.cuda.synchronize()
         with torch.enable_grad():
-            exec(self.init_code, self.gd, storage.ld)  # is compiler.gd
+            exec(self.init_code, self.gd, self.compiler.storage.ld)  # is compiler.gd
             # for l,op in zip(self.fwd_fct_list, self.op_sched.op_list[:self.op_sched.loss_idx+1]):
             for op in self.op_list[:self.op_sched.loss_idx+1]:
                 if isinstance(op, OffloadOp) and isinstance(op.target, Parameter):

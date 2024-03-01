@@ -7,6 +7,7 @@ from .solvers.op_schedule import (
     Activation,
     Parameter,
     Buffer,
+    Op,
     ComputeOp,
     DeleteOp,
     MappingOp,
@@ -1155,6 +1156,175 @@ class Compiler:
                 raise SyntaxWarning(f"Unrecognized operation type {op_type}")
             self.compile_op[op_type](op)
 
+    def compile_preparation(self, cluster, op_sched, minor_param_nodes):
+        op_list = op_sched.op_list
+        init_op_list = op_sched.init_op_list
+        storage: RK_Storage = self.storage
+        prep_op = Op("Preparation")
+        for anode in cluster.list_anodes:
+            if not anode.info: continue# source anode
+            prep_op.fct_list.append(Fct_mem_alloc(anode.main_target,
+                                                  shape=0,
+                                                  dtype=torch.float32,
+                                                  alloc_mode="tensor",
+                                                  requires_grad=anode.info.requires_grad))
+            # storage.ld[anode.main_target] = torch.empty(
+            #     0,
+            #     device=self.device,
+            #     requires_grad=anode.info.requires_grad,
+            # )
+            
+        for anode in cluster.interfaces["output_data_anodes"]:
+            prep_op.fct_list.append(Fct_mem_alloc(f"out_{anode.main_target}",
+                                                  shape = 0,
+                                                  dtype=torch.float32,
+                                                  alloc_mode="tensor",
+                                                  requires_grad=anode.info.requires_grad))
+        # for out_node in self.rkgb_res.forward_graph.output_nodes:
+        #     storage.ld[f"out_{out_node.main_target}"] = torch.empty(
+        #         0,
+        #         device=self.device,
+        #         requires_grad=out_node.info.requires_grad,
+        #     )
+            
+
+        # for op in self.op_sched.init_op_list:
+        #     if isinstance(op, MappingOp) and len(op.targets)==1:
+        #         # to create the full size buffer
+        #         target = op.targets[0]
+        #         storage.ld["cpu_"+target.name.strip("cpu_")] = torch.empty(target.size, 
+        #                                             dtype=target.dtype, 
+        #                                             device=torch.device("cpu"),
+        #                                             pin_memory=True)
+                
+        for pnode in cluster.parameter_nodes:
+            ignore = False
+            if pnode.is_buffer or pnode in minor_param_nodes:
+                device = storage.gd["device"]
+                ignore = True
+            else:
+                device = torch.device("cpu")
+            # for t in pnode.view_targets:
+            #     storage.ld[t] = torch.empty(0, requires_grad=pnode.requires_grad)
+            prep_op.fct_list.append(Fct_to_storage(pnode.param_name,
+                                                   pnode,
+                                                   device=device))
+            
+            prep_op.fct_list.append(Fct_run_fwd(pnode.param_name,
+                                                code=pnode.get_code()))
+
+            prep_op.fct_list.append(Fct_get_shape(pnode.param_name))
+            prep_op.fct_list.append(Fct_RNG_state(pnode.param_name))
+            if not ignore:#TODO: check if cpu preparation is necessary for the parameter
+                prep_op.fct_list.append(Fct_mem_alloc(f"cpu_{pnode.param_name}",
+                                                      alloc_mode="tensor",
+                                                      device = torch.device("cpu"),
+                                                      pin_memory = True))
+                prep_op.fct_list.append(Fct_offload(pnode.param_name,
+                                                    pin_memory = True))
+                prep_op.fct_list.append(Fct_del(pnode.param_name))
+                if pnode.requires_grad:
+                    prep_op.fct_list.append(Fct_mem_alloc(f"cpu_{pnode.param_name}",
+                                                          device = torch.device("cpu"),
+                                                          alloc_mode="grad",
+                                                          pin_memory = True))
+                    # assume not keeping gradients of parameters in init
+
+            # target = pnode.get_value(self.original_mod)
+            # target.data = target.data.to("cuda")
+            # storage.ld[pnode.param_name] = target
+            # code = make_str_list_assign(pnode.view_code, suffix=".data")
+            # exec(pnode.get_code(), self.gd, storage.ld)
+        # for k,v in self.op_sched.dict_alloc_param.items():
+        #     if v.pnode.mem < self.gd["optimize_stats"]["minor_param_size"]:continue
+        #     if v.is_grad:continue
+        #     if v.is_optim_states:continue
+        #     # target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
+        #     target = v.pnode.get_value(self.original_mod)
+        #     storage.shapes[v.pnode.param_name] = target.shape
+        #     storage.dtypes[v.pnode.param_name] = target.dtype
+        #     target.grad = None
+        #     # if (f"Optimize_cpu_{k}" in self.op_sched.op_name_list
+        #     #     or f"Offload_{k}" in self.op_sched.op_name_list):
+        #     if True:
+        #         storage.ld["cpu_"+v.target_name] = torch.empty_like(target, 
+        #                                             dtype=target.dtype, 
+        #                                             device=torch.device("cpu"),
+        #                                             pin_memory=True)
+        #         storage.ld["cpu_"+v.target_name].copy_(target.data)
+        #         # TODO: get info from op_sched
+        #         if v.pnode.requires_grad: #and f"Offload_{k}_grad" in self.op_sched.op_name_list:
+        #             storage.ld["cpu_"+v.target_name].grad = torch.empty_like(storage.ld["cpu_"+v.target_name], pin_memory=True)
+        #     # if v.pnode.is_buffer:
+        #     #     storage.ld[k] = target.to("cuda")
+        #     # else:
+        #     # target.data = torch.empty(0)
+        #     storage.ld[v.target_name] = target
+        # print(psutil.virtual_memory())
+        # for k, v in self.op_sched.dict_alloc.items():
+        #     if isinstance(v, Activation):
+        #         continue
+                
+        #     if isinstance(v, Parameter):
+        #         if v.grad:continue
+        #         target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
+        #         storage.ld["cpu_"+k] = torch.empty_like(target, 
+        #                                             dtype=target.dtype, 
+        #                                             device=torch.device("cpu"),
+        #                                             pin_memory=True)
+        #         storage.ld["cpu_"+k].copy_(self.gd["self"].get_parameter(k.removesuffix(" parameter")).data)
+        #         storage.ld["cpu_"+k].grad = torch.empty_like(storage.ld["cpu_"+k], pin_memory=True)
+        #         storage.ld[k] = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
+                
+        #     elif isinstance(v, Buffer):
+        #         storage.ld[k] = torch.empty(0, device=self.gd["device"])
+                
+        #     else:
+        #         print(f"Unrecognized type {type(v)}")
+        
+
+        # storage.ld["optimizers"] = {}
+        for op in op_list:
+            if isinstance(op, OptimizeOp):
+                optim = self.storage.gd["cpu_optim"] if "cpu" in op.name else self.storage.gd["gpu_optim"]
+                prep_op.fct_list.append(Fct_add_optimizer(op.name, op.list_params, optim, **self.storage.gd["opt_kwargs"]))
+                # storage.ld["optimizers"][op.name] = optim([storage.ld[p] for p in op.list_params], **self.gd["opt_kwargs"])
+            if isinstance(op, OffloadOp) and isinstance(op.target, Parameter) and op.target.is_optim_states:
+                var_name = op.target.param_name
+                # CPU optim states are placeholder for offload, they are not necessarily attached to the optimizers
+                prep_op.fct_list.append(Fct_mem_alloc(f"exp_avg_{var_name}",
+                                                      alloc_mode="data",
+                                                      device=torch.device("cpu")
+                                                      ))
+                prep_op.fct_list.append(Fct_mem_alloc(f"exp_avg_sq_{var_name}",
+                                                      alloc_mode="data",
+                                                      device=torch.device("cpu")
+                                                      ))
+        if minor_param_nodes:
+            minor_parameters = [pnode.param_name for pnode in minor_param_nodes]
+            prep_op.fct_list.append(Fct_add_optimizer("optimizer_minors", 
+                                                      minor_parameters, 
+                                                      self.storage.gd["gpu_optim"], 
+                                                      **self.storage.gd["opt_kwargs"]))
+
+        op_sched.init_op_list = [prep_op] + init_op_list
+                # var = storage.ld[f"cpu_{var_name}"] if f"cpu_{var_name}" in storage.ld else storage.ld[var_name]
+                # storage.ld["optimizers"][f"exp_avg_{var_name}"] = torch.zeros_like(var, pin_memory=True, device="cpu")
+                # storage.ld["optimizers"][f"exp_avg_sq_{var_name}"] = torch.zeros_like(var, pin_memory=True, device="cpu")
+        # for k,v in op_sched.dict_alloc_param.items():
+        #     target = v.pnode.get_value(self.original_mod)
+        #     if v.pnode.mem < self.gd["optimize_stats"]["minor_param_size"]:continue
+        #     if v.is_grad:continue
+            
+        #     target.data = torch.empty(0)
+        
+        # print(psutil.virtual_memory())
+
+        # if self.minor_parameters:
+        #     storage.ld["optimizers"]["minors"] = self.gd["gpu_optim"](self.minor_parameters, **self.gd["opt_kwargs"])
+        
+        
+
     # def pos_info(self, op_sched:OpSchedule, i):
     #     """
     #     To get the positional information of the operation in the list.
@@ -1334,7 +1504,7 @@ class Compiler:
 
     def Allocate(self, op: AllocateOp):
         target: Parameter = op.target
-        alloc_mode = "tensor"
+        alloc_mode = "data"
         if target.is_optim_states:alloc_mode = "optim_states"
         op.fct_list.append(Fct_mem_alloc(
                                        target.param_name,
@@ -1380,7 +1550,7 @@ class Fct_del(RK_Fct):
     def del_var(self):
         self.storage.ld[self.target_name] = torch.empty(0)
     def del_optim_states(self):
-            for k,v in self.storage.ld["optimizers"][f"Optimize_{self.target_name}"].state.items():
+            for k,v in self.storage.ld[f"Optimize_{self.target_name}"].state.items():
                 v["exp_avg"].data = torch.empty(0)
                 v["exp_avg_sq"].data = torch.empty(0)
 
@@ -1518,7 +1688,9 @@ class Fct_get_shape(RK_Fct):
     def __call__(self):
         with torch.cuda.stream(self.storage.gd["main_stream"]):
             self.storage.shapes[self.target_name] = self.storage.ld[self.target_name].shape
+            self.storage.shapes[f"cpu_{self.target_name}"] = self.storage.ld[self.target_name].shape
             self.storage.dtypes[self.target_name] = self.storage.ld[self.target_name].dtype
+            self.storage.dtypes[f"cpu_{self.target_name}"] = self.storage.ld[self.target_name].dtype
 
 class Fct_optimize(RK_Fct):
     def __init__(self,
@@ -1530,31 +1702,67 @@ class Fct_optimize(RK_Fct):
         self.del_grad_list = del_grad_list
 
     def __call__(self):
-        self.storage.ld["optimizers"][self.target_name].step()
+        self.storage.ld[self.target_name].step()
         # for p in self.del_grad_list:
         #     self.storage.ld[p].grad.zero_()
 
 class Fct_mem_alloc(RK_Fct):
     def __init__(self,
                  target_name: str, 
-                 alloc_mode = "tensor",
+                 shape = None,
+                 dtype = None,
+                 alloc_mode = "data",
+                 device = None,
                  **kwargs):
         super().__init__(**kwargs)
         # self.target = target
         self.target_name = target_name
-        self.alloc_fct = {"tensor":self.alloc_tensor,
+        self.alloc_fct = {"data":self.alloc_data,
+                          "grad":self.alloc_grad,
+                          "tensor":self.alloc_tensor,
                           "optim_states":self.alloc_optim_states}
         self.alloc_mode = alloc_mode
+        if device is None:
+            self.device = self.storage.gd["device"]
+        else:
+            self.device = device
+        self.kwargs = kwargs
+        self.shape = shape
+        self.dtype = dtype
     
     def alloc_optim_states(self):
-        for k,v in self.storage.ld["optimizers"][f"Optimize_{self.target_name}"].state.items():
-            v["exp_avg"].data = torch.zeros_like(self.storage.ld["optimizers"][f"exp_avg_{self.target_name}"], device=self.storage.gd["device"])
-            v["exp_avg_sq"].data = torch.zeros_like(self.storage.ld["optimizers"][f"exp_avg_sq_{self.target_name}"], device=self.storage.gd["device"])
+        for k,v in self.storage.ld[f"Optimize_{self.target_name}"].state.items():
+            v["exp_avg"].data = torch.empty_like(self.storage.ld[f"exp_avg_{self.target_name}"], device=self.device)
+            v["exp_avg_sq"].data = torch.empty_like(self.storage.ld[f"exp_avg_sq_{self.target_name}"], device=self.device)
 
-    def alloc_tensor(self):
+    def alloc_grad(self):
+        shape = self.storage.shapes[self.target_name] if self.shape is None else self.shape
+        dtype = self.storage.dtypes[self.target_name] if self.dtype is None else self.dtype
+        self.storage.ld[self.target_name].grad = torch.empty(
+                    shape, 
+                    dtype=dtype, 
+                    device=self.device,
+                    **self.kwargs
+                )
+
+    def alloc_data(self):
+        shape = self.storage.shapes[self.target_name] if self.shape is None else self.shape
+        dtype = self.storage.dtypes[self.target_name] if self.dtype is None else self.dtype
         self.storage.ld[self.target_name].data = torch.empty(
-                    self.storage.shapes[self.target_name], 
-                    dtype=self.storage.dtypes[self.target_name], device=self.storage.gd["device"]
+                    shape, 
+                    dtype=dtype, 
+                    device=self.device,
+                    **self.kwargs
+                )
+        
+    def alloc_tensor(self):
+        shape = self.storage.shapes[self.target_name] if self.shape is None else self.shape
+        dtype = self.storage.dtypes[self.target_name] if self.dtype is None else self.dtype
+        self.storage.ld[self.target_name] = torch.empty(
+                    shape, 
+                    dtype=dtype, 
+                    device=self.device,
+                    **self.kwargs
                 )
         
     def __call__(self):
@@ -1588,9 +1796,9 @@ class Fct_offload(RK_Fct):
                 )
             
     def offload_optim_states(self):
-        for k,v in self.storage.ld["optimizers"][f"Optimize_{self.target_name}"].state.items():
-            self.storage.ld["optimizers"][f"exp_avg_{self.target_name}"].copy_(v["exp_avg"], non_blocking=True)
-            self.storage.ld["optimizers"][f"exp_avg_sq_{self.target_name}"].copy_(v["exp_avg_sq"], non_blocking=True)
+        for k,v in self.storage.ld[f"Optimize_{self.target_name}"].state.items():
+            self.storage.ld[f"exp_avg_{self.target_name}"].copy_(v["exp_avg"], non_blocking=True)
+            self.storage.ld[f"exp_avg_sq_{self.target_name}"].copy_(v["exp_avg_sq"], non_blocking=True)
 
     def __call__(self):
          with torch.cuda.stream(self.storage.gd[self.stream]):
@@ -1626,9 +1834,9 @@ class Fct_prefetch(RK_Fct):
     #                 non_blocking=True,
     #             )
     def prefetch_optim_states(self):
-        for k,v in self.storage.ld["optimizers"][f"Optimize_{self.target_name}"].state.items():
-            self.storage.ld["optimizers"][f"exp_avg_{self.target_name}"].copy_(v["exp_avg"], non_blocking=True)
-            self.storage.ld["optimizers"][f"exp_avg_sq_{self.target_name}"].copy_(v["exp_avg_sq"], non_blocking=True)
+        for k,v in self.storage.ld[f"Optimize_{self.target_name}"].state.items():
+            self.storage.ld[f"exp_avg_{self.target_name}"].copy_(v["exp_avg"], non_blocking=True)
+            self.storage.ld[f"exp_avg_sq_{self.target_name}"].copy_(v["exp_avg_sq"], non_blocking=True)
 
     def post_process_param(self):
         exec(self.post_process_code, self.storage.gd, self.storage.ld)
@@ -1675,3 +1883,42 @@ class Fct_RNG_state(RK_Fct):
             self.storage.rng_state.get(self.target_name)
         else:
             self.storage.rng_state.restore(self.target_name)
+
+class Fct_to_storage(RK_Fct):
+    """
+    Get parameter value from nn.module (storage.ld['self']),
+    send to the value in storage.ld[target_name].
+    By default, module parameters will be kept in CPU (f'cpu_{target_name}')
+    and the real value should be empty.
+    """
+    def __init__(self,
+                 target_name,
+                 pnode,
+                 device=None,
+                 **kwargs):
+        super().__init__(**kwargs)
+        self.target_name = target_name
+        self.pnode = pnode
+        self.device = device
+
+    def __call__(self):
+        self.storage.ld[self.target_name] = self.pnode.get_value(self.storage.gd["self"])
+        self.storage.ld[self.target_name].data = self.storage.ld[self.target_name].data.to(self.device)
+        
+class Fct_add_optimizer(RK_Fct):
+    def __init__(self,
+                 target_name,
+                 list_params,
+                 optim,
+                 **kwargs):
+        super().__init__(**kwargs)
+        self.target_name = target_name
+        # self.op = op
+        self.list_params = list_params
+        self.optim = optim
+        self.kwargs = kwargs
+
+    def __call__(self):
+        self.storage.ld[self.target_name] = self.optim([self.storage.ld[p] for p in self.list_params], **self.kwargs)
+        
+
