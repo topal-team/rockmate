@@ -51,7 +51,7 @@ def make_gd(
     cpu_optim,
     gpu_optim,
     optim_kwargs={},
-    optimize_stats={},
+    optimize_metrics={},
 ):
     return {
         **globals(),
@@ -65,7 +65,7 @@ def make_gd(
         "cpu_optim": cpu_optim,
         "gpu_optim": gpu_optim,
         "opt_kwargs": optim_kwargs,
-        "optimize_stats": optimize_stats,
+        "optimize_metrics": optimize_metrics,
         "main_stream": torch.cuda.current_stream(),
         # "prefetch_stream": torch.cuda.current_stream(),
         # "offload_stream": torch.cuda.current_stream(),

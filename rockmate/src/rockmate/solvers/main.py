@@ -365,7 +365,7 @@ def get_single_compute_op_list(
     return op_list  # , loss_idx
 
 
-def get_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
+def get_optimize_metrics(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
     # timer = irotor.make_timer(torch.device("cpu"))
     timer = TimerCPU()
     a_c = torch.ones([10, 1024,1024], device="cpu", pin_memory=True)
@@ -421,10 +421,10 @@ def get_optimize_stats(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
             b_g.copy_(b_c, non_blocking=True)
         optimizer.step()
     timer.end()
-    optimize_stats = {"optimizer_states_size": round(opt_size//size/p.element_size()),
+    optimize_metrics = {"optimizer_states_size": round(opt_size//size/p.element_size()),
                           "optimizer_overhead":round(opt_overhead//size/p.element_size()),
                           "cpu_optimize_speed": size*p.element_size()*niter/timer.elapsed(),
                           "gpu_optimize_speed":gpu_optimize_speed,
                           "bandwidth": bandwidth}
-    return optimize_stats
+    return optimize_metrics
 
