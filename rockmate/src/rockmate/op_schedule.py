@@ -134,10 +134,6 @@ class Op:
     def name(self):
         return f"{self.op_type}({self.target_name})"
 
-    # @name.setter
-    # def name(self, value):
-    #     self._name = value
-
     @property
     def op_type(self):
         return self._op_type
@@ -191,21 +187,12 @@ class ComputeOp(Op):
         self.target:ComputationNode = cnode
         self.overhead = cnode.mem_overhead
         self.pos_info = {}#positional information to be filled before compiling
+        self.op_type = "Compute"
 
     @property
     def time(self):
         # cnode can be replaced during translation
         return self.target.time if self.target.time is not None else 0
-    
-    @property
-    def kcn(self):
-        # TODO: deprecated attribute
-        return self.target
-    
-    @property
-    def op_type(self):
-        cnode_type = "FWD" if self.target.is_fwd else "BWD"
-        return f"Compute"
 
     @property
     def target_name(self):
@@ -217,17 +204,7 @@ class DeleteOp(Op):
         super().__init__(alloc.name, disabled=disabled)
         self.target = alloc
         self.op_type = f"Delete"
-        # self.grad = grad
-        # self.is_optim_states = is_optim_states
-
-    # def __repr__(self):
-    #     return "Disabled_"*self.disabled+"Delete_" + self.target.name+"grad"*self.grad+"_optim_stats"*self.is_optim_states
-    
-    # @property
-    # def name(self):
-    #     # name changes with target is changed during translation
-    #     return "Delete_" + self.target.name
-
+       
 
 class MappingOp(Op):
     """
@@ -346,7 +323,6 @@ class OpSchedule:
         self.interfaces = cluster.interfaces
 
         self.create_list_alloc(cluster)
-        # self.create_alive_list()
         self.get_sched_info()# get the schedule information for higher level solving
 
     def get_occurrences(self):
@@ -383,7 +359,20 @@ class OpSchedule:
                 d = self.dict_alloc[k]
                 mem += d.mem
         return mem
+    
+    def get_memory(self, alive_list):
+        L = len(self.op_list)
+        self.time = np.zeros(L)
+        self.save_mem = np.zeros(L)
+        self.overhead = np.zeros(L)
 
+        for i, (op, alive_status) in enumerate(zip(self.op_list, alive_list)):
+            self.save_mem[i] = self._sum_mem(alive_status, self.interface_names)
+            if op.disabled:
+                continue
+            self.time[i] = op.time
+            self.overhead[i] = op.overhead
+            
     def get_sched_info(self):
         """
         To get schedule information for higher level solving:
@@ -393,37 +382,19 @@ class OpSchedule:
         - .fwd_overhead: during forward, the excess over the ending memory from the peak
         - .bwd_overhead: during backward, the excess over the ending memory from the peak
         - .phantoms: saved anodes at the loss step
+        - .deps_interfaces_data: bwd requires interface data nodes which should be kept from fwd
         """
-        # self.save_mem = self.alive_status.save_mem
         self.get_occurrences()
         alive_list = self.create_alive_list()
+        self.get_memory(alive_list)
 
-        L = len(self.op_list)
-        self.time = np.zeros(L)
-        self.save_mem = np.zeros(L)
-        self.overhead = np.zeros(L)
-        self.interface_mem = np.zeros(L)
-
-        def get_overhead_(save, overhead):
-            return max(save + overhead) - save[-1]
-
-        for i, (op, alive_status) in enumerate(zip(self.op_list, alive_list)):
-            self.save_mem[i] = self._sum_mem(alive_status, self.interface_names)
-            self.interface_mem[i] = self._sum_mem(alive_status) - self.save_mem[i]
-            if op.disabled:
-                continue
-            self.time[i] = op.time
-            self.overhead[i] = op.overhead
-            
         self.mem = self.save_mem[self.loss_idx]
         self.fwd_time = np.sum(self.time[: self.loss_idx + 1])
         self.bwd_time = np.sum(self.time[self.loss_idx + 1 :])
 
-        self.phantoms = set()
-        for anode in self.list_anodes:
-            if alive_list[self.loss_idx][anode.name] and not anode in self.all_interfaces:
-                self.phantoms.add(anode)
-
+        def get_overhead_(save, overhead):
+            return max(save + overhead) - save[-1]
+        
         self.fwd_overhead = get_overhead_(
             self.save_mem[: self.loss_idx + 1],
             self.overhead[: self.loss_idx + 1],
@@ -433,6 +404,11 @@ class OpSchedule:
                 self.save_mem[self.loss_idx + 1 :],
                 self.overhead[self.loss_idx + 1 :],
             )
+
+        self.phantoms = set()
+        for anode in self.list_anodes:
+            if alive_list[self.loss_idx][anode.name] and not anode in self.all_interfaces:
+                self.phantoms.add(anode)
 
         self.dep_interfaces_data = set()
         for i, op in enumerate(self.op_list[self.loss_idx + 1 :]):
@@ -446,7 +422,7 @@ class OpSchedule:
                         if not self.is_occurred(ComputeOp(cnode).name,
                                                 self.loss_idx, 
                                                 self.loss_idx+i):
-                        # if not generated during bwd
+                            # if not generated during bwd
                             self.dep_interfaces_data.add(self.list_anodes.index(anode))
 
 
