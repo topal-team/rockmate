@@ -218,6 +218,7 @@ class Simulator:
     of operation list can be used in op_sched updatation.
     """
     def __init__(self, op_sched: OpSchedule):
+        self.op_sched = op_sched
         self.op_list: List[Op] = op_sched.op_list
         self.loss_idx = op_sched.loss_idx
         alive_list = op_sched.alive_list if hasattr(op_sched, "alive_list") else op_sched.create_alive_list()
@@ -285,38 +286,21 @@ class Simulator:
         """
         Disable deletion to avoid infeasible operations in the list.
         """
-        for i, op in enumerate(self.op_list):
+        for idx, op in enumerate(self.op_list):
             if op.disabled:continue
             if "loss" in op.name:
                 op.disabled = True
-            if isinstance(op, DeleteOp):
-                if isinstance(op.target, Activation):
-                    # try to delete KDN
-                    src_i = []  # indices of source KCN's after i
-                    for cnode in op.target.anode.deps:
-                        c_op = ComputeOp(cnode)
-                        if c_op in self.op_list[i:]:
-                            src_i.append(self.op_list[i:].index(c_op) + i)
-                        else:
-                            src_i.append(len(self.op_list))
-                    src_i = src_i or [len(self.op_list)]
-
-                    next_used_i = len(self.op_list)  # the next index to use KDN
-                    for cnode in op.target.anode.users_real:
-                        c_op = ComputeOp(cnode)
-                        if c_op in self.op_list[i:]:
-                            next_used_i = min(
-                                self.op_list[i:].index(c_op) + i,
-                                next_used_i,
-                            )
-
-                    if max(src_i) > next_used_i:  # try to use before regenerate
-                        # print(f"refine {op} for {self.op_name_list[next_used_i]}")
+            if isinstance(op, DeleteOp) and isinstance(op.target, Activation):
+                used_idx = [i
+                    for cnode in op.target.anode.users_real
+                    for i in self.op_sched.occurrences[ComputeOp(cnode).name]
+                    ]
+                if max(used_idx) < idx:continue
+                next_used_i = min(i for i in used_idx if i >idx)
+                
+                for cnode in op.target.anode.deps:
+                    c_op = ComputeOp(cnode)
+                    if not self.op_sched.is_occurred(c_op.name, idx, next_used_i):
                         op.disabled = True
-
-                elif isinstance(op.target, Parameter):
-                    # TODO: disabled wrong deletion of parameter
-                    pass
-
-        self.recreate_op_list()
-
+                        break
+                        

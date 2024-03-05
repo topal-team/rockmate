@@ -7,7 +7,6 @@ from typing import List
 import warnings
 import numpy as np
 import torch
-from .simulation import Simulator
 from rkgb.lowlevel.ast_add_on import make_str_list_assign
 
 class Allocation:
@@ -346,7 +345,6 @@ class OpSchedule:
         self.with_parameters = with_parameters
         self.interfaces = cluster.interfaces
 
-        self.get_occurrences()
         self.create_list_alloc(cluster)
         # self.create_alive_list()
         self.get_sched_info()# get the schedule information for higher level solving
@@ -355,11 +353,21 @@ class OpSchedule:
         self.occurrences = dict()
         for i, op in enumerate(self.op_list):
             if op.name in self.occurrences:
-                self.occurrences.append(i)
+                self.occurrences[op.name].append(i)
             else:
-                self.occurrences = [i]
+                self.occurrences[op.name] = [i]
+    
+    def is_occurred(self, op_name, i, next_i=None):
+        if next_i is None:
+            return i in self.occurrences[op_name]
+        else:
+            return any(i<= i_ <= next_i for i_ in self.occurrences[op_name])
 
-    def simulate_update(self, refine_optimize=False):
+    def simulate_update(self, Simulator, refine_optimize=False):
+        """
+        Args:
+            Simulator: Class defined to simulate op_sched
+        """
         simulator = Simulator(self)
         simulator.refine()# assume init_op_list remains the same
         if refine_optimize:
@@ -387,6 +395,7 @@ class OpSchedule:
         - .phantoms: saved anodes at the loss step
         """
         # self.save_mem = self.alive_status.save_mem
+        self.get_occurrences()
         alive_list = self.create_alive_list()
 
         L = len(self.op_list)
@@ -434,10 +443,10 @@ class OpSchedule:
                     self.dep_interfaces_data.add(self.list_anodes.index(anode))
                 if anode in self.interfaces["output_data_anodes"]:
                     for cnode in anode.deps:
-                        if (
-                            ComputeOp(cnode) in self.op_list[self.loss_idx + 1 :][:i]
-                            # cnode.name not in self.op_name_list[self.loss_idx + 1 :][:i]
-                        ):  # if not generated during bwd
+                        if not self.is_occurred(ComputeOp(cnode).name,
+                                                self.loss_idx, 
+                                                self.loss_idx+i):
+                        # if not generated during bwd
                             self.dep_interfaces_data.add(self.list_anodes.index(anode))
 
 
@@ -502,51 +511,51 @@ class OpSchedule:
         """
         if not hasattr(self, "alive_list"):
             self.alive_list = self.create_alive_list()
-        for i, op in enumerate(self.op_list):
+        for index, op in enumerate(self.op_list):
+            assert index in self.occurrences[op.name]
             if not isinstance(op, ComputeOp):
                 continue
             op.pos_info = {
-                "index":i,
-                "first_occurrence":not op in self.op_list[:i],
-                "last_occurrence":not op in self.op_list[i+1:],
+                "index":index,
+                "first_occurrence": index == min(self.occurrences[op.name]),
+                "last_occurrence":index == max(self.occurrences[op.name]),
                 }
             if op.target.is_fwd:
-                last_before_bwd = True
-                for j, _op in enumerate(self.op_list[i+1:]):
-                    if (isinstance(_op, ComputeOp)
-                        and op.target.main_target==_op.target.main_target):
-                        if _op.target.is_fwd:
-                            last_before_bwd = False
-                        else:
-                            op.pos_info["next_bwd_idx"] = i+1+j
-                            op.pos_info["last_before_bwd"] = last_before_bwd
-                        cnode = op.target
-                        no_save_nodes = (
-                            list(cnode.deps_real)
-                            + list(cnode.users)
-                            + list(cnode.required_parameter_nodes_real)
-                            + list(cnode.required_parameter_nodes_fake)
-                        )
-                        op.pos_info["no_save_list"] = [anode.main_target
-                                                       if hasattr(anode, "main_target")
-                                                       else anode.param_name
-                                                       for anode in no_save_nodes]
+                # last_before_bwd = True
+                bwd_op_name = op.name.replace("FWD", "BWD")
+                if bwd_op_name not in self.occurrences:
+                    continue
+                op.pos_info["next_bwd_idx"] = min(i for i in self.occurrences[bwd_op_name] if i> index)
+                op.pos_info["last_before_bwd"] = self.is_occurred(op.name, index, op.pos_info["next_bwd_idx"])
+                
+                # TODO: no_save_list should contain only the one got deleted before bwd
+                cnode = op.target
+                no_save_nodes = (
+                    list(cnode.deps_real)
+                    + list(cnode.users)
+                    + list(cnode.required_parameter_nodes_real)
+                    + list(cnode.required_parameter_nodes_fake)
+                )
+                op.pos_info["no_save_list"] = [anode.main_target
+                                                if hasattr(anode, "main_target")
+                                                else anode.param_name
+                                                for anode in no_save_nodes]
             else:
                 op.pos_info["temporary_tensor_names"] = []
-                for anode in op.target.deps_fake:#|op.target.deps_real:
-                    if not self.alive_list[i][anode.name]:
+                for anode in op.target.deps_fake:
+                    if not self.alive_list[index][anode.name]:
                         op.pos_info["temporary_tensor_names"].append(anode.main_target)
-                        # if anode.main_target == op.target.main_target:
-                        #     op.pos_info["temporary_tensor_names"].append(f"_{anode.main_target}")
+                        
                 op.pos_info["input_names"] = []
                 if not op.pos_info["first_occurrence"]:
-                    prev_i = i - self.op_list[:i][::-1].index(op) - 1
+                    # prev_i = index - self.op_list[:index][::-1].index(op) - 1
+                    prev_i = max(i for i in self.occurrences[op.name] if i <index)
                     for anode in op.target.users:
-                        if DeleteOp(Activation(anode)) in self.op_list[prev_i:i]:
+                        if self.is_occurred(DeleteOp(Activation(anode)).name, prev_i, index):
                             op.pos_info["input_names"].append(anode.main_target)
 
                     for pnode in op.target.required_parameter_nodes_real:
-                        if DeleteOp(Parameter(pnode)) in self.op_list[prev_i:i]:
+                        if self.is_occurred(DeleteOp(Parameter(anode)).name, prev_i, index):
                             op.pos_info["input_names"].append(pnode.param_name)
                     if not op.pos_info["input_names"]:
                         op.disabled = True
