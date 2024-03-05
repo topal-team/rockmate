@@ -2,7 +2,7 @@ from rkgb.lowlevel.ast_add_on import make_str_assign, make_str_list_assign
 from rkgb.core.backward import ComputationNode, AllocationNode
 import torch
 import numpy as np
-from .solvers.op_schedule import (
+from .op_schedule import (
     Allocation,
     Activation,
     Parameter,

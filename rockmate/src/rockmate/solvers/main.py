@@ -14,7 +14,7 @@ from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
 from rkgb.core.backward import ComputationNode
 from rkgb.lowlevel.constants import init_target_string
 
-from .op_schedule import OpSchedule, ComputeOp, DeleteOp, Activation
+from ..op_schedule import OpSchedule, ComputeOp, DeleteOp, Activation
 import time
 import psutil
 

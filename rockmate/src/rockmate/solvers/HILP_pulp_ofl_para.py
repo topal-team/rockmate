@@ -14,7 +14,7 @@ from pulp import (
     LpStatus,
 )
 
-from .op_schedule import (
+from ..op_schedule import (
     Activation,
     Parameter,
     Buffer,
