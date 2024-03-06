@@ -366,13 +366,11 @@ class ORockmate(torch.nn.Module):
                     "define_autograd_Function"
                 )
             # -> Send the inputs to Function.forward via the buffer (Rem 1)
-            # self.dict_inputs_buffer = dict_inputs = ExampleInputs(
-            #     self.original_mod, args, kwargs
-            # )
             self.inputs_buffer = ExampleInputs(
                 self.original_mod, args, kwargs
             )
             self.dict_inputs_buffer = dict_inputs = self.inputs_buffer.dict
+
             # -> Pass the inputs which req grad to prepare their backward (Rem 1)
             inputs_which_req_grad = []
             name_of_inputs_which_req_grad = []
@@ -381,28 +379,15 @@ class ORockmate(torch.nn.Module):
                     inputs_which_req_grad.append(v)
                     name_of_inputs_which_req_grad.append(k)
             self.name_of_inputs_which_req_grad_buffer = name_of_inputs_which_req_grad
+
             dummy_input = torch.ones(1).requires_grad_()
             output_mt_values = self.autograd_Function.apply(
                 dummy_input, *inputs_which_req_grad
             )
-            # print([o.shape for o in output_mt_values])
-            # for out_mt, out_mt_value in zip(
-            #     self.rkgb_res.S_graph.outputs, output_mt_values
-            # ):
-            # for out_node in self.rkgb_res.forward_and_backward_graph.list_output_data_anodes:
-            #     out_mt = out_node.main_target
-            #     view_code = self.dict_output_viewing_code[out_mt]
-            #     exec(view_code, self.gd, self.compiler.storage.ld)
-                # -> We access to out_mt_value directly in the storage
-            # exec(self.outputs_wrapping_code, self.gd, self.compiler.storage.ld)
+
+            # To output what's defined in module
             output_nodes = self.rkgb_res.forward_graph.output_nodes
-            # final_output = self.compiler.get_val(
-            #     self.rkgb_res.D_graph.whole_module_output
-            # )
-            # final_outputs = [self.compiler.get_val(f"out_{output.main_target}") for output in output_nodes]
-            final_outputs = [self.compiler.get_val(f"{output.main_target}") for output in output_nodes[:1]]
-            #  -> Clear the compiler
-            # self.compiler.storage = None
+            final_outputs = [self.compiler.get_val(f"{output.main_target}") for output in output_nodes]
             return tuple(final_outputs)
 
     # === end of forward ===
@@ -576,8 +561,6 @@ def define_autograd_Function(RkMod):
                 )
                 with torch.enable_grad():
                     exec(RkMod.init_code, RkMod.gd, storage.ld)  # is compiler.gd
-                    # for l in RkMod.fwd_fct_list:
-                    #     RkMod._exec(l)
                     for op in RkMod.op_list[:RkMod.op_sched.loss_idx]:
                         RkMod._exec(op)
             else:
@@ -585,15 +568,17 @@ def define_autograd_Function(RkMod):
                 #  -> Get the inputs using the buffer (Rem 1)
                 dict_inputs = RkMod.dict_inputs_buffer
                 RkMod.dict_inputs_buffer = None
+                
                 #  -> Create the RK_Storage for this run, and store it in ctx
                 ctx.RK_Storage = storage = RK_Storage()
                 storage.init(RkMod.gd)
                 RkMod.compiler.storage = storage
+                
                 #  -> Store what we need to return inputs' grad (Rem 1)
                 ctx.name_of_inputs_which_req_grad = (
                     RkMod.name_of_inputs_which_req_grad_buffer
                 )
-                # RkMod.name_of_inputs_which_req_grad_buffer = None
+
                 #  -> Detach input tensors (Rem 3) and store all the inputs
                 dict_input_tensors_detach = dict()  #  dict : input -> detached input
                 for k, v in dict_inputs.items():
@@ -616,23 +601,15 @@ def define_autograd_Function(RkMod):
             # -> But we need it to forward/backward each node.
             
             # -> Get the output
-            # outs = [
-            #     RkMod.compiler.get_val(out_node.main_target).detach().requires_grad_()
-            #     for out_node in RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes
-            # ]
-
             outs = []
-            # for out_node in RkMod.rkgb_res.forward_graph.output_nodes:
             for out_node in RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes:
-                # print(anode)
-                if out_node.main_target == RkMod.rkgb_res.forward_graph.nodes[-1].main_target:
+                out_mt = out_node.main_target
+                if out_mt == RkMod.rkgb_res.forward_graph.nodes[-1].main_target:
                     # Last output node; its grad_fn will not be called again
-                    outs.append(RkMod.compiler.get_val(out_node.main_target))
+                    outs.append(RkMod.compiler.get_val(out_mt))
                     continue
-                RkMod.compiler.get_val(f"out_{out_node.main_target}").data = RkMod.compiler.get_val(out_node.main_target)
-                o = RkMod.compiler.get_val(f"out_{out_node.main_target}")#.detach().requires_grad_()
-                # o = RkMod.compiler.get_val(f"{out_node.main_target}").detach().requires_grad_()
-                # print(o.grad_fn)
+                RkMod.compiler.get_val(f"out_{out_mt}").data = RkMod.compiler.get_val(out_mt)
+                o = RkMod.compiler.get_val(f"out_{out_mt}")
                 outs.append(o)
 
             if len(outs) == 1:
@@ -673,38 +650,28 @@ def define_autograd_Function(RkMod):
             for out_node, out_grad in zip(
                 RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes,
                 grad_outs):
-                out_mt = out_node.main_target
-                out = RkMod.compiler.get_val(out_mt)
-                out.grad = out_grad.data#.view(out.shape)
-                # print(out.grad.shape)
-                # out.grad = out_grad.data.as_strided_(
-                #             out.shape, out.stride(), out.storage_offset()
-                #         )
-                out_grad.data = torch.empty(0)
-            # for out_node in RkMod.rkgb_res.forward_graph.output_nodes:
-            #         # print(anode)
-            #         RkMod.compiler.get_val(f"out_{out_node.main_target}").data = torch.empty(0)
+                out = RkMod.compiler.get_val(out_node.main_target)
+                out.grad = out_grad.data
                 
+                out_grad.data = torch.empty(0)
+            for out_node in RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes:
+                    RkMod.compiler.get_val(f"out_{out_node.main_target}").data = torch.empty(0)
+                
+            loss_idx = RkMod.op_sched.loss_idx
             #  * record_mem stuff *
             if RkMod.exec_with_record_mem:
                 RkMod.output_size = tensor_memory_size(
                     storage.ld[RkMod.output.main_target]
                 )
-                loss_idx = len(RkMod.allo_mem)
-                # RkMod.allo_mem[-1] += RkMod.output.info.memsize
-                # output grad is generated outside
-            # -> exec bwd_fct_list with early stop or not
+                # TODO: record output grad if needed
+
             stop = RkMod.backward_stop
             if stop:
-                len_fwd = len(RkMod.fwd_fct_list)
-                for l in RkMod.bwd_fct_list[: (stop - len_fwd)]:
+                for op in RkMod.op_list[loss_idx+1:loss_idx+stop+1]:
                     with torch.enable_grad():
-                        RkMod._exec(l)
+                        RkMod._exec(op)
             else:
-                # for l in RkMod.bwd_fct_list:
-                #     with torch.enable_grad():
-                #         RkMod._exec(l)
-                for op in RkMod.op_list[RkMod.op_sched.loss_idx+1:]:
+                for op in RkMod.op_list[loss_idx+1:]:
                     RkMod._exec(op)
                 if RkMod.exec_with_record_mem and RkMod.backward_add_output_grad:
                     RkMod.allo_mem[loss_idx] += RkMod.output_size
@@ -714,11 +681,6 @@ def define_autograd_Function(RkMod):
                     for inp in ctx.name_of_inputs_which_req_grad
                 )
                 grads = (torch.ones(1),) + grad_inputs
-                #  -> Clear the compiler (and Autograd clears ctx)
-                # RkMod.compiler.storage = None
-                # for out_node in RkMod.rkgb_res.forward_graph.output_nodes:
-                #     # print(anode)
-                #     RkMod.compiler.get_val(f"out_{out_node.main_target}").data = torch.empty(0)
                     
                 return grads
 
