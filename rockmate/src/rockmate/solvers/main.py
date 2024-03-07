@@ -2,11 +2,6 @@ import rkgb
 import torch
 import numpy as np
 from copy import deepcopy
-# from rkgb.Htools import H_C_node, H_D_node, H_graph, H_cluster
-# from rkgb.Ktools import K_C_node, K_D_node
-# from rkgb.utils.ast_add_on import ast_to_str
-# from rkgb.utils.def_info import Var_info
-# from rkgb.utils import irotor
 
 from rkgb.lowlevel.ast_add_on import ast_to_str
 from rkgb.lowlevel.measure import TimerCPU
@@ -49,13 +44,6 @@ def H_cluster_method_get_sched(self, pareto=False):
             is_pareto[i] = np.all(np.any(time_mem >= c, axis=1))
 
     return [list_schedules[i] for i, p in enumerate(is_pareto) if p]
-    # if self is not representee:
-    #     repr_sols = representee.get_sched()
-    #     ano_sols = [representee.translator.translate(sol) for sol in repr_sols]
-    #     return [self.translator.reverse_translate(sol) for sol in ano_sols]
-    # else:
-    #     return self.list_schedules
-
 
 def H_cluster_method_translate_op_list(self, op_list):
     if self is self.representee_cluster:
@@ -65,29 +53,14 @@ def H_cluster_method_translate_op_list(self, op_list):
     translated_op_list = deepcopy(op_list)
     for op in translated_op_list:
         if isinstance(op, DeleteOp):
-            # ana_kn = translator_re.dict_name_to_ano_triplet[op.target.name]
-            # op.target = Activation(translator.dict_ano_triplet_to_anode[ana_kn])
             ana_kn = translator_re.to_ano(op.target.anode)
             op.target = Activation(translator.from_ano(ana_kn))
         else:
-            # ana_kn = translator_re.dict_name_to_ano_triplet[op.cnode.name]
-            # op.cnode = translator.dict_ano_triplet_to_cnode[ana_kn]
             ana_kn = translator_re.to_ano(op.target)
             op.target = translator.from_ano(ana_kn)
     return translated_op_list
 
-
-# def H_cluster_method_solve(self, solver: Solver):
-#     if self is not self.representee_cluster:
-#         self.representee_cluster.solve(solver)
-#     elif solver.stop_condition(self):
-#         pass
-#     else:
-#         self.sched.extend(solver(self))
-
-
 setattr(HierarchicalCluster, "get_sched", H_cluster_method_get_sched)
-# setattr(HierarchicalCluster, "solve", H_cluster_method_solve)
 setattr(HierarchicalCluster, "translate_op_list", H_cluster_method_translate_op_list)
 
 
@@ -129,22 +102,8 @@ def get_cluster_budget(
     with_save_budget=False,
 ):
     # assuming solving budget does not based on lower level solution
-
-    # hg = cluster
-    # return [1e12]
-    # def get_hg_budgets(hg, nb_bdg_peak=3, nb_bdg_save=6):
-    # return reasonable budget list
     budgets = []
-    sizes = []
-    # fwd_hdns = set()
-    # for hcn in hg.list_HCNs:
-    #     # if hcn.is_fwd:
-    #     for hdn in hcn.users:
-    #         # if hdn not in hg.interfaces:
-    #         #     fwd_hdns.add(hdn)
-    #         if not hcn.sub_cluster is None:
-    #             sizes.append(hcn.sub_cluster.list_schedules[0].mem)
-    # sizes += [hdn.mem for hdn in hg.list_hdn]
+    
     sizes = [anode.mem for anode in cluster.list_anodes]
     overheads = [cnode.mem_overhead for cnode in cluster.list_cnodes if cnode.mem_overhead]
 
@@ -212,17 +171,7 @@ def solve_recursive(h_cluster: HierarchicalCluster, list_solvers=[], skip_self=F
             if h_cluster is h_cluster.representee_cluster:
                 last_time = time.time()
                 h_cluster.list_schedules.extend(solver(h_cluster))
-                # print(
-                #     f"Time to solve {h_cluster.name} of size {len(h_cluster.list_cnodes)}: {time.time() - last_time}"
-                # )
-                # mem = psutil.virtual_memory()
-                # print(
-                #     f"The CPU mem usage when solving {h_cluster.name} is: ",
-                #     # psutil.cpu_percent(4)
-                #     mem.used,
-                # )
-
-
+                
 # Preprocessing Cluster: add fast_forward and autograd option
 def preprocess_rec(cluster: HierarchicalCluster):
     if cluster is cluster.representee_cluster:
@@ -240,13 +189,6 @@ def preprocess(cluster: HierarchicalCluster,
                               f"{init_target_string} grad"], 
                add_no_save_sched=True):
     if cluster is cluster.representee_cluster:
-        # assert cluster.list_schedules == []  # only visit representee once
-        # autograd_op_list, autograd_loss_idx = get_single_compute_op_list(
-        #     cluster, with_bwd=True, protect_names=protect_names
-        # )
-        # cluster.list_schedules.append(
-        #     OpSchedule(autograd_op_list, autograd_loss_idx, cluster=cluster)
-        # )
         for hg in cluster.partitionings:
             for hcn in hg.list_HCNs:
                 if hcn.sub_cluster is None:  # fwd with no grad
