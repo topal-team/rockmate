@@ -633,7 +633,8 @@ class Compiler:
                     requires_grad=anode.info.requires_grad,
                 )
             )
-        for out_node in output_nodes:
+
+        for out_node in list(cluster.interfaces["output_data_anodes"])+output_nodes:
             prep_op.add_fct(
                 Fct_mem_alloc(
                     f"out_{out_node.main_target}",
@@ -746,11 +747,11 @@ class Compiler:
                 )
             )
 
-    def compile_preparation(self, cluster, op_sched, minor_param_nodes):
+    def compile_preparation(self, cluster, op_sched, minor_param_nodes, output_nodes):
         op_list = op_sched.op_list
         init_op_list = op_sched.init_op_list
         prep_op = Op("Preparation")
-        self._activation_placehold(prep_op, cluster, cluster.interfaces["output_data_anodes"])
+        self._activation_placehold(prep_op, cluster, output_nodes)
         self._parameter_placehold(prep_op, cluster, minor_param_nodes)
         self._optimizer_placehold(prep_op, op_list, minor_param_nodes)
         op_sched.init_op_list = [prep_op] + init_op_list

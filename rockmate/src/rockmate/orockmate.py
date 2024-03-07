@@ -39,12 +39,12 @@ from .compiler import Compiler, RK_Storage, make_gd
 import psutil
 
 class ORockmate(torch.nn.Module):
-    # compiler = None
-    # autograd_Function = None
-    # backward_stop = False
-    # backward_add_output_grad = True
-    # op_sched = None
-    # module_does_not_req_grad = False
+    compiler = None
+    autograd_Function = None
+    backward_stop = False
+    backward_add_output_grad = True
+    op_sched = None
+    module_does_not_req_grad = False
 
     def __init__(
         self,
@@ -262,7 +262,7 @@ class ORockmate(torch.nn.Module):
         self.compiler.compile_preparation(self.rkgb_res.hierarchical_cluster,
                                           self.op_sched,
                                           self.minor_param_nodes,
-                                        #   self.rkgb_res.forward_graph.output_nodes
+                                          self.rkgb_res.forward_graph.output_nodes
                                           )
 
     def _exec(self, op:Op):
@@ -375,9 +375,24 @@ class ORockmate(torch.nn.Module):
                 dummy_input, *inputs_which_req_grad
             )
 
+            # for output_node in self.rkgb_res.simplified_graph.output_nodes:
+            for main_target, set_output_targets in self.rkgb_res.simplified_graph.dict_output_mt_to_targets_sent.items():
+                for output_target in set_output_targets:
+                    code = self.rkgb_res.simplified_graph.dict_output_viewing_code[main_target]
+                    code = ast_to_str(code)
+                    code = code.replace(output_target, f"out_{output_target}")
+                    if main_target != output_target:
+                        code = code.replace(main_target, f"out_{main_target}")
+                    else:
+                        code = ""
+
+                    exec(code,
+                         self.compiler.storage.gd,
+                         self.compiler.storage.ld)
+
             # -> Output what's defined in module
             output_nodes = self.rkgb_res.forward_graph.output_nodes
-            final_outputs = [self.compiler.get_val(f"{output.main_target}") for output in output_nodes]
+            final_outputs = [self.compiler.get_val(f"out_{output.main_target}") for output in output_nodes]
             return tuple(final_outputs)
 
     def zero_grad(self, set_to_none=True, remain_for_offload=True):
@@ -499,7 +514,7 @@ def define_autograd_Function(RkMod):
                     RkMod.name_of_inputs_which_req_grad_buffer
                 )
                 with torch.enable_grad():
-                    exec(RkMod.init_code, RkMod.gd, storage.ld)  # is compiler.gd
+                    exec(RkMod.init_code, RkMod.global_dict, storage.ld)  # is compiler.global_dict
                     for op in RkMod.op_list[:RkMod.op_sched.loss_idx]:
                         RkMod._exec(op)
             else:
@@ -510,7 +525,7 @@ def define_autograd_Function(RkMod):
                 
                 #  -> Create the RK_Storage for this run, and store it in ctx
                 ctx.RK_Storage = storage = RK_Storage()
-                storage.init(RkMod.gd)
+                storage.init(RkMod.global_dict)
                 RkMod.compiler.storage = storage
                 
                 #  -> Store what we need to return inputs' grad (Rem 1)
@@ -543,10 +558,10 @@ def define_autograd_Function(RkMod):
             outs = []
             for out_node in RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes:
                 out_mt = out_node.main_target
-                if out_mt == RkMod.rkgb_res.forward_graph.nodes[-1].main_target:
-                    # Last output node; its grad_fn will not be called again
-                    outs.append(RkMod.compiler.get_val(out_mt))
-                    continue
+                # if out_mt == RkMod.rkgb_res.forward_graph.nodes[-1].main_target:
+                #     # Last output node; its grad_fn will not be called again
+                #     outs.append(RkMod.compiler.get_val(out_mt))
+                #     continue
                 RkMod.compiler.get_val(f"out_{out_mt}").data = RkMod.compiler.get_val(out_mt)
                 o = RkMod.compiler.get_val(f"out_{out_mt}")
                 outs.append(o)
