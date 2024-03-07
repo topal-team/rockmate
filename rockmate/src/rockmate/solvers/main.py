@@ -77,17 +77,17 @@ def H_cluster_method_translate_op_list(self, op_list):
     return translated_op_list
 
 
-def H_cluster_method_solve(self, solver: Solver):
-    if self is not self.representee_cluster:
-        self.representee_cluster.solve(solver)
-    elif solver.stop_condition(self):
-        pass
-    else:
-        self.sched.extend(solver(self))
+# def H_cluster_method_solve(self, solver: Solver):
+#     if self is not self.representee_cluster:
+#         self.representee_cluster.solve(solver)
+#     elif solver.stop_condition(self):
+#         pass
+#     else:
+#         self.sched.extend(solver(self))
 
 
 setattr(HierarchicalCluster, "get_sched", H_cluster_method_get_sched)
-setattr(HierarchicalCluster, "solve", H_cluster_method_solve)
+# setattr(HierarchicalCluster, "solve", H_cluster_method_solve)
 setattr(HierarchicalCluster, "translate_op_list", H_cluster_method_translate_op_list)
 
 
@@ -365,7 +365,7 @@ def get_single_compute_op_list(
     return op_list  # , loss_idx
 
 
-def get_optimize_metrics(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
+def get_optimize_metrics(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10, minor_param_size=1024**2):
     # timer = irotor.make_timer(torch.device("cpu"))
     timer = TimerCPU()
     a_c = torch.ones([10, 1024,1024], device="cpu", pin_memory=True)
@@ -423,8 +423,12 @@ def get_optimize_metrics(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10):
     timer.end()
     optimize_metrics = {"optimizer_states_size": round(opt_size//size/p.element_size()),
                           "optimizer_overhead":round(opt_overhead//size/p.element_size()),
+                          "cpu_optim": cpu_optim,
+                          "gpu_optim": gpu_optim,
                           "cpu_optimize_speed": size*p.element_size()*niter/timer.elapsed(),
                           "gpu_optimize_speed":gpu_optimize_speed,
-                          "bandwidth": bandwidth}
+                          "bandwidth": bandwidth,
+                          "minor_param_size": minor_param_size,
+                          "optim_kwargs":optim_kwargs}
     return optimize_metrics
 

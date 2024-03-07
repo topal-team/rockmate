@@ -77,82 +77,69 @@ class ORockmate(torch.nn.Module):
         self.device = torch.device("cuda")# Not obtaining from model
         self.exec_with_record_mem = False
         self.budget = budget
+        self.rkgb_res = rkgb_res
         self.list_solutions = []
         object.__setattr__(self, "original_mod", original_mod)
+        
         self.config_partitioner()
         
-        # -- use rkGB --
-        try:
-            if rkgb_res is None:
-                self.rkgb_res = rkgb.rkgb.Result(
-                    original_mod,
-                    # dict_inputs,
-                    model_args=model_inputs,
-                    model_kwargs=model_kwargs,
-                    # verbose=verbose,
-                    wanted_graphs={"FB"},
-                    partitioners=partitioners,
-                    inspection_device=torch.device("cuda"),
-                    print_time_in_each_stage=True
-                    # check_device_is_gpu=False
-                )
-            else:
-                self.rkgb_res = rkgb_res
-            if len(self.rkgb_res.simplified_graph.nodes) <= max_size_S_graph_for_no_partitioning:
-                # -> No partitioning !
-                self.rkgb_res.build_hierarchical(partitioners)
-                list_solvers = [
-                    HILP(
-                        HILP.Config(
-                            nb_total_nodes_top_level=max_size_S_graph_for_no_partitioning
-                            + 1
-                        ),
-                        ilp_solver=ilp_solver
-                    )
-                ]
-            else:
-                self.rkgb_res.build_hierarchical(partitioners)
-        except ExceptionModuleDoesNotReqGrad:
-            self.module_does_not_req_grad = True
-    
-        self.dict_constants = self.rkgb_res.forward_and_backward_graph.dict_constants
-        self.init_code = ast_to_str(self.rkgb_res.forward_and_backward_graph.init_code)
-        self.dict_output_viewing_code = dict(
-            (out_mt, ast_to_str(view_code))
-            for (
-                out_mt,
-                view_code,
-            ) in self.rkgb_res.forward_and_backward_graph.dict_output_viewing_code.items()
-        )
-        # self.outputs_wrapping_code = ast_to_str(
-        #     self.rkgb_res.K_graph.outputs_wrapping_code
-        # )
-        self.output = self.rkgb_res.forward_and_backward_graph.list_output_data_anodes[0]
-        p = list(original_mod.parameters())[0]
-        optimize_metrics = get_optimize_metrics(p, 
+        self.get_rkgb_result(model_inputs, model_kwargs, minor_param_size)
+        
+        self.optimize_metrics = get_optimize_metrics(list(original_mod.parameters())[0], 
                                             cpu_optim=cpu_optim, 
                                             gpu_optim=gpu_optim,
-                                            optim_kwargs=optim_kwargs)
-        optimize_metrics["minor_param_size"] = minor_param_size
-
-        self.minor_param_nodes = []
-        for pnode in self.rkgb_res.hierarchical_cluster.parameter_nodes:
-            if pnode.mem < minor_param_size and not pnode.is_buffer:
-                self.minor_param_nodes.append(pnode)
-        self.minor_param_nodes += self.rkgb_res.S.init_node.required_parameter_nodes
+                                            optim_kwargs=optim_kwargs,
+                                            minor_param_size=minor_param_size)
+        
         self.gd = make_gd(
             self.device, 
             self.original_mod, 
             self.dict_constants,
-            cpu_optim, 
-            gpu_optim,
-            optim_kwargs=optim_kwargs,
-            optimize_metrics = optimize_metrics
+            optimize_metrics = self.optimize_metrics
         )
 
         if solve_sched:
             self.solve_sched()
             self.get_compiled_fct()
+
+
+    def get_rkgb_result(self, model_inputs, model_kwargs, minor_param_size):
+        # -- use rkGB --
+        try:
+            if self.rkgb_res is None:
+                self.rkgb_res = rkgb.rkgb.Result(
+                    self.original_mod,
+                    model_args=model_inputs,
+                    model_kwargs=model_kwargs,
+                    # verbose=verbose,
+                    # wanted_graphs={"FB"},
+                    partitioners=self.partitioners,
+                    inspection_device=torch.device("cuda"),
+                    print_time_in_each_stage=True
+                )
+            else:
+                self.rkgb_res = self.rkgb_res
+            
+        except ExceptionModuleDoesNotReqGrad:
+            self.module_does_not_req_grad = True
+        
+        self.dict_constants = self.rkgb_res.forward_and_backward_graph.dict_constants
+        self.init_code = ast_to_str(self.rkgb_res.forward_and_backward_graph.init_code)
+        # self.dict_output_viewing_code = dict(
+        #     (out_mt, ast_to_str(view_code))
+        #     for (
+        #         out_mt,
+        #         view_code,
+        #     ) in self.rkgb_res.forward_and_backward_graph.dict_output_viewing_code.items()
+        # )
+
+        self.output_names = [o.name for o in self.rkgb_res.forward_and_backward_graph.list_output_data_anodes]
+        
+        self.minor_param_nodes = []
+        for pnode in self.rkgb_res.hierarchical_cluster.parameter_nodes:
+            if pnode.mem < minor_param_size and not pnode.is_buffer:
+                self.minor_param_nodes.append(pnode)
+        self.minor_param_nodes += self.rkgb_res.S.init_node.required_parameter_nodes
     
     def config_partitioner(self):
         if self.partitioners is None:
@@ -182,8 +169,7 @@ class ORockmate(torch.nn.Module):
                     protect_names=[
                         f"{init_target_string} data", 
                         f"{init_target_string} grad",
-                        self.output.name,
-                    ],
+                    ] + self.output_names
                 )
 
     def solver_recursive(self, list_solvers=None, only_preprocess=False):
@@ -194,8 +180,7 @@ class ORockmate(torch.nn.Module):
             self.rkgb_res.hierarchical_cluster, list_solvers=list_solvers, skip_self=True
         )
 
-    def solve_sched(self, budget=None, list_solvers=None, rec=True):
-        # budget should be a single value.
+    def solve_sched(self, budget: float=None, list_solvers=None, recursive=True):
         # if multiple solvers in list_solvers,
         # will choose the one with minimum time
         budget = budget or self.budget
@@ -206,6 +191,7 @@ class ORockmate(torch.nn.Module):
         checkmate_solver = False
         for solver in list_solvers:
             if isinstance(solver, HILP):
+                # TODO: if no partitioning is allowed, update solver max nodes
                 hilp_solver = True
             # if isinstance(solver, RK_rotor):
             #     rotor_solver = True
@@ -214,7 +200,8 @@ class ORockmate(torch.nn.Module):
 
         for solver in list_solvers:
             if isinstance(solver, HILP):
-                solver.config.protected_names.append(self.output.name)
+                # solver.config.protected_names.append(self.output.name)
+                solver.config.protected_names += self.output_names
                 if rotor_solver:
                     solver.config.nb_bdg_save = 10
                     solver.config.nb_bdg_peak = 10
@@ -225,7 +212,7 @@ class ORockmate(torch.nn.Module):
                 isinstance(solver, HILP)# or isinstance(solver, RK_rotor)
                 for solver in list_solvers
             ]
-            and rec
+            and recursive
         ):
             self.solver_recursive()
         # elif (
@@ -305,11 +292,18 @@ class ORockmate(torch.nn.Module):
             raise e
             
     def init_fwd_exec(self):
+        """
+        The first forward execution to:
+        1. allocate parameters in RK_storage;
+        2. set placeholders for activations;
+        3. run forward the first time so no parameter gradients.
+        """
+        
         for op in self.op_sched.init_op_list:
             self._exec(op)
         torch.cuda.synchronize()
         with torch.enable_grad():
-            exec(self.init_code, self.gd, self.compiler.storage.ld)  # is compiler.gd
+            exec(self.init_code, self.gd, self.compiler.storage.ld)
             for op in self.op_list[:self.op_sched.loss_idx+1]:
                 if isinstance(op, OffloadOp) and isinstance(op.target, Parameter):
                     if op.target.is_grad or op.target.is_optim_states:continue#first iteration without grad offload
@@ -318,6 +312,11 @@ class ORockmate(torch.nn.Module):
                 torch.cuda.synchronize()
         
     def restore_exec(self, keep_grad=False):
+        """
+        After the training iteration, restore parameters to original_mod.
+        All the updated parameters of the original_mod will be kept on CPU.
+        """
+
         if self.compiler.storage.ld == {}:return None
         self.zero_grad()
         for l in self.restore_fct_list:
@@ -326,14 +325,13 @@ class ORockmate(torch.nn.Module):
             p.data = p.data.to("cpu")
 
         for k,v in self.op_sched.dict_alloc_param.items():
-            if v.pnode.is_buffer:
+            if v.pnode.is_buffer or v.pnode in self.minor_param_nodes:
                 target = v.pnode.get_value(self.original_mod)
                 target.data = target.data.to("cpu")
                 continue
 
-            if v.pnode in self.minor_param_nodes:continue
-            if v.grad:continue
-            # target = self.gd["self"].get_parameter(k.removesuffix(" parameter"))
+            if v.is_grad or v.is_optim_states:continue
+
             target = v.pnode.get_value(self.original_mod)
             target.data = self.compiler.storage.ld[v.target_name].data
             if keep_grad:
@@ -393,15 +391,6 @@ class ORockmate(torch.nn.Module):
     # === end of forward ===
 
     def zero_grad(self, set_to_none=True, remain_for_offload=True):
-        # if self.compiler.storage:
-            # if set_to_none:
-            #     for k,v in self.compiler.storage.ld.items():
-            #         if "cpu_" in k:
-            #             v.grad = None
-            # else:
-            # for k,v in self.compiler.storage.ld.items():
-            #     if "cpu_" in k:
-            #         v.grad = torch.zeros_like(v)
         if remain_for_offload:
             remains = []
             for k,v in self.op_sched.dict_alloc_param.items():
