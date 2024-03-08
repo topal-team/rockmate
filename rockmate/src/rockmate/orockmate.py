@@ -30,7 +30,7 @@ from rkgb.core.partitioned import PartitionerBottomToTop, PartitionerSequence, P
 from rkgb.lowlevel.constants import init_target_string
 
 from .op_schedule import *
-from .solvers.main import preprocess, solve_recursive, get_optimize_metrics
+from .solvers.main import preprocess, solve_recursive, get_optimize_metrics, FastSolver
 # from .solvers import RK_rotor, HILP, TwRemat, RK_checkmate
 from .solvers import HILP
 from .solvers.hilp import default_time_limit
@@ -154,11 +154,12 @@ class ORockmate(torch.nn.Module):
         
 
     def preprocess(self):
+        solver = FastSolver()
         for cluster in self.rkgb_res.hierarchical_structure.all_clusters:
             if not cluster.is_bottom:
-                preprocess(
+                solver.preprocess(
                     cluster,
-                    protect_names=[
+                    no_del_names=[
                         f"{init_target_string} data", 
                         f"{init_target_string} grad",
                     ] + self.output_names
@@ -606,6 +607,7 @@ def define_autograd_Function(RkMod):
                 grad_outs):
                 out = RkMod.compiler.get_val(out_node.main_target)
                 out.grad = out_grad.data
+                # print(out_node.main_target, out.grad.mean)
                 
                 out_grad.data = torch.empty(0)
             for out_node in RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes:

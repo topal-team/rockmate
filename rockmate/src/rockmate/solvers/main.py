@@ -29,6 +29,170 @@ class Solver:
         # -> RETURN list of Op_sched
         pass
 
+class FastSolver(Solver):
+    def __init__(self, config=None):
+        super().__init__(config)
+
+    def solve_hcn(self, hcn, cluster, no_del_names):
+        if hcn.sub_cluster is None:  # fwd with no grad
+            if hcn.name in cluster.dict_nodes:
+                cnode = cluster.dict_nodes[hcn.name]
+                hcn.ff_time = cnode.time
+                hcn.ff_overhead = cnode.mem_overhead
+                hcn.ff_op_list = [ComputeOp(cnode, fast_forward=True)]
+            else:  # loss node
+                hcn.ff_time = 0
+                hcn.ff_overhead = 0
+                hcn.ff_op_list = []
+            return 
+        
+        re_cluster = hcn.sub_cluster.representee_cluster
+
+        if re_cluster.list_schedules == []:
+            re_cluster.list_schedules += self.solve(re_cluster)
+        list_sched = re_cluster.list_schedules
+
+        save_none_sched = list_sched[1]
+        
+        hcn.ff_time = save_none_sched.fwd_time
+        hcn.ff_overhead = save_none_sched.fwd_overhead
+        hcn.ff_op_list = save_none_sched.op_list[:save_none_sched.loss_idx]
+
+
+    def solve(self,
+              cluster: HierarchicalCluster,
+              no_del_names=[f"{init_target_string} data", 
+                            f"{init_target_string} grad"]):
+        """
+        Return basic schedules for the cluster:
+        1. PyTorch autograd schedule.
+        2. Save_none: forward saves no intermediate activations and delete ASAP;
+                      backward runs autograd schedule (fwd+bwd).
+        """
+        assert cluster is cluster.representee_cluster
+        
+        list_sched = []
+        # if not cluster is cluster.representee_cluster:
+        #     return list_sched
+        ff_op_list = self.single_compute_op_list(
+            cluster,
+            with_backward=False,
+            no_del_names=no_del_names,
+            fast_forward=True,
+        )
+        # list_sched.append(
+        #     OpSchedule(
+        #     ff_op_list + [ComputeOp(ComputationNode("loss"))],
+        #     cluster=cluster,
+        #     loss_idx=len(ff_op_list)
+        #     )
+        # )  # not real sched, only for info
+        
+        autograd_op_list = self.single_compute_op_list(
+            cluster,
+            no_del_names=no_del_names,
+        )
+        list_sched.append(
+            OpSchedule(
+                autograd_op_list,
+                cluster=cluster,
+                loss_idx=autograd_op_list.index(ComputeOp(ComputationNode("loss"), disabled=True))
+            )
+        )
+        list_sched.append(
+            OpSchedule(
+                ff_op_list + [ComputeOp(ComputationNode("loss"))]+autograd_op_list,
+                cluster=cluster,
+                loss_idx=len(ff_op_list)
+            )
+        )
+        return list_sched
+            
+        
+    def single_compute_op_list(self, 
+                               cluster: HierarchicalCluster,
+                               with_backward=True,
+                               no_del_names=[],
+                               fast_forward=False):
+        list_cnode = cluster.list_cnodes.copy()
+        if not with_backward:
+            list_cnode = list_cnode[: cluster.loss_idx]
+        loss_i = list_cnode.index(cluster.loss_cnode) if cluster.loss_cnode in list_cnode else -1
+
+        def _can_del(i, anode):
+            if anode.name in no_del_names:
+                return False
+            for cnode in anode.users_real:
+                if cnode in list_cnode[i + 1 :]:
+                    return False
+            
+            if anode in cluster.loss_cnode.deps_real and i<= loss_i:
+                return False
+            # if anode in cluster.interfaces["input_data_anodes"]:
+            #     return False
+            if anode in cluster.interfaces["input_grad_anodes"]:
+                return False
+            return True
+
+        op_list = []
+        alive_status = {}
+
+        for anode in cluster.list_anodes:
+            # if hdn not in cluster.interfaces:
+            alive_status[anode.name] = (
+                1 if (anode in cluster.interfaces["input_data_anodes"]) else 0
+            )
+
+        loss_idx = None
+        for i, cnode in enumerate(list_cnode):
+            for anode in cnode.users:
+                if "phantom" in anode.name and fast_forward:
+                    continue
+                alive_status[anode.name] = 1
+            if cnode == cluster.loss_cnode:
+                loss_idx = len(op_list)
+            op_list.append(
+                ComputeOp(
+                    cnode,
+                    detach=True,  # not with_bwd,
+                    fast_forward=fast_forward,
+                    disabled=("loss" in cnode.name),
+                )
+            )
+
+            for anode_name, alive in alive_status.items():
+                if alive:
+                    anode = cluster.dict_nodes[anode_name]
+                    if _can_del(i, anode):
+                        op_list.append(DeleteOp(Activation(anode)))
+                        alive_status[anode_name] = 0
+
+        return op_list
+
+    
+    # def recursive_solve_hcn(self,
+    #                         hcn,
+    #                         no_del_names=[f"{init_target_string} data", 
+    #                         f"{init_target_string} grad"]):
+    #     cluster = hcn.sub_cluster
+    #     if not cluster is cluster.representee_cluster or cluster.is_bottom:
+    #         return
+    #     for hg in cluster.partitionings:
+    #         for hcn in hg.list_HCNs:
+    #             self.recursive_solve_hcn(hcn, hcn, no_del_names)
+    #             self.solve_hcn(hcn, no_del_names)
+
+    def preprocess(self,
+                   cluster: HierarchicalCluster,
+                   no_del_names=[f"{init_target_string} data", 
+                   f"{init_target_string} grad"]):
+        if not cluster is cluster.representee_cluster or cluster.is_bottom:
+            return
+        for hg in cluster.partitionings:
+            for hcn in hg.list_HCNs:
+                self.solve_hcn(hcn, cluster, no_del_names)
+
+
 def add_sched(cluster:HierarchicalCluster, sched):
     cluster.list_schedules.append(sched)
 
@@ -61,40 +225,6 @@ def translate(cluster:HierarchicalCluster, op_list):
             ana_kn = translator_re.to_ano(op.target)
             op.target = translator.from_ano(ana_kn)
     return translated_op_list
-
-
-# def H_cluster_method_get_sched(self, pareto=False):
-#     representee = self.representee_cluster
-#     if not pareto:
-#         return representee.list_schedules
-#     else:
-#         list_schedules = representee.list_schedules
-#         time_mem = np.array(
-#             [(sum(op_sched.time), op_sched.mem) for op_sched in list_schedules]
-#         )
-#         is_pareto = np.ones(len(list_schedules), dtype=bool)
-#         for i, c in enumerate(time_mem):
-#             is_pareto[i] = np.all(np.any(time_mem >= c, axis=1))
-
-#     return [list_schedules[i] for i, p in enumerate(is_pareto) if p]
-
-# def H_cluster_method_translate_op_list(self, op_list):
-#     if self is self.representee_cluster:
-#         return op_list
-#     translator_re = self.representee_cluster.translator
-#     translator = self.translator
-#     translated_op_list = deepcopy(op_list)
-#     for op in translated_op_list:
-#         if isinstance(op, DeleteOp):
-#             ana_kn = translator_re.to_ano(op.target.anode)
-#             op.target = Activation(translator.from_ano(ana_kn))
-#         else:
-#             ana_kn = translator_re.to_ano(op.target)
-#             op.target = translator.from_ano(ana_kn)
-#     return translated_op_list
-
-# setattr(HierarchicalCluster, "get_sched", H_cluster_method_get_sched)
-# setattr(HierarchicalCluster, "translate_op_list", H_cluster_method_translate_op_list)
 
 
 def get_hgraph_budget_lb(hgraph: HierarchicalGraph):
@@ -219,7 +349,7 @@ def preprocess_rec(cluster: HierarchicalCluster):
 
 
 def preprocess(cluster: HierarchicalCluster, 
-               protect_names=[f"{init_target_string} data", 
+               no_del_names=[f"{init_target_string} data", 
                               f"{init_target_string} grad"], 
                add_no_save_sched=True):
     if cluster is cluster.representee_cluster:
@@ -239,7 +369,7 @@ def preprocess(cluster: HierarchicalCluster,
                     ff_op_list = get_single_compute_op_list(
                         hcn.sub_cluster,
                         with_bwd=False,
-                        protect_names=protect_names,
+                        no_del_names=no_del_names,
                         ff=True,
                     )
                     ff_op_sched = OpSchedule(
@@ -257,7 +387,7 @@ def preprocess(cluster: HierarchicalCluster,
                         autograd_op_list = get_single_compute_op_list(
                             hcn.sub_cluster,
                             with_bwd=True,
-                            protect_names=protect_names,
+                            no_del_names=no_del_names,
                         )
                         hcn.sub_cluster.list_schedules.append(
                             OpSchedule(
@@ -278,15 +408,15 @@ def preprocess(cluster: HierarchicalCluster,
 
 
 def get_single_compute_op_list(
-    cluster: HierarchicalCluster, with_bwd=True, protect_names=[], ff=False
+    cluster: HierarchicalCluster, with_bwd=True, no_del_names=[], ff=False
 ):
     list_cnode = cluster.list_cnodes.copy()
     if not with_bwd:
         list_cnode = list_cnode[: cluster.loss_idx]
-    loss_idx = list_cnode.index(cluster.loss_cnode) if cluster.loss_cnode in list_cnode else -1
+    loss_i = list_cnode.index(cluster.loss_cnode) if cluster.loss_cnode in list_cnode else -1
 
     def _can_del(i, anode):
-        if anode.name in protect_names:
+        if anode.name in no_del_names:
             return False
         # for cnode in list_cnode[i + 1 :]:
         #     if anode in cnode.deps_real:
@@ -295,7 +425,7 @@ def get_single_compute_op_list(
             if cnode in list_cnode[i + 1 :]:
                 return False
         
-        if anode in cluster.loss_cnode.deps_real and i<= loss_idx:
+        if anode in cluster.loss_cnode.deps_real and i<= loss_i:
             return False
         # if anode in cluster.interfaces["input_data_anodes"]:
         #     return False
@@ -312,13 +442,14 @@ def get_single_compute_op_list(
             1 if (anode in cluster.interfaces["input_data_anodes"]) else 0
         )
 
+    loss_idx = None
     for i, cnode in enumerate(list_cnode):
-        # if i == cluster.loss_idx:
-        #     loss_idx = len(op_list)
         for anode in cnode.users:
             if "phantom" in anode.name and ff:
                 continue
             alive_status[anode.name] = 1
+        if cnode == cluster.loss_cnode:
+            loss_idx = len(op_list)
         op_list.append(
             ComputeOp(
                 cnode,
@@ -327,17 +458,14 @@ def get_single_compute_op_list(
                 disabled=("loss" in cnode.name),
             )
         )
-        # alive_list.append(alive_status.copy())
 
         for anode_name, alive in alive_status.items():
             if alive:
                 anode = cluster.dict_nodes[anode_name]
                 if _can_del(i, anode):
                     op_list.append(DeleteOp(Activation(anode)))
-
                     alive_status[anode_name] = 0
-                    # alive_list.append(alive_status.copy())
-    # print(alive_status)
+
     return op_list  # , loss_idx
 
 
