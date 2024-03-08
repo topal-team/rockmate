@@ -261,17 +261,19 @@ class ModelPULP:
                 continue
             list_sched = self.list_list_sched[self.hcn2sub_c[k]]
             for op_sched in list_sched:
-                for i_ in op_sched.dep_interfaces_data:
-                    sub_cluster = hcn.sub_cluster
-                    if sub_cluster.representee_cluster is sub_cluster:
-                        name = sub_cluster.list_anodes[i_].name
-                    else:
-                        ano = sub_cluster.representee_cluster.translator.to_ano(op_sched.list_anodes[i_])
-                        name = sub_cluster.translator.from_ano(ano).name
+                # for i_ in op_sched.dep_interfaces_data:
+                for anode in op_sched.dep_interfaces_data:
+                    # sub_cluster = hcn.sub_cluster
+                    # if sub_cluster.representee_cluster is sub_cluster:
+                    #     name = sub_cluster.list_anodes[i_].name
+                    # else:
+                    #     ano = sub_cluster.representee_cluster.translator.to_ano(op_sched.list_anodes[i_])
+                    #     name = sub_cluster.translator.from_ano(ano).name
+
                     # print(hcn, i_, name)
                     # Without specifying schedule, we assume it's possible to use hdn here
                     for i in range(I):
-                        if (name
+                        if (anode.name
                             == self.hgraph.list_HANs[i].anode.name
                             and k not in self.hdn_users[i]
                         ):
@@ -468,17 +470,19 @@ class ModelPULP:
                     )
 
                     list_sched = self.list_list_sched[j]
-                    for i in list_sched[o].dep_interfaces_data:
+                    # for i in list_sched[o].dep_interfaces_data:
+                    for anode in list_sched[o].dep_interfaces_data:
                         hcn = self.hgraph.list_HCNs[bwd_i]
-                        if self.sub_clusters[j].representee_cluster is self.sub_clusters[j]:
-                            name = self.sub_clusters[j].list_anodes[i].name
-                        else:
-                            ano = self.sub_clusters[j].representee_cluster.translator.to_ano(list_sched[o].list_anodes[i])
-                            name = self.sub_clusters[j].translator.from_ano(ano).name
-                        self.dep_interfaces[hcn.name].append((o, name))
+                        # if self.sub_clusters[j].representee_cluster is self.sub_clusters[j]:
+                        #     name = self.sub_clusters[j].list_anodes[i].name
+                        # else:
+                        #     ano = self.sub_clusters[j].representee_cluster.translator.to_ano(list_sched[o].list_anodes[i])
+                        #     name = self.sub_clusters[j].translator.from_ano(ano).name
+
+                        self.dep_interfaces[hcn.name].append((o, anode.name))
                         # Tensor req_i is required by BWD
                         req_i = [hdn.anode.name for hdn in self.hgraph.list_HANs].index(
-                            name
+                            anode.name
                         )
                         for j_, (k_, i_) in enumerate(self.create_list):
                             if i_ == req_i:
@@ -486,11 +490,7 @@ class ModelPULP:
                                     self.Comp[t, bwd_i, o]
                                     <= self.sumComp[t, k_] + self.AliveA[t, j_]
                                 )
-        # self.md += (self.create[14,67] == 0)
-        # self.md += (self.create[14,68] == 0)
-        # self.md += (self.create[14,69] == 0)
-        # self.md += (self.create[10,51] == 0)
-        # self.md += (self.create[12,58] == 0)
+
         #### Offload constraints
         if self.with_parameters:
             self.add_offload_constraints()

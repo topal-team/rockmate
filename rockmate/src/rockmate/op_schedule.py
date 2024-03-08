@@ -315,6 +315,7 @@ class OpSchedule:
         compute the alive status given the HierarchicalCluster.
         """
         self.op_list = op_list
+        self.cluster = cluster
         self.loss_idx = loss_idx
         self.init_alive_status = init_alive_status
         self.init_op_list = init_op_list# Place to prepare items in storage
@@ -408,7 +409,7 @@ class OpSchedule:
         self.phantoms = set()
         for anode in self.list_anodes:
             if alive_list[self.loss_idx][anode.name] and not anode in self.all_interfaces:
-                self.phantoms.add(anode)
+                self.phantoms.add(self.cluster.translate_representee_node(anode))
 
         self.dep_interfaces_data = set()
         for i, op in enumerate(self.op_list[self.loss_idx + 1 :]):
@@ -416,14 +417,18 @@ class OpSchedule:
                 continue
             for anode in op.target.deps_real:
                 if anode in self.interfaces["input_data_anodes"]:
-                    self.dep_interfaces_data.add(self.list_anodes.index(anode))
+                    # self.dep_interfaces_data.add(self.list_anodes.index(anode))
+                    self_anode = self.cluster.translate_representee_node(anode)
+                    self.dep_interfaces_data.add(self_anode)
                 if anode in self.interfaces["output_data_anodes"]:
                     for cnode in anode.deps:
                         if not self.is_occurred(ComputeOp(cnode).name,
                                                 self.loss_idx, 
                                                 self.loss_idx+i):
                             # if not generated during bwd
-                            self.dep_interfaces_data.add(self.list_anodes.index(anode))
+                            self_anode = self.cluster.translate_representee_node(anode)
+                            # self.dep_interfaces_data.add(self.list_anodes.index(self_anode))
+                            self.dep_interfaces_data.add(self_anode)
 
 
     def create_list_alloc(self, cluster: HierarchicalCluster):

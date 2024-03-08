@@ -677,6 +677,19 @@ class HierarchicalCluster():
                     assert(set(old_self_list_anodes) == set(self.list_anodes))
         # ================ END SECOND CONSTRUCTOR ==================
 
+    def translate_representee_node(self, re_node):
+        if self is self.representee_cluster:
+            return re_node
+        try:
+            ano_node = self.representee_cluster.translator.to_ano(re_node)
+        except:
+            raise TypeError(f"{re_node} cannot be translated to anonymized node")
+        try:
+            self_node = self.translator.from_ano(ano_node)
+        except:
+            raise TypeError(f"{ano_node} cannot be translated to real node")
+        return self_node
+
 
     def make_dict_nodes(self):
         self.dict_nodes = dict(
