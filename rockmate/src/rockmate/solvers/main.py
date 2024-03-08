@@ -29,9 +29,11 @@ class Solver:
         # -> RETURN list of Op_sched
         pass
 
+def add_sched(cluster:HierarchicalCluster, sched):
+    cluster.list_schedules.append(sched)
 
-def H_cluster_method_get_sched(self, pareto=False):
-    representee = self.representee_cluster
+def get_sched(cluster:HierarchicalCluster, pareto=False):
+    representee = cluster.representee_cluster
     if not pareto:
         return representee.list_schedules
     else:
@@ -45,11 +47,11 @@ def H_cluster_method_get_sched(self, pareto=False):
 
     return [list_schedules[i] for i, p in enumerate(is_pareto) if p]
 
-def H_cluster_method_translate_op_list(self, op_list):
-    if self is self.representee_cluster:
+def translate(cluster:HierarchicalCluster, op_list):
+    if cluster is cluster.representee_cluster:
         return op_list
-    translator_re = self.representee_cluster.translator
-    translator = self.translator
+    translator_re = cluster.representee_cluster.translator
+    translator = cluster.translator
     translated_op_list = deepcopy(op_list)
     for op in translated_op_list:
         if isinstance(op, DeleteOp):
@@ -60,8 +62,39 @@ def H_cluster_method_translate_op_list(self, op_list):
             op.target = translator.from_ano(ana_kn)
     return translated_op_list
 
-setattr(HierarchicalCluster, "get_sched", H_cluster_method_get_sched)
-setattr(HierarchicalCluster, "translate_op_list", H_cluster_method_translate_op_list)
+
+# def H_cluster_method_get_sched(self, pareto=False):
+#     representee = self.representee_cluster
+#     if not pareto:
+#         return representee.list_schedules
+#     else:
+#         list_schedules = representee.list_schedules
+#         time_mem = np.array(
+#             [(sum(op_sched.time), op_sched.mem) for op_sched in list_schedules]
+#         )
+#         is_pareto = np.ones(len(list_schedules), dtype=bool)
+#         for i, c in enumerate(time_mem):
+#             is_pareto[i] = np.all(np.any(time_mem >= c, axis=1))
+
+#     return [list_schedules[i] for i, p in enumerate(is_pareto) if p]
+
+# def H_cluster_method_translate_op_list(self, op_list):
+#     if self is self.representee_cluster:
+#         return op_list
+#     translator_re = self.representee_cluster.translator
+#     translator = self.translator
+#     translated_op_list = deepcopy(op_list)
+#     for op in translated_op_list:
+#         if isinstance(op, DeleteOp):
+#             ana_kn = translator_re.to_ano(op.target.anode)
+#             op.target = Activation(translator.from_ano(ana_kn))
+#         else:
+#             ana_kn = translator_re.to_ano(op.target)
+#             op.target = translator.from_ano(ana_kn)
+#     return translated_op_list
+
+# setattr(HierarchicalCluster, "get_sched", H_cluster_method_get_sched)
+# setattr(HierarchicalCluster, "translate_op_list", H_cluster_method_translate_op_list)
 
 
 def get_hgraph_budget_lb(hgraph: HierarchicalGraph):
@@ -69,7 +102,8 @@ def get_hgraph_budget_lb(hgraph: HierarchicalGraph):
     hcn_memory_budget = []
     for hcn in hgraph.list_HCNs:
         if hcn.sub_cluster is not None:
-            list_schedules = hcn.sub_cluster.get_sched()
+            # list_schedules = hcn.sub_cluster.get_sched()
+            list_schedules = get_sched(hcn.sub_cluster)
             hcn_memory_budget.append(min(op_sched.peak_mem for op_sched in list_schedules))
         else:
             hcn_memory_budget.append(hcn.ff_overhead)
