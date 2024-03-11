@@ -155,9 +155,24 @@ class ModelPULP:
         self.grouping = grouping
         self.grad_mode = grad_mode
         self.cpu_optimize_kwargs = cpu_optimize_kwargs
-
-        #############################
+        self.protected_names = protected_names
         self.hgraph = hgraph
+        #############################
+        self.config()
+
+        self.add_variables()
+        if self.with_parameters:
+            self.add_offload_variables()
+
+        self.add_objective()
+
+        print("adding constraints")
+        self.add_valid_constraints()
+        self.add_memory_constrains()
+        if self.with_parameters:
+            self.add_offload_constraints()
+
+    def config(self):
         self.hcn2sub_c = []
         self.list_list_sched = []
         self.sub_clusters = []
@@ -231,7 +246,7 @@ class ModelPULP:
         self.han_users = []
 
         for i, han in enumerate(self.hgraph.list_HANs):
-            if han.anode.name in protected_names:
+            if han.anode.name in self.protected_names:
                 self.protected_indices.append(i)
             if han in self.hgraph.input_grad_HANs:
                 self.input_grad_indices.append(i)
@@ -272,14 +287,10 @@ class ModelPULP:
         self.De = len(self.delete_list)
         self.W = len(self.sub_clusters)
 
-        self.add_variables()
-        if accurate_mem and self.with_parameters:
-            self.add_offload_variables()
-
-
+    def add_objective(self, bandwidth_cost=0.01):
         # define objective function
         prf_cost = (
-            0.01
+            bandwidth_cost
             * lpSum(
                 (self.PrfW[t, k, w] + self.PrfG[t, k, w] + self.PrfO[t, k, w])
                 * self.parameter_size[w] / self.bandwidthPrf
@@ -291,7 +302,7 @@ class ModelPULP:
             else 0
         )
         ofl_cost = (
-            0.01
+            bandwidth_cost
             * lpSum(
                 (self.OflW[t, k, w] + self.OflG[t, k, w] + self.OflO[t, k, w])
                 * self.parameter_size[w] / self.bandwidthOfl
@@ -308,36 +319,6 @@ class ModelPULP:
             + prf_cost
             + ofl_cost
         )
-
-        print("adding constraints")
-        ##### Time constraints
-        for t in range(self.T):
-            for k in self.krange(t):
-                # if k==self.loss_idx:continue
-                if self.with_parameters:# and k in self.hcn2param:
-                    # w = self.hcn2param[k] if k != self.loss_idx else None
-                    ofl_time = lpSum(
-                        self.parameter_size[w] / self.bandwidthOfl * self.OflW[t, k, w]
-                        for w in self.hcn2param[k]
-                    )
-                else:
-                    ofl_time = 0
-
-                self.md += (
-                    self.Time[t, k]
-                    >= lpSum(
-                        self.Comp[t, k, o] * self.time[k][o] for o in range(self.nR[k])
-                    )
-                    + ofl_time
-                )
-
-        
-        self.add_valid_constraints()
-        
-        if self.with_parameters:
-            self.add_offload_constraints()
-
-        self.add_memory_constrains()
 
     def add_variables(self):
         self.Comp = RkLpVariable.dicts(
@@ -626,6 +607,15 @@ class ModelPULP:
             self.bandwidthPrf = cpu_optimize_kwargs["bandwidth"]/self.gcd  # byte/ms
 
     def add_valid_constraints(self):
+        for t in range(self.T):
+            for k in self.krange(t):
+                self.md += (
+                    self.Time[t, k]
+                    >= lpSum(
+                        self.Comp[t, k, o] * self.time[k][o] for o in range(self.nR[k])
+                    )
+                )
+
         # In the last stage, every source edge of input_grad should be alive or executed
         for i in self.input_grad_indices:
             for j_, (k_, i_) in enumerate(self.create_list):
@@ -1143,7 +1133,21 @@ class ModelPULP:
         self.PrfGProg = dict()
         self.OflOProg = dict()
         self.PrfOProg = dict()
-        
+        ##### Time constraints
+        for t in range(self.T):
+            for k in self.krange(t):
+                ofl_time = lpSum(
+                    self.parameter_size[w] / self.bandwidthOfl * self.OflW[t, k, w]
+                    for w in self.hcn2param[k]
+                )
+                self.md += (
+                    self.Time[t, k]
+                    >= lpSum(
+                        self.Comp[t, k, o] * self.time[k][o] for o in range(self.nR[k])
+                    )
+                    + ofl_time
+                )
+
         def get_progress(op, t, k, w):
             bwd_i = max(self.param2hcn[w])
             if bwd_i < t:  # after bwd of w
