@@ -150,7 +150,7 @@ class ModelPULP:
         self.with_grad = accurate_mem
         self.with_optimizer_states = accurate_mem#optimizer states will be offloaded
         self.gradient_accumulation = 0# if 0, no gradient/optimizer states alive from previous iters
-        self.single_fwd = accurate_mem#False
+        self.single_fwd = accurate_mem
         self.single_bwd = accurate_mem
         self.grouping = grouping
         self.grad_mode = grad_mode
@@ -165,6 +165,7 @@ class ModelPULP:
         self.nR = []  # number to run R, =nOpts if bwd, =nOpts+1 if fwd
         self.time = []
         self.overhead = []
+        self.bin_type = "Binary"
 
         for i, hcn in enumerate(self.hgraph.list_HCNs):
             if "Loss" in hcn.name:
@@ -210,7 +211,7 @@ class ModelPULP:
             if j is None:
                 continue
             self.sub_c2hcn[j].append(i)
-        self.mem = [hdn.mem / self.gcd for hdn in self.hgraph.list_HANs]
+        self.mem = [han.mem / self.gcd for han in self.hgraph.list_HANs]
         self.saved_mem = [
             [op_sched.mem / self.gcd for op_sched in list_sched]
             for list_sched in self.list_list_sched
@@ -220,37 +221,28 @@ class ModelPULP:
         self.I = I = len(self.hgraph.list_HANs)
         self.J = J = len(self.list_list_sched)
 
-        self.protected_indices = [
-            i
-            for i, hdn in enumerate(self.hgraph.list_HANs)
-            if hdn.anode.name in protected_names
-        ]
+        self.hcn2idx = {hcn:i for i, hcn in enumerate(self.hgraph.list_HCNs)}
+        self.han2idx = {hcn:i for i, hcn in enumerate(self.hgraph.list_HANs)}
+        
+        self.protected_indices = []
+        self.input_grad_indices = []
+        self.input_data_indices = []
+        self.han_deps = []
+        self.han_users = []
 
-        self.input_grad_indices = [
-            self.hgraph.list_HANs.index(hdn)
-            for hdn in self.hgraph.input_grad_HANs
-            if hdn in self.hgraph.list_HANs
-        ]
-        self.input_data_indices = [
-            self.hgraph.list_HANs.index(hdn)
-            for hdn in self.hgraph.input_data_HANs
-            if hdn in self.hgraph.list_HANs
-        ]
+        for i, han in enumerate(self.hgraph.list_HANs):
+            if han.anode.name in protected_names:
+                self.protected_indices.append(i)
+            if han in self.hgraph.input_grad_HANs:
+                self.input_grad_indices.append(i)
+            if han in self.hgraph.input_data_HANs:
+                self.input_data_indices.append(i)
+            self.han_deps.append([self.hcn2idx[hcn] for hcn in han.deps])
+            self.han_users.append([self.hcn2idx[hcn] for hcn in han.users
+                                   if hcn in self.hcn2idx])# current sub-graph users
 
-        self.hdn_deps = [
-            [self.hgraph.list_HCNs.index(hcn) for hcn in hdn.deps]
-            for hdn in self.hgraph.list_HANs
-        ]  # source of hdn
-        self.hdn_users = [
-            [
-                self.hgraph.list_HCNs.index(hcn)
-                for hcn in self.hgraph.list_HANs[i].users
-                if hcn in self.hgraph.list_HCNs
-            ]
-            for i in range(I)
-        ]  # outputs of hdn
         self.hcn_users = [
-            [self.hgraph.list_HANs.index(hdn) for hdn in self.hgraph.list_HCNs[k].users]
+            [self.han2idx[han] for han in self.hgraph.list_HCNs[k].users]
             for k in range(self.T)
         ]  # outputs of hcn
 
@@ -263,26 +255,18 @@ class ModelPULP:
             for op_sched in list_sched:
                 # for i_ in op_sched.dep_interfaces_data:
                 for anode in op_sched.dep_interfaces_data:
-                    # sub_cluster = hcn.sub_cluster
-                    # if sub_cluster.representee_cluster is sub_cluster:
-                    #     name = sub_cluster.list_anodes[i_].name
-                    # else:
-                    #     ano = sub_cluster.representee_cluster.translator.to_ano(op_sched.list_anodes[i_])
-                    #     name = sub_cluster.translator.from_ano(ano).name
-
-                    # print(hcn, i_, name)
-                    # Without specifying schedule, we assume it's possible to use hdn here
+                    # Without specifying schedule, we assume it's possible to use han here
                     for i in range(I):
                         if (anode.name
                             == self.hgraph.list_HANs[i].anode.name
-                            and k not in self.hdn_users[i]
+                            and k not in self.han_users[i]
                         ):
-                            self.hdn_users[i].append(k)
+                            self.han_users[i].append(k)
 
         ##############################
 
         self.create_list = [(k, i) for k in range(self.T) for i in self.hcn_users[k]]
-        self.delete_list = [(k, i) for i in range(I) for k in self.hdn_deps[i] + self.hdn_users[i]]
+        self.delete_list = [(k, i) for i in range(I) for k in self.han_deps[i] + self.han_users[i]]
 
         self.Cr = len(self.create_list)
         self.De = len(self.delete_list)
@@ -369,9 +353,9 @@ class ModelPULP:
         #     == 0
         # )
         # for i in range(I):
-        #     if self.hdn_deps[i]:
+        #     if self.han_deps[i]:
         #         self.md += (
-        #             lpSum(self.AliveT[t, i] for t in range(min(self.hdn_deps[i]) + 1)) == 0
+        #             lpSum(self.AliveT[t, i] for t in range(min(self.han_deps[i]) + 1)) == 0
         #         )
 
         ##### Validity constraints
@@ -442,7 +426,7 @@ class ModelPULP:
                 self.md += self.AliveA[t + 1, j] <= self.AliveA[t, j] + src
         for t in range(self.T):
             for j, (k, i) in enumerate(self.create_list):
-                for k_ in self.hdn_users[i]:
+                for k_ in self.han_users[i]:
                     self.md += (
                         self.sumComp[t, k_] <= self.sumComp[t, k] + self.AliveA[t, j]
                     )
@@ -473,15 +457,9 @@ class ModelPULP:
                     # for i in list_sched[o].dep_interfaces_data:
                     for anode in list_sched[o].dep_interfaces_data:
                         hcn = self.hgraph.list_HCNs[bwd_i]
-                        # if self.sub_clusters[j].representee_cluster is self.sub_clusters[j]:
-                        #     name = self.sub_clusters[j].list_anodes[i].name
-                        # else:
-                        #     ano = self.sub_clusters[j].representee_cluster.translator.to_ano(list_sched[o].list_anodes[i])
-                        #     name = self.sub_clusters[j].translator.from_ano(ano).name
-
                         self.dep_interfaces[hcn.name].append((o, anode.name))
                         # Tensor req_i is required by BWD
-                        req_i = [hdn.anode.name for hdn in self.hgraph.list_HANs].index(
+                        req_i = [han.anode.name for han in self.hgraph.list_HANs].index(
                             anode.name
                         )
                         for j_, (k_, i_) in enumerate(self.create_list):
@@ -531,13 +509,13 @@ class ModelPULP:
                     pass
                     self.md += (
                         self.AliveT[t + 1, i]
-                        == self.alive[(t, max(self.hdn_deps[i] + self.hdn_users[i]), i)]
+                        == self.alive[(t, max(self.han_deps[i] + self.han_users[i]), i)]
                     )
                 elif i not in self.protected_indices:
                     # in the end of bwd, del every HDN
                     step = None
                     for k in self.krange(t):
-                        if k in self.hdn_deps[i] + self.hdn_users[i]:
+                        if k in self.han_deps[i] + self.han_users[i]:
                             step = k
                     if step is not None:
                         self.md += self.alive[(t, step, i)] == 0
@@ -554,33 +532,33 @@ class ModelPULP:
                     1
                     - self.sumComp[t, k]
                     + self.AliveT[t + 1, i]
-                    + lpSum(self.sumComp[t, j] for j in self.hdn_users[i] if j > k)
+                    + lpSum(self.sumComp[t, j] for j in self.han_users[i] if j > k)
                 )
             return (
                 1
                 - self.sumComp[t, k]
-                + lpSum(self.sumComp[t, j] for j in self.hdn_users[i] if j > k)
+                + lpSum(self.sumComp[t, j] for j in self.han_users[i] if j > k)
             )
 
         def _max_num_hazards(t, i, k):
-            num_uses_after_k = sum(1 for j in self.hdn_users[i] if j > k)
+            num_uses_after_k = sum(1 for j in self.han_users[i] if j > k)
             if t + 1 < T:
                 return 2 + num_uses_after_k
             return 1 + num_uses_after_k
 
         # delete when not needed
-        # for t in range(self.T):
-        #     for eidx, (k, i) in enumerate(self.delete_list):
-        #         self.md += 1 - self.delete[t, eidx] <= _num_hazards(t, i, k)
+        for t in range(self.T):
+            for eidx, (k, i) in enumerate(self.delete_list):
+                self.md += 1 - self.delete[t, eidx] <= _num_hazards(t, i, k)
 
-        # # don't delete if still needed
-        # for t in range(self.T):
-        #     for eidx, (k, i) in enumerate(self.delete_list):
-        #         self.md += _max_num_hazards(t, i, k) * (
-        #             1 - self.delete[t, eidx]
-        #         ) >= _num_hazards(t, i, k)
-        #         if i in self.protected_indices:
-        #             self.md += self.delete[t, eidx] == 0
+        # don't delete if still needed
+        for t in range(self.T):
+            for eidx, (k, i) in enumerate(self.delete_list):
+                self.md += _max_num_hazards(t, i, k) * (
+                    1 - self.delete[t, eidx]
+                ) >= _num_hazards(t, i, k)
+                if i in self.protected_indices:
+                    self.md += self.delete[t, eidx] == 0
 
         self.U = {}
         for t in range(self.T):
@@ -690,7 +668,7 @@ class ModelPULP:
                                     continue
 
                                 i_ = [
-                                    hdn.anode.name for hdn in self.hgraph.list_HANs
+                                    han.anode.name for han in self.hgraph.list_HANs
                                 ].index(
                                     self.sub_clusters[j]
                                     .list_anodes[inter_position[0]]
@@ -704,7 +682,7 @@ class ModelPULP:
                                         not_kept_alive = self.delete[t, eidx]
                                     else:  # when output_data is not deps, but we care about it
                                         # eidx = self.delete_list.index((k, i_))
-                                        k_ = max([kk for kk in self.hdn_deps[i_] if kk < k])
+                                        k_ = max([kk for kk in self.han_deps[i_] if kk < k])
                                         not_kept_alive = self.alive[(t, k_, i_)]
                                 else:  # start status
                                     eidx = self.create_list.index((k, i_))
@@ -748,7 +726,7 @@ class ModelPULP:
                 for k in self.krange(t)
                 for o in range(self.nR[k])
             ],
-            cat="Binary",
+            cat=self.bin_type,
         )
 
         self.sumComp = {}
@@ -774,7 +752,7 @@ class ModelPULP:
                 for o in range(len(list_sched))
                 if t-1 in self.sub_c2hcn[j]
             ],
-            cat="Binary",
+            cat=self.bin_type,
         )
         for j, list_sched in enumerate(self.list_list_sched):
             for o in range(len(list_sched)):
@@ -795,7 +773,7 @@ class ModelPULP:
             self.active_stages[i] = []
             for t in range(self.T):
                 for k in self.krange(t):
-                    if k in self.hdn_deps[i]+self.hdn_users[i]:
+                    if k in self.han_deps[i]+self.han_users[i]:
                         self.active_stages[i].append(t)
             if not self.hgraph.list_HANs[i].deps:# src node
                 self.active_stages[i].append(-1)
@@ -804,7 +782,7 @@ class ModelPULP:
             "AliveA", [(t, c)
                        for t in range(1,self.T) 
                        for c, (k, i) in enumerate(self.create_list)
-                       if t-1 in self.active_stages[i]], cat="Binary"
+                       if t-1 in self.active_stages[i]], cat=self.bin_type
         )  # activation
         for c, (k, i) in enumerate(self.create_list):
             self.AliveA[0,c] = 0
@@ -816,7 +794,7 @@ class ModelPULP:
             "AliveT", [(t, i)
                        for t in range(self.T) 
                        for i in range(self.I)
-                       if t-1 in self.active_stages[i]], cat="Binary"
+                       if t-1 in self.active_stages[i]], cat=self.bin_type
         )  # tensor that can be shared by acts
         for i in range(self.I):
             if (0,i) not in self.AliveT:
@@ -833,7 +811,7 @@ class ModelPULP:
                 for i in range(self.Cr)
                 if self.create_list[i][0] in self.krange(t)
             ],
-            cat="Binary",
+            cat=self.bin_type,
         )
         self.delete = RkLpVariable.dicts(
             "delete",
@@ -843,7 +821,7 @@ class ModelPULP:
                 for i in range(self.De)
                 if self.delete_list[i][0] in self.krange(t)
             ],
-            cat="Binary",
+            cat=self.bin_type,
         )
         for t in range(self.T):
             for i in range(self.Cr):
@@ -856,7 +834,7 @@ class ModelPULP:
                 for d in range(self.De):
                     (k, i) = self.delete_list[d]
                     if i in self.protected_indices:continue
-                    if k == max(self.hdn_deps[i] + self.hdn_users[i]) and k == t:
+                    if k == max(self.han_deps[i] + self.han_users[i]) and k == t:
                         self.delete[t, d] = 1
                         pass
  
@@ -1340,7 +1318,8 @@ class ModelPULP:
 
         sol = self.sol
         if self.feasible:
-            # print("finished solving")
+            print(f"finished solving in {self.md.solutionTime}")
+            print(f"objective {self.md.objective.value()}")
             self.solve_time = self.md.solutionTime
             self.active_steps = []
             for t in list(range(self.loss_idx + 1, self.T)) + list(
@@ -1798,8 +1777,8 @@ class ModelPULP:
             # print(k_, i)
             # if k == k_ and self.delete[t, eidx].value()==1:
             if k == k_ and sol(self.delete[t, eidx]):
-                hdn = hgraph.list_HANs[i]
-                op_list.append(DeleteOp(Activation(hdn.anode)))
+                han = hgraph.list_HANs[i]
+                op_list.append(DeleteOp(Activation(han.anode)))
         return op_list
 
     def schedule_offload(self, hgraph=None):
