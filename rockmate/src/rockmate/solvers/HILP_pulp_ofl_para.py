@@ -444,30 +444,19 @@ class ModelPULP:
             "AliveA", [(t, c)
                        for t in range(1,self.T) 
                        for c, (k, i) in enumerate(self.create_list)
-                       if t-1 in self.active_stages[i]
+                    #    if t-1 in self.active_stages[i]
                        ], 
                        cat=self.bin_type
         )  # activation
-        for c, (k, i) in enumerate(self.create_list):
-            self.AliveA[0,c] = 0
-            for t in range(1, self.T):
-                if (t,c) not in self.AliveA:
-                    self.AliveA[t,c] = self.AliveA[t-1,c]
 
         self.AliveT = RkLpVariable.dicts(
             "AliveT", [(t, i)
                        for t in range(self.T) 
                        for i in range(self.I)
-                       if t-1 in self.active_stages[i]
+                    #    if t-1 in self.active_stages[i]
                        ], 
                        cat=self.bin_type
         )  # tensor that can be shared by acts
-        for i in range(self.I):
-            if (0,i) not in self.AliveT:
-                self.AliveT[0,i] = 0
-            for t in range(1, self.T):
-                if (t,i) not in self.AliveT:
-                    self.AliveT[t,i] = self.AliveT[t-1,i]
 
         self.create = RkLpVariable.dicts(
             "create",
@@ -1100,27 +1089,18 @@ class ModelPULP:
                     if not t-1 in self.sub_c2hcn[j]:
                         self.AliveP[t,j,o] = self.AliveP[t-1,j,o]
 
-        # for c, (k, i) in enumerate(self.create_list):
-        #     self.AliveA[0,c] = 0
-        #     for t in range(1, self.T):
-        #         # if not t-1 in self.active_stages[i]:
-        #         #     self.AliveA[t,c] = 0
-        #         if (t,c) not in self.AliveA:
-        #             self.AliveA[t,c] = self.AliveA[t-1,c]
-                
+        for c, (k, i) in enumerate(self.create_list):
+            self.AliveA[0,c] = 0
+            for t in range(1, self.T):
+                if not t-1 in self.active_stages[i]:
+                    self.AliveA[t,c] = self.AliveA[t-1,c]
 
-        # for i in range(self.I):
-        #     if (0,i) not in self.AliveT:
-        #         self.AliveT[0,i] = 0
-        #     # for t in range(self.T):
-        #         # if not t-1 in self.active_stages[i]:
-        #         #     self.AliveT[t,i] = 0
-        #     for t in range(1, self.T):
-        #         # if not t-1 in self.active_stages[i]:
-        #         #     self.AliveT[t,i] = 0
-        #         if (t,i) not in self.AliveT:
-        #             self.AliveT[t,i] = self.AliveT[t-1,i]
-                
+        for i in range(self.I):
+            if not -1 in self.active_stages[i]:#src node
+                self.AliveT[0,i] = 0
+            for t in range(1, self.T):
+                if not t-1 in self.active_stages[i]:
+                    self.AliveT[t,i] = self.AliveT[t-1,i]
     
         for t in range(self.T):
             for i in range(self.Cr):
