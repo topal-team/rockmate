@@ -286,6 +286,47 @@ class ModelPULP:
         self.De = len(self.delete_list)
         self.W = len(self.sub_clusters)
 
+    def krange(self, t):
+        if self.single_fwd:
+            return [t]
+        elif self.single_bwd and t > self.loss_idx:
+            return list(range(self.loss_idx)) + [t]
+        return list(range(t + 1))
+        # return range(self.T)
+
+    def crange(self, t):
+        """
+        Concerning range for computation
+        """
+        return self.krange(t)
+    
+    def orange(self, t):
+        """
+        Concerning range for computation
+        """
+        return self.krange(t)
+
+    def next_index(self, t, i, upper_triangle=False):
+        # if upper_triangle, consider the case when i>t
+        if t == self.T - 1:
+            if i < max(self.krange(t)):
+                t_ = t
+                i_ = self.krange(t)[self.krange(t).index(i) + 1]
+            else:
+                t_ = 0
+                i_ = 0
+        else:
+            # end = self.T - 1 if upper_triangle else t
+            end = max(self.krange(t))
+            if i < end:
+                t_ = t
+                i_ = self.krange(t)[self.krange(t).index(i) + 1]
+            else:
+                i_ = min(self.krange(t + 1))
+                t_ = t + 1
+        return (t_, i_)
+
+
     def add_objective(self, bandwidth_cost=0.01):
         # define objective function
         prf_cost = (
@@ -376,18 +417,11 @@ class ModelPULP:
                 for t in range(self.T + 1)
                 for j, list_sched in enumerate(self.list_list_sched)
                 for o in range(len(list_sched))
-                if t-1 in self.sub_c2hcn[j]
+                # if t-1 in self.sub_c2hcn[j]
             ],
             cat=self.bin_type,
         )
-        for j, list_sched in enumerate(self.list_list_sched):
-            for o in range(len(list_sched)):
-                if (0,j,o) not in self.AliveP:
-                    self.AliveP[0,j,o] = 0
-                for t in range(1,self.T + 1):
-                    if (t,j,o) not in self.AliveP:
-                        self.AliveP[t,j,o] = self.AliveP[t-1,j,o]
-
+        
         self.sumAliveP = {}
         for j in range(self.J):
             for t in range(self.T + 1):
@@ -410,7 +444,9 @@ class ModelPULP:
             "AliveA", [(t, c)
                        for t in range(1,self.T) 
                        for c, (k, i) in enumerate(self.create_list)
-                       if t-1 in self.active_stages[i]], cat=self.bin_type
+                       if t-1 in self.active_stages[i]
+                       ], 
+                       cat=self.bin_type
         )  # activation
         for c, (k, i) in enumerate(self.create_list):
             self.AliveA[0,c] = 0
@@ -422,7 +458,9 @@ class ModelPULP:
             "AliveT", [(t, i)
                        for t in range(self.T) 
                        for i in range(self.I)
-                       if t-1 in self.active_stages[i]], cat=self.bin_type
+                       if t-1 in self.active_stages[i]
+                       ], 
+                       cat=self.bin_type
         )  # tensor that can be shared by acts
         for i in range(self.I):
             if (0,i) not in self.AliveT:
@@ -451,24 +489,11 @@ class ModelPULP:
             ],
             cat=self.bin_type,
         )
-        for t in range(self.T):
-            for i in range(self.Cr):
-                if self.create_list[i][0] not in self.krange(t):
-                    self.create[t, i] = 0
-            for i in range(self.De):
-                if self.delete_list[i][0] not in self.krange(t):
-                    self.delete[t, i] = 0
-            if self.single_fwd:
-                for d in range(self.De):
-                    (k, i) = self.delete_list[d]
-                    if i in self.protected_indices:continue
-                    if k == max(self.han_deps[i] + self.han_users[i]) and k == t:
-                        self.delete[t, d] = 1
-                        pass
- 
+        
         self.Time = RkLpVariable.dicts(
             "Time", [(t, k) for t in range(self.T) for k in self.krange(t)], cat="Continuous"
         )
+        self.prefill_compute()
 
     def add_offload_variables(self):
         cpu_optimize_kwargs = self.cpu_optimize_kwargs
@@ -626,7 +651,7 @@ class ModelPULP:
                 upBound=1,
             )
             self.param_grad_mem = {(t,k):0 for t in range(self.T) for k in self.krange(t)}
-            self.prefill()
+            self.prefill_offload()
 
             self.bandwidthOfl = cpu_optimize_kwargs["bandwidth"]/self.gcd  # byte/ms
             self.bandwidthPrf = cpu_optimize_kwargs["bandwidth"]/self.gcd  # byte/ms
@@ -986,34 +1011,6 @@ class ModelPULP:
                     self.md += self.U[t, k] <= self.save_budget
 
     
-    def krange(self, t):
-        if self.single_fwd:
-            return [t]
-        elif self.single_bwd and t > self.loss_idx:
-            return list(range(self.loss_idx)) + [t]
-        return list(range(t + 1))
-        # return range(self.T)
-
-    def next_index(self, t, i, upper_triangle=False):
-        # if upper_triangle, consider the case when i>t
-        if t == self.T - 1:
-            if i < max(self.krange(t)):
-                t_ = t
-                i_ = self.krange(t)[self.krange(t).index(i) + 1]
-            else:
-                t_ = 0
-                i_ = 0
-        else:
-            # end = self.T - 1 if upper_triangle else t
-            end = max(self.krange(t))
-            if i < end:
-                t_ = t
-                i_ = self.krange(t)[self.krange(t).index(i) + 1]
-            else:
-                i_ = min(self.krange(t + 1))
-                t_ = t + 1
-        return (t_, i_)
-
     def add_abar_constraint(self, save_budget):
         T = len(self.hgraph.list_HCNs)
         self.save_budget = save_budget / self.gcd
@@ -1083,7 +1080,66 @@ class ModelPULP:
                                       for w in l_w)
         return optimizer_states_mem + optimizer_overhead*with_overhead
 
-    def prefill(self):
+    def prefill_compute(self):
+        self.active_stages = dict()
+        for i in range(self.I):
+            self.active_stages[i] = []
+            for t in range(self.T):
+                for k in self.krange(t):
+                    if k in self.han_deps[i]+self.han_users[i]:
+                        self.active_stages[i].append(t)
+            if not self.hgraph.list_HANs[i].deps:# src node
+                self.active_stages[i].append(-1)
+
+        for j, list_sched in enumerate(self.list_list_sched):
+            for o in range(len(list_sched)):
+                # if (0,j,o) not in self.AliveP:
+                self.AliveP[0,j,o] = 0
+                for t in range(1,self.T + 1):
+                    # if (t,j,o) not in self.AliveP:
+                    if not t-1 in self.sub_c2hcn[j]:
+                        self.AliveP[t,j,o] = self.AliveP[t-1,j,o]
+
+        # for c, (k, i) in enumerate(self.create_list):
+        #     self.AliveA[0,c] = 0
+        #     for t in range(1, self.T):
+        #         # if not t-1 in self.active_stages[i]:
+        #         #     self.AliveA[t,c] = 0
+        #         if (t,c) not in self.AliveA:
+        #             self.AliveA[t,c] = self.AliveA[t-1,c]
+                
+
+        # for i in range(self.I):
+        #     if (0,i) not in self.AliveT:
+        #         self.AliveT[0,i] = 0
+        #     # for t in range(self.T):
+        #         # if not t-1 in self.active_stages[i]:
+        #         #     self.AliveT[t,i] = 0
+        #     for t in range(1, self.T):
+        #         # if not t-1 in self.active_stages[i]:
+        #         #     self.AliveT[t,i] = 0
+        #         if (t,i) not in self.AliveT:
+        #             self.AliveT[t,i] = self.AliveT[t-1,i]
+                
+    
+        for t in range(self.T):
+            for i in range(self.Cr):
+                if self.create_list[i][0] not in self.krange(t):
+                    self.create[t, i] = 0
+            for i in range(self.De):
+                if self.delete_list[i][0] not in self.krange(t):
+                    self.delete[t, i] = 0
+            if self.single_fwd:
+                for d in range(self.De):
+                    (k, i) = self.delete_list[d]
+                    if i in self.protected_indices:continue
+                    if k == max(self.han_deps[i] + self.han_users[i]) and k == t:
+                        self.delete[t, d] = 1
+                        pass
+ 
+
+
+    def prefill_offload(self):
         for t in range(self.T):
             for k in range(self.T):                
                 for w in range(self.W):
