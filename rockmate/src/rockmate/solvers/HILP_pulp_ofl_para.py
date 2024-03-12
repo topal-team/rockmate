@@ -134,6 +134,7 @@ class ModelPULP:
         grouping=True,
         grad_mode="free", #["free", "accumulate"]
         cpu_optimize_kwargs = None,
+        activation_offload = False,
         batch_multiplier = 1
     ):
         self.gcd = gcd if gcd else 1024**2
@@ -155,6 +156,7 @@ class ModelPULP:
         self.grouping = grouping
         self.grad_mode = grad_mode
         self.cpu_optimize_kwargs = cpu_optimize_kwargs
+        self.activation_offload = activation_offload
         self.protected_names = protected_names
         self.hgraph = hgraph
         #############################
@@ -167,17 +169,14 @@ class ModelPULP:
         self.add_objective()
 
         print("adding constraints")
-        self.add_valid_constraints()
-        self.add_memory_constrains()
-        if self.with_parameters:
-            self.add_offload_constraints()
-
+        self.add_constraints()
+        
     def config(self):
         self.hcn2sub_c = []
         self.list_list_sched = []
         self.sub_clusters = []
-        self.nOpts = []  # number of opts
-        self.nR = []  # number to run R, =nOpts if bwd, =nOpts+1 if fwd
+        self.nSched = []  # number of fwd-bwd schedule
+        self.nComp = []  # number to run compute, =nSched if bwd, =nSched + 1 if fwd
         self.time = []
         self.overhead = []
         self.bin_type = "Binary"
@@ -188,8 +187,8 @@ class ModelPULP:
             if hcn.sub_cluster is None:
                 # only when hcn is fwd with requires_grad=False
                 self.hcn2sub_c.append(None)
-                self.nR.append(1)
-                self.nOpts.append(0)
+                self.nComp.append(1)
+                self.nSched.append(0)
                 self.time.append([hcn.ff_time])
                 self.overhead.append([hcn.ff_overhead / self.gcd])
             else:
@@ -200,8 +199,8 @@ class ModelPULP:
                 list_sched = self.list_list_sched[j]  # hcn bwd does not have list_sched
                 self.hcn2sub_c.append(j)
                 # self.hcn2sub_c.append(len(self.list_list_sched) - 1)
-                self.nR.append(len(list_sched) + (1 if hcn.is_fwd else 0))
-                self.nOpts.append(len(list_sched))
+                self.nComp.append(len(list_sched) + (1 if hcn.is_fwd else 0))
+                self.nSched.append(len(list_sched))
 
                 if hcn.is_fwd:
                     # add fast forward to the options (final one)
@@ -320,6 +319,30 @@ class ModelPULP:
             + ofl_cost
         )
 
+    def add_constraints(self):
+        self.add_valid_constraints()
+        self.add_memory_constrains()
+        if self.with_parameters:
+            self.add_offload_constraints()
+        ##### Time constraints
+        for t in range(self.T):
+            for k in self.krange(t):
+                if self.with_parameters:
+                    ofl_time = lpSum(
+                        self.parameter_size[w] / self.bandwidthOfl * self.OflW[t, k, w]
+                        for w in self.hcn2param[k]
+                    )
+                else:
+                    ofl_time = 0
+                self.md += (
+                    self.Time[t, k]
+                    >= lpSum(
+                        self.Comp[t, k, o] * self.time[k][o] for o in range(self.nComp[k])
+                    )
+                    + ofl_time
+                )
+
+
     def add_variables(self):
         self.Comp = RkLpVariable.dicts(
             f"Comp",
@@ -327,7 +350,7 @@ class ModelPULP:
                 (t, k, o)
                 for t in range(self.T)
                 for k in self.krange(t)
-                for o in range(self.nR[k])
+                for o in range(self.nComp[k])
             ],
             cat=self.bin_type,
         )
@@ -336,13 +359,13 @@ class ModelPULP:
         for t in range(self.T):
             for k in self.krange(t):
                 self.sumComp[t, k] = lpSum(
-                    self.Comp[t, k, o] for o in range(self.nR[k])
+                    self.Comp[t, k, o] for o in range(self.nComp[k])
                 )
 
         for t in range(self.T):
             for k in range(self.T):
                 if k not in self.krange(t):
-                    for o in range(self.nR[k]):
+                    for o in range(self.nComp[k]):
                         self.Comp[t, k, o] = 0
                     self.sumComp[t, k] = 0
 
@@ -371,6 +394,7 @@ class ModelPULP:
                 self.sumAliveP[t,j] = lpSum(
                     self.AliveP[t, j, o] for o in range(len(self.list_list_sched[j]))
                 )
+
         self.active_stages = dict()
         for i in range(self.I):
             self.active_stages[i] = []
@@ -380,6 +404,7 @@ class ModelPULP:
                         self.active_stages[i].append(t)
             if not self.hgraph.list_HANs[i].deps:# src node
                 self.active_stages[i].append(-1)
+
         # to present whether one saved tensor can be inherited from the last stage
         self.AliveA = RkLpVariable.dicts(
             "AliveA", [(t, c)
@@ -607,15 +632,6 @@ class ModelPULP:
             self.bandwidthPrf = cpu_optimize_kwargs["bandwidth"]/self.gcd  # byte/ms
 
     def add_valid_constraints(self):
-        for t in range(self.T):
-            for k in self.krange(t):
-                self.md += (
-                    self.Time[t, k]
-                    >= lpSum(
-                        self.Comp[t, k, o] * self.time[k][o] for o in range(self.nR[k])
-                    )
-                )
-
         # In the last stage, every source edge of input_grad should be alive or executed
         for i in self.input_grad_indices:
             for j_, (k_, i_) in enumerate(self.create_list):
@@ -634,7 +650,7 @@ class ModelPULP:
             # self.md += (
             #     lpSum(
             #         (self.AliveP[0, j, o])  # - self.Comp[bwd_i][T - 1, o])
-            #         for o in range(self.nOpts[bwd_i])
+            #         for o in range(self.nSched[bwd_i])
             #     )
             #     == 0
             # )
@@ -642,7 +658,7 @@ class ModelPULP:
             self.md += (
                 lpSum(
                     (self.AliveP[self.T, j, o])  # - self.Comp[bwd_i][T - 1, o])
-                    for o in range(self.nOpts[bwd_i])
+                    for o in range(self.nSched[bwd_i])
                 )
                 == 0
             )
@@ -693,7 +709,7 @@ class ModelPULP:
             for j in range(self.J):
                 fwd_i = min(self.sub_c2hcn[j])
                 bwd_i = max(self.sub_c2hcn[j])
-                for o in range(self.nOpts[fwd_i]):
+                for o in range(self.nSched[fwd_i]):
                     self.md += (
                         self.AliveP[t + 1, j, o]
                         <= self.AliveP[t, j, o] + self.Comp[t, fwd_i, o]
@@ -833,7 +849,7 @@ class ModelPULP:
                 )
                 + lpSum(  # if the first fwd operation creates phantoms
                     self.Comp[t, 0, o] * self.saved_mem[self.hcn2sub_c[0]][o]
-                    for o in range(self.nOpts[0])
+                    for o in range(self.nSched[0])
                 )
                 # - lpSum(
                 #     self.Bwd[f_to_b[i]][t_, o] * self.saved_mem[i][o]
@@ -863,7 +879,7 @@ class ModelPULP:
                 if self.hgraph.list_HCNs[k].is_fwd:
                     self.U[t, k] += lpSum(
                         self.Comp[t, k, o] * self.saved_mem[j][o]
-                        for o in range(self.nOpts[k])
+                        for o in range(self.nSched[k])
                     )
                 else:
                     if j is None:
@@ -876,7 +892,7 @@ class ModelPULP:
                             - self.AliveP[t, j, o]
                         )
                         * self.saved_mem[j][o]
-                        for o in range(self.nOpts[k])
+                        for o in range(self.nSched[k])
                     )
         for t in range(self.T):
             for k in self.krange(t):
@@ -891,7 +907,7 @@ class ModelPULP:
                         self.U[t, k]
                         + lpSum(
                             self.Comp[t, k, o] * self.overhead[k][o]
-                            for o in range(self.nR[k])
+                            for o in range(self.nComp[k])
                         )
                         + lpSum(
                             self.mem[i_] * self.delete[t, eidx_d]
@@ -1133,21 +1149,7 @@ class ModelPULP:
         self.PrfGProg = dict()
         self.OflOProg = dict()
         self.PrfOProg = dict()
-        ##### Time constraints
-        for t in range(self.T):
-            for k in self.krange(t):
-                ofl_time = lpSum(
-                    self.parameter_size[w] / self.bandwidthOfl * self.OflW[t, k, w]
-                    for w in self.hcn2param[k]
-                )
-                self.md += (
-                    self.Time[t, k]
-                    >= lpSum(
-                        self.Comp[t, k, o] * self.time[k][o] for o in range(self.nR[k])
-                    )
-                    + ofl_time
-                )
-
+        
         def get_progress(op, t, k, w):
             bwd_i = max(self.param2hcn[w])
             if bwd_i < t:  # after bwd of w
@@ -1192,7 +1194,7 @@ class ModelPULP:
                     * self.OptC[t, k, w]
                     for w in self.hcn2param[k]))
                 self.md += self.Time[t, k] >= (lpSum(self.Comp[t, k, o] * self.time[k][o] 
-                                                     for o in range(self.nR[k]))
+                                                     for o in range(self.nComp[k]))
                 + 1/ self.bandwidthOfl *lpSum(
                     self.parameter_size[w] 
                     * self.OflW[t, k, w]
@@ -1577,8 +1579,7 @@ class ModelPULP:
                 for p in select_paras:
                     op = OffloadOp(alloc=Parameter(parameters[p],
                                                    is_optim_states=True), indices=(0, None),
-                                   time=parameters[p].mem/self.bandwidthOfl/self.gcd*self.optimizer_states_factor,
-                                   is_optim_states=True)
+                                   time=parameters[p].mem/self.bandwidthOfl/self.gcd*self.optimizer_states_factor)
                     ofl_ops.append((t, k, op))
                     Offloaded[p] = 1
 
@@ -1601,8 +1602,8 @@ class ModelPULP:
                 #     pass
                 for p in select_paras:
                     del_ops.append((t, k, DeleteOp(Parameter(parameters[p],
-                                                             is_optim_states=True),
-                                                   is_optim_states=True)))
+                                                             is_optim_states=True)
+                                                   )))
                     Alive[p] = 0
             if current_alive_size < next_alive_size or k_==bwd_i:
                 # if w == 15:print(self.active_steps[k_]==bwd_i)
@@ -1632,11 +1633,9 @@ class ModelPULP:
                 #     pass
                 for p in select_paras:
                     prf_ops.append((t, k, AllocateOp(Parameter(parameters[p],
-                                                               is_optim_states=True),
-                                                     is_optim_states=True)))
+                                                               is_optim_states=True))))
                     op = PrefetchOp(alloc=Parameter(parameters[p]), indices=(0, None),
-                                    time=parameters[p].mem/self.bandwidthPrf/self.gcd*self.optimizer_states_factor,
-                                    is_optim_states=True)
+                                    time=parameters[p].mem/self.bandwidthPrf/self.gcd*self.optimizer_states_factor)
                     prf_ops.append((t, k, op))
                     Alive[p] = 1
             if k_==bwd_i:assert 0 not in Alive.values()
@@ -1712,7 +1711,7 @@ class ModelPULP:
         if sol(self.sumComp[t, k]):
             hcn = hgraph.list_HCNs[k]
             opt = -1
-            for o in range(self.nOpts[k]):
+            for o in range(self.nSched[k]):
                 if sol(self.Comp[t, k, o]):
                     opt = o
                     break
