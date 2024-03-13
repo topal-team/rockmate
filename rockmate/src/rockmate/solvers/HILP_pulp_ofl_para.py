@@ -28,8 +28,8 @@ class RkLpVariable(LpVariable):
         cls,
         name,
         indices=None,
-        lowBound=None,
-        upBound=None,
+        lowBound=0,
+        upBound=1,
         cat="Continuous",
         indexStart=[],
     ):
@@ -381,7 +381,6 @@ class ModelPULP:
             "AliveA", [(t, c)
                        for t in range(1,self.T) 
                        for c, (k, i) in enumerate(self.create_list)
-                    #    if t-1 in self.active_stages[i]
                        ], 
                        cat=self.bin_type
         )  # activation
@@ -390,13 +389,12 @@ class ModelPULP:
             "AliveT", [(t, i)
                        for t in range(self.T) 
                        for i in range(self.I)
-                    #    if t-1 in self.active_stages[i]
                        ], 
                        cat=self.bin_type
         )  # tensor that can be shared by acts
 
-        self.create = RkLpVariable.dicts(
-            "create",
+        self.Create = RkLpVariable.dicts(
+            "Create",
             [
                 (t, i)
                 for t in range(self.T)
@@ -405,8 +403,8 @@ class ModelPULP:
             ],
             cat=self.bin_type,
         )
-        self.delete = RkLpVariable.dicts(
-            "delete",
+        self.Delete = RkLpVariable.dicts(
+            "Delete",
             [
                 (t, i)
                 for t in range(self.T)
@@ -437,7 +435,6 @@ class ModelPULP:
         self.param_multiplier = RkLpVariable("BMpl", lowBound=0, upBound=1-1/batch_multiplier, cat="Continuous")
         self.param_multiplier = 0.
 
-        # self.param2hcn, self.parameters = get_parameters(self.hgraph.list_HCNs)
         self.param2hcn = dict()
         self.parameters = []
         for k,v in self.hgraph.parameter_groups.items():
@@ -455,91 +452,18 @@ class ModelPULP:
                                             )/self.gcd for p in self.parameters]
         self.W = W = len(self.parameters)
 
-        self.AliveW = RkLpVariable.dicts(
-            "AliveW",
-            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-            cat="Continuous",
-            lowBound=0,
-            upBound=1,
-        )  # parameter w is alive at the start of step j.
-        self.AliveG = RkLpVariable.dicts(
-            "AliveG",
-            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-            cat="Continuous",
-            lowBound=0,
-            upBound=1,
-        )  # w.grad is alive at the start of step j.
-        self.AliveO = RkLpVariable.dicts(
-            "AliveO",
-            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-            cat="Continuous",
-            lowBound=0,
-            upBound=1,
-        )  # w.grad is alive at the start of step j.
-
-        self.OflW = RkLpVariable.dicts(
-            "OflW",
-            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-            cat="Continuous",
-            lowBound=0,
-            upBound=1,
-        )
-        self.OflG = RkLpVariable.dicts(
-            "OflG",
-            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-            cat="Continuous",
-            lowBound=0,
-            upBound=1,
-        )
-        self.PrfW = RkLpVariable.dicts(
-            "PrfW",
-            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-            cat="Continuous",
-            lowBound=0,
-            upBound=1,
-        )
-        self.PrfG = RkLpVariable.dicts(
-            "PrfG",
-            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-            cat="Continuous",
-            lowBound=0,
-            upBound=1,
-        )
-        self.OptC = RkLpVariable.dicts(
-            "OptC",
-            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-            cat="Continuous",
-            lowBound=0,
-            upBound=1,
-        )
-        self.OflO = RkLpVariable.dicts(
-        "OflO",
-        [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-        cat="Continuous",
-        lowBound=0,
-        upBound=1,
-        )
-        self.PrfO = RkLpVariable.dicts(
-            "PrfO",
-            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-            cat="Continuous",
-            lowBound=0,
-            upBound=1,
-        )
-        self.OflP = RkLpVariable.dicts(
-        "OflP",
-        [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-        cat="Continuous",
-        lowBound=0,
-        upBound=1,
-        )
-        self.PrfP = RkLpVariable.dicts(
-            "PrfP",
-            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-            cat="Continuous",
-            lowBound=0,
-            upBound=1,
-        )
+        ofl_idx = [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)] 
+        self.AliveW = RkLpVariable.dicts("AliveW", ofl_idx)  # parameter w is alive at the start of step j.
+        self.AliveG = RkLpVariable.dicts("AliveG", ofl_idx)  # w.grad is alive at the start of step j.
+        self.AliveO = RkLpVariable.dicts("AliveO", ofl_idx)  # w.grad is alive at the start of step j.
+        self.OflW = RkLpVariable.dicts("OflW", ofl_idx)# Offload weight
+        self.OflG = RkLpVariable.dicts("OflG", ofl_idx)# Offload gradient
+        self.PrfW = RkLpVariable.dicts("PrfW", ofl_idx)# Prefetch gradient
+        self.PrfG = RkLpVariable.dicts("PrfG", ofl_idx)# Prefetch gradient
+        self.OptC = RkLpVariable.dicts("OptC", ofl_idx)# Optimize on cpu
+        self.OflO = RkLpVariable.dicts("OflO", ofl_idx)# Offload optimizer states
+        self.PrfO = RkLpVariable.dicts("PrfO", ofl_idx)# Prefetch optimizer states
+        
         self.param_grad_mem = {(t,k):0 for t in range(self.T) for k in self.krange(t)}
         self.prefill_offload()
 
@@ -663,12 +587,12 @@ class ModelPULP:
             for eidx, (k, i) in enumerate(self.delete_list):
                 self.alive[(t, k, i)] = self.AliveT[t, i]
                 self.alive[(t, k, i)] += lpSum(
-                    self.create[t, eidx_c]
+                    self.Create[t, eidx_c]
                     for eidx_c, (k_, i_) in enumerate(self.create_list)
                     if i_ == i and k_ <= k
                 )
                 self.alive[(t, k, i)] -= lpSum(
-                    self.delete[t, eidx_d]
+                    self.Delete[t, eidx_d]
                     for eidx_d, (k_, i_) in enumerate(self.delete_list)
                     if i_ == i and k_ <= k
                 )
@@ -677,15 +601,15 @@ class ModelPULP:
                 if (k, i) in self.create_list:
                     didx = self.delete_list.index((k, i))
                     self.md += (
-                        self.alive[(t, k, i)] + self.delete[t, didx]
+                        self.alive[(t, k, i)] + self.Delete[t, didx]
                         >= self.sumComp[t, k]
                     )
 
             for eidx, (k, i) in enumerate(self.create_list):
                 # if k not in self.krange(t):
                 #     continue
-                self.md += self.create[t, eidx] <= self.sumComp[t, k]
-                # self.md += self.create[t, eidx] >= self.sumComp[t, k] - self.alive[(t,k,i)]
+                self.md += self.Create[t, eidx] <= self.sumComp[t, k]
+                # self.md += self.Create[t, eidx] >= self.sumComp[t, k] - self.alive[(t,k,i)]
             for i in range(self.I):
                 if t + 1 < self.T:
                     pass
@@ -731,28 +655,28 @@ class ModelPULP:
         # delete when not needed
         for t in range(self.T):
             for eidx, (k, i) in enumerate(self.delete_list):
-                self.md += 1 - self.delete[t, eidx] <= _num_hazards(t, i, k)
+                self.md += 1 - self.Delete[t, eidx] <= _num_hazards(t, i, k)
 
         # don't delete if still needed
         for t in range(self.T):
             for eidx, (k, i) in enumerate(self.delete_list):
                 self.md += _max_num_hazards(t, i, k) * (
-                    1 - self.delete[t, eidx]
+                    1 - self.Delete[t, eidx]
                 ) >= _num_hazards(t, i, k)
                 if i in self.protected_indices:
-                    self.md += self.delete[t, eidx] == 0
+                    self.md += self.Delete[t, eidx] == 0
 
         self.U = {}
         for t in range(self.T):
             self.U[t, 0] = (
                 lpSum(self.AliveT[t, i] * self.mem[i] for i in range(self.I))
                 + lpSum(
-                    self.create[t, eidx] * self.mem[i]
+                    self.Create[t, eidx] * self.mem[i]
                     for eidx, (k_, i) in enumerate(self.create_list)
                     if k_ == 0 and k_ in self.krange(t)
                 )
                 - lpSum(
-                    self.delete[t, eidx] * self.mem[i]
+                    self.Delete[t, eidx] * self.mem[i]
                     for eidx, (k_, i) in enumerate(self.delete_list)
                     if k_ == 0 and k_ in self.krange(t)
                 )
@@ -779,12 +703,12 @@ class ModelPULP:
                 self.U[t, k] = (
                     self.U[(t, k - 1)]
                     + lpSum(
-                        self.create[t, eidx] * self.mem[i]
+                        self.Create[t, eidx] * self.mem[i]
                         for eidx, (k_, i) in enumerate(self.create_list)
                         if k_ == k and k_ in self.krange(t)
                     )
                     - lpSum(
-                        self.delete[t, eidx] * self.mem[i]
+                        self.Delete[t, eidx] * self.mem[i]
                         for eidx, (k_, i) in enumerate(self.delete_list)
                         if k_ == k and k_ in self.krange(t)
                     )
@@ -824,7 +748,7 @@ class ModelPULP:
                             for o in range(self.nComp[k])
                         )
                         + lpSum(
-                            self.mem[i_] * self.delete[t, eidx_d]
+                            self.mem[i_] * self.Delete[t, eidx_d]
                             for eidx_d, (k_, i_) in enumerate(self.delete_list)
                             if k == k_
                         )
@@ -861,21 +785,21 @@ class ModelPULP:
                                 elif not inter_position[1]:  # ending status
                                     if (k, i_) in self.delete_list:
                                         eidx = self.delete_list.index((k, i_))
-                                        not_kept_alive = self.delete[t, eidx]
+                                        not_kept_alive = self.Delete[t, eidx]
                                     else:  # when output_data is not deps, but we care about it
                                         # eidx = self.delete_list.index((k, i_))
                                         k_ = max([kk for kk in self.han_deps[i_] if kk < k])
                                         not_kept_alive = self.alive[(t, k_, i_)]
                                 else:  # start status
                                     eidx = self.create_list.index((k, i_))
-                                    not_kept_alive = self.create[t, eidx]
+                                    not_kept_alive = self.Create[t, eidx]
                                 correction_term += not_kept_alive * inter_mem
                             self.md += (
                                 self.U[t, k]
                                 + self.Comp[t, k, o] * overhead / self.gcd
                                 + correction_term
                                 + lpSum(
-                                    self.mem[i_] * self.delete[t, eidx_d]
+                                    self.mem[i_] * self.Delete[t, eidx_d]
                                     for eidx_d, (k_, i_) in enumerate(self.delete_list)
                                     if k == k_
                                 )
@@ -890,7 +814,7 @@ class ModelPULP:
                                 self.U[t, k]
                                 + self.Comp[t, k, o] * self.overhead[k][o]
                                 + lpSum(
-                                    self.mem[i_] * self.delete[t, eidx_d]
+                                    self.mem[i_] * self.Delete[t, eidx_d]
                                     for eidx_d, (k_, i_) in enumerate(self.delete_list)
                                     if k == k_
                                 )
@@ -1005,16 +929,16 @@ class ModelPULP:
         for t in range(self.T):
             for i in range(self.Cr):
                 if self.create_list[i][0] not in self.krange(t):
-                    self.create[t, i] = 0
+                    self.Create[t, i] = 0
             for i in range(self.De):
                 if self.delete_list[i][0] not in self.krange(t):
-                    self.delete[t, i] = 0
+                    self.Delete[t, i] = 0
             if self.single_fwd:
                 for d in range(self.De):
                     (k, i) = self.delete_list[d]
                     if i in self.protected_indices:continue
                     if k == max(self.han_deps[i] + self.han_users[i]) and k == t:
-                        self.delete[t, d] = 1
+                        self.Delete[t, d] = 1
                         pass
  
 
