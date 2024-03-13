@@ -219,7 +219,7 @@ class ORockmate(torch.nn.Module):
             if isinstance(solver, HILP):
                 solver.config.solve_top_level = True
                 solver.config.time_limit_top = self.ilp_time_limit_top
-                solver.config.cpu_optimize_kwargs = self.global_dict["optimize_metrics"]
+                solver.config.optimize_metrics = self.global_dict["optimize_metrics"]
                 # print("temporarily changing total_nodes for top level hilp")
                 list_solutions.extend(
                     solver(self.rkgb_res.hierarchical_cluster, [budget], accurate_mem=True)
