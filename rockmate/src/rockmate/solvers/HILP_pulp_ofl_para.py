@@ -133,7 +133,7 @@ class ModelPULP:
         protected_names=[],
         grouping=True,
         grad_mode="free", #["free", "accumulate"]
-        cpu_optimize_kwargs = None,
+        optimize_metrics = None,
         activation_offload = False,
         batch_multiplier = 1
     ):
@@ -155,7 +155,7 @@ class ModelPULP:
         self.single_bwd = accurate_mem
         self.grouping = grouping
         self.grad_mode = grad_mode
-        self.cpu_optimize_kwargs = cpu_optimize_kwargs
+        self.optimize_metrics = optimize_metrics
         self.activation_offload = activation_offload
         self.protected_names = protected_names
         self.hgraph = hgraph
@@ -231,9 +231,9 @@ class ModelPULP:
             for list_sched in self.list_list_sched
         ]
 
-        self.T = T = len(self.hgraph.list_HCNs)
-        self.I = I = len(self.hgraph.list_HANs)
-        self.J = J = len(self.list_list_sched)
+        self.T = len(self.hgraph.list_HCNs)
+        self.I = len(self.hgraph.list_HANs)
+        self.J = len(self.list_list_sched)
 
         self.hcn2idx = {hcn:i for i, hcn in enumerate(self.hgraph.list_HCNs)}
         self.han2idx = {hcn:i for i, hcn in enumerate(self.hgraph.list_HANs)}
@@ -270,7 +270,7 @@ class ModelPULP:
                 # for i_ in op_sched.dep_interfaces_data:
                 for anode in op_sched.dep_interfaces_data:
                     # Without specifying schedule, we assume it's possible to use han here
-                    for i in range(I):
+                    for i in range(self.I):
                         if (anode.name
                             == self.hgraph.list_HANs[i].anode.name
                             and k not in self.han_users[i]
@@ -280,7 +280,7 @@ class ModelPULP:
         ##############################
 
         self.create_list = [(k, i) for k in range(self.T) for i in self.hcn_users[k]]
-        self.delete_list = [(k, i) for i in range(I) for k in self.han_deps[i] + self.han_users[i]]
+        self.delete_list = [(k, i) for i in range(self.I) for k in self.han_deps[i] + self.han_users[i]]
 
         self.Cr = len(self.create_list)
         self.De = len(self.delete_list)
@@ -302,11 +302,11 @@ class ModelPULP:
     
     def orange(self, t):
         """
-        Concerning range for computation
+        Concerning range for offloading
         """
         return self.krange(t)
 
-    def next_index(self, t, i, upper_triangle=False):
+    def next_idx(self, t, i, upper_triangle=False):
         # if upper_triangle, consider the case when i>t
         if t == self.T - 1:
             if i < max(self.krange(t)):
@@ -485,165 +485,129 @@ class ModelPULP:
         self.prefill_compute()
 
     def add_offload_variables(self):
-        cpu_optimize_kwargs = self.cpu_optimize_kwargs
+        optimize_metrics = self.optimize_metrics
 
         self.cpu_optimize = True
-        self.optimizer_states_factor = cpu_optimize_kwargs["optimizer_states_size"]#*weight size
-        self.cpu_optimize_speed = cpu_optimize_kwargs["cpu_optimize_speed"]#B/ms
-        self.gpu_optimize_speed = cpu_optimize_kwargs["gpu_optimize_speed"]#B/ms
-        self.optimizer_overhead_factor = cpu_optimize_kwargs["optimizer_overhead"]#*weight size
-        self.minor_param_size = cpu_optimize_kwargs["minor_param_size"]# minor weight size
-        self.bandwidth = cpu_optimize_kwargs["bandwidth"]# bandwidth
+        self.optimizer_states_factor = optimize_metrics["optimizer_states_size"]#*weight size
+        self.cpu_optimize_speed = optimize_metrics["cpu_optimize_speed"]#B/ms
+        self.gpu_optimize_speed = optimize_metrics["gpu_optimize_speed"]#B/ms
+        self.optimizer_overhead_factor = optimize_metrics["optimizer_overhead"]#*weight size
+        self.minor_param_size = optimize_metrics["minor_param_size"]# minor weight size
+        self.bandwidth = optimize_metrics["bandwidth"]# bandwidth
         batch_multiplier = 4
         # self.BatMpl = RkLpVariable("BMpl", lowBound=0, upBound=self.batch_multiplier, cat="Integer")
         # self.param_multiplier = 1-self.BatMpl*1/self.batch_multiplier
         self.param_multiplier = RkLpVariable("BMpl", lowBound=0, upBound=1-1/batch_multiplier, cat="Continuous")
         self.param_multiplier = 0.
 
+        # self.param2hcn, self.parameters = get_parameters(self.hgraph.list_HCNs)
+        self.param2hcn = dict()
+        self.parameters = []
+        for k,v in self.hgraph.parameter_groups.items():
+            self.param2hcn[len(self.parameters)] = k
+            self.parameters.append(v)
 
-        def get_parameters(hierarchical_nodes):
-            all_params = {}
-            # all_clusters = {sub_cluster.name:sub_cluster for sub_cluster in sub_clusters if sub_cluster}
-            # sub_c2params = {sub_cluster.name:set() for sub_cluster in sub_clusters if sub_cluster}
-            param2sub_c = {}
+        self.hcn2param = {t:[] for t in range(self.T)}
 
-            for i,hcn in enumerate(hierarchical_nodes):
-                if not hasattr(hcn, "required_parameter_nodes_real"):continue
-                if hcn.sub_cluster is not None and hasattr(hcn.sub_cluster, "parameter_nodes"):
-                    # if FWD/BWD hcns have different req_pnodes, parameters may be needed for recomputation
-                    req_pnodes = hcn.sub_cluster.parameter_nodes
-                else:
-                    req_pnodes = hcn.required_parameter_nodes_real|hcn.required_parameter_nodes_fake
-                for pnode in req_pnodes:
-                    if pnode.is_buffer:continue
-                    if pnode.mem < self.minor_param_size:continue
-                    # sub_c2params[sub_cluster.name].add(pnode.param_name)
-                    if hasattr(pnode, "original_param_node"):
-                        all_params[pnode.param_name] = pnode.original_param_node
-                    else:
-                        all_params[pnode.param_name] = pnode
-                    if pnode.param_name not in param2sub_c:
-                        param2sub_c[pnode.param_name] = {i}
-                    else:
-                        param2sub_c[pnode.param_name].add(i)
-            result = {}
-            for p, c in param2sub_c.items():
-                c_ = tuple(sorted(c))
-                if c_ not in result:
-                    result[c_] = {p}
-                else:
-                    result[c_].add(p)
+        for p,hcn_s in self.param2hcn.items():
+            for hcn in hcn_s:
+                self.hcn2param[hcn].append(p)
 
-            parameters = []
-            params2sub_c = {}
-            for k,v in result.items():
-                params2sub_c[len(parameters)] = k
-                parameters.append([all_params[p] for p in v])
-            return params2sub_c, parameters
-        
-        if self.with_parameters:
-            self.param2hcn, self.parameters = get_parameters(self.hgraph.list_HCNs)
-            self.hcn2param = {t:[] for t in range(self.T)}
+        self.parameter_size = [sum(pnode.mem for pnode in p)/self.gcd for p in self.parameters]
+        self.parameter_gradient_size = [sum(pnode.mem for pnode in p if pnode.info.requires_grad
+                                            )/self.gcd for p in self.parameters]
+        self.W = W = len(self.parameters)
 
-            for p,hcn_s in self.param2hcn.items():
-                for hcn in hcn_s:
-                    self.hcn2param[hcn].append(p)
-
-            self.parameter_size = [sum(pnode.mem for pnode in p)/self.gcd for p in self.parameters]
-            self.parameter_gradient_size = [sum(pnode.mem for pnode in p if pnode.info.requires_grad
-                                                )/self.gcd for p in self.parameters]
-            self.W = W = len(self.parameters)
-
-            self.AliveW = RkLpVariable.dicts(
-                "AliveW",
-                [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-                cat="Continuous",
-                lowBound=0,
-                upBound=1,
-            )  # parameter w is alive at the start of step j.
-            self.AliveG = RkLpVariable.dicts(
-                "AliveG",
-                [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-                cat="Continuous",
-                lowBound=0,
-                upBound=1,
-            )  # w.grad is alive at the start of step j.
-            self.AliveO = RkLpVariable.dicts(
-                "AliveO",
-                [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-                cat="Continuous",
-                lowBound=0,
-                upBound=1,
-            )  # w.grad is alive at the start of step j.
-
-            self.OflW = RkLpVariable.dicts(
-                "OflW",
-                [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-                cat="Continuous",
-                lowBound=0,
-                upBound=1,
-            )
-            self.OflG = RkLpVariable.dicts(
-                "OflG",
-                [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-                cat="Continuous",
-                lowBound=0,
-                upBound=1,
-            )
-            self.PrfW = RkLpVariable.dicts(
-                "PrfW",
-                [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-                cat="Continuous",
-                lowBound=0,
-                upBound=1,
-            )
-            self.PrfG = RkLpVariable.dicts(
-                "PrfG",
-                [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-                cat="Continuous",
-                lowBound=0,
-                upBound=1,
-            )
-            self.OptC = RkLpVariable.dicts(
-                "OptC",
-                [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-                cat="Continuous",
-                lowBound=0,
-                upBound=1,
-            )
-            self.OflO = RkLpVariable.dicts(
-            "OflO",
+        self.AliveW = RkLpVariable.dicts(
+            "AliveW",
             [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
             cat="Continuous",
             lowBound=0,
             upBound=1,
-            )
-            self.PrfO = RkLpVariable.dicts(
-                "PrfO",
-                [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-                cat="Continuous",
-                lowBound=0,
-                upBound=1,
-            )
-            self.OflP = RkLpVariable.dicts(
-            "OflP",
+        )  # parameter w is alive at the start of step j.
+        self.AliveG = RkLpVariable.dicts(
+            "AliveG",
             [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
             cat="Continuous",
             lowBound=0,
             upBound=1,
-            )
-            self.PrfP = RkLpVariable.dicts(
-                "PrfP",
-                [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
-                cat="Continuous",
-                lowBound=0,
-                upBound=1,
-            )
-            self.param_grad_mem = {(t,k):0 for t in range(self.T) for k in self.krange(t)}
-            self.prefill_offload()
+        )  # w.grad is alive at the start of step j.
+        self.AliveO = RkLpVariable.dicts(
+            "AliveO",
+            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
+            cat="Continuous",
+            lowBound=0,
+            upBound=1,
+        )  # w.grad is alive at the start of step j.
 
-            self.bandwidthOfl = cpu_optimize_kwargs["bandwidth"]/self.gcd  # byte/ms
-            self.bandwidthPrf = cpu_optimize_kwargs["bandwidth"]/self.gcd  # byte/ms
+        self.OflW = RkLpVariable.dicts(
+            "OflW",
+            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
+            cat="Continuous",
+            lowBound=0,
+            upBound=1,
+        )
+        self.OflG = RkLpVariable.dicts(
+            "OflG",
+            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
+            cat="Continuous",
+            lowBound=0,
+            upBound=1,
+        )
+        self.PrfW = RkLpVariable.dicts(
+            "PrfW",
+            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
+            cat="Continuous",
+            lowBound=0,
+            upBound=1,
+        )
+        self.PrfG = RkLpVariable.dicts(
+            "PrfG",
+            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
+            cat="Continuous",
+            lowBound=0,
+            upBound=1,
+        )
+        self.OptC = RkLpVariable.dicts(
+            "OptC",
+            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
+            cat="Continuous",
+            lowBound=0,
+            upBound=1,
+        )
+        self.OflO = RkLpVariable.dicts(
+        "OflO",
+        [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
+        cat="Continuous",
+        lowBound=0,
+        upBound=1,
+        )
+        self.PrfO = RkLpVariable.dicts(
+            "PrfO",
+            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
+            cat="Continuous",
+            lowBound=0,
+            upBound=1,
+        )
+        self.OflP = RkLpVariable.dicts(
+        "OflP",
+        [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
+        cat="Continuous",
+        lowBound=0,
+        upBound=1,
+        )
+        self.PrfP = RkLpVariable.dicts(
+            "PrfP",
+            [(t, k, w) for t in range(self.T) for k in self.krange(t) for w in range(W)],
+            cat="Continuous",
+            lowBound=0,
+            upBound=1,
+        )
+        self.param_grad_mem = {(t,k):0 for t in range(self.T) for k in self.krange(t)}
+        self.prefill_offload()
+
+        self.bandwidthOfl = optimize_metrics["bandwidth"]/self.gcd  # byte/ms
+        self.bandwidthPrf = optimize_metrics["bandwidth"]/self.gcd  # byte/ms
 
     def add_valid_constraints(self):
         # In the last stage, every source edge of input_grad should be alive or executed
@@ -717,7 +681,6 @@ class ModelPULP:
                         self.sumComp[t, k_] <= self.sumComp[t, k] + self.AliveA[t, j]
                     )
 
-        self.dep_interfaces = {hcn.name :[] for hcn in self.hgraph.list_HCNs}
         #### Options-related constraints
         for t in range(self.T):
             for j in range(self.J):
@@ -743,11 +706,11 @@ class ModelPULP:
                     # for i in list_sched[o].dep_interfaces_data:
                     for anode in list_sched[o].dep_interfaces_data:
                         hcn = self.hgraph.list_HCNs[bwd_i]
-                        self.dep_interfaces[hcn.name].append((o, anode.name))
                         # Tensor req_i is required by BWD
                         req_i = [han.anode.name for han in self.hgraph.list_HANs].index(
                             anode.name
                         )
+                        # req_i = self.han2idx[anode]
                         for j_, (k_, i_) in enumerate(self.create_list):
                             if i_ == req_i:
                                 self.md += (
@@ -756,7 +719,7 @@ class ModelPULP:
                                 )
 
     def add_memory_constrains(self):
-                # we don't keep eyes on the alive status all the time
+        # we don't keep eyes on the alive status all the time
         # only the steps when changes can happen
         self.alive = {}
         for t in range(self.T):
@@ -1118,7 +1081,6 @@ class ModelPULP:
                         pass
  
 
-
     def prefill_offload(self):
         for t in range(self.T):
             for k in range(self.T):                
@@ -1210,7 +1172,7 @@ class ModelPULP:
 
         for t in range(self.T):
             for k in self.krange(t):
-                t_, k_ = self.next_index(t, k)
+                t_, k_ = self.next_idx(t, k)
 
                 self.md += self.Time[t, k] >= 1/ self.bandwidthOfl *lpSum(
                     self.parameter_size[w] 
@@ -1301,7 +1263,7 @@ class ModelPULP:
             if self.gradient_accumulation:
                 self.md += self.OflGProg[bwd_i, bwd_i, w] == self.accumC_grad(w)
                 self.md += self.PrfGProg[bwd_i, bwd_i, w] == self.accumC_grad(w) - self.sumOptC[w]
-            t_, k_ = self.next_index(bwd_i, bwd_i)
+            t_, k_ = self.next_idx(bwd_i, bwd_i)
             # self.md += self.AliveO[t_, k_, w] - self.AliveO[bwd_i, bwd_i, w] <= 1 - self.gradient_accumulation
             # self.md += self.AliveG[t_, k_, w] - self.AliveG[bwd_i, bwd_i, w] <= 1# - self.gradient_accumulation
             for t in range(self.T):
@@ -1409,7 +1371,7 @@ class ModelPULP:
         assert (bwd_i, bwd_i) in self.active_steps
         idx = self.active_steps.index((bwd_i, bwd_i))
         for t, k in self.active_steps[idx:] + self.active_steps[:idx]:
-            t_, k_ = self.next_index(t, k)
+            t_, k_ = self.next_idx(t, k)
             current_alive_size = sum(parameters[p].mem * a for p, a in Alive.items())
             current_offloaded_size = sum(parameters[p].mem * a for p, a in Offloaded.items())
             next_alive_size = round((self.AliveG[(t_, k_, w)]+self.AliveW[(t_, k_, w)]).value() * parameter_size)
@@ -1583,7 +1545,7 @@ class ModelPULP:
                     if a:
                         init_alive.append(Parameter(parameters[p],is_optim_states=True))
 
-            t_, k_ = self.next_index(t, k)
+            t_, k_ = self.next_idx(t, k)
             current_alive_size = sum(parameters[p].mem * a for p, a in Alive.items())
             current_offloaded_size = sum(parameters[p].mem * a for p, a in Offloaded.items())
             next_alive_size = min(gpu_optimize_size,

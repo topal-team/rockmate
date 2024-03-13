@@ -26,6 +26,25 @@ import psutil
 default_time_limit = [60 * 60]
 
 
+def set_hcn_list_sched(hcn, list_sched):
+    """
+    As part of preprocess for the hierarchical solver, we selection
+    schedules and store in hcn.list_sched, which is temporarily used 
+    by the ILP. 
+    """
+    setattr(hcn, "list_sched", list_sched)
+
+def clean_hcn_list_sched(hcn):
+    delattr(hcn, "list_sched")
+
+def set_hg_parameter_groups(hg, parameter_groups):
+    setattr(hg, "parameter_groups", parameter_groups)
+
+def clean_hg_parameter_groups(hg):
+    delattr(hg, "parameter_groups")
+
+
+
 class HILP(Solver):
     class Config:
         def __init__(
@@ -55,7 +74,7 @@ class HILP(Solver):
             self.solve_top_level = False
             self.time_limit_ = time_limit
             self.time_limit_top = time_limit
-            self.cpu_optimize_kwargs = {}
+            self.optimize_metrics = {}
 
         @property
         def time_limit(self):
@@ -112,6 +131,53 @@ class HILP(Solver):
             budgets.append((bd_peak, l_bd_save))
         return budgets
 
+    def _group_parameters(self, hg: HierarchicalGraph):
+        all_params = {}
+        param2hcn = {}
+
+        for i,hcn in enumerate(hg.list_HCNs):
+            if not hasattr(hcn, "required_parameter_nodes_real"):continue
+            if hcn.sub_cluster is not None and hasattr(hcn.sub_cluster, "parameter_nodes"):
+                # if FWD/BWD hcns have different req_pnodes, parameters may be needed for recomputation
+                req_pnodes = hcn.sub_cluster.parameter_nodes
+            else:
+                h_pnodes = hcn.required_parameter_nodes_real|hcn.required_parameter_nodes_fake
+                req_pnodes = [pnode.original_param_node for pnode in h_pnodes]
+            for pnode in req_pnodes:
+                if pnode.is_buffer:continue
+                if pnode.mem < self.config.optimize_metrics["minor_param_size"]:continue
+                if pnode not in param2hcn:
+                    param2hcn[pnode] = {i}
+                else:
+                    param2hcn[pnode].add(i)
+
+                # # sub_c2params[sub_cluster.name].add(pnode.param_name)
+                # if hasattr(pnode, "original_param_node"):
+                #     all_params[pnode.param_name] = pnode.original_param_node
+                # else:
+                #     all_params[pnode.param_name] = pnode
+                # if pnode.param_name not in param2hcn:
+                #     param2hcn[pnode.param_name] = {i}
+                # else:
+                #     param2hcn[pnode.param_name].add(i)
+                    
+        parameter_groups = {}
+        for p, c in param2hcn.items():
+            c_ = tuple(sorted(c))
+            if c_ not in parameter_groups:
+                parameter_groups[c_] = {p}
+            else:
+                parameter_groups[c_].add(p)
+
+        set_hg_parameter_groups(hg, parameter_groups)
+
+        # parameters = []
+        # param_group2hcn = {}
+        # for hcn, v in result.items():
+        #     param_group2hcn[len(parameters)] = 
+        #     parameters.append([all_params[p] for p in v])
+        # return param_group2hcn, parameters
+
     def _select_sched(self, hg, overall_budget=None):
         # for fwd hcn, select sched from hcn.sub_cluster and put in hcn.list_sched
         weights = []
@@ -140,7 +206,8 @@ class HILP(Solver):
                     if op_sched.mem <= overall_budget
                 ]
                 if nb_sched >= len(list_sched):
-                    hcn.list_sched = list_sched
+                    # hcn.list_sched = list_sched
+                    set_hcn_list_sched(hcn, list_sched)
                     continue
                 indices = np.array(
                     [(i, op_sched.mem) for i, op_sched in enumerate(list_sched)]
@@ -219,6 +286,7 @@ class HILP(Solver):
 
         list_op_sched = []
         self._select_sched(hg, overall_budget=peak_budget)
+        self._group_parameters(hg)
         if not hasattr(save_budget, "__iter__"):
             save_budget = [save_budget]
         # start = time.time()
@@ -241,7 +309,7 @@ class HILP(Solver):
                 ilp_solver_params=ilp_solver_params,
                 accurate_mem=accurate_mem,
                 protected_names=protected_names,
-                cpu_optimize_kwargs = self.config.cpu_optimize_kwargs
+                optimize_metrics = self.config.optimize_metrics
             )
             # print(f"model building: {time.time()-start}")
             sols = set()
