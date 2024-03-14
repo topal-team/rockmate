@@ -15,7 +15,10 @@ from pulp import (
 from .ilp_schedule import schedule
 from rkgb.core.hierarchical import HierarchicalGraph
 from .ilp_utils import RkLpVariable
-from .ilp_offload import add_offload_variables, add_offload_constraints, add_offload_objective
+from .ilp_offload import (add_offload_variables, 
+                          add_offload_constraints, 
+                          add_offload_objective,
+                          all_param_mem)
 
 class ModelPULP:
     """
@@ -52,7 +55,7 @@ class ModelPULP:
         self.ilp_solver_params = ilp_solver_params
         self.feasible = None
         self.solve_time = None
-        self.with_parameters = accurate_mem
+        self.with_offload = accurate_mem
         self.with_grad = accurate_mem
         self.with_optimizer_states = accurate_mem#optimizer states will be offloaded
         self.gradient_accumulation = 0# if 0, no gradient/optimizer states alive from previous iters
@@ -200,12 +203,6 @@ class ModelPULP:
         Concerning range for computation
         """
         return self.krange(t)
-    
-    def orange(self, t):
-        """
-        Concerning range for offloading
-        """
-        return self.krange(t)
 
     def next_idx(self, t, i, upper_triangle=False):
         # if upper_triangle, consider the case when i>t
@@ -230,7 +227,7 @@ class ModelPULP:
 
     def add_objective(self, bandwidth_cost=0.01):
 
-        if self.with_parameters:
+        if self.with_offload:
             add_offload_objective(self)
         else:
             self.md += (
@@ -240,7 +237,7 @@ class ModelPULP:
     def add_constraints(self):
         self.add_valid_constraints()
         self.add_memory_constrains()
-        if self.with_parameters:
+        if self.with_offload:
             add_offload_constraints(self)
             
         ##### Time constraints
@@ -356,7 +353,7 @@ class ModelPULP:
             cat="Continuous"
         )
         self.prefill_compute()
-        if self.with_parameters:
+        if self.with_offload:
             add_offload_variables(self)
 
     def add_valid_constraints(self):
@@ -578,12 +575,6 @@ class ModelPULP:
                     self.Comp[t, 0, o] * self.saved_mem[self.hcn2sub_c[0]][o]
                     for o in range(self.nSched[0])
                 )
-                # - lpSum(
-                #     self.Bwd[f_to_b[i]][t_, o] * self.saved_mem[i][o]
-                #     for i in range(self.chain.ln)
-                #     for o in range(nb_opt[i])
-                #     for t_ in range(t)
-                # )
             )
 
         for t in range(self.T):
@@ -623,7 +614,7 @@ class ModelPULP:
                     )
         for t in range(self.T):
             for k in self.krange(t):
-                parameter_mem = self.all_param_mem(t, k) if self.with_parameters else 0
+                parameter_mem = self.all_param_mem(t, k)
                 j = self.hcn2sub_c[k]
                 self.md += self.U[t, k] >= 0
                 self.md += self.U[t, k] <= (self.peak_budget - parameter_mem)
@@ -719,68 +710,10 @@ class ModelPULP:
         for k in range(self.T):
             self.md += self.U[(self.loss_idx, k)] <= self.save_budget
 
-    def req_w(self):
-        return 1 - self.param_multiplier
-
-    def accumC_grad(self, w):
-        #if grad_accumulation, gradient stored on CPU from previous iterations
-        return self.sumOptC[w]
-    
-    def accumC_optimizer_states(self, w):
-        #if grad_accumulation, optimizer states stored on CPU from previous iterations
-        return self.accumC_grad(w)
-    
-    def instant_opt(self, w):
-        # return the fraction of parameter instantly optimized after bwd
-        if self.gradient_accumulation:
-            return 0
-        if self.grad_mode =="free":
-            return self.req_w()
-        return 1-self.sumOptC[w]- self.param_multiplier
-    
-    def max_OflGProg(self, t, k, w):
-        return self.OflGProg[t, k, w]+(self.OflWProg[t, k, w]*(self.grad_mode=="free")
-                                      *self.w_by_wg(w))
-
-    def w_by_wg(self, w):
-        if self.parameter_gradient_size[w]==0:return 0
-        return self.parameter_size[w]/self.parameter_gradient_size[w]
-
     def all_param_mem(self, t, k, with_multiplier=True):
-        return (self.parameter_mem(t,k) 
-                + self.param_grad_mem[t,k]
-                + self.optimizer_states_mem(t,k)  
-                + self.param_multiplier*self.peak_budget*with_multiplier)
-
-    def parameter_mem(self, t, k):
-        parameter_mem = lpSum(
-            (self.AliveW[t, k, w] + self.PrfW[t, k, w])
-            * self.parameter_size[w]
-            for w in range(self.W)
-        )
-        return parameter_mem
-    
-    # def param_grad_mem(self, t, k):
-    #     grad_mem = lpSum(
-    #         self.AliveG[t, k, w]
-    #         * self.parameter_gradient_size[w]
-    #         for w in range(self.W)
-    #     )
-    #     return grad_mem
-    
-    def optimizer_states_mem(self, t, k, with_overhead=True):    
-        optimizer_states_mem = lpSum(((self.AliveO[t, k, w]+self.PrfO[t, k, w])*
-                    self.parameter_gradient_size[w] *
-                    self.optimizer_states_factor)
-                    for w in range(self.W))
-        optimizer_overhead = 0
-        if k > self.loss_idx:# and k in self.hcn2param:
-            l_w = self.hcn2param[k]
-            optimizer_overhead += sum((self.req_w()-self.sumOptC[w])
-                                      * self.parameter_gradient_size[w]
-                                      * self.optimizer_overhead_factor
-                                      for w in l_w)
-        return optimizer_states_mem + optimizer_overhead*with_overhead
+        if not self.with_offload:
+            return 0
+        return all_param_mem(self, t, k, with_multiplier=with_multiplier)
 
     def prefill_compute(self):
         self.active_stages = dict()
@@ -832,9 +765,7 @@ class ModelPULP:
  
     def solve(self, solver=""):
         # some solvers have no support of 'Time limit reached' status
-        # if self.with_parameters:
-        #     self.add_single_fwd_constraints()
-        #     self.add_single_bwd_constraints()
+        
         print(f"time limit {self.ilp_solver_params['TimeLimit']}")
         try:
             solver = get_solver(
@@ -875,5 +806,4 @@ class ModelPULP:
         return value > 0.9999
 
     def schedule(self):
-        # scheduler = Scheduler(self)
         return schedule(self)

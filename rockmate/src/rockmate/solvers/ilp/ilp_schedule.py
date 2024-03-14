@@ -18,7 +18,7 @@ from ...op_schedule import (
 )
 from ..main import get_sched, add_sched, translate
 from rkgb.core.hierarchical import HierarchicalGraph
-
+from .ilp_offload import req_w
 
 class knapsack:
     def __init__(self, parameter_sizes: list, pre_solve_size=10):
@@ -80,7 +80,7 @@ def schedule(md, hgraph=None, check_valid=False):
     restore_op_list = []
     init_alive_status = {}
     loss_op = ComputeOp(md.hgraph.cluster.loss_cnode, disabled=True)
-    if md.with_parameters:
+    if md.with_offload:
         W = len(md.parameter_size)
         (
             op_list,
@@ -107,7 +107,7 @@ def schedule(md, hgraph=None, check_valid=False):
         init_alive_status=init_alive_status,
         init_op_list=init_op_list,
         restore_op_list=restore_op_list,
-        with_parameters=md.with_parameters,
+        with_parameters=md.with_offload,
     )
     # check_valid = True
     if check_valid:
@@ -630,7 +630,7 @@ def group_optimizer_states(md, w, gpu_optimize_param):
                     prf_size=0
                 else:
                     raise ValueError
-            if md.sol(md.AliveO[(t_, k_, w)]+md.sumOptC[w]-md.req_w()+1) or k_==bwd_i:
+            if md.sol(md.AliveO[(t_, k_, w)]+md.sumOptC[w]-req_w(md)+1) or k_==bwd_i:
                 
                 select_paras = list(candidates.keys())
                 # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size>0.99

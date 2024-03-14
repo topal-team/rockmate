@@ -73,28 +73,28 @@ def accumC_grad(md, w):
 
 def accumC_optimizer_states(md, w):
     #if grad_accumulation, optimizer states stored on CPU from previous iterations
-    return md.accumC_grad(w)
+    return accumC_grad(md, w)
 
 def instant_opt(md, w):
     # return the fraction of parameter instantly optimized after bwd
     if md.gradient_accumulation:
         return 0
     if md.grad_mode =="free":
-        return md.req_w()
+        return req_w(md)
     return 1-md.sumOptC[w]- md.param_multiplier
 
 def max_OflGProg(md, t, k, w):
     return md.OflGProg[t, k, w]+(md.OflWProg[t, k, w]*(md.grad_mode=="free")
-                                    *md.w_by_wg(w))
+                                    *w_by_wg(md, w))
 
 def w_by_wg(md, w):
     if md.parameter_gradient_size[w]==0:return 0
     return md.parameter_size[w]/md.parameter_gradient_size[w]
 
 def all_param_mem(md, t, k, with_multiplier=True):
-    return (md.parameter_mem(t,k) 
+    return (parameter_mem(md, t,k)
             + md.param_grad_mem[t,k]
-            + md.optimizer_states_mem(t,k)  
+            + optimizer_states_mem(md, t,k)
             + md.param_multiplier*md.peak_budget*with_multiplier)
 
 def parameter_mem(md, t, k):
@@ -121,7 +121,7 @@ def optimizer_states_mem(md, t, k, with_overhead=True):
     optimizer_overhead = 0
     if k > md.loss_idx:# and k in md.hcn2param:
         l_w = md.hcn2param[k]
-        optimizer_overhead += sum((md.req_w()-md.sumOptC[w])
+        optimizer_overhead += sum((req_w(md)-md.sumOptC[w])
                                     * md.parameter_gradient_size[w]
                                     * md.optimizer_overhead_factor
                                     for w in l_w)
@@ -150,7 +150,7 @@ def prefill_offload(md):
 
     if not md.with_optimizer_states:
         for (t,k,w) in md.AliveO:
-            md.AliveO[(t,k,w)] = (1-md.accumC_optimizer_states(w)- md.param_multiplier)
+            md.AliveO[(t,k,w)] = (1-accumC_optimizer_states(md, w)- md.param_multiplier)
             md.PrfO[(t,k,w)] = 0
             md.OflO[(t,k,w)] = 0
     if md.grad_mode in ["free"]:
@@ -163,7 +163,7 @@ def prefill_offload(md):
                 md.AliveG[(t,k,w)] = 0
                 if k == max(md.param2hcn[w]):
                     # md.overhead[k] = [v+grad_size for v in md.overhead[k]]
-                    md.param_grad_mem[t,k] += grad_size * md.req_w()
+                    md.param_grad_mem[t,k] += grad_size * req_w(md)
             else:#shared weight
                 bwd_first = min(x for x in md.param2hcn[w] if x>md.loss_idx)
                 bwd_last = max(md.param2hcn[w])
@@ -173,7 +173,7 @@ def prefill_offload(md):
                     md.AliveG[(t,k,w)] = 1
                     if k in md.param2hcn[w] and k>bwd_first:
                         # md.overhead[k] = [v+grad_size for v in md.overhead[k]]
-                        md.param_grad_mem[t,k] += grad_size * md.req_w()
+                        md.param_grad_mem[t,k] += grad_size * req_w(md)
     elif md.grad_mode in ["accumulate"]:
         for (t,k,w) in md.AliveG:
             md.AliveG[(t,k,w)] = 1
@@ -247,7 +247,7 @@ def add_offload_constraints(md):
                 for w in md.hcn2param[k])# current layer offload
                 + 1/md.gpu_optimize_speed*md.gcd
                 * lpSum(md.parameter_gradient_size[w]
-                * (md.req_w() - md.sumOptC[w])
+                * (req_w(md) - md.sumOptC[w])
                 for w in md.hcn2param[k]
                 ))
             md.md += md.Time[t, k] >= lpSum(
@@ -270,17 +270,17 @@ def add_offload_constraints(md):
                 md.PrfOProg[t,k,w] = get_progress(md.PrfO, t, k, w)
                 md.OptCProg[t,k,w] = get_progress(md.OptC, t, k, w)
                 
-                md.md += (md.AliveW[t, k, w] <= md.req_w())
-                md.md += md.OflWProg[t, k, w] <= md.req_w()
-                md.md += md.OflGProg[t, k, w] <= md.accumC_grad(w)
-                md.md += md.OptCProg[t, k, w] <= md.max_OflGProg(t,k,w)
-                md.md += md.OptCProg[t, k, w] <= md.PrfWProg[t, k, w]*md.w_by_wg(w)
+                md.md += (md.AliveW[t, k, w] <= req_w(md))
+                md.md += md.OflWProg[t, k, w] <= req_w(md)
+                md.md += md.OflGProg[t, k, w] <= accumC_grad(md, w)
+                md.md += md.OptCProg[t, k, w] <= max_OflGProg(md,t,k,w)
+                md.md += md.OptCProg[t, k, w] <= md.PrfWProg[t, k, w]*w_by_wg(md, w)
                 md.md += (md.AliveW[t, k, w] + md.OflWProg[t, k, w]
-                            >= md.instant_opt(w))
+                            >= instant_opt(md, w))
                 md.md += (md.AliveG[t, k, w] + md.OflGProg[t, k, w] 
-                            >= md.req_w() - md.instant_opt(w))
+                            >= req_w(md) - instant_opt(md, w))
                 md.md += (md.AliveW[t_, k_, w] + md.PrfW[t_, k_, w] <= 
-                            md.req_w()
+                            req_w(md)
                             + (md.OptCProg[t, k, w] - md.sumOptC[w])
                             *md.parameter_gradient_size[w]/md.parameter_size[w]
                             # size that not yet finished updating cannot be prefetched
@@ -296,18 +296,18 @@ def add_offload_constraints(md):
                 md.md += md.AliveO[t_, k_, w] - md.AliveO[t, k, w] <= md.PrfO[t,k,w]
                 md.md += md.OflOProg[t, k, w] >= md.PrfOProg[t, k, w]
                 md.md += (md.AliveO[t, k, w] + md.OflOProg[t, k, w]
-                            >= md.req_w() - md.sumOptC[w])
+                            >= req_w(md) - md.sumOptC[w])
                 md.md += (md.OflOProg[t, k, w]
-                            <= md.req_w() - md.sumOptC[w])
+                            <= req_w(md) - md.sumOptC[w])
         
     for w in md.param2hcn:
         fwd_i = min(md.param2hcn[w])
         bwd_i = max(md.param2hcn[w])
         md.md += md.PrfWProg[fwd_i,fwd_i,w] >= md.sumOptC[w]
-        md.md += md.req_w() - md.sumOptC[w] <= md.AliveO[bwd_i, bwd_i, w]
+        md.md += req_w(md) - md.sumOptC[w] <= md.AliveO[bwd_i, bwd_i, w]
         if md.gradient_accumulation:
-            md.md += md.OflGProg[bwd_i, bwd_i, w] == md.accumC_grad(w)
-            md.md += md.PrfGProg[bwd_i, bwd_i, w] == md.accumC_grad(w) - md.sumOptC[w]
+            md.md += md.OflGProg[bwd_i, bwd_i, w] == accumC_grad(md, w)
+            md.md += md.PrfGProg[bwd_i, bwd_i, w] == accumC_grad(md, w) - md.sumOptC[w]
         t_, k_ = md.next_idx(bwd_i, bwd_i)
         # md.md += md.AliveO[t_, k_, w] - md.AliveO[bwd_i, bwd_i, w] <= 1 - md.gradient_accumulation
         # md.md += md.AliveG[t_, k_, w] - md.AliveG[bwd_i, bwd_i, w] <= 1# - md.gradient_accumulation
@@ -315,7 +315,7 @@ def add_offload_constraints(md):
             for k in md.param2hcn[w]:
                 if k not in md.krange(t):
                     continue
-                md.md += md.sumComp[t, k] -1 <= md.AliveW[t, k, w] - md.req_w()
+                md.md += md.sumComp[t, k] -1 <= md.AliveW[t, k, w] - req_w(md)
 
     for t in range(md.T):
         for k in md.krange(t):
@@ -342,8 +342,6 @@ def add_offload_objective(md, bandwidth_cost=0.01):
             for k in md.krange(t)
             for w in range(md.W)
         )
-        if md.with_parameters
-        else 0
     )
     ofl_cost = (
         bandwidth_cost
@@ -354,8 +352,6 @@ def add_offload_objective(md, bandwidth_cost=0.01):
             for k in md.krange(t)
             for w in range(md.W)
         )
-        if md.with_parameters
-        else 0
     )
     md.md += (
             lpSum(md.Time[t, k] for t in range(md.T) for k in md.krange(t))
