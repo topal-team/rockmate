@@ -43,7 +43,7 @@ def add_offload_variables(md):
     ofl_idx = [(t, k, w) 
                for t in range(md.T) 
                for k in md.krange(t)
-               for w in range(W)]
+               for w in range(md.W)]
     md.AliveW = RkLpVariable.dicts("AliveW", ofl_idx)  # parameter w is alive at the start of step j.
     md.AliveG = RkLpVariable.dicts("AliveG", ofl_idx)  # w.grad is alive at the start of step j.
     md.AliveO = RkLpVariable.dicts("AliveO", ofl_idx)  # w.grad is alive at the start of step j.
@@ -54,7 +54,10 @@ def add_offload_variables(md):
     md.OptC = RkLpVariable.dicts("OptC", ofl_idx)# Optimize on cpu
     md.OflO = RkLpVariable.dicts("OflO", ofl_idx)# Offload optimizer states
     md.PrfO = RkLpVariable.dicts("PrfO", ofl_idx)# Prefetch optimizer states
-    
+    md.sumOptC = dict()
+    for w in md.param2hcn:
+        md.sumOptC[w] = lpSum(md.OptC[t,k,w] for t in range(md.T) for k in md.krange(t))    
+
     md.param_grad_mem = {(t,k):0 for t in range(md.T) for k in md.krange(t)}
 
     md.bandwidthOfl = optimize_metrics["bandwidth"]/md.gcd  # byte/ms
@@ -139,9 +142,7 @@ def prefill_offload(md):
                 if k not in md.krange(t) or (t>fwd_i and t<bwd_i):
                     md.OptC[t, k, w] = 0
 
-    md.sumOptC = dict()
-    for w in md.param2hcn:
-        md.sumOptC[w] = lpSum(md.OptC[t,k,w] for t in range(md.T) for k in md.krange(t))
+    
 
     if not md.gradient_accumulation:
         for k in md.PrfG:
@@ -315,6 +316,21 @@ def add_offload_constraints(md):
                 if k not in md.krange(t):
                     continue
                 md.md += md.sumComp[t, k] -1 <= md.AliveW[t, k, w] - md.req_w()
+
+    for t in range(md.T):
+        for k in md.krange(t):
+            ofl_time = lpSum(
+                md.parameter_size[w] / md.bandwidthOfl * md.OflW[t, k, w]
+                for w in md.hcn2param[k]
+            )
+            md.md += (
+                md.Time[t, k]
+                >= lpSum(
+                    md.Comp[t, k, o] * md.time[k][o] for o in range(md.nComp[k])
+                )
+                + ofl_time
+            )
+
 
 def add_offload_objective(md, bandwidth_cost=0.01):
     prf_cost = (

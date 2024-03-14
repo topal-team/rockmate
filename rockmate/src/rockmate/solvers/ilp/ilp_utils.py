@@ -32,8 +32,8 @@ class RkLpVariable(LpVariable):
         cls,
         name,
         indices=None,
-        lowBound=None,
-        upBound=None,
+        lowBound=0,
+        upBound=1,
         cat="Continuous",
         indexStart=[],
     ):
