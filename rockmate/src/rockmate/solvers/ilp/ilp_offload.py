@@ -145,8 +145,6 @@ def prefill_offload(md):
                 if k not in md.krange(t) or (t>fwd_i and t<bwd_i):
                     md.OptC[t, k, w] = 0
 
-    
-
     if not md.gradient_accumulation:
         for k in md.PrfG:
             md.PrfG[k] = 0
@@ -183,7 +181,14 @@ def prefill_offload(md):
             # if k == max(md.param2hcn[w]):
             #     md.overhead[k] = [v+grad_size for v in md.overhead[k]]
             # TODO: add offload gradient variables for gradient accumulation
-
+    
+    for t in range(md.T):
+        for k in md.krange(t):
+            md.param_grad_mem[t,k] += lpSum(
+                            md.AliveG[t, k, w]
+                            * md.parameter_gradient_size[w]
+                            for w in range(md.W)
+                        )
 
 def add_offload_param_constraints(md):
     # if with_grad, AliveG is a variable
@@ -230,11 +235,6 @@ def add_offload_param_constraints(md):
                                        + time_step_offload_self(md, t, k)
                                        + time_step_optimize_self(md, t, k, cpu=True))
 
-            md.param_grad_mem[t,k] += lpSum(
-                            md.AliveG[t, k, w]
-                            * md.parameter_gradient_size[w]
-                            for w in range(md.W)
-                        )
             for w in range(md.W):
                 md.PrfWProg[t,k,w] = get_progress(md.PrfW, t, k, w)
                 md.PrfGProg[t,k,w] = get_progress(md.PrfG, t, k, w)
@@ -244,15 +244,16 @@ def add_offload_param_constraints(md):
                 md.PrfOProg[t,k,w] = get_progress(md.PrfO, t, k, w)
                 md.OptCProg[t,k,w] = get_progress(md.OptC, t, k, w)
                 
-                md.md += (md.AliveW[t, k, w] <= md.req_w)
+                md.md += md.AliveW[t, k, w] <= md.req_w
                 md.md += md.OflWProg[t, k, w] <= md.req_w
                 md.md += md.OflGProg[t, k, w] <= accumC_grad(md, w)
                 md.md += md.OptCProg[t, k, w] <= max_OflGProg(md,t,k,w)
                 md.md += md.OptCProg[t, k, w] <= md.PrfWProg[t, k, w]*w_by_wg(md, w)
                 md.md += (md.AliveW[t, k, w] + md.OflWProg[t, k, w]
-                            >= instant_opt(md, w))
+                            >= fraction_constant_param(md, w)
+                            + fraction_instant_updated_param(md, w))
                 md.md += (md.AliveG[t, k, w] + md.OflGProg[t, k, w] 
-                            >= md.req_w - instant_opt(md, w))
+                            >= fraction_remaining_gradients(md, w))
                 md.md += (md.AliveW[t_, k_, w] + md.PrfW[t_, k_, w] <= 
                             md.req_w
                             + (md.OptCProg[t, k, w] - md.sumOptC[w])
