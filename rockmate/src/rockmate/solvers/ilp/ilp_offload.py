@@ -78,14 +78,6 @@ def accumC_optimizer_states(md, w):
     #if grad_accumulation, optimizer states stored on CPU from previous iterations
     return accumC_grad(md, w)
 
-def instant_opt(md, w):
-    # return the fraction of parameter instantly optimized after bwd
-    if md.gradient_accumulation:
-        return 0
-    if md.grad_mode =="free":
-        return md.req_w
-    return md.req_w-md.sumOptC[w]
-
 def max_OflGProg(md, t, k, w):
     return md.OflGProg[t, k, w]+(md.OflWProg[t, k, w]*(md.grad_mode=="free")
                                     *w_by_wg(md, w))
@@ -249,17 +241,18 @@ def add_offload_param_constraints(md):
                 md.md += md.OflGProg[t, k, w] <= accumC_grad(md, w)
                 md.md += md.OptCProg[t, k, w] <= max_OflGProg(md,t,k,w)
                 md.md += md.OptCProg[t, k, w] <= md.PrfWProg[t, k, w]*w_by_wg(md, w)
+            
                 md.md += (md.AliveW[t, k, w] + md.OflWProg[t, k, w]
                             >= fraction_constant_param(md, w)
                             + fraction_instant_updated_param(md, w))
                 md.md += (md.AliveG[t, k, w] + md.OflGProg[t, k, w] 
                             >= fraction_remaining_gradients(md, w))
-                md.md += (md.AliveW[t_, k_, w] + md.PrfW[t_, k_, w] <= 
-                            md.req_w
-                            + (md.OptCProg[t, k, w] - md.sumOptC[w])
-                            *md.parameter_gradient_size[w]/md.parameter_size[w]
-                            # size that not yet finished updating cannot be prefetched
-                                )
+            
+                to_be_prefetched = md.parameter_size[w] * (md.req_w -
+                          md.AliveW[t_, k_, w] - md.PrfW[t_, k_, w])
+                to_be_optimized = md.parameter_gradient_size[w] * (md.sumOptC[w] - md.OptCProg[t, k, w])
+                md.md += to_be_prefetched >= to_be_optimized
+                
                 diffW = md.AliveW[t_, k_, w] - md.AliveW[t, k, w]
                 md.md += diffW <= md.PrfW[t, k, w]
 
@@ -268,13 +261,15 @@ def add_offload_param_constraints(md):
                                         and k>md.loss_idx)#backward operations
                                         +md.PrfG[t, k, w])
 
-                md.md += md.AliveO[t_, k_, w] - md.AliveO[t, k, w] <= md.PrfO[t,k,w]
+                diffO = md.AliveO[t_, k_, w] - md.AliveO[t, k, w]
+                md.md += diffO <= md.PrfO[t,k,w]
+
                 md.md += md.OflOProg[t, k, w] >= md.PrfOProg[t, k, w]
                 md.md += (md.AliveO[t, k, w] + md.OflOProg[t, k, w]
-                            >= md.req_w - md.sumOptC[w])
-                md.md += (md.OflOProg[t, k, w]
-                            <= md.req_w - md.sumOptC[w])
+                            >= fraction_gpu_optimized(md, w))
+                md.md += (md.OflOProg[t, k, w] <= fraction_gpu_optimized(md, w))
         
+    # parameters and their user operations
     for w in md.param2hcn:
         fwd_i = min(md.param2hcn[w])
         bwd_i = max(md.param2hcn[w])
@@ -328,6 +323,9 @@ The following functions are meant to be used for building constraints with
 meaningful names. They are not supposed to be called outside this file.
 By default, index t is for stage, k for step and w for the parameter group.
 """
+
+def fraction_gpu_optimized(md, w):
+    return md.req_w-md.sumOptC[w]
 
 def fraction_constant_param(md, w):
     return 1 - md.parameter_gradient_size[w]/md.parameter_size[w]
