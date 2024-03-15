@@ -18,7 +18,6 @@ from ...op_schedule import (
 )
 from ..main import get_sched, add_sched, translate
 from rkgb.core.hierarchical import HierarchicalGraph
-from .ilp_offload import req_w
 
 class knapsack:
     def __init__(self, parameter_sizes: list, pre_solve_size=10):
@@ -195,10 +194,10 @@ def schedule_offload(md, hgraph=None):
                         md.OflO, md.OflOProg, md.PrfO, 
                         md.PrfOProg
                         ]
-    if isinstance(md.param_multiplier, float):
-        multiplier = md.param_multiplier
+    if isinstance(md.req_w, float):
+        multiplier = 1- md.req_w
     else:
-        multiplier = md.param_multiplier.value()
+        multiplier = 1- md.req_w.value()
     for p in md.params_vars:
         for k,v in p.items():
             p[k] = v*1/ (1-multiplier)
@@ -498,10 +497,10 @@ def group(md, w, tol=1):
     # assert sum(candidates.values())/parameter_size >= md.sumOptC[w].value()-0.01
     
         # cpu_optimize_size = md.sumOptC[w].value()*parameter_size# size by subgraph
-    if isinstance(md.param_multiplier, float):
-        multiplier = md.param_multiplier
+    if isinstance(md.req_w, float):
+        multiplier = 1-md.req_w
     else:
-        multiplier = md.param_multiplier.value()
+        multiplier = 1-md.req_w.value()
     # cpu_optimize_size = (sum(md.sumOptC[w_].value() * 
     #                         md.parameter_gradient_size[w_] *md.gcd
     #                         for w_ in range(w, md.W)) / (1-multiplier)
@@ -630,7 +629,7 @@ def group_optimizer_states(md, w, gpu_optimize_param):
                     prf_size=0
                 else:
                     raise ValueError
-            if md.sol(md.AliveO[(t_, k_, w)]+md.sumOptC[w]-req_w(md)+1) or k_==bwd_i:
+            if md.sol(md.AliveO[(t_, k_, w)]+md.sumOptC[w]-md.req_w+1) or k_==bwd_i:
                 
                 select_paras = list(candidates.keys())
                 # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size>0.99

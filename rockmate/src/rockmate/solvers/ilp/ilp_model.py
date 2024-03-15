@@ -55,6 +55,11 @@ class ModelPULP:
         self.ilp_solver_params = ilp_solver_params
         self.feasible = None
         self.solve_time = None
+        self.optimize_metrics = optimize_metrics
+        self.protected_names = protected_names
+        self.hgraph = hgraph
+        self.md = LpProblem(f"rockmateMILP", LpMinimize)
+
         self.with_offload = accurate_mem
         self.with_grad = accurate_mem
         self.with_optimizer_states = accurate_mem#optimizer states will be offloaded
@@ -63,11 +68,8 @@ class ModelPULP:
         self.single_bwd = accurate_mem
         self.grouping = grouping
         self.grad_mode = grad_mode
-        self.optimize_metrics = optimize_metrics
         self.activation_offload = activation_offload
-        self.protected_names = protected_names
-        self.hgraph = hgraph
-        self.md = LpProblem(f"rockmateMILP", LpMinimize)
+        
 
         #############################
         self.config()
