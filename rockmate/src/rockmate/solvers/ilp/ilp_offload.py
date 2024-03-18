@@ -8,10 +8,32 @@ def add_offload_variables(md):
 def add_offload_constraints(md):
     add_offload_param_constraints(md)
     add_offload_activation_constraints(md)
+    for t in range(md.T):
+        for k in md.krange(t):
+            md.md += md.Time[t, k] >= time_step_prefetch(md, t, k)
+            md.md += md.Time[t, k] >= (time_step_offload(md, t, k)
+                                       + time_step_optimize_self(md, t, k))
+            md.md += md.Time[t, k] >= time_step_optimize(md, t, k)
+            md.md += md.Time[t, k] >= (time_step_compute(md, t, k) 
+                                       + time_step_optimize_self(md, t, k, cpu=False)
+                                       + time_step_offload_self(md, t, k)
+                                       + time_step_optimize_self(md, t, k, cpu=True))
+
 
 def add_offload_activation_variables(md):
-
-    pass
+    """
+    We assume single forward/backward mode for ILP, thus only
+    one possible source/user for phantom activations.
+    """
+    phantom_idx = [(t, k, j) 
+               for t in range(md.T) 
+               for k in md.krange(t)
+               for j in range(md.J)]
+    # at step (t,k), removal of phantom of the j-th node.
+    # md.RemovalP = RkLpVariable.dicts("RemovalP", phantom_idx)
+    md.OflP = RkLpVariable.dicts("OflP", phantom_idx, lowBound=0, upBound=None)
+    md.PrfP = RkLpVariable.dicts("PrfP", phantom_idx, lowBound=0, upBound=None)
+    # pass
 
 def add_offload_param_variables(md):
     optimize_metrics = md.optimize_metrics
@@ -90,7 +112,16 @@ def all_param_mem(md, t, k, with_multiplier=True):
     return (parameter_mem(md, t,k)
             + md.param_grad_mem[t,k]
             + optimizer_states_mem(md, t,k)
-            + (1-md.req_w)*md.peak_budget*with_multiplier)
+            + (1-md.req_w)*md.peak_budget*with_multiplier
+            - removal_phantom_mem(md, t, k))
+
+def removal_phantom_mem(md, t, k):
+    if not md.activation_offload:
+        return 0
+    mem = 0
+    for j in range(md.J):
+        mem += (md.OflPProg[t,k,j] -md.PrfPProg[t,k,j])
+    return mem
 
 def parameter_mem(md, t, k):
     parameter_mem = lpSum(
@@ -196,12 +227,17 @@ def add_offload_param_constraints(md):
     def get_progress(op, t, k, w):
         bwd_i = max(md.param2hcn[w])
         if bwd_i < t:  # after bwd of w
-            progress = lpSum(
+            progress = (lpSum(
                 op[t, kk, w] for kk in md.krange(t) if kk < k
             ) + lpSum(
                 op[tt, kk, w]
-                for tt in range(bwd_i, t)  # offload right after bwd_i
+                for tt in range(bwd_i+1, t) 
                 for kk in md.krange(tt)
+            )
+            + lpSum(
+                op[bwd_i, kk, w]
+                for kk in md.krange(bwd_i) if kk>= bwd_i
+             ) # offload right after bwd_i
             )
         else:
             progress = (
@@ -209,8 +245,12 @@ def add_offload_param_constraints(md):
                 + lpSum(op[tt, kk, w] for tt in range(t) for kk in md.krange(tt))
                 + lpSum(
                     op[tt, kk, w]
-                    for tt in range(bwd_i, md.T)
+                    for tt in range(bwd_i+1, md.T)
                     for kk in md.krange(tt)
+                )
+                + lpSum(
+                    op[bwd_i, kk, w]
+                    for kk in md.krange(bwd_i) if kk>= bwd_i
                 )
             )
         return progress
@@ -218,14 +258,14 @@ def add_offload_param_constraints(md):
     for t in range(md.T):
         for k in md.krange(t):
             t_, k_ = md.next_idx(t, k)
-            md.md += md.Time[t, k] >= time_step_prefetch(md, t, k)
-            md.md += md.Time[t, k] >= (time_step_offload(md, t, k)
-                                       + time_step_optimize_self(md, t, k))
-            md.md += md.Time[t, k] >= time_step_optimize(md, t, k)
-            md.md += md.Time[t, k] >= (time_step_compute(md, t, k) 
-                                       + time_step_optimize_self(md, t, k, cpu=False)
-                                       + time_step_offload_self(md, t, k)
-                                       + time_step_optimize_self(md, t, k, cpu=True))
+            # md.md += md.Time[t, k] >= time_step_prefetch(md, t, k)
+            # md.md += md.Time[t, k] >= (time_step_offload(md, t, k)
+            #                            + time_step_optimize_self(md, t, k))
+            # md.md += md.Time[t, k] >= time_step_optimize(md, t, k)
+            # md.md += md.Time[t, k] >= (time_step_compute(md, t, k) 
+            #                            + time_step_optimize_self(md, t, k, cpu=False)
+            #                            + time_step_offload_self(md, t, k)
+            #                            + time_step_optimize_self(md, t, k, cpu=True))
 
             for w in range(md.W):
                 md.PrfWProg[t,k,w] = get_progress(md.PrfW, t, k, w)
@@ -288,7 +328,44 @@ def add_offload_param_constraints(md):
                 md.md += md.sumComp[t, k] -1 <= md.AliveW[t, k, w] - md.req_w
 
 def add_offload_activation_constraints(md):
-    pass
+    md.PrfPProg = dict()
+    md.OflPProg = dict()
+    
+    def get_progress_phantom(op, t, k, j):
+        fwd_i = min(md.sub_c2hcn[j])
+        bwd_i = max(md.sub_c2hcn[j])
+
+        if bwd_i < t or fwd_i>t:  # after bwd of w
+            return 0
+
+        progress = (lpSum(
+            op[t, kk, j] for kk in md.krange(t) if kk < k
+        ) + lpSum(
+            op[tt, kk, j]
+            for tt in range(fwd_i+1, t)
+            for kk in md.krange(tt)
+        )
+         + lpSum(
+            op[fwd_i, kk, j]
+            for kk in md.krange(fwd_i) if kk>= fwd_i
+        ))
+
+        return progress
+    
+    for j in range(md.J):
+        fwd_i = min(md.sub_c2hcn[j])
+        bwd_i = max(md.sub_c2hcn[j])
+        saved_mem = lpSum(md.saved_mem[j][o]*md.Comp[fwd_i, fwd_i, o] 
+                          for o in range(md.nSched[j]))
+        for t in range(fwd_i, bwd_i+1):
+            for k in md.krange(t):
+                md.PrfPProg[t,k,j] = get_progress_phantom(md.PrfP, t, k, j)
+                md.OflPProg[t,k,j] = get_progress_phantom(md.OflP, t, k, j)
+
+                # removal cannot be higher than phantom created during fwd
+                md.md += (md.OflPProg[t,k,j] <= saved_mem)
+            
+        md.md += (md.PrfPProg[bwd_i, bwd_i, j] == md.OflPProg[bwd_i, bwd_i, j])
 
 
 def add_offload_objective(md, bandwidth_cost=0.01):
@@ -354,7 +431,9 @@ def time_step_offload(md, t, k):
         mem += md.parameter_size[w] * md.OflW[t, k, w]
         optim_state = md.optimizer_states_factor * md.OflO[t,k,w]
         mem += md.parameter_gradient_size[w] * (md.OflG[t, k, w] + optim_state)
-        
+    if md.activation_offload:
+        for j in range(md.J):
+            mem += md.OflP[t, k, j]    
     return mem/md.bandwidthOfl
 
 def time_step_offload_self(md, t, k):
@@ -372,6 +451,9 @@ def time_step_prefetch(md, t, k):
         mem += md.parameter_size[w] * md.PrfW[t, k, w]
         optim_state = md.optimizer_states_factor * md.PrfO[t,k,w]
         mem += md.parameter_gradient_size[w] * (md.PrfG[t, k, w] + optim_state)
+    if md.activation_offload:
+        for j in range(md.J):
+            mem += md.PrfP[t, k, j]
         
     return mem/md.bandwidthPrf
 
