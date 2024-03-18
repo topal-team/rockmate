@@ -251,7 +251,7 @@ class ORockmate(torch.nn.Module):
             self.minor_parameters = [self.original_mod.get_parameter(pnode.param_name) 
                                 for pnode in self.minor_param_nodes]
             def optimize():
-                self.compiler.storage.ld["optimizer_minors"].step()
+                self.compiler.storage.ld["Optimize_minors"].step()
                 for p in self.minor_parameters:p.grad=None
                 for pnode in self.minor_param_nodes:
                     code = make_str_list_assign(pnode.view_code, suffix=".data")
