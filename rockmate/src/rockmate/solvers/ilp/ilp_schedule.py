@@ -646,7 +646,7 @@ def group_optimizer_states(md, w, gpu_optimize_param):
             for p in select_paras:
                 prf_ops.append((t, k, AllocateOp(Parameter(parameters[p],
                                                             is_optim_states=True))))
-                op = PrefetchOp(alloc=Parameter(parameters[p]), indices=(0, None),
+                op = PrefetchOp(alloc=Parameter(parameters[p],is_optim_states=True), indices=(0, None),
                                 time=parameters[p].mem/md.bandwidthPrf/md.gcd*md.optimizer_states_factor)
                 prf_ops.append((t, k, op))
                 Alive[p] = 1

@@ -93,7 +93,7 @@ class RK_Storage:
 
     def init(self, gd):
         self.ld = dict()
-        self.shapes = dict()
+        self.shapes = {"Empty_size": torch.Size([0])}
         self.dtypes = dict()
         self.rng_state = RngState()
         self.gd = gd
@@ -144,7 +144,7 @@ class Fct_del(RK_Fct):
         self.storage.ld[self.target_name] = torch.empty(0)
 
     def del_optim_states(self):
-        for k, v in self.storage.ld[f"Optimize_{self.target_name}"].state.items():
+        for k, v in self.storage.ld[f"Optimize_({self.target_name})"].state.items():
             v["exp_avg"].data = torch.empty(0)
             v["exp_avg_sq"].data = torch.empty(0)
 
@@ -239,10 +239,11 @@ class Fct_run_fwd(RK_Fct):
         self.fwd_mode = fwd_mode
 
     def fwd_with_grad(self):
-        with torch.autograd.graph.saved_tensors_hooks(
-            self.fct_get_pack(self.no_save_list), self.fct_get_unpack()
-        ):
-            exec(self.code, self.storage.gd, self.storage.ld)
+        with torch.enable_grad():
+            with torch.autograd.graph.saved_tensors_hooks(
+                self.fct_get_pack(self.no_save_list), self.fct_get_unpack()
+            ):
+                exec(self.code, self.storage.gd, self.storage.ld)
 
     def fwd_no_grad(self):
         with torch.no_grad():
@@ -347,11 +348,12 @@ class Fct_mem_alloc(RK_Fct):
         else:
             self.device = device
         self.kwargs = kwargs
-        self.shape = shape
+        self.shape_name = target_name if shape is None else shape
+
         self.dtype = dtype
 
     def alloc_optim_states(self):
-        for k, v in self.storage.ld[f"Optimize_{self.target_name}"].state.items():
+        for k, v in self.storage.ld[f"Optimize_({self.target_name})"].state.items():
             v["exp_avg"].data = torch.empty_like(
                 self.storage.ld[f"exp_avg_{self.target_name}"], device=self.device
             )
@@ -360,33 +362,27 @@ class Fct_mem_alloc(RK_Fct):
             )
 
     def alloc_grad(self):
-        shape = (
-            self.storage.shapes[self.target_name] if self.shape is None else self.shape
-        )
+        shape = self.storage.shapes[self.shape_name]
         dtype = (
-            self.storage.dtypes[self.target_name] if self.dtype is None else self.dtype
+            self.storage.dtypes[self.shape_name] if self.dtype is None else self.dtype
         )
         self.storage.ld[self.target_name].grad = torch.empty(
             shape, dtype=dtype, device=self.device, **self.kwargs
         )
 
     def alloc_data(self):
-        shape = (
-            self.storage.shapes[self.target_name] if self.shape is None else self.shape
-        )
+        shape = self.storage.shapes[self.shape_name]
         dtype = (
-            self.storage.dtypes[self.target_name] if self.dtype is None else self.dtype
+            self.storage.dtypes[self.shape_name] if self.dtype is None else self.dtype
         )
         self.storage.ld[self.target_name].data = torch.empty(
             shape, dtype=dtype, device=self.device, **self.kwargs
         )
 
     def alloc_tensor(self):
-        shape = (
-            self.storage.shapes[self.target_name] if self.shape is None else self.shape
-        )
+        shape = self.storage.shapes[self.shape_name]
         dtype = (
-            self.storage.dtypes[self.target_name] if self.dtype is None else self.dtype
+            self.storage.dtypes[self.shape_name] if self.dtype is None else self.dtype
         )
         self.storage.ld[self.target_name] = torch.empty(
             shape, dtype=dtype, device=self.device, **self.kwargs
@@ -429,7 +425,7 @@ class Fct_offload(RK_Fct):
         )
 
     def offload_optim_states(self):
-        for k, v in self.storage.ld[f"Optimize_{self.target_name}"].state.items():
+        for k, v in self.storage.ld[f"Optimize_({self.target_name})"].state.items():
             self.storage.ld[f"exp_avg_{self.target_name}"].copy_(
                 v["exp_avg"], non_blocking=True
             )
@@ -480,7 +476,7 @@ class Fct_prefetch(RK_Fct):
     #                 non_blocking=True,
     #             )
     def prefetch_optim_states(self):
-        for k, v in self.storage.ld[f"Optimize_{self.target_name}"].state.items():
+        for k, v in self.storage.ld[f"Optimize_({self.target_name})"].state.items():
             self.storage.ld[f"exp_avg_{self.target_name}"].copy_(
                 v["exp_avg"], non_blocking=True
             )
@@ -489,7 +485,9 @@ class Fct_prefetch(RK_Fct):
             )
 
     def post_process_param(self):
-        exec(self.post_process_code, self.storage.gd, self.storage.ld)
+        pass
+        # with torch.enable_grad():
+        #     exec(self.post_process_code, self.storage.gd, self.storage.ld)
 
     def post_process_optim_states(self):
         pass
@@ -497,7 +495,8 @@ class Fct_prefetch(RK_Fct):
     def __call__(self):
         with torch.cuda.stream(self.storage.gd[self.stream]):
             self.prefetch_fct[self.prefetch_mode]()
-        with torch.cuda.stream(self.storage.gd["main_stream"]):
+            torch.cuda.synchronize()
+        # with torch.cuda.stream(self.storage.gd["main_stream"]):
             self.post_process[self.prefetch_mode]()
 
 
@@ -627,7 +626,7 @@ class Compiler:
                 Fct_mem_alloc(
                     anode.main_target,
                     storage=self.storage,
-                    shape=0,
+                    shape="Empty_size",
                     dtype=torch.float32,
                     alloc_mode="tensor",
                     requires_grad=anode.info.requires_grad,
@@ -639,7 +638,7 @@ class Compiler:
                 Fct_mem_alloc(
                     f"out_{out_node.main_target}",
                     storage=self.storage,
-                    shape=0,
+                    shape="Empty_size",
                     dtype=torch.float32,
                     alloc_mode="tensor",
                     requires_grad=out_node.info.requires_grad,
@@ -723,7 +722,8 @@ class Compiler:
                     Fct_mem_alloc(
                         f"exp_avg_{var_name}",
                         storage=self.storage,
-                        alloc_mode="data",
+                        alloc_mode="tensor",
+                        shape = var_name,
                         device=torch.device("cpu"),
                     )
                 )
@@ -731,15 +731,17 @@ class Compiler:
                     Fct_mem_alloc(
                         f"exp_avg_sq_{var_name}",
                         storage=self.storage,
-                        alloc_mode="data",
+                        alloc_mode="tensor",
+                        shape = var_name,
                         device=torch.device("cpu"),
                     )
                 )
+
         if minor_param_nodes:
             minor_parameters = [pnode.param_name for pnode in minor_param_nodes]
             prep_op.add_fct(
                 Fct_add_optimizer(
-                    "optimizer_minors",
+                    "Optimize_minors",
                     storage=self.storage,
                     list_params=minor_parameters,
                     optim=self.storage.gd["gpu_optim"],
@@ -794,6 +796,14 @@ class Compiler:
             )
         )
         main_code = main_code.replace(cnode.main_target, f"_{cnode.main_target}")
+        for pnode in cnode.required_parameter_nodes_real:
+            op.add_fct(
+                Fct_run_fwd(
+                    cnode.main_target,
+                    storage=self.storage,
+                    code=pnode.get_code(),
+                )
+            )
 
         if not op.pos_info["last_before_bwd"]:
             for target in cnode.tensor_targets:
@@ -843,6 +853,15 @@ class Compiler:
                 op.name, storage=self.storage, get_state=op.pos_info["first_occurrence"]
             )
         )
+
+        for pnode in cnode.required_parameter_nodes_real:
+            op.add_fct(
+                Fct_run_fwd(
+                    cnode.main_target,
+                    storage=self.storage,
+                    code=pnode.get_code(),
+                )
+            )
 
         for target_name in op.pos_info["temporary_tensor_names"]:
             op.add_fct(
