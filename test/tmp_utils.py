@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from rockmate.solvers.op_schedule import (SynchronizeOp, 
+from rockmate.op_schedule import (SynchronizeOp, 
                                           OffloadOp, 
                                           PrefetchOp,
                                           ComputeOp,
