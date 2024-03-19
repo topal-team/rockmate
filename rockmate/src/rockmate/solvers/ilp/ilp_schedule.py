@@ -17,7 +17,8 @@ from ...op_schedule import (
     OpSchedule,
 )
 from ..main import get_sched, add_sched, translate
-from rkgb.core.hierarchical import HierarchicalGraph
+from .ilp_model import ModelPULP
+from .ilp_offload import ModelPULPOffload
 
 class knapsack:
     def __init__(self, parameter_sizes: list, pre_solve_size=10):

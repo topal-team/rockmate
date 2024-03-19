@@ -15,10 +15,6 @@ from pulp import (
 from .ilp_schedule import schedule
 from rkgb.core.hierarchical import HierarchicalGraph
 from .ilp_utils import RkLpVariable
-from .ilp_offload import (add_offload_variables, 
-                          add_offload_constraints, 
-                          add_offload_objective,
-                          all_param_mem)
 
 class ModelPULP:
     """
@@ -69,10 +65,10 @@ class ModelPULP:
         self.grouping = grouping
         self.grad_mode = grad_mode
         self.activation_offload = activation_offload
-        
-
-        #############################
         self.config()
+        
+    def build(self):
+        # OVERWRITTING METHOD
         self.add_variables()
         self.add_constraints()
         self.add_objective()
@@ -228,19 +224,13 @@ class ModelPULP:
 
 
     def add_objective(self, bandwidth_cost=0.01):
-
-        if self.with_offload:
-            add_offload_objective(self)
-        else:
-            self.md += (
-                lpSum(self.Time[t, k] for t in range(self.T) for k in self.krange(t))
-            )
+        self.md += (
+            lpSum(self.Time[t, k] for t in range(self.T) for k in self.krange(t))
+        )
 
     def add_constraints(self):
         self.add_valid_constraints()
         self.add_memory_constrains()
-        if self.with_offload:
-            add_offload_constraints(self)
             
         ##### Time constraints
         for t in range(self.T):
@@ -355,8 +345,8 @@ class ModelPULP:
             cat="Continuous"
         )
         self.prefill_compute()
-        if self.with_offload:
-            add_offload_variables(self)
+        # if self.with_offload:
+        #     add_offload_variables(self)
 
     def add_valid_constraints(self):
         # In the last stage, every source edge of input_grad should be alive or executed
@@ -713,9 +703,7 @@ class ModelPULP:
             self.md += self.U[(self.loss_idx, k)] <= self.save_budget
 
     def all_param_mem(self, t, k, with_multiplier=True):
-        if not self.with_offload:
-            return 0
-        return all_param_mem(self, t, k, with_multiplier=with_multiplier)
+        return 0
 
     def prefill_compute(self):
         self.active_stages = dict()
@@ -806,6 +794,3 @@ class ModelPULP:
         if hasattr(value, "value"):
             return value.value() > 0.9999
         return value > 0.9999
-
-    def schedule(self):
-        return schedule(self)

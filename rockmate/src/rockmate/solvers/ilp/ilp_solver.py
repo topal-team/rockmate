@@ -14,6 +14,8 @@ import pulp
 from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
 from rkgb.lowlevel.constants import init_target_string
 from .ilp_model import ModelPULP
+from .ilp_offload import ModelPULPOffload
+from .ilp_schedule import schedule
 from .ilp_utils import (
     set_hcn_list_sched, 
     set_hg_parameter_groups,
@@ -67,11 +69,9 @@ class HILP(Solver):
     def __init__(self, config=None, ilp_solver=None):
         super().__init__(config)
         self.ilp_solver = ilp_solver# or solver_name[0]
-        # if self.ilp_solver == "gurobi":
-        #     self.model_ilp = ModelGurobi
-        #     print("Using GUROBI to solve ILP")
-        # else:
-        self.model_ilp = ModelPULP
+        
+        
+        
         try:
             solver = pulp.get_solver(self.ilp_solver, msg=0)
         except:
@@ -219,6 +219,11 @@ class HILP(Solver):
         print(f"solving {cluster.name}")
         list_op_sched = []
 
+        if self.config.solve_top_level:
+            self.model_ilp = ModelPULPOffload
+        else:
+            self.model_ilp = ModelPULP
+
         # for hg in cluster.representee_cluster.possible_hg:
         for hg in cluster.representee_cluster.partitionings:
             if budgets is None:
@@ -292,6 +297,7 @@ class HILP(Solver):
                 protected_names=protected_names,
                 optimize_metrics = self.config.optimize_metrics
             )
+            md.build()
             # print(f"model building: {time.time()-start}")
             sols = set()
             for sv_budget in np.sort(save_budget)[::-1]:
@@ -325,7 +331,7 @@ class HILP(Solver):
                         # start = time.time()
 
                         sols.add(time_mem)
-                        op_sched = md.schedule()
+                        op_sched = schedule(md)
                         # if md.md.status==2:
                         #     status = "opt"
                         # elif md.md.status==9:

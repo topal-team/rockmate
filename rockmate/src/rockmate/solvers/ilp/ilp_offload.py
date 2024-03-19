@@ -9,11 +9,14 @@ class ModelPULPOffload(ModelPULP):
     def __init__(self, hgraph: HierarchicalGraph, peak_budget: int, save_budget=None, ilp_solver_params: Dict[str, Any] = ..., gcd=None, accurate_mem=False, protected_names=..., grouping=True, grad_mode="free", optimize_metrics=None, activation_offload=False, batch_multiplier=1):
         super().__init__(hgraph, peak_budget, save_budget, ilp_solver_params, gcd, accurate_mem, protected_names, grouping, grad_mode, optimize_metrics, activation_offload, batch_multiplier)
 
-    def add_offload_variables(self,):
+    def build(self):
+        # OVERWRITTING METHOD
+        super().add_variables()
         self.add_offload_param_variables()
-
-    def add_offload_constraints(self,):
+        super().add_constraints()
         self.add_offload_param_constraints()
+        super().add_objective()
+
         for t in range(self.T):
             for k in self.krange(t):
                 self.md += self.Time[t, k] >= self.time_step_prefetch(t, k)
@@ -24,6 +27,7 @@ class ModelPULPOffload(ModelPULP):
                                         + self.time_step_optimize_self(t, k, cpu=False)
                                         + self.time_step_offload_self(t, k)
                                         + self.time_step_optimize_self(t, k, cpu=True))
+
 
     def add_offload_param_variables(self,):
         optimize_metrics = self.optimize_metrics
