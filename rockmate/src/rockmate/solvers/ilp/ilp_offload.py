@@ -16,7 +16,9 @@ class ModelPULPOffload(ModelPULP):
         super().add_constraints()
         self.add_offload_param_constraints()
         super().add_objective()
+        self.add_offload_time_constraints()
 
+    def add_offload_time_constraints(self):
         for t in range(self.T):
             for k in self.krange(t):
                 self.md += self.Time[t, k] >= self.time_step_prefetch(t, k)
@@ -101,6 +103,12 @@ class ModelPULPOffload(ModelPULP):
     def w_by_wg(self,w):
         if self.parameter_gradient_size[w]==0:return 0
         return self.parameter_size[w]/self.parameter_gradient_size[w]
+
+    def activation_mem(self, t, k):
+        return self.U[t, k]
+
+    def save_mem(self, t, k):
+        return self.activation_mem(t,k) + self.all_param_mem(t,k)
 
     def all_param_mem(self,t, k, with_multiplier=True):
         return (self.parameter_mem(t,k)

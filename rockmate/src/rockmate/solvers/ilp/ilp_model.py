@@ -12,7 +12,6 @@ from pulp import (
     LpStatus,
 )
 
-from .ilp_schedule import schedule
 from rkgb.core.hierarchical import HierarchicalGraph
 from .ilp_utils import RkLpVariable
 
@@ -457,7 +456,7 @@ class ModelPULP:
                                     <= self.sumComp[t, k_] + self.AliveA[t, j_]
                                 )
 
-    def add_memory_constrains(self):
+    def add_activation_deletion(self):
         # we don't keep eyes on the alive status all the time
         # only the steps when changes can happen
         self.alive = {}
@@ -544,6 +543,7 @@ class ModelPULP:
                 if i in self.protected_indices:
                     self.md += self.delete[t, eidx] == 0
 
+    def add_activation_mem(self):
         self.U = {}
         for t in range(self.T):
             self.U[t, 0] = (
@@ -604,17 +604,27 @@ class ModelPULP:
                         * self.saved_mem[j][o]
                         for o in range(self.nSched[k])
                     )
+
+    def save_mem(self, t, k):
+        # OVERWRITTING IN OFFLOAD
+        return self.U[t, k]
+
+    def add_memory_constrains(self):
+        self.add_activation_deletion()
+        self.add_activation_mem()
+        self.add_abar_constraint(self.save_budget*self.gcd)
+        
         for t in range(self.T):
             for k in self.krange(t):
                 parameter_mem = self.all_param_mem(t, k)
                 j = self.hcn2sub_c[k]
-                self.md += self.U[t, k] >= 0
-                self.md += self.U[t, k] <= (self.peak_budget - parameter_mem)
+                self.md += self.save_mem(t,k) >= 0
+                self.md += self.save_mem(t,k) <= (self.peak_budget - parameter_mem)
                 # if j is None or not accurate_mem:
                 if True:
                     # don't consider correction_term
                     self.md += (
-                        self.U[t, k]
+                        self.save_mem(t,k)
                         + lpSum(
                             self.Comp[t, k, o] * self.overhead[k][o]
                             for o in range(self.nComp[k])
@@ -692,18 +702,11 @@ class ModelPULP:
                                 )
                                 <= self.peak_budget - parameter_mem
                             )
-                if t == self.loss_idx and self.save_budget:
-                    self.md += self.U[t, k] <= self.save_budget
-
     
     def add_abar_constraint(self, save_budget):
-        T = len(self.hgraph.list_HCNs)
-        self.save_budget = save_budget / self.gcd
+        # self.save_budget = save_budget / self.gcd
         for k in range(self.T):
-            self.md += self.U[(self.loss_idx, k)] <= self.save_budget
-
-    def all_param_mem(self, t, k, with_multiplier=True):
-        return 0
+            self.md += self.U[(self.loss_idx, k)] <= save_budget/self.gcd
 
     def prefill_compute(self):
         self.active_stages = dict()
