@@ -6,8 +6,8 @@ from copy import deepcopy
 import numpy as np
 # from models import *
 # from models.LLM import *
-from rockmate import HRockmate
-from rockmate.solvers.op_schedule import *
+from rockmate import ORockmate
+from rockmate.op_schedule import *
 from rockmate.solvers.HILP_pulp_ofl_para import *
 from datetime import datetime
 device = torch.device("cuda")
@@ -111,7 +111,7 @@ def check_correctness(model, sample, budget=1e9, optim=torch.optim.Adam):
     # print(model_c(*sample_c).mean())
     exec(model_c, sample_c, print_mem=False, print_loss=True, optimize_fct=optimize)
 
-    model_r = HRockmate(model, sample, budget, 
+    model_r = ORockmate(model, sample, budget, 
                         solve_sched=False,
                         cpu_optim=optim,
                         gpu_optim=optim,
@@ -319,7 +319,7 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B"):
         max_number_of_patterns=nlayers+2,
         min_percentage_covered_required=0.75)]
 
-    rkmod = HRockmate(model, sample, 1e8, solve_sched=0, 
+    rkmod = ORockmate(model, sample, 1e8, solve_sched=0, 
                     ilp_solver="PULP_CBC_CMD", 
                     #   ilp_solver="HiGHS_CMD", 
                     # cpu_optim = DeepSpeedCPUAdam,
@@ -363,22 +363,23 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B"):
         raise ValueError
     print(md.solving_time)
     exp_stats["solving_time"] = str(md.solving_time)
-    mem_ilp, mem_sched = analyze_mem(rkmod)
-    exp_stats["Mem_ILP"] = mem_ilp
-    exp_stats["Mem_sched"] = mem_sched
+    # mem_ilp, mem_sched = analyze_mem(rkmod)
+    # exp_stats["Mem_ILP"] = mem_ilp
+    # exp_stats["Mem_sched"] = mem_sched
 
-    exp_stats["Before_refine"] = {}
-    add_sched_stats(exp_stats["Before_refine"], rkmod)
+    # exp_stats["Before_refine"] = {}
+    # add_sched_stats(exp_stats["Before_refine"], rkmod)
 
     # time, mem = exec_rk(rkmod, sample, niters=niters)
     # exp_stats["Before_refine_time"] = time/niters
     # exp_stats["Before_refine_peak_mem"] = mem
 
     ### Refine schedule
-    rkmod.op_sched.refine_optimize()
-    exp_stats["After_refine"] = {}
-    add_sched_stats(exp_stats["After_refine"], rkmod)
-    print(exp_stats["After_refine"])
+    # rkmod.op_sched.refine_optimize()
+    rkmod.op_sched.simulate_update()
+    # exp_stats["After_refine"] = {}
+    # add_sched_stats(exp_stats["After_refine"], rkmod)
+    # print(exp_stats["After_refine"])
     # rkmod.op_sched.alive_list = rkmod.op_sched.create_alive_list()
     # rkmod.op_sched.refine()
     rkmod.get_compiled_fct()
