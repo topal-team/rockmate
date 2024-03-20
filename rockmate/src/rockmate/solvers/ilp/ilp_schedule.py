@@ -357,8 +357,9 @@ def group(md, w, tol=1):
 
     def apply_cpu_optimize(p):
         for (t,k,op) in ofl_ops:
-            if op.target.name == p:
-                op.grad = True
+            if op.target.target_name == p:
+                op.target.is_grad = True
+                # op.grad = True
                 break
         # for (t,k,op) in del_ops:
         #     if op.target.name == p:

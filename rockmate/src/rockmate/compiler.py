@@ -557,7 +557,7 @@ class Fct_to_storage(RK_Fct):
 
 class Fct_add_optimizer(RK_Fct):
     def __init__(
-        self, target_name: str, storage: RK_Storage, list_params, optim, **kwargs
+        self, target_name: str, storage: RK_Storage, list_params, optim, is_cpu=False, **kwargs
     ):
         super().__init__(
             target_name=target_name,
@@ -567,10 +567,11 @@ class Fct_add_optimizer(RK_Fct):
         self.list_params = list_params
         self.optim = optim
         self.kwargs = kwargs
+        self.is_cpu = is_cpu
 
     def __call__(self):
         self.storage.ld[self.target_name] = self.optim(
-            [self.storage.ld[p] for p in self.list_params], **self.kwargs
+            [self.storage.ld[self.is_cpu*'cpu_'+p] for p in self.list_params], **self.kwargs
         )
 
 
@@ -708,6 +709,7 @@ class Compiler:
                         storage=self.storage,
                         list_params=op.list_params,
                         optim=optim,
+                        is_cpu=op.is_cpu,
                         **self.storage.gd["opt_kwargs"],
                     )
                 )
