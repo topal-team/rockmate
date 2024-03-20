@@ -477,11 +477,11 @@ class Fct_prefetch(RK_Fct):
     #             )
     def prefetch_optim_states(self):
         for k, v in self.storage.ld[f"Optimize_({self.target_name})"].state.items():
-            self.storage.ld[f"exp_avg_{self.target_name}"].copy_(
-                v["exp_avg"], non_blocking=True
+            v["exp_avg"].copy_(
+                self.storage.ld[f"exp_avg_{self.target_name}"], non_blocking=True
             )
-            self.storage.ld[f"exp_avg_sq_{self.target_name}"].copy_(
-                v["exp_avg_sq"], non_blocking=True
+            v["exp_avg_sq"].copy_(
+                self.storage.ld[f"exp_avg_sq_{self.target_name}"], non_blocking=True
             )
 
     def post_process_param(self):
