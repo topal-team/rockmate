@@ -15,7 +15,8 @@ class ModelPULPOffload(ModelPULP):
         self.add_offload_param_variables()
         super().add_constraints()
         self.add_offload_param_constraints()
-        super().add_objective()
+        # super().add_objective()
+        self.add_offload_objective()
         self.add_offload_time_constraints()
 
     def add_offload_time_constraints(self):
@@ -166,7 +167,8 @@ class ModelPULPOffload(ModelPULP):
             for k in self.PrfG:
                 self.PrfG[k] = 0
 
-        if not self.with_optimizer_states:
+        # if not self.with_optimizer_states:
+        if not self.optimize_metrics["optimizer_states_size"]:
             for (t,k,w) in self.AliveO:
                 self.AliveO[(t,k,w)] = (self.req_w-self.accumC_optimizer_states(w))
                 self.PrfO[(t,k,w)] = 0

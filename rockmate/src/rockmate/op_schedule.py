@@ -75,14 +75,20 @@ class Parameter(Allocation):
     There is not paramter grad/optim_states nodes from rkgb.
     Need to handle the dependency manually for Allocation.
     """
-    def __init__(self, pnode, is_grad=False, is_optim_states=False):
+    def __init__(self, pnode, is_grad=False, is_optim_states=False, optim_states_multiplier=2):
         self.pnode = pnode
         self.is_grad = is_grad
         self.is_optim_states = is_optim_states
+        self.optim_states_multiplier = optim_states_multiplier
+        if not self.is_optim_states:
+            mem = pnode.mem
+        else:
+            mem = pnode.mem * self.optim_states_multiplier
+
         super().__init__(
             target_name=pnode.param_name,
             alloc_type= "param",# + "_grad"*grad+"_optim_states"*is_optim_states,
-            mem=pnode.mem + pnode.mem*is_optim_states,
+            mem= mem,
             info=pnode.info,
             dtype=pnode.info.dtype,
         )
@@ -308,7 +314,8 @@ class OpSchedule:
         with_parameters=False,
         init_alive_status: dict = {},
         init_op_list: list = [],
-        restore_op_list: list = []
+        restore_op_list: list = [],
+        optim_states_multiplier = 2,
     ):
         """
         OpSchedule contains the operation list and automatically
@@ -321,6 +328,7 @@ class OpSchedule:
         self.init_op_list = init_op_list# Place to prepare items in storage
         self.restore_op_list = restore_op_list
         self.with_parameters = with_parameters
+        self.optim_states_multiplier = optim_states_multiplier
         self.interfaces = cluster.interfaces
 
         self.create_list_alloc(cluster)
@@ -448,8 +456,10 @@ class OpSchedule:
                 [Parameter(anode, is_grad=True) for anode in cluster.parameter_nodes
                     if anode.info.requires_grad]
             )# add parameter grad allocation
+            # if self.optim_states_multiplier:
             self.list_alloc.extend(
-                [Parameter(anode, is_optim_states=True)
+                [Parameter(anode, is_optim_states=True,
+                           optim_states_multiplier=self.optim_states_multiplier)
                     for anode in cluster.parameter_nodes
                     if anode.info.requires_grad]
             )# add parameter grad allocation

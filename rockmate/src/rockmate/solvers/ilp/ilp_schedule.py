@@ -69,7 +69,7 @@ class knapsack:
         return sel_i
 
 
-def schedule(md, hgraph=None, check_valid=False):
+def schedule(md: ModelPULP, hgraph=None, check_valid=False):
     """
     Given the solution from HILP, we want to translate the result
     to a OpSchedule that can be used in a higher level.
@@ -108,6 +108,7 @@ def schedule(md, hgraph=None, check_valid=False):
         init_op_list=init_op_list,
         restore_op_list=restore_op_list,
         with_parameters=md.with_offload,
+        optim_states_multiplier = md.optimize_metrics["optimizer_states_size"]
     )
     # check_valid = True
     if check_valid:
