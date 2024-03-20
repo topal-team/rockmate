@@ -285,6 +285,7 @@ class ORockmate(torch.nn.Module):
             raise e
             
     def init_fwd_exec(self):
+        # TODO: rename to first forward; also do the first backward differently incase grad not exist
         """
         The first forward execution to:
         1. allocate parameters in RK_storage;
@@ -514,6 +515,18 @@ def define_autograd_Function(RkMod):
                 ctx.name_of_inputs_which_req_grad = (
                     RkMod.name_of_inputs_which_req_grad_buffer
                 )
+                dict_inputs = RkMod.dict_inputs_buffer
+                #  -> Detach input tensors (Rem 3) and store all the inputs
+                dict_input_tensors_detach = dict()  #  dict : input -> detached input
+                for k, v in dict_inputs.items():
+                    if isinstance(v, torch.Tensor):
+                        v_d = v.detach().requires_grad_(v.requires_grad)
+                        dict_input_tensors_detach[v] = v_d
+                        storage.ld[k] = v_d
+                    #  TODO elif iterables of Tensors ?
+                    else:
+                        storage.ld[k] = v
+                
                 with torch.enable_grad():
                     exec(RkMod.init_code, RkMod.global_dict, storage.ld)  # is compiler.global_dict
                     for op in RkMod.op_list[:RkMod.op_sched.loss_idx]:
@@ -597,7 +610,7 @@ def define_autograd_Function(RkMod):
         # === OUR BACKWARD FUNCTION ===
         @staticmethod
         @torch.autograd.function.once_differentiable
-        def backward(ctx, *grad_outs):  #  TODO multiple outputs
+        def backward(ctx, *grad_outs):
             #  -> Reload the storage and out
             storage = ctx.RK_Storage
             RkMod.compiler.storage = storage
@@ -608,8 +621,9 @@ def define_autograd_Function(RkMod):
                 out = RkMod.compiler.get_val(out_node.main_target)
                 out.grad = out_grad.data
                 # print(out_node.main_target, out.grad.mean)
-                
                 out_grad.data = torch.empty(0)
+
+            # TODO: let users to decide from hyperparameter whether to keep the output
             for out_node in RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes:
                     RkMod.compiler.get_val(f"out_{out_node.main_target}").data = torch.empty(0)
                 
