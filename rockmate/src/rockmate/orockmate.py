@@ -354,8 +354,11 @@ class ORockmate(torch.nn.Module):
             # for output_node in self.rkgb_res.simplified_graph.output_nodes:
             for main_target, set_output_targets in self.rkgb_res.simplified_graph.dict_output_mt_to_targets_sent.items():
                 for output_target in set_output_targets:
-                    code = self.rkgb_res.simplified_graph.dict_output_viewing_code[main_target]
-                    code = ast_to_str(code)
+                    ast_code = self.rkgb_res.simplified_graph.dict_output_viewing_code[main_target]
+                    code = ""
+                    for assign in ast_code.body:
+                        if ast_to_str(assign.targets) == output_target:
+                            code += f"{ast_to_str(assign)}\n"
                     code = code.replace(output_target, f"out_{output_target}")
                     if main_target != output_target:
                         code = code.replace(main_target, f"out_{main_target}")
