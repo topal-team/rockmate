@@ -496,7 +496,7 @@ class Fct_prefetch(RK_Fct):
         with torch.cuda.stream(self.storage.gd[self.stream]):
             self.prefetch_fct[self.prefetch_mode]()
             torch.cuda.synchronize()
-        # with torch.cuda.stream(self.storage.gd["main_stream"]):
+            # with torch.cuda.stream(self.storage.gd["main_stream"]):
             self.post_process[self.prefetch_mode]()
 
 
@@ -557,7 +557,13 @@ class Fct_to_storage(RK_Fct):
 
 class Fct_add_optimizer(RK_Fct):
     def __init__(
-        self, target_name: str, storage: RK_Storage, list_params, optim, is_cpu=False, **kwargs
+        self,
+        target_name: str,
+        storage: RK_Storage,
+        list_params,
+        optim,
+        is_cpu=False,
+        **kwargs,
     ):
         super().__init__(
             target_name=target_name,
@@ -571,7 +577,8 @@ class Fct_add_optimizer(RK_Fct):
 
     def __call__(self):
         self.storage.ld[self.target_name] = self.optim(
-            [self.storage.ld[self.is_cpu*'cpu_'+p] for p in self.list_params], **self.kwargs
+            [self.storage.ld[self.is_cpu * "cpu_" + p] for p in self.list_params],
+            **self.kwargs,
         )
 
 
@@ -602,7 +609,7 @@ class Compiler:
             "AllocateOp": self.Allocate,
             "OptimizeOp": self.Optimize,
             "SynchronizeOp": self.Synchronize,
-            "Op": lambda x: None, # only for preparation
+            "Op": lambda x: None,  # only for preparation
         }
 
     def compile_sched(self, op_sched: OpSchedule):
@@ -634,7 +641,7 @@ class Compiler:
                 )
             )
 
-        for out_node in list(cluster.interfaces["output_data_anodes"])+output_nodes:
+        for out_node in list(cluster.interfaces["output_data_anodes"]) + output_nodes:
             prep_op.add_fct(
                 Fct_mem_alloc(
                     f"out_{out_node.main_target}",
@@ -725,7 +732,7 @@ class Compiler:
                         f"exp_avg_{var_name}",
                         storage=self.storage,
                         alloc_mode="tensor",
-                        shape = var_name,
+                        shape=var_name,
                         device=torch.device("cpu"),
                     )
                 )
@@ -734,7 +741,7 @@ class Compiler:
                         f"exp_avg_sq_{var_name}",
                         storage=self.storage,
                         alloc_mode="tensor",
-                        shape = var_name,
+                        shape=var_name,
                         device=torch.device("cpu"),
                     )
                 )
@@ -769,7 +776,11 @@ class Compiler:
         cnode: ComputationNode = op.target
         if not cnode.info.requires_grad:
             op.add_fct(
-                Fct_run_fwd(target_name=cnode.main_target, storage=self.storage, code=cnode.get_code())
+                Fct_run_fwd(
+                    target_name=cnode.main_target,
+                    storage=self.storage,
+                    code=cnode.get_code(),
+                )
             )
             if op.pos_info["first_occurrence"]:
                 for target_name in cnode.tensor_targets:
@@ -789,13 +800,12 @@ class Compiler:
                     bc,
                     suffix=suffix,
                     force_special_kwargs=not op.pos_info["first_occurrence"],
-                )+"\n"
+                )
+                + "\n"
             )
-        main_code = (
-            make_str_assign(
-                cnode.main_code,
-                force_special_kwargs=not op.pos_info["first_occurrence"],
-            )
+        main_code = make_str_assign(
+            cnode.main_code,
+            force_special_kwargs=not op.pos_info["first_occurrence"],
         )
         main_code = main_code.replace(cnode.main_target, f"_{cnode.main_target}")
         for pnode in cnode.required_parameter_nodes_real:

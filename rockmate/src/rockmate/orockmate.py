@@ -9,19 +9,6 @@ from datetime import datetime
 import warnings
 import gc
 import rkgb
-# from rkgb.main import make_inputs, make_all_graphs, make_late_partitioning
-# from rkgb.utils import print_debug, np, irotor
-# from rkgb.utils.global_vars import (
-#     ref_verbose,
-#     solver_name,
-#     ExceptionModuleDoesNotReqGrad,
-# )
-# from rkgb.utils.small_fcts import get_device
-# from rkgb.utils.ast_add_on import ast_to_str
-# from rkgb import Ptools
-
-# TODO: make_all_graphs, make_late_partitioning
-
 from rkgb.lowlevel.preprocess_samples import ExampleInputs
 from rkgb.lowlevel.measure import tensor_memory_size
 from rkgb.lowlevel.constants import ref_verbose, ExceptionModuleDoesNotReqGrad
@@ -31,10 +18,8 @@ from rkgb.lowlevel.constants import init_target_string
 
 from .op_schedule import *
 from .solvers.main import preprocess, solve_recursive, get_optimize_metrics, FastSolver
-# from .solvers import RK_rotor, HILP, TwRemat, RK_checkmate
 from .solvers import HILP
 from .solvers.hilp import default_time_limit
-# from .solvers.HILP_gurobi import *
 from .compiler import Compiler, RK_Storage, make_gd
 import psutil
 
@@ -186,14 +171,8 @@ class ORockmate(torch.nn.Module):
             if isinstance(solver, HILP):
                 # TODO: if no partitioning is allowed, update solver max nodes
                 hilp_solver = True
-            # if isinstance(solver, RK_rotor):
-            #     rotor_solver = True
-            # if isinstance(solver, RK_checkmate):
-            #     checkmate_solver = True
-
         for solver in list_solvers:
             if isinstance(solver, HILP):
-                # solver.config.protected_names.append(self.output.name)
                 solver.config.protected_names += self.output_names
                 if rotor_solver:
                     solver.config.nb_bdg_save = 10
@@ -208,11 +187,6 @@ class ORockmate(torch.nn.Module):
             and recursive
         ):
             self.solver_recursive()
-        # elif (
-        #     True in [isinstance(solver, RK_checkmate) for solver in list_solvers]
-        #     and rec
-        # ):
-        #     self.preprocess()
 
         list_solutions = []
         for solver in list_solvers:
@@ -303,7 +277,7 @@ class ORockmate(torch.nn.Module):
                     if op.target.is_grad or op.target.is_optim_states:continue#first iteration without grad offload
                 if isinstance(op, OptimizeOp):continue#first iteration no need to optimize
                 self._exec(op)
-                torch.cuda.synchronize()
+                # torch.cuda.synchronize()
         
     def restore_exec(self, keep_grad=False):
         """
@@ -354,7 +328,7 @@ class ORockmate(torch.nn.Module):
             elif self.autograd_Function is None:
                 raise Exception(
                     "The custom forward and backward functions haven't "
-                    "been generated yet, please call the method : "
+                    "been generated yet, please call the function: "
                     "define_autograd_Function"
                 )
             # -> Send the inputs to Function.forward via the buffer (Rem 1)
@@ -447,65 +421,7 @@ class ORockmate(torch.nn.Module):
                 self.get_compiled_fct()
 
 
-def define_autograd_Function(RkMod):
-    #  To define properly new module's forward and backward
-    #  functions we need to make it compatible with Autograd.
-    #  This method MUST be called to create the forward function.
-    # With this the module will be fully compatible with Autograd.
-
-    # Rem 1:
-    # Autograd.Function forward function kwargs must be defined,
-    #  so we cannot use "**kwargs". Which means to do things
-    #  properly we would need to extract original_mod's kwargs
-    # definition (with default value) and write custom Autograd.Function
-    # definition using a string and `exec` (since the definition
-    # of the Function depends on some arguments).
-    # To avoid this issue we do the following :
-    # nn.Module.forward function receives *args and **kwargs
-    # and saves everything in a buffer `self(nn.Module).dict_inputs_buffer`
-    # then we call Function.forward without giving it the inputs.
-    # Instead, Function.forward catches the inputs from the buffer.
-    # Note: Function.forward needs at least one input, so
-    # we just give a dummy input, and this input must requires_grad
-    # (otherwise, if none of Function.forward's inputs req_grad,
-    # Autograd thinks it's useless to generate a backward function.
-    #  Because it only sees the inputs and outputs, and we
-    # take care of all the intermediate evaluations, therefore
-    # autograd doesn't realize there are some params which
-    # requires_grad for instance.)
-
-    #  Rem 2:
-    # Normally Autograd.Function's backward method returns inputs' grad,
-    # and Autograd then backward the inputs using these grads.
-    # But since we use a buffer to pass the inputs (cf Rem 1).
-    #  Autograd cannot see the inputs and therefore backward them once
-    # we finished. So instead of returning inputs' grad we trigger
-    # inputs' backward.
-
-    # Rem 3:
-    # To isolate our Module range of action we need to detach the inputs
-    # before using them so we won't backward through them when handling
-    #  the backward of our module. Otherwise the backward operations of the
-    # first nodes inside our computation graph will trigger inputs' backward.
-    # So we detach the inputs, then we do everything for our part, and once
-    # we finished, we trigger inputs' backward (cf Rem 2 -> normally we
-    # would have simply returned inputs' grad).
-
-    # Rem 4: TODO REWRITE THIS
-    # ALWAYS DETACH IN CASE OF VIEWS TO PROCESS grad_out
-    # SO IT'S A DOUBLE DETACH
-    # Our goal is to define a custom backward method for the output
-    # of the nn.Module, which mean output.backward() will lead to
-    # the following lines, where `output` is the output of the forward
-    # function of the Checkpointed Module. But by default it's also the
-    # output of the last primitive operation inside the module. And we need
-    # to be able to backward the last node using its standard backward
-    # function. So we must not overwrite last node's output backward
-    # function, otherwise last_cnode.backward will call the following lines.
-    # SO we need to return a detached copy of the outputs.
-    #  Thus, the last node's output backward isn't affected, and
-    # we properly redefine HRockmate's output backward.
-
+def define_autograd_Function(RkMod: ORockmate):
     class RK_autograd_Function(torch.autograd.Function):
         # === OUR FORWARD FUNCTION ===
         @staticmethod
@@ -515,7 +431,7 @@ def define_autograd_Function(RkMod):
                 ctx.name_of_inputs_which_req_grad = (
                     RkMod.name_of_inputs_which_req_grad_buffer
                 )
-                dict_inputs = RkMod.dict_inputs_buffer
+                dict_inputs = RkMod.dict_inputs_buffer#args are passed in RkMod.forward
                 #  -> Detach input tensors (Rem 3) and store all the inputs
                 dict_input_tensors_detach = dict()  #  dict : input -> detached input
                 for k, v in dict_inputs.items():
@@ -624,8 +540,8 @@ def define_autograd_Function(RkMod):
                 out_grad.data = torch.empty(0)
 
             # TODO: let users to decide from hyperparameter whether to keep the output
-            for out_node in RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes:
-                    RkMod.compiler.get_val(f"out_{out_node.main_target}").data = torch.empty(0)
+            # for out_node in RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes:
+            #         RkMod.compiler.get_val(f"out_{out_node.main_target}").data = torch.empty(0)
                 
             loss_idx = RkMod.op_sched.loss_idx
             #  * record_mem stuff *

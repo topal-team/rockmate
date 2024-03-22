@@ -121,7 +121,7 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
                     raise ValueError
     return op_sched
 
-def schedule_compute(md, t,k,hgraph):
+def schedule_compute(md: ModelPULP, t,k,hgraph):
     op_list = []
     sol = md.sol
     
@@ -181,7 +181,7 @@ def schedule_compute(md, t,k,hgraph):
     return op_list
 
 
-def schedule_offload(md, hgraph=None):
+def schedule_offload(md: ModelPULPOffload, hgraph=None):
     """
     V1: md.grouping = False:
     merge every cluster, ofl/prf/del partially, high memory overhead
