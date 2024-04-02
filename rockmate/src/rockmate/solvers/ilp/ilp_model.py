@@ -55,7 +55,7 @@ class ModelPULP:
         self.hgraph = hgraph
         self.md = LpProblem(f"rockmateMILP", LpMinimize)
 
-        self.with_offload = accurate_mem
+        self.with_offload = False
         self.with_grad = accurate_mem
         self.with_optimizer_states = accurate_mem#optimizer states will be offloaded
         self.gradient_accumulation = 0# if 0, no gradient/optimizer states alive from previous iters
@@ -616,7 +616,7 @@ class ModelPULP:
         
         for t in range(self.T):
             for k in self.krange(t):
-                parameter_mem = self.all_param_mem(t, k)
+                parameter_mem = 0#self.all_param_mem(t, k)
                 j = self.hcn2sub_c[k]
                 self.md += self.save_mem(t,k) >= 0
                 self.md += self.save_mem(t,k) <= (self.peak_budget - parameter_mem)

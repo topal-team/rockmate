@@ -218,9 +218,8 @@ class ORockmate(torch.nn.Module):
             storage = RK_Storage()
             storage.init(self.global_dict)
             self.compiler = Compiler(storage)
-        self.compiler.compile_sched(self.op_sched)
-        self.minor_parameters = []
         
+        self.minor_parameters = []
         if self.minor_param_nodes:
             self.minor_parameters = [self.original_mod.get_parameter(pnode.param_name) 
                                 for pnode in self.minor_param_nodes]
@@ -239,6 +238,8 @@ class ORockmate(torch.nn.Module):
                                           self.minor_param_nodes,
                                           self.rkgb_res.forward_graph.output_nodes
                                           )
+        
+        self.compiler.compile_sched(self.op_sched)
 
     def _exec(self, op:Op):
         try:

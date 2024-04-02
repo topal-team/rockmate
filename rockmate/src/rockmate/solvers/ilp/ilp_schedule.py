@@ -14,6 +14,7 @@ from ...op_schedule import (
     PrefetchOp,
     SynchronizeOp,
     OptimizeOp,
+    PrepareOp,
     OpSchedule,
 )
 from ..main import get_sched, add_sched, translate
@@ -80,7 +81,7 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
     restore_op_list = []
     init_alive_status = {}
     loss_op = ComputeOp(md.hgraph.cluster.loss_cnode, disabled=True)
-    if md.with_offload:
+    if isinstance(md, ModelPULPOffload):
         W = len(md.parameter_size)
         (
             op_list,
@@ -107,7 +108,7 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
         init_alive_status=init_alive_status,
         init_op_list=init_op_list,
         restore_op_list=restore_op_list,
-        with_parameters=md.with_offload,
+        with_parameters=isinstance(md, ModelPULPOffload),
         optim_states_multiplier = md.optimize_metrics["optimizer_states_size"]
     )
     # check_valid = True
@@ -275,6 +276,12 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
                 op_list.extend([SynchronizeOp(str(k))]+wait_op_3)
 
             op_list.extend(prefetch_list)
+
+    init_ops = {op.target.name:op for op in init_op_list}
+    for pnode in md.hgraph.cluster.parameter_nodes:
+        alloc = Parameter(pnode)
+        if alloc.name not in init_ops:
+            init_op_list.append(PrepareOp(alloc, device="cuda"))
     return op_list, init_alive_status, init_op_list, restore_op_list
 
 def create_optimize_ops(md, t, k, w, itemsize=4):
@@ -400,13 +407,14 @@ def group(md, w, tol=1):
             for p, a in Alive.items():
                 if a:
                     p_alloc = Parameter(parameters[p])
-                    init_ops.append((t, k, AllocateOp(p_alloc)))
+                    # init_ops.append((t, k, AllocateOp(p_alloc)))
+                    init_ops.append((t, k, PrepareOp(p_alloc, device="cuda")))
                     init_alive.append(p_alloc)
-                    op = PrefetchOp(
-                        alloc=p_alloc, indices=(0, None), 
-                        time=parameters[p].mem/md.bandwidthPrf/md.gcd
-                    )
-                    init_ops.append((t, k, op))
+                    # op = PrefetchOp(
+                    #     alloc=p_alloc, indices=(0, None), 
+                    #     time=parameters[p].mem/md.bandwidthPrf/md.gcd
+                    # )
+                    # init_ops.append((t, k, op))
                     op = OffloadOp(
                         alloc=p_alloc, indices=(0, None),
                         time=parameters[p].mem/md.bandwidthOfl/md.gcd

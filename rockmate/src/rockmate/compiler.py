@@ -18,6 +18,7 @@ from .op_schedule import (
     OptimizeOp,
     OpSchedule,
     ExecCodeOp,
+    PrepareOp,
 )
 import psutil
 
@@ -288,24 +289,22 @@ class Fct_run_fwd(RK_Fct):
 
 
 class Fct_get_shape(RK_Fct):
-    def __init__(self, target_name: str, storage: RK_Storage, **kwargs):
+    def __init__(self, target_name: str, storage: RK_Storage, pnode=None, **kwargs):
         super().__init__(target_name=target_name, storage=storage, **kwargs)
         self.target_name = target_name
+        self.pnode = pnode
 
     def __call__(self):
+        if self.pnode:
+            target = self.pnode.get_value(self.storage.gd["self"])
+        else:
+            target = self.storage.ld[self.target_name]
+
         with torch.cuda.stream(self.storage.gd["main_stream"]):
-            self.storage.shapes[self.target_name] = self.storage.ld[
-                self.target_name
-            ].shape
-            self.storage.shapes[f"cpu_{self.target_name}"] = self.storage.ld[
-                self.target_name
-            ].shape
-            self.storage.dtypes[self.target_name] = self.storage.ld[
-                self.target_name
-            ].dtype
-            self.storage.dtypes[f"cpu_{self.target_name}"] = self.storage.ld[
-                self.target_name
-            ].dtype
+            self.storage.shapes[self.target_name] = target.shape
+            self.storage.shapes[f"cpu_{self.target_name}"] = target.shape
+            self.storage.dtypes[self.target_name] = target.dtype
+            self.storage.dtypes[f"cpu_{self.target_name}"] = target.dtype
 
 
 class Fct_optimize(RK_Fct):
@@ -547,7 +546,7 @@ class Fct_to_storage(RK_Fct):
         self.device = device
 
     def __call__(self):
-        self.storage.ld[self.target_name] = self.pnode.get_value(
+        self.storage.ld[self.pnode.param_name] = self.pnode.get_value(
             self.storage.gd["self"]
         )
         self.storage.ld[self.target_name].data = self.storage.ld[
@@ -609,6 +608,7 @@ class Compiler:
             "AllocateOp": self.Allocate,
             "OptimizeOp": self.Optimize,
             "SynchronizeOp": self.Synchronize,
+            "PrepareOp": self.Prepare,
             "Op": lambda x: None,  # only for preparation
         }
 
@@ -763,9 +763,9 @@ class Compiler:
         init_op_list = op_sched.init_op_list
         prep_op = Op("Preparation")
         self._activation_placehold(prep_op, cluster, output_nodes)
-        self._parameter_placehold(prep_op, cluster, minor_param_nodes)
+        # self._parameter_placehold(prep_op, cluster, minor_param_nodes)
         self._optimizer_placehold(prep_op, op_list, minor_param_nodes)
-        op_sched.init_op_list = [prep_op] + init_op_list
+        op_sched.init_op_list = init_op_list+ [prep_op]
 
     def _compute_fwd(self, op: ComputeOp):
         op.add_fct(
@@ -1005,6 +1005,57 @@ class Compiler:
 
     def Synchronize(self, op: SynchronizeOp):
         op.add_fct(Fct_synchronize(storage=self.storage))
+
+    def Prepare(self, op:PrepareOp):
+        pnode = op.target.pnode
+        on_cpu = op.device=="cpu"
+        op.add_fct(Fct_get_shape(pnode.param_name, pnode=pnode, storage=self.storage))
+
+        if op.cpu_placeholder:
+            op.add_fct(
+                    Fct_mem_alloc(
+                        f"cpu_{pnode.param_name}",
+                        storage=self.storage,
+                        alloc_mode="tensor",
+                        device=torch.device("cpu"),
+                        pin_memory=True,
+                    )
+                )
+
+        op.add_fct(
+                Fct_to_storage(
+                    "cpu_"*on_cpu + pnode.param_name, 
+                    storage=self.storage, 
+                    pnode=pnode, 
+                    device=op.device
+                )
+            )
+        
+        # op.add_fct(Fct_RNG_state(pnode.param_name, storage=self.storage))
+        
+        if not on_cpu:
+            op.add_fct(
+                Fct_run_fwd(
+                    pnode.param_name, storage=self.storage, code=pnode.get_code()
+                )
+            )
+            if op.cpu_placeholder:
+                op.add_fct(
+                    Fct_offload(pnode.param_name, storage=self.storage, pin_memory=True)
+                )
+        else:
+            op.add_fct(Fct_del(pnode.param_name, storage=self.storage))
+
+        if pnode.requires_grad:#TODO: check if need cpu_grad placeholder
+            op.add_fct(
+                Fct_mem_alloc(
+                    f"cpu_{pnode.param_name}",
+                    storage=self.storage,
+                    device=torch.device("cpu"),
+                    alloc_mode="grad",
+                    pin_memory=True,
+                )
+            )
 
     def get_val(self, val):
         if val in self.storage.ld:

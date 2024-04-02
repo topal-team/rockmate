@@ -303,6 +303,23 @@ class ExecCodeOp(Op):
         super().__init__(name, time, disabled, overhead)
         self.code = code
 
+
+class PrepareOp(Op):
+    # Prepare the placeholders for parameters before the iteration
+    def __init__(
+        self,
+        alloc: Allocation,
+        device: str= "cpu",
+        cpu_placeholder = True,
+        disabled: bool = False,
+    ):
+        super().__init__(alloc.name, disabled=disabled)
+        self.target = alloc
+        self.device= device
+        self.cpu_placeholder = cpu_placeholder
+        self.disabled = disabled
+        self.op_type = f"Prepare_{alloc.alloc_type}"
+
 class OpSchedule:
     solver = None
 
@@ -463,9 +480,9 @@ class OpSchedule:
                     for anode in cluster.parameter_nodes
                     if anode.info.requires_grad]
             )# add parameter grad allocation
-            self.dict_alloc_param = {alloc.name: alloc 
-                                 for alloc in self.list_alloc
-                                 if isinstance(alloc, Parameter)}
+        self.dict_alloc_param = {alloc.name: alloc 
+                                for alloc in self.list_alloc
+                                if isinstance(alloc, Parameter)}
         self.dict_alloc = {alloc.name: alloc for alloc in self.list_alloc}
 
     def create_alive_list(self):
