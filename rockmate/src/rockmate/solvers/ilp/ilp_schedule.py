@@ -101,6 +101,12 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
     # print("finish scheduling")
     for anode in md.hgraph.cluster.interfaces["input_data_anodes"]:
         init_alive_status[anode.name] = True  # anode share the name as alloc
+
+    init_ops = {op.target.name:op for op in init_op_list}
+    for pnode in md.hgraph.cluster.parameter_nodes:
+        alloc = Parameter(pnode)
+        if alloc.name not in init_ops:
+            init_op_list.append(PrepareOp(alloc, device="cuda"))
     op_sched = OpSchedule(
         op_list,
         loss_idx=op_list.index(loss_op),
@@ -277,11 +283,7 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
 
             op_list.extend(prefetch_list)
 
-    init_ops = {op.target.name:op for op in init_op_list}
-    for pnode in md.hgraph.cluster.parameter_nodes:
-        alloc = Parameter(pnode)
-        if alloc.name not in init_ops:
-            init_op_list.append(PrepareOp(alloc, device="cuda"))
+    
     return op_list, init_alive_status, init_op_list, restore_op_list
 
 def create_optimize_ops(md, t, k, w, itemsize=4):
