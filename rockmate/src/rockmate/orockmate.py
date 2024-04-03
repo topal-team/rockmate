@@ -539,7 +539,7 @@ def define_autograd_Function(RkMod: ORockmate):
                 RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes,
                 grad_outs):
                 out = RkMod.compiler.get_val(out_node.main_target)
-                out.grad = out_grad.data
+                out.grad = out_grad.data.as_strided_(out.shape, out.stride(), out.storage_offset())
                 # print(out_node.main_target, out.grad.mean)
                 out_grad.data = torch.empty(0)
 
