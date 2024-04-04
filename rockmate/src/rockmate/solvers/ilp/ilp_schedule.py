@@ -177,6 +177,20 @@ def schedule_compute(md: ModelPULP, t,k,hgraph):
             h_obj = hcn
             sub_op_list = deepcopy(h_obj.ff_op_list)
 
+        anode_to_protect = []
+        if not hcn.sub_cluster is None:
+            for anode in hcn.sub_cluster.all_interfaces:
+                i_ = [
+                        hdn.anode.name for hdn in md.hgraph.list_HANs
+                    ].index(anode.name)
+                if (k, i_) in md.delete_list:
+                    eidx = md.delete_list.index((k, i_))
+                    if not sol(md.delete[t, eidx]):
+                        anode_to_protect.append(anode.name)
+
+        for op in sub_op_list:
+            if isinstance(op, DeleteOp) and op.target.anode.name in anode_to_protect:
+                op.disabled = True
         op_list += sub_op_list
 
     for eidx, (k_, i) in enumerate(md.delete_list):
