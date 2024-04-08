@@ -886,6 +886,10 @@ class Compiler:
             delete_tensor_function_list.append(
                 Fct_del(target_name, storage=self.storage, del_mode="data")
             )
+            if cnode.main_target == target_name:
+                delete_tensor_function_list.append(
+                    Fct_del(f"_{target_name}", storage=self.storage, del_mode="data")
+                )
 
         op.add_fct(
             Fct_run_bwd(
@@ -895,6 +899,9 @@ class Compiler:
                 input_names=op.pos_info["input_names"],
             )
         )
+
+        for f in delete_tensor_function_list:
+            op.add_fct(f)
 
     def Compute(self, op: ComputeOp):
         if op.target.is_fwd:
