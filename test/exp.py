@@ -8,6 +8,7 @@ import numpy as np
 # from models.LLM import *
 from rockmate import ORockmate
 from rockmate.op_schedule import *
+from rockmate.simulation import Simulator
 from rockmate.solvers.HILP_pulp_ofl_para import *
 from datetime import datetime
 device = torch.device("cuda")
@@ -65,8 +66,8 @@ def analyze_mem(rkmod, print_status=False, with_param=True, with_grad=True, deta
     max_t, max_k = max(mem, key=mem.get)
     max_i = np.argmax(rkmod.op_sched.save_mem + rkmod.op_sched.interface_mem + rkmod.op_sched.overhead)
     grad_size = 0#max(md.parameter_size)
-    optimizer_states_mem = 0#rkmod.op_sched.optimizer_states_size()*rkmod.gd['optimize_stats']['optimizer_states_size']
-    optimizer_states_mem += sum([p.numel()*p.element_size() for p in rkmod.minor_parameters])*rkmod.gd['optimize_stats']['optimizer_states_size']
+    optimizer_states_mem = 0#rkmod.op_sched.optimizer_states_size()*rkmod.compiler.storage.gd['optimize_stats']['optimizer_states_size']
+    optimizer_states_mem += sum([p.numel()*p.element_size() for p in rkmod.minor_parameters])*rkmod.compiler.storage.gd['optimize_stats']['optimizer_states_size']
     print(
         f"solution peak memory {(max(mem.values())*md.gcd)/1024**2:.0f}MB at {max_t, max_k}"
     )
@@ -79,7 +80,7 @@ def analyze_mem(rkmod, print_status=False, with_param=True, with_grad=True, deta
 
 def get7Bllama(batch, seq_len, nlayers=32, dtype=torch.float32):
     #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
-    sample = torch.randint(0, 600, [batch, seq_len])
+    sample = torch.randint(0, 600, (int(batch), int(seq_len)))
     # Initializing a LLaMA llama-7b style configuration
     configuration = LlamaConfig(num_hidden_layers=nlayers,
                                 hidden_size=4096,
@@ -192,15 +193,16 @@ def exec(model,
          niters=10, 
          optimize_fct=None,
          print_loss=True,
-         print_mem=False,
+         print_mem=True,
          zero_grad=True,
           **kwargs):
     torch.random.manual_seed(0)
-    def hook_fn(m, args, output):
-        # print(f"{output.mean()}")
-        return output
-    for x in model.children():
-        x.register_forward_hook(hook_fn)
+    print(f"{[s.shape for s in sample]}")
+    # def hook_fn(m, args, output):
+    #     # print(f"{output.mean()}")
+    #     return output
+    # for x in model.children():
+    #     x.register_forward_hook(hook_fn)
     y = model(*sample, **kwargs)[0]
     # labels = torch.randn(y.shape).softmax(dim=1).to(sample[0].device)
     if print_mem:print(torch.cuda.memory_allocated())
@@ -211,16 +213,17 @@ def exec(model,
     if optimize_fct:optimize_fct()
     timer.start()
     for i in range(niters):
-        if print_mem:print(torch.cuda.memory_allocated())
+        if print_mem:print(f"Mem before fwd {torch.cuda.memory_allocated()}")
         if zero_grad:model.zero_grad()
         y = model(*sample, **kwargs)[0]
         assert y.requires_grad
         loss = Loss(y)
+        if print_mem:print(f"Mem after fwd {torch.cuda.memory_allocated()}")
         if print_loss:print(f"loss: {loss}")
         loss.backward()
         # torch.cuda.synchronize()
         # print(f"grad: {model.wte.weight.grad[0,0]}")
-        if optimize_fct:optimize_fct()
+        # if optimize_fct:optimize_fct()
         # for s in sample:
         #     s.grad = None
         y.data = torch.empty(0)
@@ -247,7 +250,7 @@ def exec_pt(model, sample, optim=torch.optim.Adam, niters=10, device="cuda", **k
     torch.random.manual_seed(0)
     torch.cuda.reset_peak_memory_stats()
     sample = [s.to(device) for s in sample]
-    optimizer = optim(model.parameters())
+    optimizer = optim(model.parameters(), lr=1e-3)
     def optimize():
         optimizer.step()
     mem = torch.cuda.memory_allocated()
@@ -276,7 +279,7 @@ def exp_pt(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B", opt
     exp_stats["model_size"] = sum(p.numel()*p.element_size() for p in model.parameters())
     exp_stats["model_gradient_size"] = sum(p.numel()*p.element_size() for p in model.parameters()
                                            if p.requires_grad)
-    # exp_stats["optimize_stats"] = rkmod.gd["optimize_stats"]
+    # exp_stats["optimize_stats"] = rkmod.compiler.storage.gd["optimize_stats"]
     exp_stats["cpu_optim"] = str(optim)
     exp_stats["gpu_optim"] = str(optim)
     exp_stats["gpu_type"] = torch.cuda.get_device_name()
@@ -347,14 +350,13 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B"):
                                            if p.requires_grad)
     exp_stats["act_size"] = sum(kdn.mem for kdn in rkmod.rkgb_res.hierarchical_cluster.list_anodes
                                 if "grad" not in kdn.name)
-    exp_stats["optimize_stats"] = rkmod.gd["optimize_stats"]
-    exp_stats["cpu_optim"] = str(rkmod.gd["cpu_optim"])
-    exp_stats["gpu_optim"] = str(rkmod.gd["gpu_optim"])
+    exp_stats["optimize_stats"] = rkmod.optimize_metrics
     exp_stats["gpu_type"] = torch.cuda.get_device_name()
+    exp_stats["budget"] = budget
 
     ### Solve schedule
     rkmod.preprocess()
-    rkmod.solve_sched(budget, rec=False)
+    rkmod.solve_sched(budget, recursive=False)
     md = rkmod.list_solvers[0].md
     if md.feasible:
         # analyze_mem(rkmod)
@@ -376,7 +378,8 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B"):
 
     ### Refine schedule
     # rkmod.op_sched.refine_optimize()
-    rkmod.op_sched.simulate_update()
+    rkmod.op_sched.simulate_update(Simulator)
+
     # exp_stats["After_refine"] = {}
     # add_sched_stats(exp_stats["After_refine"], rkmod)
     # print(exp_stats["After_refine"])
@@ -391,11 +394,11 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B"):
 
     exp_stats["time"] = time/niters
     exp_stats["peak_mem"] = mem
-    opts = list(rkmod.compiler.storage.ld["optimizers"].keys())
+    # opts = list(rkmod.compiler.storage.ld["optimizers"].keys())
     # for s in sample:
     #     s.data = torch.empty(0)
-    for opt in opts:
-        del rkmod.compiler.storage.ld["optimizers"][opt]
+    # for opt in opts:
+    #     del rkmod.compiler.storage.ld["optimizers"][opt]
     # rkmod.restore_exec()
     del rkmod
     gc.collect()
@@ -416,12 +419,12 @@ if __name__=="__main__":
     # a = torch.empty(2560,1024,1024,device="cuda")
     # a.data = torch.empty(0)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--exp_id", metavar=datetime.now().strftime('%d_%m_%H_%M'), type=str)
-    parser.add_argument("--nlayers", metavar=32, type=int)
-    parser.add_argument("--num_adapters", metavar=256, type=int)
-    parser.add_argument("--id", metavar=None, type=str)
-    parser.add_argument("--rk", metavar=1, type=int)
-    parser.add_argument("--batch_size", metavar=3, type=int)
+    parser.add_argument("--exp_id", nargs="?",  type=str)
+    parser.add_argument("--nlayers", nargs="?",  const=32, type=int)
+    parser.add_argument("--num_adapters", nargs="?",  const=256, type=int)
+    parser.add_argument("--id", nargs="?",  const=None, type=str)
+    parser.add_argument("--rk", nargs="?",  const=1, type=int)
+    parser.add_argument("--batch_size", nargs="?",  const=3, type=int)
 
     args = parser.parse_args()
     exp_id = args.exp_id
