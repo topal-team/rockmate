@@ -628,7 +628,7 @@ class Compiler:
 
     def _activation_placehold(self, prep_op: Op, cluster, output_nodes):
         for anode in cluster.list_anodes:
-            if not anode.info:
+            if not anode.info or not anode.allocation_type=="data":
                 continue  # source anode
             prep_op.add_fct(
                 Fct_mem_alloc(
@@ -641,17 +641,18 @@ class Compiler:
                 )
             )
 
-        for out_node in list(cluster.interfaces["output_data_anodes"]) + output_nodes:
-            prep_op.add_fct(
-                Fct_mem_alloc(
-                    f"out_{out_node.main_target}",
-                    storage=self.storage,
-                    shape="Empty_size",
-                    dtype=torch.float32,
-                    alloc_mode="tensor",
-                    requires_grad=out_node.info.requires_grad,
+        for out_anode in list(cluster.interfaces["output_data_anodes"]):
+            for out_target in out_anode.all_targets:
+                prep_op.add_fct(
+                    Fct_mem_alloc(
+                        f"out_{out_target}",
+                        storage=self.storage,
+                        shape="Empty_size",
+                        dtype=torch.float32,
+                        alloc_mode="tensor",
+                        requires_grad=out_anode.info.requires_grad,
+                    )
                 )
-            )
 
     def _parameter_placehold(self, prep_op: Op, cluster, minor_param_nodes):
         for pnode in cluster.parameter_nodes:

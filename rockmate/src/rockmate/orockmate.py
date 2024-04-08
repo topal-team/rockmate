@@ -352,23 +352,33 @@ class ORockmate(torch.nn.Module):
                 dummy_input, *inputs_which_req_grad
             )
 
+            self.out_code = []
             # for output_node in self.rkgb_res.simplified_graph.output_nodes:
-            for main_target, set_output_targets in self.rkgb_res.simplified_graph.dict_output_mt_to_targets_sent.items():
-                for output_target in set_output_targets:
-                    ast_code = self.rkgb_res.simplified_graph.dict_output_viewing_code[main_target]
-                    code = ""
-                    for assign in ast_code.body:
-                        if ast_to_str(assign.targets) == output_target:
-                            code += f"{ast_to_str(assign)}\n"
-                    code = code.replace(output_target, f"out_{output_target}")
-                    if main_target != output_target:
-                        code = code.replace(main_target, f"out_{main_target}")
-                    else:
-                        code = ""
+            # for main_target, set_output_targets in self.rkgb_res.simplified_graph.dict_output_mt_to_targets_sent.items():
+            for main_target in self.rkgb_res.forward_and_backward_graph.output_targets:
+                # anode = self.rkgb_res.hierarchical_cluster.dict_nodes[main_target]
+                cnode = self.rkgb_res.hierarchical_cluster.dict_nodes[f"FWD[{main_target}]"]
+                code = make_str_list_assign(cnode.body_code)
+                for out_target in cnode.all_targets:
+                    code = code.replace(out_target, f"out_{out_target}")
+                
 
-                    exec(code,
-                         self.compiler.storage.gd,
-                         self.compiler.storage.ld)
+                # for output_target in set_output_targets:
+                #     # ast_code = self.rkgb_res.simplified_graph.dict_output_viewing_code[main_target]
+                #     # code = ""
+                #     # for assign in ast_code.body:
+                #     #     if ast_to_str(assign.targets) == output_target:
+                #     #         code += f"{ast_to_str(assign)}\n"
+
+                #     code = code.replace(output_target, f"out_{output_target}")
+                #     if main_target != output_target:
+                #         code = code.replace(main_target, f"out_{main_target}")
+                #     else:
+                #         code = ""
+                self.out_code.append(code)
+                exec(code,
+                        self.compiler.storage.gd,
+                        self.compiler.storage.ld)
 
             # -> Output what's defined in module
             output_nodes = self.rkgb_res.forward_graph.output_nodes
@@ -531,6 +541,7 @@ def define_autograd_Function(RkMod: ORockmate):
         @staticmethod
         @torch.autograd.function.once_differentiable
         def backward(ctx, *grad_outs):
+            print("start backward")
             #  -> Reload the storage and out
             storage = ctx.RK_Storage
             RkMod.compiler.storage = storage
