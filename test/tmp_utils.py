@@ -158,45 +158,52 @@ def save_mem(rkmod):
     param_size = 0
     act_size = 0
     view_params = []
+    optim_size_all = 0
     for k,v in rkmod.op_sched.dict_alloc_param.items():
         view_params += v.pnode.view_targets
     for k,v in rkmod.compiler.storage.ld.items():
-        if not isinstance(v,torch.Tensor):continue
-        if v.grad is not None and ("cuda" in str(v.device) or "cuda" in str(v.grad.device)):
+        if isinstance(v, torch.optim.Optimizer):
             print(k)
+            for w, state in v.state.items():
+                for s in state.values():
+                    if s.numel()>0 and "cuda" in str(s.device):
+                        optim_size_all += s.numel()*s.element_size()
+        if not isinstance(v,torch.Tensor):continue
+        if not "cuda" in str(v.device):continue
+        # if v.grad is not None and ("cuda" in str(v.device) or "cuda" in str(v.grad.device)):
+        #     print(k)
         if "__" not in k and "cuda" in str(v.device):
             # if v.numel()>0:print(k,v.numel()*v.element_size())
             param_size += v.numel()*v.element_size()
             if v.grad is not None:
                 print(k)
                 param_size += v.grad.numel()*v.element_size()
-        if "__" in k and k not in view_params:# and "___" not in k:
+        if "__" in k and k not in view_params and "___" not in k:
             if v.numel()>0:print(k,v.numel()*v.element_size())
             act_size += v.numel()*v.element_size()
             # if v.grad is not None:
             #     act_size += v.grad.numel()*v.element_size()
-
-    optim_size_all = 0
-    for k,optimizer in rkmod.compiler.storage.ld["optimizers"].items():#["minors"]
-        optim_size = 0
-        for k,v in optimizer.state.items():
-            if not v:
-                p_size= m_size=v_size=0
-                continue
-            else:
-                if isinstance(k, torch.Tensor) and "cuda" in str(k.device):
-                    p_size = k.numel()*k.element_size()
-                # if isinstance(v["exp_avg"], torch.Tensor) and "cuda" in str(v["exp_avg"].device):
-                    m_size = v["exp_avg"].numel()*v["exp_avg"].element_size()
-                # if isinstance(v["exp_avg_sq"], torch.Tensor) and "cuda" in str(v["exp_avg_sq"].device):
-                    v_size = v["exp_avg_sq"].numel()*v["exp_avg_sq"].element_size()
-                else:
-                    # print(k,v)
-                    continue
-            optim_size = m_size+v_size#+p_size#not with parameter itself
-        if optim_size:
-            # print(optim_size, p_size, m_size, v_size)
-            optim_size_all += optim_size
+        
+    # for k,optimizer in rkmod.compiler.storage.ld["optimizers"].items():#["minors"]
+    #     optim_size = 0
+    #     for k,v in optimizer.state.items():
+    #         if not v:
+    #             p_size= m_size=v_size=0
+    #             continue
+    #         else:
+    #             if isinstance(k, torch.Tensor) and "cuda" in str(k.device):
+    #                 p_size = k.numel()*k.element_size()
+    #             # if isinstance(v["exp_avg"], torch.Tensor) and "cuda" in str(v["exp_avg"].device):
+    #                 m_size = v["exp_avg"].numel()*v["exp_avg"].element_size()
+    #             # if isinstance(v["exp_avg_sq"], torch.Tensor) and "cuda" in str(v["exp_avg_sq"].device):
+    #                 v_size = v["exp_avg_sq"].numel()*v["exp_avg_sq"].element_size()
+    #             else:
+    #                 # print(k,v)
+    #                 continue
+    #         optim_size = m_size+v_size#+p_size#not with parameter itself
+    #     if optim_size:
+    #         # print(optim_size, p_size, m_size, v_size)
+    #         optim_size_all += optim_size
     return param_size, act_size, optim_size_all
 
 def measure_cost_large_model():
