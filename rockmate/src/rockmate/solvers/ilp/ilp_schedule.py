@@ -104,9 +104,13 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
 
     init_ops = {op.target.name:op for op in init_op_list}
     for pnode in md.hgraph.cluster.parameter_nodes:
+        if pnode.mem< md.optimize_metrics["minor_param_size"]:
+            device = "cuda"
+        else:
+            device = "cpu"
         alloc = Parameter(pnode)
         if alloc.name not in init_ops:
-            init_op_list.append(PrepareOp(alloc, device="cuda"))
+            init_op_list.append(PrepareOp(alloc, device=device))
     op_sched = OpSchedule(
         op_list,
         loss_idx=op_list.index(loss_op),
