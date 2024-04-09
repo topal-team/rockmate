@@ -967,6 +967,15 @@ class Compiler:
                     del_mode=del_mode,
                 )
             )
+            if del_mode == "data":
+                for target in op.target.pnode.view_targets:
+                    op.add_fct(
+                    Fct_del(
+                        target_name=target,
+                        storage=self.storage,
+                        del_mode="data",
+                    )
+                )       
 
     def Offload(self, op: OffloadOp):
         target: Parameter = op.target
