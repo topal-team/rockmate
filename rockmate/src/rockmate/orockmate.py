@@ -173,7 +173,7 @@ class ORockmate(torch.nn.Module):
                 hilp_solver = True
         for solver in list_solvers:
             if isinstance(solver, HILP):
-                solver.config.protected_names += self.output_names
+                # solver.config.protected_names += self.output_names
                 if rotor_solver:
                     solver.config.nb_bdg_save = 10
                     solver.config.nb_bdg_peak = 10
@@ -241,20 +241,24 @@ class ORockmate(torch.nn.Module):
         
         self.compiler.compile_sched(self.op_sched)
 
-    def _exec(self, op:Op):
+    def _exec(self, op:Op, disable=False):
         try:
             if self.exec_with_record_mem:
                 torch.cuda.reset_peak_memory_stats()
                 self.mem_before = torch.cuda.memory_allocated()
                 self.max_before = torch.cuda.max_memory_allocated()
-                op()
+                if not disable:
+                    op()
                 torch.cuda.synchronize()
                 allo_mem = torch.cuda.memory_allocated() - self.mem_before
                 peak_mem = torch.cuda.max_memory_allocated() - self.max_before
                 self.max_mem.append(peak_mem - allo_mem)
                 self.allo_mem.append(allo_mem)
+                op.allo_mem = allo_mem
+                op.peak_mem = peak_mem - allo_mem
             else:
-                op()
+                if not disable:
+                    op()
         except Exception as e:
             print(f"Failed to execute {op}")
             raise e
@@ -274,10 +278,13 @@ class ORockmate(torch.nn.Module):
         with torch.enable_grad():
             exec(self.init_code, self.global_dict, self.compiler.storage.ld)
             for op in self.op_list[:self.op_sched.loss_idx+1]:
+                disable = False
                 if isinstance(op, OffloadOp) and isinstance(op.target, Parameter):
-                    if op.target.is_grad or op.target.is_optim_states:continue#first iteration without grad offload
-                if isinstance(op, OptimizeOp):continue#first iteration no need to optimize
-                self._exec(op)
+                    if op.target.is_grad or op.target.is_optim_states:
+                        disable = True#first iteration without grad offload
+                if isinstance(op, OptimizeOp):
+                    disable = True#first iteration no need to optimize
+                self._exec(op, disable=disable)
                 # torch.cuda.synchronize()
         
     def restore_exec(self, keep_grad=False):
@@ -388,10 +395,10 @@ class ORockmate(torch.nn.Module):
     def zero_grad(self, set_to_none=True, remain_for_offload=True):
         if remain_for_offload:
             remains = []
-            for k,v in self.op_sched.dict_alloc_param.items():
-                if v.is_grad and self.op_sched.alive_list[-1][k]:
-                # if v.is_grad and self.op_sched.init_alive_status[k]:
-                    remains.append(v.pnode.param_name)
+            # for k,v in self.op_sched.dict_alloc_param.items():
+            #     if v.is_grad and self.op_sched.alive_list[-1][k]:
+            #     # if v.is_grad and self.op_sched.init_alive_status[k]:
+            #         remains.append(v.pnode.param_name)
             for k,p in self.original_mod.named_parameters():
                 if k not in remains:
                     p.grad = None if set_to_none else torch.zeros_like(p)
@@ -541,7 +548,6 @@ def define_autograd_Function(RkMod: ORockmate):
         @staticmethod
         @torch.autograd.function.once_differentiable
         def backward(ctx, *grad_outs):
-            print("start backward")
             #  -> Reload the storage and out
             storage = ctx.RK_Storage
             RkMod.compiler.storage = storage
@@ -560,11 +566,11 @@ def define_autograd_Function(RkMod: ORockmate):
                 
             loss_idx = RkMod.op_sched.loss_idx
             #  * record_mem stuff *
-            if RkMod.exec_with_record_mem:
-                RkMod.output_size = tensor_memory_size(
-                    storage.ld[RkMod.output.main_target]
-                )
-                # TODO: record output grad if needed
+            # if RkMod.exec_with_record_mem:
+            #     RkMod.output_size = tensor_memory_size(
+            #         storage.ld[RkMod.output.main_target]
+            #     )
+            #     # TODO: record output grad if needed
 
             stop = RkMod.backward_stop
             if stop:
@@ -574,8 +580,8 @@ def define_autograd_Function(RkMod: ORockmate):
             else:
                 for op in RkMod.op_list[loss_idx+1:]:
                     RkMod._exec(op)
-                if RkMod.exec_with_record_mem and RkMod.backward_add_output_grad:
-                    RkMod.allo_mem[loss_idx] += RkMod.output_size
+                # if RkMod.exec_with_record_mem and RkMod.backward_add_output_grad:
+                #     RkMod.allo_mem[loss_idx] += RkMod.output_size
                 #  -> return grad of dummy input + inputs' which req grad (Rem 1)
                 grad_inputs = tuple(
                     RkMod.compiler.get_val(inp).grad
