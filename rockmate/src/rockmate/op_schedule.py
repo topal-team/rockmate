@@ -415,7 +415,7 @@ class OpSchedule:
         """
         self.get_occurrences()
         alive_list = self.create_alive_list()
-        self.alive_list = alive_list
+        # self.alive_list = alive_list
         self.get_memory(alive_list)
 
         self.mem = self.save_mem[self.loss_idx]

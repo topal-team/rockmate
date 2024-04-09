@@ -138,10 +138,12 @@ class AliveSimulator():
                                    dtype=bool)
         
         self.categories = {}
-        self.categories["activation"] = [alloc_name for alloc_name in self.alloc_names
-                                         if isinstance(self.dict_alloc[alloc_name], Activation)]
-        self.categories["parameter"] = [alloc_name for alloc_name in self.alloc_names
-                                        if isinstance(self.dict_alloc[alloc_name], Parameter)]
+        self.categories["activation"] = np.array([self.alloc_names.index(alloc_name) 
+                                                  for alloc_name in self.alloc_names
+                                                  if isinstance(self.dict_alloc[alloc_name], Activation)])
+        self.categories["parameter"] = np.array([self.alloc_names.index(alloc_name)
+                                                 for alloc_name in self.alloc_names
+                                                 if isinstance(self.dict_alloc[alloc_name], Parameter)])
         for k,v in alloc_categories.items():
             self.categories[k] = np.array([self.alloc_names.index(alloc_name) for alloc_name in v])
 
@@ -294,8 +296,9 @@ class Simulator:
                 used_idx = [i
                     for cnode in op.target.anode.users_real
                     for i in self.op_sched.occurrences[ComputeOp(cnode).name]
+                    if not "loss" in cnode.name
                     ]
-                if max(used_idx) < idx:continue
+                if not used_idx or max(used_idx) < idx:continue
                 next_used_i = min(i for i in used_idx if i >idx)
                 
                 for cnode in op.target.anode.deps:
