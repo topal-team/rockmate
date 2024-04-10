@@ -210,7 +210,7 @@ class ORockmate(torch.nn.Module):
             self.op_sched = list_solutions[
                 np.argmin([sum(op_sched.time) for op_sched in list_solutions])
             ]
-            self.op_list = self.op_sched.op_list
+            # self.op_list = self.op_sched.op_list
         self.list_solutions.extend(list_solutions)
 
     def get_compiled_fct(self, new_compiler=True):
@@ -360,6 +360,7 @@ class ORockmate(torch.nn.Module):
             )
 
             self.out_code = []
+            self.output_targets = []
             # for output_node in self.rkgb_res.simplified_graph.output_nodes:
             # for main_target, set_output_targets in self.rkgb_res.simplified_graph.dict_output_mt_to_targets_sent.items():
             for main_target in self.rkgb_res.forward_and_backward_graph.output_targets:
@@ -368,6 +369,7 @@ class ORockmate(torch.nn.Module):
                 code = make_str_list_assign(cnode.body_code)
                 for out_target in cnode.all_targets:
                     code = code.replace(out_target, f"out_{out_target}")
+                    self.output_targets.append(f"out_{out_target}")
                 
 
                 # for output_target in set_output_targets:
@@ -409,6 +411,10 @@ class ORockmate(torch.nn.Module):
     def minor_size(self):
         return (sum([pnode.mem for pnode in self.minor_param_nodes]) * 
                    (self.global_dict["optimize_metrics"]["optimizer_states_size"]+1))
+    
+    @property
+    def op_list(self):
+        return self.op_sched.op_list
 
     def inherits_original_mod_attributes_and_methods(self):
         for k, v in self.original_mod.__dict__.items():
@@ -559,6 +565,10 @@ def define_autograd_Function(RkMod: ORockmate):
                 out.grad = out_grad.data.as_strided_(out.shape, out.stride(), out.storage_offset())
                 # print(out_node.main_target, out.grad.mean)
                 out_grad.data = torch.empty(0)
+            
+            for target in RkMod.output_targets:
+                RkMod.compiler.storage.ld[target].data = torch.empty(0)
+                RkMod.compiler.storage.ld[target].grad = None
 
             # TODO: let users to decide from hyperparameter whether to keep the output
             # for out_node in RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes:
