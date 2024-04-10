@@ -163,24 +163,26 @@ def save_mem(rkmod):
         view_params += v.pnode.view_targets
     for k,v in rkmod.compiler.storage.ld.items():
         if isinstance(v, torch.optim.Optimizer):
-            print(k)
             for w, state in v.state.items():
                 for s in state.values():
                     if s.numel()>0 and "cuda" in str(s.device):
                         optim_size_all += s.numel()*s.element_size()
         if not isinstance(v,torch.Tensor):continue
-        if not "cuda" in str(v.device):continue
+        # if not "cuda" in str(v.device):continue
         # if v.grad is not None and ("cuda" in str(v.device) or "cuda" in str(v.grad.device)):
         #     print(k)
         if "__" not in k and "cuda" in str(v.device):
             # if v.numel()>0:print(k,v.numel()*v.element_size())
             param_size += v.numel()*v.element_size()
             if v.grad is not None:
-                print(k)
+                # print(k)
                 param_size += v.grad.numel()*v.element_size()
-        if "__" in k and k not in view_params and "___" not in k:
+        elif "__" in k and k not in view_params and "cuda" in str(v.device):# and "___" not in k:
             if v.numel()>0:print(k,v.numel()*v.element_size())
             act_size += v.numel()*v.element_size()
+
+        elif v.grad is not None and "cuda" in str(v.grad.device):
+            print(k, v.grad.numel())
             # if v.grad is not None:
             #     act_size += v.grad.numel()*v.element_size()
         
@@ -603,3 +605,12 @@ def print_sched(rkmod):
 
                     # if md.PrfEnd[i,j,e].value()>0:
                     #     print(f"\tPrefetch done of edge {e}")
+
+def alive_diff(rkmod, i):
+    for k,v in rkmod.op_sched.alive_list[i].items():
+        if rkmod.op_sched.alive_list[i-1][k]!=v:
+            print(k, v-rkmod.op_sched.alive_list[i-1][k])
+
+def save_mem_diff(rkmod, i):
+    return rkmod.op_sched.save_mem[i] - rkmod.op_sched.save_mem[i-1]
+    

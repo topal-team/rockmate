@@ -215,7 +215,8 @@ def exec(model,
     for i in range(niters):
         if print_mem:print(f"Mem before fwd {torch.cuda.memory_allocated()}")
         if zero_grad:model.zero_grad()
-        y = model(*sample, **kwargs)[0]
+        ys = model(*sample, **kwargs)
+        y = ys[0]
         assert y.requires_grad
         loss = Loss(y)
         if print_mem:print(f"Mem after fwd {torch.cuda.memory_allocated()}")
@@ -226,9 +227,10 @@ def exec(model,
         # if optimize_fct:optimize_fct()
         # for s in sample:
         #     s.grad = None
-        y.data = torch.empty(0)
-        y.grad = None
-        del y
+        for _y in ys:
+            _y.data = torch.empty(0)
+            _y.grad = None
+            del _y
         torch.cuda.empty_cache()
     timer.end()
     return timer.elapsed()
