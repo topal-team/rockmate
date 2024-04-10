@@ -406,7 +406,7 @@ class SimplifiedGraph(base.Graph):
                 for out in forward_graph.output_targets]
             self.clear()
             self.simplify_lists_and_tuples()
-            self.optional_simplify_cheap_operations()
+            # self.optional_simplify_cheap_operations()
             self.simplify_sizes()
             self.simplify_view()
 
