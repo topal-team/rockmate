@@ -396,7 +396,7 @@ def group(md, w, tol=1):
         i = md.active_steps.index((t,k))+1# TODO: distribute cpu optimization based on time
         p_alloc = Parameter(parameters[p])
         op = OptimizeOp(list_params=[p], cpu=True, alloc=p_alloc,
-                        time=parameters[p].mem/md.cpu_optimize_speed,
+                        time=parameters[p].mem/md.cpu_optimize_speed/md.gcd,
                         )
         opt_ops.append((*md.active_steps[i], op))
         md.cpu_optimized_steps[md.active_steps[i]].append(p)
@@ -406,7 +406,7 @@ def group(md, w, tol=1):
     def apply_gpu_optimize(p):
         p_alloc = Parameter(parameters[p])
         op = OptimizeOp(list_params=[p], alloc=p_alloc,
-                        time = parameters[p].mem/md.gpu_optimize_speed,
+                        time = parameters[p].mem/md.gpu_optimize_speed/md.gcd,
                         overhead=parameters[p].mem*md.optimizer_overhead_factor)
         opt_ops.append((bwd_i, bwd_i, op))# optimize after bwd
         del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p], is_grad=True))))

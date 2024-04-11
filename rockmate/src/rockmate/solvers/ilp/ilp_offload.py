@@ -446,7 +446,7 @@ class ModelPULPOffload(ModelPULP):
             for w in self.hcn2param[k]:
                 opt_fraction = self.fraction_instant_updated_param(w)
                 mem += self.parameter_gradient_size[w] * opt_fraction
-            return mem/self.cpu_optimize_speed
+            return mem/self.gpu_optimize_speed
 
     def time_step_compute(self,t, k):
         return lpSum(self.Comp[t, k, o] * self.time[k][o] for o in range(self.nComp[k]))
