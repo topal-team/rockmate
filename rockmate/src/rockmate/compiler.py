@@ -316,6 +316,9 @@ class Fct_optimize(RK_Fct):
         self.del_grad_list = del_grad_list
 
     def __call__(self):
+        # if "cpu" in self.target_name:
+        #     torch.cuda.synchronize()
+            # return None
         self.storage.ld[self.target_name].step()
         # for p in self.del_grad_list:
         #     self.storage.ld[p].grad.zero_()
@@ -347,6 +350,8 @@ class Fct_mem_alloc(RK_Fct):
         else:
             self.device = device
         self.kwargs = kwargs
+        if self.device == torch.device("cpu"):
+            self.kwargs["pin_memory"] = True
         self.shape_name = target_name if shape is None else shape
 
         self.dtype = dtype
@@ -426,14 +431,17 @@ class Fct_offload(RK_Fct):
     def offload_optim_states(self):
         for k, v in self.storage.ld[f"Optimize_({self.target_name})"].state.items():
             self.storage.ld[f"exp_avg_{self.target_name}"].copy_(
-                v["exp_avg"], non_blocking=True
+                v["exp_avg"], 
+                non_blocking=True
             )
             self.storage.ld[f"exp_avg_sq_{self.target_name}"].copy_(
-                v["exp_avg_sq"], non_blocking=True
+                v["exp_avg_sq"], 
+                non_blocking=True
             )
 
     def __call__(self):
         with torch.cuda.stream(self.storage.gd[self.stream]):
+            pass
             self.offload_fct[self.offload_mode]()
 
 
@@ -494,9 +502,9 @@ class Fct_prefetch(RK_Fct):
     def __call__(self):
         with torch.cuda.stream(self.storage.gd[self.stream]):
             self.prefetch_fct[self.prefetch_mode]()
-            torch.cuda.synchronize()
+            # torch.cuda.synchronize()
             # with torch.cuda.stream(self.storage.gd["main_stream"]):
-            self.post_process[self.prefetch_mode]()
+            # self.post_process[self.prefetch_mode]()
 
 
 class Fct_synchronize(RK_Fct):

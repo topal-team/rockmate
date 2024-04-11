@@ -378,6 +378,7 @@ class OpSchedule:
         if refine_optimize:
             simulator.refine_optimize()
         self.op_list = simulator.op_list
+        self.steps = simulator.steps
         self.loss_idx = simulator.loss_idx
         self.get_sched_info()
 
