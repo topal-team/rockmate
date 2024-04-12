@@ -558,7 +558,7 @@ class Fct_to_storage(RK_Fct):
             self.storage.gd["self"]
         )
         self.storage.ld[self.target_name].data = self.storage.ld[
-            self.target_name
+            self.pnode.param_name
         ].data.to(self.device)
 
 
