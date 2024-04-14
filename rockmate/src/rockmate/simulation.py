@@ -283,7 +283,16 @@ class Simulator:
             op_list += step.op_list
         self.op_list = op_list
         self.loss_idx = self.op_list.index(self.loss_op)
+        self.get_occurrences()
         
+    def get_occurrences(self):
+        self.occurrences = dict()
+        for i, op in enumerate(self.op_list):
+            if op.name in self.occurrences:
+                self.occurrences[op.name].append(i)
+            else:
+                self.occurrences[op.name] = [i]
+
     def refine(self):
         """
         Disable deletion to avoid infeasible operations in the list.
@@ -295,7 +304,7 @@ class Simulator:
             if isinstance(op, DeleteOp) and isinstance(op.target, Activation):
                 used_idx = [i
                     for cnode in op.target.anode.users_real
-                    for i in self.op_sched.occurrences[ComputeOp(cnode).name]
+                    for i in self.occurrences[ComputeOp(cnode).name]
                     if not "loss" in cnode.name
                     ]
                 if not used_idx or max(used_idx) < idx:continue
