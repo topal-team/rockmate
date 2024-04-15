@@ -10,7 +10,7 @@ import warnings
 import gc
 import rkgb
 from rkgb.lowlevel.preprocess_samples import ExampleInputs
-from rkgb.lowlevel.measure import tensor_memory_size
+from rkgb.lowlevel.measure import tensor_memory_size, TimerCUDA
 from rkgb.lowlevel.constants import ref_verbose, ExceptionModuleDoesNotReqGrad
 from rkgb.lowlevel.ast_add_on import ast_to_str, make_str_list_assign
 from rkgb.core.partitioned import PartitionerBottomToTop, PartitionerSequence, Partitioner
@@ -22,6 +22,8 @@ from .solvers import HILP
 from .solvers.hilp import default_time_limit
 from .compiler import Compiler, RK_Storage, make_gd
 import psutil
+
+timer = TimerCUDA(torch.device("cuda"))
 
 class ORockmate(torch.nn.Module):
     compiler = None
@@ -171,6 +173,8 @@ class ORockmate(torch.nn.Module):
             if isinstance(solver, HILP):
                 # TODO: if no partitioning is allowed, update solver max nodes
                 hilp_solver = True
+                solver.config.time_limit_top = self.ilp_time_limit_top
+                solver.config.optimize_metrics = self.global_dict["optimize_metrics"]
         for solver in list_solvers:
             if isinstance(solver, HILP):
                 # solver.config.protected_names += self.output_names
@@ -192,8 +196,6 @@ class ORockmate(torch.nn.Module):
         for solver in list_solvers:
             if isinstance(solver, HILP):
                 solver.config.solve_top_level = True
-                solver.config.time_limit_top = self.ilp_time_limit_top
-                solver.config.optimize_metrics = self.global_dict["optimize_metrics"]
                 # print("temporarily changing total_nodes for top level hilp")
                 list_solutions.extend(
                     solver(self.rkgb_res.hierarchical_cluster, [budget], accurate_mem=True)
@@ -262,6 +264,13 @@ class ORockmate(torch.nn.Module):
         except Exception as e:
             print(f"Failed to execute {op}")
             raise e
+        
+    def exec_step(self, step):
+        timer.start()
+        for op in step.op_list:
+            self._exec(op)
+        timer.end()
+        self.step_time.append(timer.elapsed())
             
     def init_fwd_exec(self):
         # TODO: rename to first forward; also do the first backward differently incase grad not exist
@@ -323,6 +332,7 @@ class ORockmate(torch.nn.Module):
         self.exec_with_record_mem = record_mem
         self.max_mem = []
         self.allo_mem = []
+        self.step_time = []
         if not self.training:
             self.original_mod.eval()
             return self.original_mod(*args, **kwargs)
@@ -402,8 +412,9 @@ class ORockmate(torch.nn.Module):
             #     # if v.is_grad and self.op_sched.init_alive_status[k]:
             #         remains.append(v.pnode.param_name)
             for k,p in self.original_mod.named_parameters():
-                if k not in remains:
-                    p.grad = None if set_to_none else torch.zeros_like(p)
+                if k not in remains and p.grad is not None:
+                    # p.grad = None if set_to_none else torch.zeros_like(p)
+                    p.grad.zero_()
         else:
             self.original_mod.zero_grad(set_to_none=set_to_none)
 
@@ -472,8 +483,10 @@ def define_autograd_Function(RkMod: ORockmate):
                 
                 with torch.enable_grad():
                     exec(RkMod.init_code, RkMod.global_dict, storage.ld)  # is compiler.global_dict
-                    for op in RkMod.op_list[:RkMod.op_sched.loss_idx]:
-                        RkMod._exec(op)
+                    # for op in RkMod.op_list[:RkMod.op_sched.loss_idx]:
+                    #     RkMod._exec(op)
+                    for step in RkMod.op_sched.steps[:RkMod.op_sched.loss_step]:
+                        RkMod.exec_step(step)
             else:
                 # *** INITIALIZATION PART ***
                 #  -> Get the inputs using the buffer (Rem 1)
@@ -481,7 +494,7 @@ def define_autograd_Function(RkMod: ORockmate):
                 RkMod.dict_inputs_buffer = None
                 
                 #  -> Create the RK_Storage for this run, and store it in ctx
-                ctx.RK_Storage = storage = RK_Storage()
+                ctx.RK_Storage = storage = RkMod.compiler.storage
                 storage.init(RkMod.global_dict)
                 RkMod.compiler.storage = storage
                 
@@ -500,7 +513,6 @@ def define_autograd_Function(RkMod: ORockmate):
                     #  TODO elif iterables of Tensors ?
                     else:
                         storage.ld[k] = v
-                
 
                 torch.cuda.synchronize()
                 with torch.enable_grad():
@@ -555,8 +567,8 @@ def define_autograd_Function(RkMod: ORockmate):
         @torch.autograd.function.once_differentiable
         def backward(ctx, *grad_outs):
             #  -> Reload the storage and out
-            storage = ctx.RK_Storage
-            RkMod.compiler.storage = storage
+            # storage = ctx.RK_Storage
+            # RkMod.compiler.storage = storage
             # -> Put grad_out in out.grad (Rem 4)
             for out_node, out_grad in zip(
                 RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes,
@@ -584,12 +596,14 @@ def define_autograd_Function(RkMod: ORockmate):
 
             stop = RkMod.backward_stop
             if stop:
-                for op in RkMod.op_list[loss_idx+1:loss_idx+stop+1]:
+                for i, op in enumerate(RkMod.op_list[loss_idx+1:loss_idx+stop+1]):
                     with torch.enable_grad():
                         RkMod._exec(op)
             else:
-                for op in RkMod.op_list[loss_idx+1:]:
-                    RkMod._exec(op)
+                # for op in RkMod.op_list[loss_idx+1:]:
+                #     RkMod._exec(op)
+                for step in RkMod.op_sched.steps[RkMod.op_sched.loss_step:]:
+                    RkMod.exec_step(step)
                 # if RkMod.exec_with_record_mem and RkMod.backward_add_output_grad:
                 #     RkMod.allo_mem[loss_idx] += RkMod.output_size
                 #  -> return grad of dummy input + inputs' which req grad (Rem 1)
