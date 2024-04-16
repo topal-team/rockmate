@@ -562,6 +562,12 @@ class Fct_to_storage(RK_Fct):
         self.storage.ld[self.pnode.param_name] = self.pnode.get_value(
             self.storage.gd["self"]
         )
+        
+        x = torch.empty_like(self.storage.ld[self.pnode.param_name], pin_memory=True)
+        x.copy_(self.storage.ld[self.pnode.param_name])
+        self.storage.ld[f"cpu_{self.pnode.param_name}"]  = torch.nn.Parameter(x)
+        
+        self.storage.ld[self.pnode.param_name].data = torch.empty(0)
         # self.storage.ld[self.target_name].data = self.storage.ld[
         #     self.pnode.param_name
         # ].data.to(self.device)
@@ -1043,15 +1049,15 @@ class Compiler:
         op.add_fct(Fct_get_shape(pnode.param_name, pnode=pnode, storage=self.storage))
 
         # if op.cpu_placeholder:
-        op.add_fct(
-                Fct_mem_alloc(
-                    f"cpu_{pnode.param_name}",
-                    storage=self.storage,
-                    alloc_mode="tensor",
-                    device=torch.device("cpu"),
-                    pin_memory=True,
-                )
-            )
+        # op.add_fct(
+        #         Fct_mem_alloc(
+        #             f"cpu_{pnode.param_name}",
+        #             storage=self.storage,
+        #             alloc_mode="tensor",
+        #             device=torch.device("cpu"),
+        #             pin_memory=True,
+        #         )
+        #     )
 
         op.add_fct(
                 Fct_to_storage(
@@ -1064,12 +1070,12 @@ class Compiler:
         
         # op.add_fct(Fct_RNG_state(pnode.param_name, storage=self.storage))
         
-        op.add_fct(
-            Fct_offload(pnode.param_name, storage=self.storage, pin_memory=True)
-        )
-        # else:
+        # op.add_fct(
+        #     Fct_offload(pnode.param_name, storage=self.storage, pin_memory=True)
+        # )
         if on_cpu:
-            op.add_fct(Fct_del(pnode.param_name, storage=self.storage))
+            pass
+            # op.add_fct(Fct_del(pnode.param_name, storage=self.storage))
         else:
             op.add_fct(Fct_mem_alloc(pnode.param_name, storage=self.storage))
             op.add_fct(Fct_prefetch(op.target, storage=self.storage))
