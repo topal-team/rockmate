@@ -102,6 +102,8 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
     for anode in md.hgraph.cluster.interfaces["input_data_anodes"]:
         init_alive_status[anode.name] = True  # anode share the name as alloc
 
+    op_name_list = [op.name for op in op_list]
+
     init_ops = {op.target.name:op for op in init_op_list}
     for pnode in md.hgraph.cluster.parameter_nodes:
         if pnode.mem< md.optimize_metrics["minor_param_size"]:
@@ -110,7 +112,9 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
             device = "cpu"
         alloc = Parameter(pnode)
         if alloc.name not in init_ops:
-            init_op_list.append(PrepareOp(alloc, device=device))
+            init_op_list.append(PrepareOp(alloc, device=device, 
+                                          cpu_grad=OffloadOp(Parameter(pnode, is_grad=True)).name in op_name_list))
+
     op_sched = OpSchedule(
         op_list,
         loss_idx=op_list.index(loss_op),

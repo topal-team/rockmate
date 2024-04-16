@@ -1085,7 +1085,7 @@ class Compiler:
                 )
             )
 
-        if pnode.requires_grad:#TODO: check if need cpu_grad placeholder
+        if op.cpu_grad:
             op.add_fct(
                 Fct_mem_alloc(
                     f"cpu_{pnode.param_name}",
