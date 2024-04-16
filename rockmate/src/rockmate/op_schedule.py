@@ -262,7 +262,11 @@ class OffloadOp(Op):
         # self.grad = grad
         # self.is_optim_states = is_optim_states
         self._time = time
-        self.op_type = f"Offload_{alloc.alloc_type}"
+        self.op_type = f"Offload"
+
+    @property
+    def target_name(self):
+        return self.target.name
 
 class PrefetchOp(Op):
     def __init__(
@@ -279,7 +283,7 @@ class PrefetchOp(Op):
         self.disabled = disabled
         # self.is_optim_states = is_optim_states
         self._time = time
-        self.op_type = f"Prefetch_{alloc.alloc_type}"
+        self.op_type = f"Prefetch"
     
 class OptimizeOp(Op):
     def __init__(self, 
@@ -314,6 +318,7 @@ class PrepareOp(Op):
         alloc: Allocation,
         device: str= "cpu",
         cpu_placeholder = True,
+        cpu_grad=False,
         disabled: bool = False,
     ):
         super().__init__(alloc.name, disabled=disabled)
@@ -322,6 +327,7 @@ class PrepareOp(Op):
         self.cpu_placeholder = cpu_placeholder
         self.disabled = disabled
         self.op_type = f"Prepare_{alloc.alloc_type}"
+        self.cpu_grad = cpu_grad
 
 class OpSchedule:
     solver = None
