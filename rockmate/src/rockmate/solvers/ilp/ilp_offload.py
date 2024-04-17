@@ -32,6 +32,21 @@ class ModelPULPOffload(ModelPULP):
                                         + self.time_step_optimize_self(t, k, cpu=True))
 
 
+    def add_offload_activation_variables(self):
+        """
+        We assume single forward/backward mode for ILP, thus only
+        one possible source/user for phantom activations.
+        """
+        phantom_idx = [(t, k, j) 
+                for t in range(self.T) 
+                for k in self.krange(t)
+                for j in range(self.J)]
+        # at step (t,k), removal of phantom of the j-th node.
+        # self.RemovalP = RkLpVariable.dicts("RemovalP", phantom_idx)
+        self.OflP = RkLpVariable.dicts("OflP", phantom_idx, lowBound=0, upBound=None)
+        self.PrfP = RkLpVariable.dicts("PrfP", phantom_idx, lowBound=0, upBound=None)
+        # pass
+
     def add_offload_param_variables(self,):
         optimize_metrics = self.optimize_metrics
 
@@ -116,7 +131,16 @@ class ModelPULPOffload(ModelPULP):
                 + self.param_grad_mem[t,k]
                 + self.optimizer_states_mem(t,k)
                 + (1-self.req_w)*self.peak_budget*with_multiplier
-                )
+                
+            - self.removal_phantom_mem(t, k))
+
+    def removal_phantom_mem(self, t, k):
+        if not self.activation_offload:
+            return 0
+        mem = 0
+        for j in range(self.J):
+            mem += (self.OflPProg[t,k,j] -self.PrfPProg[t,k,j])
+        return mem
 
     def parameter_mem(self,t, k):
         parameter_mem = lpSum(
@@ -323,6 +347,47 @@ class ModelPULPOffload(ModelPULP):
                         continue
                     self.md += self.sumComp[t, k] -1 <= self.AliveW[t, k, w] - self.req_w
 
+    def add_offload_activation_constraints(self):
+        self.PrfPProg = dict()
+        self.OflPProg = dict()
+        
+        def get_progress_phantom(op, t, k, j):
+            fwd_i = min(self.sub_c2hcn[j])
+            bwd_i = max(self.sub_c2hcn[j])
+
+            if bwd_i < t or fwd_i>t:  # after bwd of w
+                return 0
+
+            progress = (lpSum(
+                op[t, kk, j] for kk in self.krange(t) if kk < k
+            ) + lpSum(
+                op[tt, kk, j]
+                for tt in range(fwd_i+1, t)
+                for kk in self.krange(tt)
+            )
+            + lpSum(
+                op[fwd_i, kk, j]
+                for kk in self.krange(fwd_i) if kk>= fwd_i
+            ))
+
+            return progress
+        
+        for j in range(self.J):
+            fwd_i = min(self.sub_c2hcn[j])
+            bwd_i = max(self.sub_c2hcn[j])
+            saved_mem = lpSum(self.saved_mem[j][o]*self.Comp[fwd_i, fwd_i, o] 
+                            for o in range(self.nSched[j]))
+            for t in range(fwd_i, bwd_i+1):
+                for k in self.krange(t):
+                    self.PrfPProg[t,k,j] = get_progress_phantom(self.PrfP, t, k, j)
+                    self.OflPProg[t,k,j] = get_progress_phantom(self.OflP, t, k, j)
+
+                    # removal cannot be higher than phantom created during fwd
+                    self.md += (self.OflPProg[t,k,j] <= saved_mem)
+                
+            self.md += (self.PrfPProg[bwd_i, bwd_i, j] == self.OflPProg[bwd_i, bwd_i, j])
+
+
     def add_offload_objective(self,bandwidth_cost=0.01):
         prf_cost = (
             bandwidth_cost
@@ -386,7 +451,10 @@ class ModelPULPOffload(ModelPULP):
             mem += self.parameter_size[w] * self.OflW[t, k, w]
             optim_state = self.optimizer_states_factor * self.OflO[t,k,w]
             mem += self.parameter_gradient_size[w] * (self.OflG[t, k, w] + optim_state)
-        return mem/self.bandwidthOfl
+        if self.activation_offload:
+            for j in range(self.J):
+                mem += self.OflP[t, k, j]    
+                return mem/self.bandwidthOfl
 
     def time_step_offload_self(self,t, k):
         mem = 0
@@ -403,6 +471,9 @@ class ModelPULPOffload(ModelPULP):
             mem += self.parameter_size[w] * self.PrfW[t, k, w]
             optim_state = self.optimizer_states_factor * self.PrfO[t,k,w]
             mem += self.parameter_gradient_size[w] * (self.PrfG[t, k, w] + optim_state)
+        if self.activation_offload:
+            for j in range(self.J):
+                mem += self.PrfP[t, k, j]
             
         return mem/self.bandwidthPrf
 
