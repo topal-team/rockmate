@@ -454,7 +454,7 @@ class ModelPULPOffload(ModelPULP):
         if self.activation_offload:
             for j in range(self.J):
                 mem += self.OflP[t, k, j]    
-                return mem/self.bandwidthOfl
+        return mem/self.bandwidthOfl
 
     def time_step_offload_self(self,t, k):
         mem = 0
