@@ -34,11 +34,6 @@ class ModelPULP:
         gcd=None,
         accurate_mem=False,
         protected_names=[],
-        grouping=True,
-        grad_mode="free", #["free", "accumulate"]
-        optimize_metrics = None,
-        activation_offload = False,
-        batch_multiplier = 1
     ):
         self.gcd = gcd if gcd else 1024**2
         self.peak_budget = peak_budget / self.gcd
@@ -50,24 +45,17 @@ class ModelPULP:
         self.ilp_solver_params = ilp_solver_params
         self.feasible = None
         self.solve_time = None
-        self.optimize_metrics = optimize_metrics
+        self.single_fwd = False
+        self.single_bwd = False
         self.protected_names = protected_names
         self.hgraph = hgraph
         self.md = LpProblem(f"rockmateMILP", LpMinimize)
+        self.correction_term = accurate_mem
 
-        self.with_offload = False
-        self.with_grad = accurate_mem
-        self.with_optimizer_states = accurate_mem#optimizer states will be offloaded
-        self.gradient_accumulation = 0# if 0, no gradient/optimizer states alive from previous iters
-        self.single_fwd = accurate_mem
-        self.single_bwd = accurate_mem
-        self.grouping = grouping
-        self.grad_mode = grad_mode
-        self.activation_offload = activation_offload
         self.config()
         
     def build(self):
-        # OVERWRITTING METHOD
+        # OVERWRITTING METHOD IN OFFLOAD
         self.add_variables()
         self.add_constraints()
         self.add_objective()
@@ -193,13 +181,6 @@ class ModelPULP:
         elif self.single_bwd and t > self.loss_idx:
             return list(range(self.loss_idx)) + [t]
         return list(range(t + 1))
-        # return range(self.T)
-
-    def crange(self, t):
-        """
-        Concerning range for computation
-        """
-        return self.krange(t)
 
     def next_idx(self, t, i, upper_triangle=False):
         # if upper_triangle, consider the case when i>t
@@ -211,7 +192,6 @@ class ModelPULP:
                 t_ = 0
                 i_ = 0
         else:
-            # end = self.T - 1 if upper_triangle else t
             end = max(self.krange(t))
             if i < end:
                 t_ = t
@@ -606,7 +586,7 @@ class ModelPULP:
                     )
 
     def save_mem(self, t, k):
-        # OVERWRITTING IN OFFLOAD
+        # OVERWRITTING METHOD IN OFFLOAD
         return self.U[t, k]
 
     def add_memory_constrains(self):
@@ -616,12 +596,11 @@ class ModelPULP:
         
         for t in range(self.T):
             for k in self.krange(t):
-                parameter_mem = 0#self.all_param_mem(t, k)
                 j = self.hcn2sub_c[k]
                 self.md += self.save_mem(t,k) >= 0
-                self.md += self.save_mem(t,k) <= (self.peak_budget - parameter_mem)
-                # if j is None or not accurate_mem:
-                if True:
+                self.md += self.save_mem(t,k) <= (self.peak_budget)
+                if j is None or not self.correction_term:
+                # if True:
                     # don't consider correction_term
                     self.md += (
                         self.save_mem(t,k)
@@ -634,7 +613,7 @@ class ModelPULP:
                             for eidx_d, (k_, i_) in enumerate(self.delete_list)
                             if k == k_
                         )
-                        <= self.peak_budget - parameter_mem
+                        <= self.peak_budget
                     )
                 else:
                     hcn = self.hgraph.list_HCNs[k]
@@ -685,7 +664,7 @@ class ModelPULP:
                                     for eidx_d, (k_, i_) in enumerate(self.delete_list)
                                     if k == k_
                                 )
-                                <= self.peak_budget - parameter_mem
+                                <= self.peak_budget
                             )
                         if not (
                             op_sched.fwd_overhead_correction
@@ -700,7 +679,7 @@ class ModelPULP:
                                     for eidx_d, (k_, i_) in enumerate(self.delete_list)
                                     if k == k_
                                 )
-                                <= self.peak_budget - parameter_mem
+                                <= self.peak_budget
                             )
     
     def add_abar_constraint(self, save_budget):
