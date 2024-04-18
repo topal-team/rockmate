@@ -8,11 +8,15 @@ from .ilp_model import ModelPULP
 class ModelPULPOffload(ModelPULP):
     def __init__(self, hgraph: HierarchicalGraph, peak_budget: int, save_budget=None, ilp_solver_params: Dict[str, Any] = ..., gcd=None, accurate_mem=False, protected_names=..., grouping=True, grad_mode="free", optimize_metrics=None, activation_offload=False, batch_multiplier=1):
         super().__init__(hgraph, peak_budget, save_budget, ilp_solver_params, gcd, accurate_mem, protected_names, grouping, grad_mode, optimize_metrics, activation_offload, batch_multiplier)
+        self.activation_offload = activation_offload
 
     def build(self):
         # OVERWRITTING METHOD
         super().add_variables()
         self.add_offload_param_variables()
+        if self.activation_offload:
+            self.add_offload_activation_variables()
+            self.add_offload_activation_constraints()
         super().add_constraints()
         self.add_offload_param_constraints()
         # super().add_objective()
@@ -377,13 +381,17 @@ class ModelPULPOffload(ModelPULP):
             bwd_i = max(self.sub_c2hcn[j])
             saved_mem = lpSum(self.saved_mem[j][o]*self.Comp[fwd_i, fwd_i, o] 
                             for o in range(self.nSched[j]))
-            for t in range(fwd_i, bwd_i+1):
+            for t in range(self.T):
                 for k in self.krange(t):
-                    self.PrfPProg[t,k,j] = get_progress_phantom(self.PrfP, t, k, j)
-                    self.OflPProg[t,k,j] = get_progress_phantom(self.OflP, t, k, j)
+                    if t >=fwd_i and t<= bwd_i:
+                        self.PrfPProg[t,k,j] = get_progress_phantom(self.PrfP, t, k, j)
+                        self.OflPProg[t,k,j] = get_progress_phantom(self.OflP, t, k, j)
 
-                    # removal cannot be higher than phantom created during fwd
-                    self.md += (self.OflPProg[t,k,j] <= saved_mem)
+                        # removal cannot be higher than phantom created during fwd
+                        self.md += (self.OflPProg[t,k,j] <= saved_mem)
+                    else:
+                        self.PrfPProg[t,k,j] = 0
+                        self.OflPProg[t,k,j] = 0
                 
             self.md += (self.PrfPProg[bwd_i, bwd_i, j] == self.OflPProg[bwd_i, bwd_i, j])
 
