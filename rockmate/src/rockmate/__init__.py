@@ -1,10 +1,6 @@
 __all__ = ["solvers", 
-        #    "Rockmate", 
-        #    "HRockmate",
-           "ORockmate"
+           "Rockmate"
            ]
 
-# from .rockmate import Rockmate
-# from .hrockmate import HRockmate
-from .orockmate import ORockmate
+from .rockmate import Rockmate
 from . import solvers
