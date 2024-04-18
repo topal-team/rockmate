@@ -471,6 +471,90 @@ class OpSchedule:
                             # self.dep_interfaces_data.add(self.list_anodes.index(self_anode))
                             self.dep_interfaces_data.add(self_anode)
 
+        self.fwd_overhead_correction = []
+        self.bwd_overhead_correction = []
+        if self.correct_overhead:
+            self.add_correction_term(alive_list)
+
+    def add_correction_term(self, alive_list):
+        interfaces_status = []
+        for anode in self.interfaces["input_data_anodes"]:  # Input of Fwd
+            interfaces_status.append((anode.name, self.loss_idx))  # After fwd
+            if self.list_anodes.index(anode) in self.dep_interfaces_data:
+                interfaces_status.append((anode.name, len(self.op_list)))  # After Bwd
+        for anode in self.interfaces["output_data_anodes"]:  # Output of Fwd
+            interfaces_status.append((anode.name, 0))  # Before fwd?
+            if self.list_anodes.index(anode) in self.dep_interfaces_data:
+                interfaces_status.append((anode.name, len(self.op_list)))  # After Bwd
+            else:
+                interfaces_status.append((anode.name, -1))  # After Bwd
+
+        for anode in self.interfaces["output_grad_anodes"]:
+            interfaces_status.append((anode.name, len(self.op_list)))  # After Bwd
+        for anode in self.interfaces["input_grad_anodes"]:
+            interfaces_status.append((anode.name, self.loss_idx + 1))  # Before Bwd
+        self.interfaces_status = interfaces_status
+        for i, (op, alive_status) in enumerate(zip(self.op_list, alive_list)):
+            if i == self.loss_idx:
+                continue
+            correction_term = {
+                "save": self.save_mem[i],
+                "overhead": self.overhead[i],
+            }
+            for anode_name, index in interfaces_status:
+                anode = self.dict_alloc[anode_name].anode
+                if index == -1:
+                    # special case: output_data in BWD without dependency
+                    # If outside is alive, no need to correct;
+                    # Otherwise, add anode to memory
+                    if i > self.loss_idx and alive_status[anode_name] > 0:
+                        correction_term["save"] += anode.mem
+                        correction_term[(self.list_anodes.index(anode), False)] = -anode.mem
+                    continue
+
+                if (
+                    alive_status[anode_name] > 0
+                    or (index > self.loss_idx) != (i > self.loss_idx)
+                    # or not anode_name
+                ):
+                    # interfaces_status is useful when:
+                    # 1. anode is not alive
+                    # 2. Fwd to Fwd, Bwd to Bwd
+                    continue
+
+                if i >= index:  # if exist before
+                    if (  # and not deleted in between
+                        # anode_name not in self.op_name_list[index : i + 1]
+                        self.is_occurred(DeleteOp(anode).name, index, i)
+                    ):
+                        correction_term[(self.list_anodes.index(anode), True)] = -anode.mem
+                    else:
+                        correction_term[(self.list_anodes.index(anode), "always")] = -anode.mem
+                else:  # if exist afterwards
+                    if not (anode in self.interfaces["output_data_anodes"]) and (
+                        anode.deps
+                        # and (list(anode.deps)[0].name in self.op_name_list[i : index + 1])
+                        and self.is_occurred(ComputeOp(list(anode.deps)[0]).name, i, index)
+                    ):  # and not generated in between
+                        # check if output_data is created after i
+                        correction_term[(self.list_anodes.index(anode), False)] = -anode.mem
+                    elif anode in self.interfaces["input_data_anodes"]:
+                        correction_term[(self.list_anodes.index(anode), False)] = -anode.mem
+                    else:
+                        correction_term[(self.list_anodes.index(anode), "always")] = -anode.mem
+
+            if (
+                i < self.loss_idx
+                and correction_term not in self.fwd_overhead_correction
+            ):
+                self.fwd_overhead_correction.append(correction_term)
+            elif (
+                i > self.loss_idx
+                and correction_term not in self.bwd_overhead_correction
+            ):
+                self.bwd_overhead_correction.append(correction_term)
+
+
 
     def create_list_alloc(self, cluster: HierarchicalCluster):
         self.all_interfaces = [
@@ -533,7 +617,6 @@ class OpSchedule:
         """
         Prepare positional information of each operation for compiling.
         """
-        print("add pos info")
         if not hasattr(self, "alive_list"):
             self.alive_list = self.create_alive_list()
         for index, op in enumerate(self.op_list):

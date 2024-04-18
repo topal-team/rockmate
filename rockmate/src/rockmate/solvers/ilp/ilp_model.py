@@ -637,7 +637,8 @@ class ModelPULP:
                                 i_ = [
                                     han.anode.name for han in self.hgraph.list_HANs
                                 ].index(
-                                    self.sub_clusters[j]
+                                    # self.sub_clusters[j]
+                                    op_sched.cluster
                                     .list_anodes[inter_position[0]]
                                     .name
                                 )
