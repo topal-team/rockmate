@@ -15,6 +15,7 @@ from ...op_schedule import (
     SynchronizeOp,
     OptimizeOp,
     PrepareOp,
+    ExecCodeOp,
     OpSchedule,
 )
 from ..main import get_sched, add_sched, translate
@@ -89,9 +90,23 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
             init_op_list,
             restore_op_list,
         ) = schedule_offload(md, hgraph)
+        op_name_list = [op.name for op in op_list]
+
+        init_ops = {op.target.name:op for op in init_op_list}
+        for pnode in md.hgraph.cluster.parameter_nodes:
+            if pnode.mem< md.optimize_metrics["minor_param_size"]:
+                device = "cuda"
+            else:
+                device = "cpu"
+            alloc = Parameter(pnode)
+            if alloc.name not in init_ops:
+                init_op_list.append(PrepareOp(alloc, device=device, 
+                                            cpu_grad=OffloadOp(Parameter(pnode, is_grad=True)).name in op_name_list))
+
     else:
         op_list = []
-        
+        for pnode in md.hgraph.cluster.parameter_nodes:
+            op_list.append(ExecCodeOp(pnode.param_name, pnode.get_code()))
         for t in range(md.T):
             for k in md.krange(t):
                 if t == md.loss_idx and k == md.loss_idx:
@@ -102,19 +117,7 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
     for anode in md.hgraph.cluster.interfaces["input_data_anodes"]:
         init_alive_status[anode.name] = True  # anode share the name as alloc
 
-    op_name_list = [op.name for op in op_list]
-
-    init_ops = {op.target.name:op for op in init_op_list}
-    for pnode in md.hgraph.cluster.parameter_nodes:
-        if pnode.mem< md.optimize_metrics["minor_param_size"]:
-            device = "cuda"
-        else:
-            device = "cpu"
-        alloc = Parameter(pnode)
-        if alloc.name not in init_ops:
-            init_op_list.append(PrepareOp(alloc, device=device, 
-                                          cpu_grad=OffloadOp(Parameter(pnode, is_grad=True)).name in op_name_list))
-
+    
     op_sched = OpSchedule(
         op_list,
         loss_idx=op_list.index(loss_op),
@@ -123,7 +126,7 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
         init_op_list=init_op_list,
         restore_op_list=restore_op_list,
         with_parameters=isinstance(md, ModelPULPOffload),
-        optim_states_multiplier = md.optimize_metrics["optimizer_states_size"]
+        optim_states_multiplier = md.optimize_metrics["optimizer_states_size"] if isinstance(md, ModelPULPOffload) else None
     )
     # check_valid = True
     if check_valid:

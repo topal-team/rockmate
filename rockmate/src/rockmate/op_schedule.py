@@ -342,6 +342,7 @@ class OpSchedule:
         init_op_list: list = [],
         restore_op_list: list = [],
         optim_states_multiplier = 2,
+        correct_overhead = True,
     ):
         """
         OpSchedule contains the operation list and automatically
@@ -356,6 +357,7 @@ class OpSchedule:
         self.with_parameters = with_parameters
         self.optim_states_multiplier = optim_states_multiplier
         self.interfaces = cluster.interfaces
+        self.correct_overhead = correct_overhead
 
         self.create_list_alloc(cluster)
         self.get_sched_info()# get the schedule information for higher level solving
@@ -369,6 +371,7 @@ class OpSchedule:
                 self.occurrences[op.name] = [i]
     
     def is_occurred(self, op_name, i, next_i=None):
+        if op_name not in self.occurrences:return False
         if next_i is None:
             return i in self.occurrences[op_name]
         else:
@@ -530,6 +533,7 @@ class OpSchedule:
         """
         Prepare positional information of each operation for compiling.
         """
+        print("add pos info")
         if not hasattr(self, "alive_list"):
             self.alive_list = self.create_alive_list()
         for index, op in enumerate(self.op_list):
@@ -554,9 +558,10 @@ class OpSchedule:
                 no_save_nodes = (
                     list(cnode.deps_real)
                     + list(cnode.users)
-                    + list(cnode.required_parameter_nodes_real)
-                    + list(cnode.required_parameter_nodes_fake)
                 )
+                if self.with_parameters:
+                    no_save_nodes += list(cnode.required_parameter_nodes_real)
+                    no_save_nodes += list(cnode.required_parameter_nodes_fake)
                 op.pos_info["no_save_list"] = [anode.main_target
                                                 if hasattr(anode, "main_target")
                                                 else anode.param_name
@@ -581,6 +586,6 @@ class OpSchedule:
                     if not op.pos_info["input_names"]:
                         op.disabled = True
                         raise Warning(f"{op.name} is recomputed but no target inputs")
-
+                    
     def __repr__(self) -> str:
         return f"Op_sched takes {sum(self.time):.2f} ms with {self.peak_mem/1024**2} MiB peak mem"
