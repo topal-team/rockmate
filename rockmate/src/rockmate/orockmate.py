@@ -19,13 +19,13 @@ from rkgb.lowlevel.constants import init_target_string
 from .op_schedule import *
 from .solvers.main import preprocess, solve_recursive, get_optimize_metrics, FastSolver
 from .solvers import HILP
-from .solvers.hilp import default_time_limit
+from .solvers.ilp.ilp_solver import default_time_limit
 from .compiler import Compiler, RK_Storage, make_gd
 import psutil
 
 timer = TimerCUDA(torch.device("cuda"))
 
-class ORockmate(torch.nn.Module):
+class Rockmate(torch.nn.Module):
     compiler = None
     autograd_Function = None
     backward_stop = False
@@ -459,7 +459,7 @@ class ORockmate(torch.nn.Module):
                 self.get_compiled_fct()
 
 
-def define_autograd_Function(RkMod: ORockmate):
+def define_autograd_Function(RkMod: Rockmate):
     class RK_autograd_Function(torch.autograd.Function):
         # === OUR FORWARD FUNCTION ===
         @staticmethod
