@@ -155,12 +155,14 @@ class ModelPULP:
             if hcn.sub_cluster is None:
                 continue
             list_sched = self.list_list_sched[self.hcn2sub_c[k]]
+            cluster = self.sub_clusters[self.hcn2sub_c[k]]
             for op_sched in list_sched:
                 # for i_ in op_sched.dep_interfaces_data:
                 for anode in op_sched.dep_interfaces_data:
+                    self_anode = cluster.translate_representee_node(anode)
                     # Without specifying schedule, we assume it's possible to use han here
                     for i in range(self.I):
-                        if (anode.name
+                        if (self_anode.name
                             == self.hgraph.list_HANs[i].anode.name
                             and k not in self.han_users[i]
                         ):
@@ -421,12 +423,14 @@ class ModelPULP:
                     )
 
                     list_sched = self.list_list_sched[j]
+                    cluster = self.sub_clusters[j]
                     # for i in list_sched[o].dep_interfaces_data:
                     for anode in list_sched[o].dep_interfaces_data:
+                        self_anode = cluster.translate_representee_node(anode)
                         hcn = self.hgraph.list_HCNs[bwd_i]
                         # Tensor req_i is required by BWD
                         req_i = [han.anode.name for han in self.hgraph.list_HANs].index(
-                            anode.name
+                            self_anode.name
                         )
                         # req_i = self.han2idx[anode]
                         for j_, (k_, i_) in enumerate(self.create_list):
@@ -616,6 +620,7 @@ class ModelPULP:
                         <= self.peak_budget
                     )
                 else:
+                    cluster = self.sub_clusters[j]
                     hcn = self.hgraph.list_HCNs[k]
                     for o, op_sched in enumerate(self.list_list_sched[j]):
                         for correction in (
@@ -638,8 +643,9 @@ class ModelPULP:
                                     han.anode.name for han in self.hgraph.list_HANs
                                 ].index(
                                     # self.sub_clusters[j]
+                                    cluster.translate_representee_node(
                                     op_sched.cluster
-                                    .list_anodes[inter_position[0]]
+                                    .list_anodes[inter_position[0]])
                                     .name
                                 )
                                 if inter_position[1] == "always":
@@ -739,7 +745,7 @@ class ModelPULP:
     def solve(self, solver=""):
         # some solvers have no support of 'Time limit reached' status
         
-        print(f"time limit {self.ilp_solver_params['TimeLimit']}")
+        # print(f"time limit {self.ilp_solver_params['TimeLimit']}")
         try:
             solver = get_solver(
                 solver, msg=0, timeLimit=self.ilp_solver_params["TimeLimit"]
@@ -761,8 +767,8 @@ class ModelPULP:
 
         sol = self.sol
         if self.feasible:
-            print(f"finished solving in {self.md.solutionTime}")
-            print(f"objective {self.md.objective.value()}")
+            # print(f"finished solving in {self.md.solutionTime}")
+            # print(f"objective {self.md.objective.value()}")
             self.solve_time = self.md.solutionTime
             self.active_steps = []
             for t in list(range(self.loss_idx + 1, self.T)) + list(
