@@ -633,6 +633,7 @@ class Compiler:
         }
 
     def compile_sched(self, op_sched: OpSchedule):
+        self.with_parameters = op_sched.with_parameters
         op_sched.add_pos_info()
         for i, op in enumerate(op_sched.init_op_list):
             self.compile_op[op.__class__.__name__](op)
@@ -785,7 +786,8 @@ class Compiler:
         prep_op = Op("Preparation")
         self._activation_placehold(prep_op, cluster, output_nodes)
         # self._parameter_placehold(prep_op, cluster, minor_param_nodes)
-        self._optimizer_placehold(prep_op, op_list, minor_param_nodes)
+        if op_sched.with_parameters:
+            self._optimizer_placehold(prep_op, op_list, minor_param_nodes)
         op_sched.init_op_list = init_op_list+ [prep_op]
 
     def _compute_fwd(self, op: ComputeOp):

@@ -34,11 +34,6 @@ class ModelPULP:
         gcd=None,
         accurate_mem=False,
         protected_names=[],
-        grouping=True,
-        grad_mode="free", #["free", "accumulate"]
-        optimize_metrics = None,
-        activation_offload = False,
-        batch_multiplier = 1
     ):
         self.gcd = gcd if gcd else 1024**2
         self.peak_budget = peak_budget / self.gcd
@@ -50,24 +45,17 @@ class ModelPULP:
         self.ilp_solver_params = ilp_solver_params
         self.feasible = None
         self.solve_time = None
-        self.optimize_metrics = optimize_metrics
+        self.single_fwd = False
+        self.single_bwd = False
         self.protected_names = protected_names
         self.hgraph = hgraph
         self.md = LpProblem(f"rockmateMILP", LpMinimize)
+        self.correction_term = accurate_mem
 
-        self.with_offload = False
-        self.with_grad = accurate_mem
-        self.with_optimizer_states = accurate_mem#optimizer states will be offloaded
-        self.gradient_accumulation = 0# if 0, no gradient/optimizer states alive from previous iters
-        self.single_fwd = accurate_mem
-        self.single_bwd = accurate_mem
-        self.grouping = grouping
-        self.grad_mode = grad_mode
-        self.activation_offload = activation_offload
         self.config()
         
     def build(self):
-        # OVERWRITTING METHOD
+        # OVERWRITTING METHOD IN OFFLOAD
         self.add_variables()
         self.add_constraints()
         self.add_objective()
@@ -167,12 +155,14 @@ class ModelPULP:
             if hcn.sub_cluster is None:
                 continue
             list_sched = self.list_list_sched[self.hcn2sub_c[k]]
+            cluster = self.sub_clusters[self.hcn2sub_c[k]]
             for op_sched in list_sched:
                 # for i_ in op_sched.dep_interfaces_data:
                 for anode in op_sched.dep_interfaces_data:
+                    self_anode = cluster.translate_representee_node(anode)
                     # Without specifying schedule, we assume it's possible to use han here
                     for i in range(self.I):
-                        if (anode.name
+                        if (self_anode.name
                             == self.hgraph.list_HANs[i].anode.name
                             and k not in self.han_users[i]
                         ):
@@ -193,13 +183,6 @@ class ModelPULP:
         elif self.single_bwd and t > self.loss_idx:
             return list(range(self.loss_idx)) + [t]
         return list(range(t + 1))
-        # return range(self.T)
-
-    def crange(self, t):
-        """
-        Concerning range for computation
-        """
-        return self.krange(t)
 
     def next_idx(self, t, i, upper_triangle=False):
         # if upper_triangle, consider the case when i>t
@@ -211,7 +194,6 @@ class ModelPULP:
                 t_ = 0
                 i_ = 0
         else:
-            # end = self.T - 1 if upper_triangle else t
             end = max(self.krange(t))
             if i < end:
                 t_ = t
@@ -441,12 +423,14 @@ class ModelPULP:
                     )
 
                     list_sched = self.list_list_sched[j]
+                    cluster = self.sub_clusters[j]
                     # for i in list_sched[o].dep_interfaces_data:
                     for anode in list_sched[o].dep_interfaces_data:
+                        self_anode = cluster.translate_representee_node(anode)
                         hcn = self.hgraph.list_HCNs[bwd_i]
                         # Tensor req_i is required by BWD
                         req_i = [han.anode.name for han in self.hgraph.list_HANs].index(
-                            anode.name
+                            self_anode.name
                         )
                         # req_i = self.han2idx[anode]
                         for j_, (k_, i_) in enumerate(self.create_list):
@@ -606,7 +590,7 @@ class ModelPULP:
                     )
 
     def save_mem(self, t, k):
-        # OVERWRITTING IN OFFLOAD
+        # OVERWRITTING METHOD IN OFFLOAD
         return self.U[t, k]
 
     def add_memory_constrains(self):
@@ -616,12 +600,11 @@ class ModelPULP:
         
         for t in range(self.T):
             for k in self.krange(t):
-                parameter_mem = 0#self.all_param_mem(t, k)
                 j = self.hcn2sub_c[k]
                 self.md += self.save_mem(t,k) >= 0
-                self.md += self.save_mem(t,k) <= (self.peak_budget - parameter_mem)
-                # if j is None or not accurate_mem:
-                if True:
+                self.md += self.save_mem(t,k) <= (self.peak_budget)
+                if j is None or not self.correction_term:
+                # if True:
                     # don't consider correction_term
                     self.md += (
                         self.save_mem(t,k)
@@ -634,9 +617,10 @@ class ModelPULP:
                             for eidx_d, (k_, i_) in enumerate(self.delete_list)
                             if k == k_
                         )
-                        <= self.peak_budget - parameter_mem
+                        <= self.peak_budget
                     )
                 else:
+                    cluster = self.sub_clusters[j]
                     hcn = self.hgraph.list_HCNs[k]
                     for o, op_sched in enumerate(self.list_list_sched[j]):
                         for correction in (
@@ -658,8 +642,10 @@ class ModelPULP:
                                 i_ = [
                                     han.anode.name for han in self.hgraph.list_HANs
                                 ].index(
-                                    self.sub_clusters[j]
-                                    .list_anodes[inter_position[0]]
+                                    # self.sub_clusters[j]
+                                    cluster.translate_representee_node(
+                                    op_sched.cluster
+                                    .list_anodes[inter_position[0]])
                                     .name
                                 )
                                 if inter_position[1] == "always":
@@ -685,7 +671,7 @@ class ModelPULP:
                                     for eidx_d, (k_, i_) in enumerate(self.delete_list)
                                     if k == k_
                                 )
-                                <= self.peak_budget - parameter_mem
+                                <= self.peak_budget
                             )
                         if not (
                             op_sched.fwd_overhead_correction
@@ -700,7 +686,7 @@ class ModelPULP:
                                     for eidx_d, (k_, i_) in enumerate(self.delete_list)
                                     if k == k_
                                 )
-                                <= self.peak_budget - parameter_mem
+                                <= self.peak_budget
                             )
     
     def add_abar_constraint(self, save_budget):
@@ -759,7 +745,7 @@ class ModelPULP:
     def solve(self, solver=""):
         # some solvers have no support of 'Time limit reached' status
         
-        print(f"time limit {self.ilp_solver_params['TimeLimit']}")
+        # print(f"time limit {self.ilp_solver_params['TimeLimit']}")
         try:
             solver = get_solver(
                 solver, msg=0, timeLimit=self.ilp_solver_params["TimeLimit"]
@@ -781,8 +767,8 @@ class ModelPULP:
 
         sol = self.sol
         if self.feasible:
-            print(f"finished solving in {self.md.solutionTime}")
-            print(f"objective {self.md.objective.value()}")
+            # print(f"finished solving in {self.md.solutionTime}")
+            # print(f"objective {self.md.objective.value()}")
             self.solve_time = self.md.solutionTime
             self.active_steps = []
             for t in list(range(self.loss_idx + 1, self.T)) + list(

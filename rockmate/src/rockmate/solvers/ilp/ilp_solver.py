@@ -45,6 +45,8 @@ class HILP(Solver):
             nb_bdg_save=6,
             nb_bdg_peak=4,
             time_limit=None,
+            offload=False,
+            activation_offload=False,
         ):
             self.mem_unit = mem_unit
             self.ilp_solver_params = ilp_solver_params
@@ -58,6 +60,8 @@ class HILP(Solver):
             self.time_limit_ = time_limit
             self.time_limit_top = time_limit
             self.optimize_metrics = {}
+            self.offload = offload
+            self.activation_offload = activation_offload
 
         @property
         def time_limit(self):
@@ -69,8 +73,6 @@ class HILP(Solver):
     def __init__(self, config=None, ilp_solver=None):
         super().__init__(config)
         self.ilp_solver = ilp_solver# or solver_name[0]
-        
-        
         
         try:
             solver = pulp.get_solver(self.ilp_solver, msg=0)
@@ -219,7 +221,7 @@ class HILP(Solver):
         print(f"solving {cluster.name}")
         list_op_sched = []
 
-        if self.config.solve_top_level:
+        if self.config.solve_top_level and self.config.offload:
             self.model_ilp = ModelPULPOffload
         else:
             self.model_ilp = ModelPULP
@@ -295,7 +297,7 @@ class HILP(Solver):
                 ilp_solver_params=ilp_solver_params,
                 accurate_mem=accurate_mem,
                 protected_names=protected_names,
-                optimize_metrics = self.config.optimize_metrics
+                # optimize_metrics = self.config.optimize_metrics
             )
             md.build()
             # print(f"model building: {time.time()-start}")

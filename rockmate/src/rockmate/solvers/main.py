@@ -56,7 +56,7 @@ class FastSolver(Solver):
         
         hcn.ff_time = save_none_sched.fwd_time
         hcn.ff_overhead = save_none_sched.fwd_overhead
-        hcn.ff_op_list = save_none_sched.op_list[:save_none_sched.loss_idx]
+        hcn.ff_op_list = translate(hcn.sub_cluster, save_none_sched.op_list[:save_none_sched.loss_idx])
 
 
     def solve(self,
