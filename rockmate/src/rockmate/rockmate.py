@@ -17,6 +17,7 @@ from rkgb.core.partitioned import PartitionerBottomToTop, PartitionerSequence, P
 from rkgb.lowlevel.constants import init_target_string
 
 from .op_schedule import *
+from .simulation import Simulator
 from .solvers.main import preprocess, solve_recursive, get_optimize_metrics, FastSolver
 from .solvers import HILP
 from .solvers.ilp.ilp_solver import default_time_limit
@@ -216,6 +217,7 @@ class Rockmate(torch.nn.Module):
         self.list_solutions.extend(list_solutions)
 
     def get_compiled_fct(self, new_compiler=True):
+        self.op_sched.simulate_update(Simulator, refine_optimize=False)
         if new_compiler:
             storage = RK_Storage()
             storage.init(self.global_dict)
