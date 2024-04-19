@@ -106,7 +106,7 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
     else:
         op_list = []
         for pnode in md.hgraph.cluster.parameter_nodes:
-            op_list.append(ExecCodeOp(pnode.param_name, pnode.get_code()))
+            init_op_list.append(ExecCodeOp(pnode.param_name, pnode.get_code()))
         for t in range(md.T):
             for k in md.krange(t):
                 if t == md.loss_idx and k == md.loss_idx:
