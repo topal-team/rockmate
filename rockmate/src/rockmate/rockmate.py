@@ -64,6 +64,7 @@ class Rockmate(torch.nn.Module):
         self.list_solvers = list_solvers
         self.device = torch.device("cuda")# Not obtaining from model
         self.exec_with_record_mem = False
+        self.exec_with_record_time = False
         self.budget = budget
         self.rkgb_res = rkgb_res
         self.list_solutions = []
@@ -328,10 +329,11 @@ class Rockmate(torch.nn.Module):
         torch.cuda.synchronize()
 
     #  === nn.module's forward method wrapping self.autograd_Function.forward ===
-    def forward(self, *args, record_mem=False, **kwargs):
+    def forward(self, *args, record_mem=False, record_time=False, **kwargs):
         if self.module_does_not_req_grad:
             return self.original_mod(*args, **kwargs)
         self.exec_with_record_mem = record_mem
+        self.exec_with_record_time = record_time
         self.max_mem = []
         self.allo_mem = []
         self.step_time = []
@@ -485,10 +487,12 @@ def define_autograd_Function(RkMod: Rockmate):
                 
                 with torch.enable_grad():
                     exec(RkMod.init_code, RkMod.global_dict, storage.ld)  # is compiler.global_dict
-                    # for op in RkMod.op_list[:RkMod.op_sched.loss_idx]:
-                    #     RkMod._exec(op)
-                    for step in RkMod.op_sched.steps[:RkMod.op_sched.loss_step]:
-                        RkMod.exec_step(step)
+                    if RkMod.exec_with_record_time and RkMod.op_sched.loss_step>0:
+                        for step in RkMod.op_sched.steps[:RkMod.op_sched.loss_step]:
+                            RkMod.exec_step(step)
+                    else:
+                        for op in RkMod.op_list[:RkMod.op_sched.loss_idx]:
+                            RkMod._exec(op)
             else:
                 # *** INITIALIZATION PART ***
                 #  -> Get the inputs using the buffer (Rem 1)
@@ -602,10 +606,13 @@ def define_autograd_Function(RkMod: Rockmate):
                     with torch.enable_grad():
                         RkMod._exec(op)
             else:
-                # for op in RkMod.op_list[loss_idx+1:]:
-                #     RkMod._exec(op)
-                for step in RkMod.op_sched.steps[RkMod.op_sched.loss_step:]:
-                    RkMod.exec_step(step)
+                
+                if RkMod.exec_with_record_time:
+                    for step in RkMod.op_sched.steps[RkMod.op_sched.loss_step:]:
+                        RkMod.exec_step(step)
+                else:
+                    for op in RkMod.op_list[loss_idx+1:]:
+                        RkMod._exec(op)
                 # if RkMod.exec_with_record_mem and RkMod.backward_add_output_grad:
                 #     RkMod.allo_mem[loss_idx] += RkMod.output_size
                 #  -> return grad of dummy input + inputs' which req grad (Rem 1)
