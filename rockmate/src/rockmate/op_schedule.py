@@ -177,6 +177,13 @@ class Op:
 
     def __hash__(self):
         return id(self)
+    
+    def __getstate__(self):
+        # fct_list should not be pickled
+        state = self.__dict__.copy()
+        state["fct_list"] = []
+        return state
+
 
 class SynchronizeOp(Op):
     def __init__(self, name="", disabled=False):
