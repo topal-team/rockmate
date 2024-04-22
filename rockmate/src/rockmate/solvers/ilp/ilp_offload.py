@@ -7,7 +7,7 @@ from .ilp_model import ModelPULP
 
 class ModelPULPOffload(ModelPULP):
     def __init__(self, hgraph: HierarchicalGraph, peak_budget: int, save_budget=None, ilp_solver_params: Dict[str, Any] = ..., gcd=None, accurate_mem=False, protected_names=..., grouping=True, grad_mode="free", optimize_metrics=None, activation_offload=True, batch_multiplier=1):
-        super().__init__(hgraph, peak_budget, save_budget, ilp_solver_params, gcd, accurate_mem, protected_names, grouping, grad_mode, optimize_metrics, activation_offload, batch_multiplier)
+        super().__init__(hgraph, peak_budget, save_budget, ilp_solver_params, gcd, accurate_mem, protected_names)
 
         self.with_offload = False
         self.with_grad = accurate_mem

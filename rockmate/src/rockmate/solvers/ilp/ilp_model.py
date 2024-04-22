@@ -34,6 +34,7 @@ class ModelPULP:
         gcd=None,
         accurate_mem=False,
         protected_names=[],
+        **kwargs
     ):
         self.gcd = gcd if gcd else 1024**2
         self.peak_budget = peak_budget / self.gcd
