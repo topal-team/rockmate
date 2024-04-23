@@ -6,7 +6,7 @@ from .ilp_utils import RkLpVariable
 from .ilp_model import ModelPULP
 
 class ModelPULPOffload(ModelPULP):
-    def __init__(self, hgraph: HierarchicalGraph, peak_budget: int, save_budget=None, ilp_solver_params: Dict[str, Any] = ..., gcd=None, accurate_mem=False, protected_names=..., grouping=True, grad_mode="free", optimize_metrics=None, activation_offload=True, batch_multiplier=1):
+    def __init__(self, hgraph: HierarchicalGraph, peak_budget: int, save_budget=None, ilp_solver_params: Dict[str, Any] = ..., gcd=None, accurate_mem=False, protected_names=..., grouping=True, grad_mode="free", optimize_metrics=None, activation_offload=False, batch_multiplier=1):
         super().__init__(hgraph, peak_budget, save_budget, ilp_solver_params, gcd, accurate_mem, protected_names)
 
         self.with_offload = False
@@ -19,6 +19,7 @@ class ModelPULPOffload(ModelPULP):
         self.grad_mode = grad_mode
         self.activation_offload = activation_offload
         self.optimize_metrics = optimize_metrics
+        self.correction_term = False
 
     def build(self):
         # OVERWRITTING METHOD
@@ -135,7 +136,7 @@ class ModelPULPOffload(ModelPULP):
         return self.parameter_size[w]/self.parameter_gradient_size[w]
 
     def activation_mem(self, t, k):
-        return self.U[t, k]
+        return self.U[t, k] - self.removal_phantom_mem(t, k)
 
     def save_mem(self, t, k):
         # OVERWRITTING METHOD
@@ -146,8 +147,7 @@ class ModelPULPOffload(ModelPULP):
                 + self.param_grad_mem[t,k]
                 + self.optimizer_states_mem(t,k)
                 + (1-self.req_w)*self.peak_budget*with_multiplier
-                
-            - self.removal_phantom_mem(t, k))
+                )
 
     def removal_phantom_mem(self, t, k):
         if not self.activation_offload:
