@@ -435,7 +435,7 @@ def group(md, w, tol=1):
                 if a:
                     p_alloc = Parameter(parameters[p])
                     # init_ops.append((t, k, AllocateOp(p_alloc)))
-                    init_ops.append((t, k, PrepareOp(p_alloc, device="cuda")))
+                    init_ops.append((t, k, PrepareOp(p_alloc, device="cuda", cpu_grad=True)))
                     init_alive.append(p_alloc)
                     # op = PrefetchOp(
                     #     alloc=p_alloc, indices=(0, None), 
