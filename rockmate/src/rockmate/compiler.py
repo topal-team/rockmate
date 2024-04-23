@@ -352,8 +352,12 @@ class Fct_mem_alloc(RK_Fct):
         self.kwargs = kwargs
         if self.device == torch.device("cpu"):
             self.kwargs["pin_memory"] = True
-        self.shape_name = target_name if shape is None else shape
-
+        if isinstance(shape, torch.Size):
+            self.shape = shape
+        else:
+            self.shape = False
+            self.shape_name = target_name if shape is None else shape
+        
         self.dtype = dtype
 
     def alloc_optim_states(self):
@@ -366,7 +370,10 @@ class Fct_mem_alloc(RK_Fct):
             )
 
     def alloc_grad(self):
-        shape = self.storage.shapes[self.shape_name]
+        if self.shape:
+            shape = self.shape
+        else:
+            shape = self.storage.shapes[self.shape_name]
         dtype = (
             self.storage.dtypes[self.shape_name] if self.dtype is None else self.dtype
         )
@@ -375,7 +382,10 @@ class Fct_mem_alloc(RK_Fct):
         )
 
     def alloc_data(self):
-        shape = self.storage.shapes[self.shape_name]
+        if self.shape:
+            shape = self.shape
+        else:
+            shape = self.storage.shapes[self.shape_name]
         dtype = (
             self.storage.dtypes[self.shape_name] if self.dtype is None else self.dtype
         )
@@ -384,7 +394,10 @@ class Fct_mem_alloc(RK_Fct):
         )
 
     def alloc_tensor(self):
-        shape = self.storage.shapes[self.shape_name]
+        if self.shape:
+            shape = self.shape
+        else:
+            shape = self.storage.shapes[self.shape_name]
         dtype = (
             self.storage.dtypes[self.shape_name] if self.dtype is None else self.dtype
         )
@@ -402,21 +415,21 @@ class Fct_offload(RK_Fct):
         self,
         target_name: str,
         storage: RK_Storage,
-        offload_mode="param",
+        offload_mode="tensor",
         stream="offload_stream",
         **kwargs,
     ):
         super().__init__(target_name=target_name, storage=storage, **kwargs)
         self.target_name = target_name
         self.offload_fct = {
-            "param": self.offload_param,
+            "tensor": self.offload_tensor,
             "grad": self.offload_grad,
             "optim_states": self.offload_optim_states,
         }
         self.offload_mode = offload_mode
         self.stream = stream
 
-    def offload_param(self):
+    def offload_tensor(self):
         self.storage.ld[f"cpu_{self.target_name}"].data.copy_(
             self.storage.ld[self.target_name].data,
             non_blocking=True,
@@ -453,7 +466,7 @@ class Fct_prefetch(RK_Fct):
         self,
         target: Allocation,
         storage: RK_Storage,
-        prefetch_mode="param",
+        prefetch_mode="tensor",
         stream="prefetch_stream",
         **kwargs,
     ):
@@ -461,11 +474,11 @@ class Fct_prefetch(RK_Fct):
         self.target = target
         self.target_name = target.target_name
         self.prefetch_fct = {
-            "param": self.prefetch_param,
+            "tensor": self.prefetch_tensor,
             "optim_states": self.prefetch_optim_states,
         }
         self.post_process = {
-            "param": self.post_process_param,
+            "tensor": self.post_process_tensor,
             "optim_states": self.post_process_optim_states,
         }
         self.prefetch_mode = prefetch_mode
@@ -474,7 +487,7 @@ class Fct_prefetch(RK_Fct):
         if isinstance(target, Parameter):
             self.post_process_code = target.pnode.get_code()
 
-    def prefetch_param(self):
+    def prefetch_tensor(self):
         self.storage.ld[self.target_name].data.copy_(
             self.storage.ld[f"cpu_{self.target_name}"].data,
             non_blocking=True,
@@ -496,7 +509,7 @@ class Fct_prefetch(RK_Fct):
             )
         pass
 
-    def post_process_param(self):
+    def post_process_tensor(self):
         pass
         # with torch.enable_grad():
         #     exec(self.post_process_code, self.storage.gd, self.storage.ld)
@@ -661,6 +674,17 @@ class Compiler:
                     requires_grad=anode.info.requires_grad,
                 )
             )
+            if OffloadOp(Activation(anode)).name in self.ops:#offload activation
+                prep_op.add_fct(
+                    Fct_mem_alloc(
+                        f"cpu_{anode.main_target}",
+                        storage=self.storage,
+                        shape=anode.info.tensor_size,#TODO: not compatible with dynamic input shape
+                        dtype=torch.float32,
+                        alloc_mode="tensor",
+                        device="cpu",
+                    )
+            )
 
         for out_anode in list(cluster.interfaces["output_data_anodes"]):
             for out_target in out_anode.all_targets:
@@ -782,6 +806,7 @@ class Compiler:
 
     def compile_preparation(self, cluster, op_sched, minor_param_nodes, output_nodes):
         op_list = op_sched.op_list
+        self.ops = {op.name: op for op in op_list}
         init_op_list = op_sched.init_op_list
         prep_op = Op("Preparation")
         self._activation_placehold(prep_op, cluster, output_nodes)
@@ -1001,22 +1026,27 @@ class Compiler:
 
     def Offload(self, op: OffloadOp):
         target: Parameter = op.target
-        offload_mode = "param"
-        if target.is_grad:
-            offload_mode = "grad"
-        if target.is_optim_states:
-            offload_mode = "optim_states"
+        offload_mode = "tensor"
+        if isinstance(op.target, Parameter):
+            # target_name = target.param_name
+            if target.is_grad:
+                offload_mode = "grad"
+            if target.is_optim_states:
+                offload_mode = "optim_states"
+        # else:
+        #     target_name = target.main_target
         op.add_fct(
             Fct_offload(
-                target.param_name, storage=self.storage, offload_mode=offload_mode
+                target.target_name, storage=self.storage, offload_mode=offload_mode
             )
         )
 
     def Prefetch(self, op: PrefetchOp):
         target: Parameter = op.target
-        prefetch_mode = "param"
-        if target.is_optim_states:
-            prefetch_mode = "optim_states"
+        prefetch_mode = "tensor"
+        if isinstance(op.target, Parameter):
+            if target.is_optim_states:
+                prefetch_mode = "optim_states"
         op.add_fct(
             Fct_prefetch(target, storage=self.storage, prefetch_mode=prefetch_mode)
         )
@@ -1025,11 +1055,12 @@ class Compiler:
     def Allocate(self, op: AllocateOp):
         target: Parameter = op.target
         alloc_mode = "data"
-        if target.is_optim_states:
-            alloc_mode = "optim_states"
+        if isinstance(op.target, Parameter):
+            if target.is_optim_states:
+                alloc_mode = "optim_states"
         op.add_fct(
             Fct_mem_alloc(
-                target.param_name, storage=self.storage, alloc_mode=alloc_mode
+                target.target_name, storage=self.storage, alloc_mode=alloc_mode
             )
         )
 
