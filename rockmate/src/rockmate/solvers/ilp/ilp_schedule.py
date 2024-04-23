@@ -257,6 +257,12 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
             restore_op_list.extend([ops[2] for ops in r_l])
             for alloc in init_alive:
                 init_alive_status[alloc.name] = True
+
+        for j in range(md.J):
+            ofl_ops, prf_ops, del_ops = group_activation_offload(md, j)
+            md.ofl_ops.extend(ofl_ops)
+            md.prf_ops.extend(prf_ops)
+            md.del_ops.extend(del_ops)
     # else:
     #     init_op_list = md.schedule_init_op_list()
 
@@ -332,8 +338,10 @@ def create_delete_ops(md, t, k, w, itemsize=4):
             if (
                 t_ == t
                 and k_ == k
-                and op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]
+                # and op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]
             ):
+                if isinstance(op.target, Parameter) and not op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]:
+                    continue
                 op_list.append(op)
         return op_list
 
@@ -347,8 +355,10 @@ def create_prefetch_ops(md, t, k, w, itemsize=4):
             if (
                 t_ == t
                 and k_ == k
-                and op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]
+                # and op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]
             ):
+                if isinstance(op.target, Parameter) and not op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]:
+                    continue
                 pre_op_list.append(op)
 
         return pre_op_list, post_op_list
@@ -361,8 +371,10 @@ def create_offload_ops(md, t, k, w, itemsize=4):
             if (
                 t_ == t
                 and k_ == k
-                and op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]
+                # and op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]
             ):
+                if isinstance(op.target, Parameter) and not op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]:
+                    continue
                 op_list.append(op)
         return op_list
 
@@ -691,4 +703,131 @@ def group_optimizer_states(md, w, gpu_optimize_param):
         if k_==bwd_i:assert 0 not in Alive.values()
 
     return ofl_ops, prf_ops, del_ops, init_alive
+
+def group_activation_offload(md: ModelPULPOffload, j):
+    ofl_ops = []
+    prf_ops = []
+    del_ops = []
+
+    if not md.activation_offload or not md.single_fwd:# we assume activation is based on single fwd
+        return ofl_ops, prf_ops, del_ops
+
+    fwd_i = min(md.sub_c2hcn[j])
+    bwd_i = max(md.sub_c2hcn[j])
+    hcn = md.hgraph.list_HCNs[fwd_i]
+
+    if md.sol(md.sumComp[fwd_i, fwd_i]):
+        opt = -1
+        for o in range(md.nSched[fwd_i]):
+            if md.sol(md.Comp[fwd_i, fwd_i, o]):
+                opt = o
+                break
+
+    assert opt > -1
+    
+    phantoms = {anode.name: anode for anode in md.list_list_sched[j][opt].phantoms}
+    phantom_size = sum(anode.mem for anode in phantoms.values())
+
+    Alive = {anode.name: 1 for anode in phantoms.values()}
+    # Offloaded = {anode.name: False for anode in phantoms.values()}
+    assert (bwd_i, bwd_i) in md.active_steps
+
+    idx_f = md.active_steps.index((fwd_i, fwd_i))
+    idx_b = md.active_steps.index((bwd_i, bwd_i))
+    for t, k in md.active_steps[idx_f:] + md.active_steps[:idx_b]:
+        t_, k_ = md.next_idx(t, k)
+
+        # current_alive_size = sum(phantoms[n].mem * a for n, a in Alive.items())
+        current_alive_size = sum(phantoms[n].mem * a for n, a in Alive.items() if a>0)
+
+        next_alive_size = phantom_size - md.OflPProg[t,k,j].value()*md.gcd
+
+        # next_offloaded_size = min(gpu_optimize_size,
+        #     round((md.OflOProg[(t_, k_, w)]).value() * parameter_size))
+        # if parameter_size * (1-md.sumOptC[w]).value()<gpu_optimize_size:
+        #     next_offloaded_size += gpu_optimize_size - parameter_size * (1-md.sumOptC[w]).value()
+
+        # assert current_alive_size <= round(md.AliveW[(t, k, w)].value() * parameter_size)
+        if current_alive_size > next_alive_size:
+            # print(t,k, next_offloaded_size, current_offloaded_size)
+            ofl_size = current_alive_size - next_alive_size
+            candidates = {
+                n: phantoms[n].mem * a
+                for n, a in Alive.items()
+                if a > 0
+            }
+            if not candidates:
+                if ofl_size<1024:
+                    ofl_size = 0
+                else:
+                    raise ValueError
+            selector = knapsack(list(candidates.items()))
+            select_paras = selector.select_size(ofl_size)
+            # assert ofl_size==0 or sum(candidates[p] for p in select_paras)/ofl_size>0.99
+            # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-ofl_size>tol:
+            #     pass
+            for n in select_paras:
+                op = OffloadOp(alloc=Activation(phantoms[n]), indices=(0, None),
+                                time=phantoms[n].mem/md.bandwidthOfl/md.gcd)
+                ofl_ops.append((t, k, op))
+                del_ops.append((t,k, DeleteOp(Activation(phantoms[n]))))
+                Alive[n] = 0
+
+        # if current_alive_size > next_alive_size:
+        #     if k_ ==bwd_i:continue
+        #     del_size = current_alive_size - next_alive_size
+        #     candidates = {}
+        #     for p, o in Offloaded.items():
+        #         if Alive[p]>0 and o>0:
+        #             candidates[p] = min(o, Alive[p])*parameters[p].mem
+        #     if not candidates:
+        #         if del_size<1024:
+        #             del_size = 0
+        #         else:
+        #             raise ValueError
+        #     selector = knapsack(list(candidates.items()))
+        #     select_paras = selector.select_size(del_size)
+        #     # assert del_size==0 or sum(candidates[p] for p in select_paras)/del_size>0.99
+        #     # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-del_size>tol:
+        #     #     pass
+        #     for p in select_paras:
+        #         del_ops.append((t, k, DeleteOp(Parameter(parameters[p],
+        #                                                     is_optim_states=True)
+        #                                         )))
+        #         Alive[p] = 0
+        if current_alive_size < next_alive_size or k_==bwd_i:
+            # if w == 15:print(md.active_steps[k_]==bwd_i)
+            # prefetch should be smaller than solution
+            prf_size = next_alive_size - current_alive_size
+            candidates = {
+                n: phantoms[n].mem * (1 - a) for n, a in Alive.items() if a < 1
+            }
+            if not candidates:
+                if prf_size<1024:
+                    prf_size=0
+                else:
+                    raise ValueError
+            if k_==bwd_i:
+                select_paras = list(candidates.keys())
+                # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size>0.99
+            else:
+                selector = knapsack(list(candidates.items()))
+                unselect_paras = selector.select_size(sum(candidates.values()) - prf_size)
+                
+                select_paras = [
+                    p for p in candidates.keys() if p not in unselect_paras
+                ]
+                # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size<1.01
+            # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-prf_size>tol:
+            #     pass
+            for n in select_paras:
+                alloc = Activation(phantoms[n])
+                prf_ops.append((t, k, AllocateOp(alloc)))
+                op = PrefetchOp(alloc=alloc, indices=(0, None),
+                                time=alloc.mem/md.bandwidthPrf/md.gcd)
+                prf_ops.append((t, k, op))
+                Alive[n] = 1
+        if k_==bwd_i:assert 0 not in Alive.values()
+
+    return ofl_ops, prf_ops, del_ops
 
