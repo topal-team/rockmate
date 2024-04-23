@@ -237,10 +237,14 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
             p[k] = v*1/ (1-multiplier)
             pass
 
-    md.ofl_ops = []
-    md.prf_ops = []
-    md.del_ops = []
-    md.opt_ops = []
+    def add_op(op_dict, op_list):
+        for op in op_list:
+            op_dict[op[:2]].append(op[2])
+        
+    md.ofl_ops = {step:[] for step in md.active_steps}
+    md.prf_ops = {step:[] for step in md.active_steps}
+    md.del_ops = {step:[] for step in md.active_steps}
+    md.opt_ops = {step:[] for step in md.active_steps}
     md.cpu_optimized_params = {}
     md.cpu_optimized_steps = {step:[] for step in md.active_steps}
     init_op_list = []
@@ -249,10 +253,10 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
     if md.grouping:
         for w in range(md.W)[::-1]:
             o_l, p_l, d_l, t_l, i_l, r_l, init_alive = group(md, w)
-            md.ofl_ops.extend(o_l)
-            md.prf_ops.extend(p_l)
-            md.del_ops.extend(d_l)
-            md.opt_ops.extend(t_l)
+            add_op(md.ofl_ops, o_l)
+            add_op(md.prf_ops, p_l)
+            add_op(md.del_ops, d_l)
+            add_op(md.opt_ops, t_l)
             init_op_list.extend([ops[2] for ops in i_l])
             restore_op_list.extend([ops[2] for ops in r_l])
             for alloc in init_alive:
@@ -260,9 +264,9 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
 
         for j in range(md.J):
             ofl_ops, prf_ops, del_ops = group_activation_offload(md, j)
-            md.ofl_ops.extend(ofl_ops)
-            md.prf_ops.extend(prf_ops)
-            md.del_ops.extend(del_ops)
+            add_op(md.ofl_ops,ofl_ops)
+            add_op(md.prf_ops,prf_ops)
+            add_op(md.del_ops,del_ops)
     # else:
     #     init_op_list = md.schedule_init_op_list()
 
@@ -287,24 +291,32 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
             j = md.hcn2sub_c[k]
             # if md.sumComp[t, k].value() == 1:
             prefetch_list = []
-            for w in range(md.W):
-                prefetch_ops = create_prefetch_ops(md,t, k, w)
-                op_list.extend(prefetch_ops[0])
-                prefetch_list.extend(prefetch_ops[1])
             op_list += schedule_compute(md,t,k,hgraph)
             wait_op_1 = []
             wait_op_2 = []
             wait_op_3 = []
-            for w in range(md.W):
-                if k in md.param2hcn[w]:
-                    wait_op_1.extend(create_optimize_ops(md,t, k, w))
-                    wait_op_2.extend(create_offload_ops(md,t, k, w))
-                    wait_op_3.extend(create_delete_ops(md,t, k, w))
-                    # op_list.extend(create_prefetch_ops(md,t,k,w))
+            self_params = [p.param_name 
+                           for w in md.hcn2param[k]
+                           for p in md.parameters[w]
+                           ]
+            for op in md.opt_ops[t,k]:
+                if op.target.target_name in self_params:
+                    wait_op_1.append(op)
                 else:
-                    op_list.extend(create_offload_ops(md,t, k, w))
-                    op_list.extend(create_delete_ops(md,t, k, w))
-                    op_list.extend(create_optimize_ops(md,t, k, w))
+                    op_list.append(op)
+            for op in md.ofl_ops[t,k]:
+                if op.target.target_name in self_params:
+                    wait_op_2.append(op)
+                else:
+                    op_list.append(op)
+            for op in md.del_ops[t,k]:
+                if op.target.target_name in self_params:
+                    wait_op_3.append(op)
+                else:
+                    op_list.append(op)
+            for op in md.prf_ops[t,k]:
+                op_list.append(op)
+
             if wait_op_1:# for the current layer, need to synchronize first
                 op_list.extend([SynchronizeOp(str(k))]+wait_op_1)
             if wait_op_2:# for the current layer, need to synchronize first
@@ -314,69 +326,7 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
 
             op_list.extend(prefetch_list)
 
-    
     return op_list, init_alive_status, init_op_list, restore_op_list
-
-def create_optimize_ops(md, t, k, w, itemsize=4):
-    op_list = []
-    # sub_cluster = md.hgraph.list_HCNs[min(md.param2hcn[w])].sub_cluster
-    if md.grouping:
-        for t_, k_, op in md.opt_ops:
-            if (
-                t_ == t
-                and k_ == k
-                and op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]
-            ):
-                op_list.append(op)
-        return op_list
-
-def create_delete_ops(md, t, k, w, itemsize=4):
-    op_list = []
-    sub_cluster = md.hgraph.list_HCNs[min(md.param2hcn[w])].sub_cluster
-    if md.grouping:
-        for t_, k_, op in md.del_ops:
-            if (
-                t_ == t
-                and k_ == k
-                # and op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]
-            ):
-                if isinstance(op.target, Parameter) and not op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]:
-                    continue
-                op_list.append(op)
-        return op_list
-
-def create_prefetch_ops(md, t, k, w, itemsize=4):
-    pre_op_list = []
-    post_op_list = []
-    sub_cluster = md.hgraph.list_HCNs[min(md.param2hcn[w])].sub_cluster
-
-    if md.grouping:
-        for t_, k_, op in md.prf_ops:
-            if (
-                t_ == t
-                and k_ == k
-                # and op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]
-            ):
-                if isinstance(op.target, Parameter) and not op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]:
-                    continue
-                pre_op_list.append(op)
-
-        return pre_op_list, post_op_list
-
-def create_offload_ops(md, t, k, w, itemsize=4):
-    op_list = []
-    sub_cluster = md.hgraph.list_HCNs[min(md.param2hcn[w])].sub_cluster
-    if md.grouping:
-        for t_, k_, op in md.ofl_ops:
-            if (
-                t_ == t
-                and k_ == k
-                # and op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]
-            ):
-                if isinstance(op.target, Parameter) and not op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]:
-                    continue
-                op_list.append(op)
-        return op_list
 
 def group(md, w, tol=1):
     # Group the parameters of each block for the task
@@ -715,6 +665,7 @@ def group_activation_offload(md: ModelPULPOffload, j):
     fwd_i = min(md.sub_c2hcn[j])
     bwd_i = max(md.sub_c2hcn[j])
     hcn = md.hgraph.list_HCNs[fwd_i]
+    sub_cluster = hcn.sub_cluster
 
     if md.sol(md.sumComp[fwd_i, fwd_i]):
         opt = -1
@@ -725,7 +676,11 @@ def group_activation_offload(md: ModelPULPOffload, j):
 
     assert opt > -1
     
-    phantoms = {anode.name: anode for anode in md.list_list_sched[j][opt].phantoms}
+    phantoms = {}
+    for re_anode in md.list_list_sched[j][opt].phantoms:
+        anode = sub_cluster.translate_representee_node(re_anode)
+        phantoms[anode.name] = anode
+    
     phantom_size = sum(anode.mem for anode in phantoms.values())
 
     Alive = {anode.name: 1 for anode in phantoms.values()}
