@@ -312,7 +312,9 @@ class Simulator:
                 
                 for cnode in op.target.anode.deps:
                     c_op = ComputeOp(cnode)
-                    if not self.op_sched.is_occurred(c_op.name, idx, next_used_i):
+                    p_op = PrefetchOp(op.target)
+                    if (not self.op_sched.is_occurred(c_op.name, idx, next_used_i)
+                    and not self.op_sched.is_occurred(p_op.name, idx, next_used_i)):
                         op.disabled = True
                         break
                         
