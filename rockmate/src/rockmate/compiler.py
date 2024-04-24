@@ -468,6 +468,7 @@ class Fct_prefetch(RK_Fct):
         storage: RK_Storage,
         prefetch_mode="tensor",
         stream="prefetch_stream",
+        with_proxy = False,
         **kwargs,
     ):
         super().__init__(target_name=target.name, storage=storage)
@@ -481,6 +482,7 @@ class Fct_prefetch(RK_Fct):
             "tensor": self.post_process_tensor,
             "optim_states": self.post_process_optim_states,
         }
+        self.with_proxy = with_proxy
         self.prefetch_mode = prefetch_mode
         self.stream = stream
         self.post_process_code = ""
@@ -492,7 +494,8 @@ class Fct_prefetch(RK_Fct):
             self.storage.ld[f"cpu_{self.target_name}"].data,
             non_blocking=True,
         )
-        pass
+        if self.with_proxy:
+            self.storage.ld[f"_{self.target_name}"].data = self.storage.ld[f"{self.target_name}"].data
 
     # def prefetch_grad(self):
     #     self.storage.ld[f"cpu_{self.target_name}"].grad.data.copy_(
@@ -1048,7 +1051,11 @@ class Compiler:
             if target.is_optim_states:
                 prefetch_mode = "optim_states"
         op.add_fct(
-            Fct_prefetch(target, storage=self.storage, prefetch_mode=prefetch_mode)
+            Fct_prefetch(target, 
+                         storage=self.storage, 
+                         prefetch_mode=prefetch_mode,
+                         with_proxy=isinstance(op.target, Activation) and op.target.info.requires_grad
+                         ) 
         )
         pass
 
