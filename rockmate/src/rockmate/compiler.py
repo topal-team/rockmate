@@ -685,7 +685,7 @@ class Compiler:
                         shape=anode.info.tensor_size,#TODO: not compatible with dynamic input shape
                         dtype=torch.float32,
                         alloc_mode="tensor",
-                        device="cpu",
+                        device=torch.device("cpu"),
                     )
             )
 
