@@ -272,6 +272,7 @@ class Rockmate(torch.nn.Module):
         timer.start()
         for op in step.op_list:
             self._exec(op)
+        torch.cuda.synchronize()
         timer.end()
         self.step_time.append(timer.elapsed())
             
