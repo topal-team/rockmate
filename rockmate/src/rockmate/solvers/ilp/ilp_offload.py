@@ -67,7 +67,8 @@ class ModelPULPOffload(ModelPULP):
                 sub_cluster = self.sub_clusters[j]
                 phantoms = [sub_cluster.translate_representee_node(re_anode)
                             for re_anode in sched.phantoms
-                            if re_anode.allocation_type == "data"# Only support data offload
+                            if (re_anode.allocation_type == "data"# Only support data offload
+                            and re_anode.mem > self.minor_offload_size)
                             ]
                 self.phantoms[(j,o)] = phantoms
 
@@ -79,7 +80,7 @@ class ModelPULPOffload(ModelPULP):
         self.cpu_optimize_speed = optimize_metrics["cpu_optimize_speed"]/self.gcd#B/ms
         self.gpu_optimize_speed = optimize_metrics["gpu_optimize_speed"]/self.gcd#B/ms
         self.optimizer_overhead_factor = optimize_metrics["optimizer_overhead"]#*weight size
-        self.minor_param_size = optimize_metrics["minor_param_size"]# minor weight size
+        self.minor_offload_size = optimize_metrics["minor_offload_size"]# minor weight size
         self.bandwidth = optimize_metrics["bandwidth"]# bandwidth
         
         self.req_w = RkLpVariable("Required_w", lowBound=0, upBound=1, cat="Continuous")

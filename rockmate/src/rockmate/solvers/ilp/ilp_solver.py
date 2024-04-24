@@ -128,7 +128,7 @@ class HILP(Solver):
                 req_pnodes = [pnode.original_param_node for pnode in h_pnodes]
             for pnode in req_pnodes:
                 if pnode.is_buffer:continue
-                if pnode.mem < self.config.optimize_metrics["minor_param_size"]:continue
+                if pnode.mem < self.config.optimize_metrics["minor_offload_size"]:continue
                 if pnode not in param2hcn:
                     param2hcn[pnode] = {i}
                 else:

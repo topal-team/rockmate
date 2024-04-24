@@ -52,7 +52,7 @@ class Rockmate(torch.nn.Module):
         cpu_optim = torch.optim.Adam,
         gpu_optim = torch.optim.Adam,
         optim_kwargs = {},
-        minor_param_size = 10*1024**2,
+        minor_offload_size = 10*1024**2,
     ):
         super().__init__()
         ref_verbose[0] = verbose
@@ -72,13 +72,13 @@ class Rockmate(torch.nn.Module):
         
         self.config_partitioner()
         
-        self.get_rkgb_result(model_inputs, model_kwargs, minor_param_size)
+        self.get_rkgb_result(model_inputs, model_kwargs, minor_offload_size)
         
         self.optimize_metrics = get_optimize_metrics(list(original_mod.parameters())[0], 
                                             cpu_optim=cpu_optim, 
                                             gpu_optim=gpu_optim,
                                             optim_kwargs=optim_kwargs,
-                                            minor_param_size=minor_param_size)
+                                            minor_offload_size=minor_offload_size)
         
         self.global_dict = make_gd(
             self.device, 
@@ -92,7 +92,7 @@ class Rockmate(torch.nn.Module):
             self.get_compiled_fct()
 
 
-    def get_rkgb_result(self, model_inputs, model_kwargs, minor_param_size):
+    def get_rkgb_result(self, model_inputs, model_kwargs, minor_offload_size):
         # -- use rkGB --
         try:
             if self.rkgb_res is None:
@@ -118,7 +118,7 @@ class Rockmate(torch.nn.Module):
         
         self.minor_param_nodes = []
         for pnode in self.rkgb_res.hierarchical_cluster.parameter_nodes:
-            if pnode.mem < minor_param_size and not pnode.is_buffer:
+            if pnode.mem < minor_offload_size and not pnode.is_buffer:
                 self.minor_param_nodes.append(pnode)
         self.minor_param_nodes += self.rkgb_res.S.init_node.required_parameter_nodes
     
