@@ -236,8 +236,10 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
         for k,v in p.items():
             p[k] = v*1/ (1-multiplier)
             pass
+    
     if md.activation_offload:
-        md.phantoms = {j:[] for j in range(md.J)}
+        md.selected_phantoms = {}
+
     def add_op(op_dict, op_list):
         for op in op_list:
             op_dict[op[:2]].append(op[2])
@@ -300,8 +302,8 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
                            for w in md.hcn2param[k]
                            for p in md.parameters[w]
                            ]
-            if md.hcn2sub_c[k]:
-                self_targets += md.phantoms[md.hcn2sub_c[k]] 
+            if md.hcn2sub_c[k] is not None:
+                self_targets += md.selected_phantoms[j]
             for op in md.opt_ops[t,k]:
                 if op.target.target_name in self_targets:
                     wait_op_1.append(op)
@@ -679,11 +681,12 @@ def group_activation_offload(md: ModelPULPOffload, j):
 
     assert opt > -1
     
-    phantoms = {}
-    for re_anode in md.list_list_sched[j][opt].phantoms:
-        anode = sub_cluster.translate_representee_node(re_anode)
-        phantoms[anode.name] = anode
-    md.phantoms[j] = [anode.main_target for anode in phantoms.values()]
+    # phantoms = {}
+    # for re_anode in md.list_list_sched[j][opt].phantoms:
+    #     anode = sub_cluster.translate_representee_node(re_anode)
+    #     phantoms[anode.name] = anode
+    phantoms = {anode.name:anode for anode in md.phantoms[j,opt]}
+    md.selected_phantoms[j] = [anode.main_target for anode in phantoms.values()]
     phantom_size = sum(anode.mem for anode in phantoms.values())
 
     Alive = {anode.name: 1 for anode in phantoms.values()}

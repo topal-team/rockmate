@@ -9,7 +9,6 @@ class ModelPULPOffload(ModelPULP):
     def __init__(self, hgraph: HierarchicalGraph, peak_budget: int, save_budget=None, ilp_solver_params: Dict[str, Any] = ..., gcd=None, accurate_mem=False, protected_names=..., grouping=True, grad_mode="free", optimize_metrics=None, activation_offload=False, batch_multiplier=1):
         super().__init__(hgraph, peak_budget, save_budget, ilp_solver_params, gcd, accurate_mem, protected_names)
 
-        self.with_offload = False
         self.with_grad = accurate_mem
         self.with_optimizer_states = accurate_mem#optimizer states will be offloaded
         self.gradient_accumulation = 0# if 0, no gradient/optimizer states alive from previous iters
@@ -61,6 +60,16 @@ class ModelPULPOffload(ModelPULP):
         self.OflP = RkLpVariable.dicts("OflP", phantom_idx, lowBound=0, upBound=None)
         self.PrfP = RkLpVariable.dicts("PrfP", phantom_idx, lowBound=0, upBound=None)
         # pass
+        self.phantoms = {}
+        for j in range(self.J):
+            for o in range(self.nSched[j]):
+                sched = self.list_list_sched[j][o]
+                sub_cluster = self.sub_clusters[j]
+                phantoms = [sub_cluster.translate_representee_node(re_anode)
+                            for re_anode in sched.phantoms
+                            if re_anode.allocation_type == "data"# Only support data offload
+                            ]
+                self.phantoms[(j,o)] = phantoms
 
     def add_offload_param_variables(self,):
         optimize_metrics = self.optimize_metrics
@@ -390,8 +399,11 @@ class ModelPULPOffload(ModelPULP):
         for j in range(self.J):
             fwd_i = min(self.sub_c2hcn[j])
             bwd_i = max(self.sub_c2hcn[j])
-            saved_mem = lpSum(self.saved_mem[j][o]*self.Comp[fwd_i, fwd_i, o] 
-                            for o in range(self.nSched[j]))
+            saved_mem = lpSum(
+                              # self.saved_mem[j][o]*
+                              sum(anode.mem for anode in self.phantoms[j,o])/self.gcd *
+                              self.Comp[fwd_i, fwd_i, o] 
+                              for o in range(self.nSched[j]))
             for t in range(self.T):
                 for k in self.krange(t):
                     if t >=fwd_i and t<= bwd_i:

@@ -297,7 +297,8 @@ class HILP(Solver):
                 ilp_solver_params=ilp_solver_params,
                 accurate_mem=accurate_mem,
                 protected_names=protected_names,
-                optimize_metrics = self.config.optimize_metrics
+                optimize_metrics = self.config.optimize_metrics,
+                activation_offload=self.config.activation_offload
             )
             md.build()
             # print(f"model building: {time.time()-start}")
