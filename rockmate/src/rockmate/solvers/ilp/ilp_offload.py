@@ -494,6 +494,10 @@ class ModelPULPOffload(ModelPULP):
             mem += self.parameter_size[w] * self.OflW[t, k, w]
             optim_state = self.optimizer_states_factor * self.OflO[t,k,w]
             mem += self.parameter_gradient_size[w] * (self.OflG[t, k, w] + optim_state)
+        if self.activation_offload:
+            j = self.hcn2sub_c[k]
+            if j is not None:
+                mem += self.OflP[t, k, j]
             
         return mem/self.bandwidthOfl
 
