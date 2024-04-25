@@ -62,8 +62,7 @@ class ModelPULPOffload(ModelPULP):
         # pass
         self.phantoms = {}
         for j in range(self.J):
-            for o in range(self.nSched[j]):
-                sched = self.list_list_sched[j][o]
+            for o,sched in enumerate(self.list_list_sched[j]):
                 sub_cluster = self.sub_clusters[j]
                 phantoms = [sub_cluster.translate_representee_node(re_anode)
                             for re_anode in sched.phantoms
@@ -404,7 +403,7 @@ class ModelPULPOffload(ModelPULP):
                               # self.saved_mem[j][o]*
                               sum(anode.mem for anode in self.phantoms[j,o])/self.gcd *
                               self.Comp[fwd_i, fwd_i, o] 
-                              for o in range(self.nSched[j]))
+                              for o, sched in enumerate(self.list_list_sched[j]))
             for t in range(self.T):
                 for k in self.krange(t):
                     if t >=fwd_i and t<= bwd_i:
