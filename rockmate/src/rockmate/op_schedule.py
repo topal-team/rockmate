@@ -389,14 +389,14 @@ class OpSchedule:
         Args:
             Simulator: Class defined to simulate op_sched
         """
-        simulator = Simulator(self)
-        simulator.refine()# assume init_op_list remains the same
+        self.simulator = Simulator(self)
+        self.simulator.refine()# assume init_op_list remains the same
         if refine_optimize:
-            simulator.refine_optimize()
-        self.op_list = simulator.op_list
-        self.steps = simulator.steps
-        self.loss_step = simulator.loss_step
-        self.loss_idx = simulator.loss_idx
+            self.simulator.refine_optimize()
+        self.op_list = self.simulator.op_list
+        self.steps = self.simulator.steps
+        self.loss_step = self.simulator.loss_step
+        self.loss_idx = self.simulator.loss_idx
         self.get_sched_info()
 
     def _sum_mem(self,alive_status_, ignore_list=[]):
