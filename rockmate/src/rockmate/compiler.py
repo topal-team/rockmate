@@ -97,6 +97,7 @@ class RK_Storage:
         self.shapes = {"Empty_size": torch.Size([0])}
         self.dtypes = dict()
         self.rng_state = RngState()
+        self.events = dict()
         self.gd = gd
 
     def add_val(self, val, x):
@@ -546,6 +547,23 @@ class Fct_synchronize(RK_Fct):
         else:
             self.sync_all()
 
+class Fct_record_event(RK_Fct):
+    def __init__(self, target_name, stream:str, storage: RK_Storage, **kwargs):
+        super().__init__(target_name, storage, **kwargs)
+        self.stream = stream
+
+    def __call__(self):
+        self.storage.events[self.target_name] = torch.cuda.Event()
+        self.storage.events[self.target_name].record(self.storage.gd[self.stream])
+
+class Fct_wait_event(RK_Fct):
+    def __init__(self, target_name, stream:str, storage: RK_Storage, **kwargs):
+        super().__init__(target_name, storage, **kwargs)
+        self.stream = stream
+
+    def __call__(self):
+        self.storage.gd[self.stream].wait_event(self.storage.events[self.target_name])
+
 
 class Fct_RNG_state(RK_Fct):
     def __init__(self, target_name: str, storage: RK_Storage, get_state=True, **kwargs):
@@ -661,7 +679,17 @@ class Compiler:
             if op_type not in self.compile_op:
                 raise SyntaxWarning(f"Unrecognized operation type {op_type}")
             op.fct_list = []
+            stream = "main_stream"
+            if isinstance(op, OffloadOp):
+                stream = "offload_stream"
+            if isinstance(op, PrefetchOp):
+                stream = "prefetch_stream"
+            for event in op.wait_events:
+                op.add_fct(Fct_wait_event(event, stream, self.storage))
             self.compile_op[op_type](op)
+            if op.record_event:
+                op.add_fct(Fct_record_event(id(op), stream, self.storage))
+
 
     def _activation_placehold(self, prep_op: Op, cluster, output_nodes):
         for anode in cluster.list_anodes:

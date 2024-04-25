@@ -217,8 +217,9 @@ class Rockmate(torch.nn.Module):
             # self.op_list = self.op_sched.op_list
         self.list_solutions.extend(list_solutions)
 
-    def get_compiled_fct(self, new_compiler=True):
-        self.op_sched.simulate_update(Simulator, refine_optimize=False)
+    def get_compiled_fct(self, new_compiler=True, simulate=True):
+        if simulate:
+            self.op_sched.simulate_update(Simulator, refine_optimize=False)
         if new_compiler:
             storage = RK_Storage()
             storage.init(self.global_dict)

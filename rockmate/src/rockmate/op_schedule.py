@@ -121,6 +121,8 @@ class Op:
         self._time = time
         self.fct_list = []
         self._op_type = type(self).__name__
+        self.record_event = False
+        self.wait_events = []
 
     def add_fct(self, f):
         self.fct_list.append(f)
