@@ -6,10 +6,9 @@ from copy import deepcopy
 import numpy as np
 # from models import *
 # from models.LLM import *
-from rockmate import ORockmate
+from rockmate import Rockmate
 from rockmate.op_schedule import *
 from rockmate.simulation import Simulator
-from rockmate.solvers.HILP_pulp_ofl_para import *
 from datetime import datetime
 device = torch.device("cuda")
 import pickle
@@ -112,7 +111,7 @@ def check_correctness(model, sample, budget=1e9, optim=torch.optim.Adam):
     # print(model_c(*sample_c).mean())
     exec(model_c, sample_c, print_mem=False, print_loss=True, optimize_fct=optimize)
 
-    model_r = ORockmate(model, sample, budget, 
+    model_r = Rockmate(model, sample, budget, 
                         solve_sched=False,
                         cpu_optim=optim,
                         gpu_optim=optim,
@@ -324,7 +323,7 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B"):
         max_number_of_patterns=nlayers+2,
         min_percentage_covered_required=0.75)]
 
-    rkmod = ORockmate(model, sample, 1e8, solve_sched=0, 
+    rkmod = Rockmate(model, sample, 1e8, solve_sched=0, 
                     ilp_solver="PULP_CBC_CMD", 
                     #   ilp_solver="HiGHS_CMD", 
                     # cpu_optim = DeepSpeedCPUAdam,
