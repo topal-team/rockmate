@@ -189,11 +189,6 @@ class AliveSimulator():
         if idx_range is None:
             idx_range = range(0, self.length)
         return act_multiplier*self.act_mem(idx_range)+self.param_mem(idx_range)
-    
-    def _alive(self, key:int, idx_range:range):
-        if isinstance(idx_range, int):
-            idx_range = range(idx_range, idx_range+1)
-        return self.alive_np[idx_range, key]
 
     def alive_once(self, key:int, idx_range:range):
         # being alive AT LEAST once
@@ -201,7 +196,7 @@ class AliveSimulator():
             idx_range = range(idx_range, idx_range+1)
         if isinstance(key, str):
             key = self.name2key[key]
-        return bool(max(self._alive[key, idx_range]))
+        return bool(max(self._alive(key, idx_range)))
 
     def alive_always(self, key:int, idx_range:range):
         # being alive AT LEAST once
@@ -209,7 +204,7 @@ class AliveSimulator():
             idx_range = range(idx_range, idx_range+1)
         if isinstance(key, str):
             key = self.name2key[key]
-        return bool(min(self._alive[key, idx_range]))
+        return bool(min(self._alive(key, idx_range)))
 
         
 
