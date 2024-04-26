@@ -194,7 +194,7 @@ def schedule_compute(md: ModelPULP, t,k,hgraph):
                 i_ = [
                         hdn.anode.name for hdn in md.hgraph.list_HANs
                     ].index(anode.name)
-                if (k, i_) in md.delete_list:
+                if (k, i_) in md.delete_list and k in md.han_users_real[i_]:
                     eidx = md.delete_list.index((k, i_))
                     if not sol(md.delete[t, eidx]):
                         anode_to_protect.append(anode.name)

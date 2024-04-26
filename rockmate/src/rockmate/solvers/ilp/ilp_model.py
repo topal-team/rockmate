@@ -133,6 +133,7 @@ class ModelPULP:
         self.input_data_indices = []
         self.han_deps = []
         self.han_users = []
+        self.han_users_real = []# without sched-dependent users
 
         for i, han in enumerate(self.hgraph.list_HANs):
             if han.anode.name in self.protected_names:
@@ -144,7 +145,8 @@ class ModelPULP:
             self.han_deps.append([self.hcn2idx[hcn] for hcn in han.deps])
             self.han_users.append([self.hcn2idx[hcn] for hcn in han.users
                                    if hcn in self.hcn2idx])# current sub-graph users
-
+        
+        self.han_users_real = self.han_users.copy()
         self.hcn_users = [
             [self.han2idx[han] for han in self.hgraph.list_HCNs[k].users]
             for k in range(self.T)
