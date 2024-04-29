@@ -302,7 +302,7 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
                            for w in md.hcn2param[k]
                            for p in md.parameters[w]
                            ]
-            if md.hcn2sub_c[k] is not None:
+            if md.hcn2sub_c[k] is not None and md.activation_offload:
                 self_targets += md.selected_phantoms[j]
             for op in md.opt_ops[t,k]:
                 if op.target.target_name in self_targets:
