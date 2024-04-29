@@ -485,6 +485,9 @@ class OpSchedule:
         if self.correct_overhead:
             self.add_correction_term(alive_list)
 
+        self.offload_time = sum(op.time for op in self.op_list if isinstance(op, OffloadOp))
+        self.prefetch_time = sum(op.time for op in self.op_list if isinstance(op, PrefetchOp))
+
     def add_correction_term(self, alive_list):
         interfaces_status = []
         for anode in self.interfaces["input_data_anodes"]:  # Input of Fwd

@@ -9,7 +9,7 @@ from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
 from rkgb.core.backward import ComputationNode
 from rkgb.lowlevel.constants import init_target_string
 
-from ..op_schedule import OpSchedule, ComputeOp, DeleteOp, Activation
+from ..op_schedule import OpSchedule, ComputeOp, DeleteOp, Activation, OffloadOp, PrefetchOp, AllocateOp
 import time
 import psutil
 
@@ -92,16 +92,19 @@ class FastSolver(Solver):
             cluster,
             no_del_names=no_del_names,
         )
-        list_sched.append(
-            OpSchedule(
+        recompute_op_list = (ff_op_list + [ComputeOp(ComputationNode("loss"))]
+                             + deepcopy(autograd_op_list))
+        autograd_sched = OpSchedule(
                 autograd_op_list,
                 cluster=cluster,
                 loss_idx=autograd_op_list.index(ComputeOp(ComputationNode("loss"), disabled=True))
             )
-        )
+        # autograd_sched = add_activation_offload(autograd_sched)
+        list_sched.append(autograd_sched)
+        
         list_sched.append(
             OpSchedule(
-                ff_op_list + [ComputeOp(ComputationNode("loss"))]+autograd_op_list,
+                recompute_op_list,
                 cluster=cluster,
                 loss_idx=len(ff_op_list)
             )
@@ -218,12 +221,15 @@ def translate(cluster:HierarchicalCluster, op_list):
     translator = cluster.translator
     translated_op_list = deepcopy(op_list)
     for op in translated_op_list:
-        if isinstance(op, DeleteOp):
+        if isinstance(op, ComputeOp):
+            ana_kn = translator_re.to_ano(op.target)
+            op.target = translator.from_ano(ana_kn)
+        elif isinstance(op.target, Activation):
             ana_kn = translator_re.to_ano(op.target.anode)
             op.target = Activation(translator.from_ano(ana_kn))
         else:
-            ana_kn = translator_re.to_ano(op.target)
-            op.target = translator.from_ano(ana_kn)
+            raise ValueError
+            
     return translated_op_list
 
 
@@ -539,3 +545,46 @@ def get_optimize_metrics(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10, mi
                           "optim_kwargs":optim_kwargs}
     return optimize_metrics
 
+
+def add_activation_offload(op_sched:OpSchedule) -> OpSchedule:
+    """
+    With all the torch.cuda.Event and stream.wait_event() to synchornize
+    between offload/prefetch, in the order of Main>Ofl>Del during fwd and Prf>Main during bwd
+
+    """
+    cluster = op_sched.cluster
+    op_list = op_sched.op_list
+    fwd_op_list = op_list[:op_sched.loss_idx]
+    bwd_op_list = op_list[op_sched.loss_idx:]
+    prefetch_op_list = []
+    phantoms = op_sched.phantoms
+    for anode in phantoms:
+        if not anode.allocation_type == "data":continue
+        i = max(min(op_sched.occurrences[ComputeOp(cnode).name]) for cnode in anode.deps)
+        op_sched.op_list[i].record_event = True
+        comp_op = op_sched.op_list[i]
+        offload_op = OffloadOp(Activation(anode), time=anode.mem/1e7)
+        offload_op.wait_events.append(comp_op)
+        offload_op.record_event = True
+        fwd_op_list.append(offload_op)
+        del_op = DeleteOp(Activation(anode))
+        del_op.wait_events.append(offload_op)
+        fwd_op_list.append(del_op)
+
+        prefetch_op_list.append(AllocateOp(Activation(anode)))
+        prefetch_op = PrefetchOp(Activation(anode), time=anode.mem/1e7)
+        prefetch_op.record_event = True
+        prefetch_op.wait_events.append(offload_op)
+        prefetch_op_list.append(prefetch_op)
+        for op in bwd_op_list:
+            if isinstance(op, ComputeOp) and op.target in anode.users_real:
+                op.wait_events.append(prefetch_op)
+
+    bwd_op_list = bwd_op_list[:1] + prefetch_op_list+bwd_op_list[1:]
+
+
+    new_op_sched = OpSchedule(fwd_op_list+bwd_op_list, 
+                              loss_idx=len(fwd_op_list), 
+                              cluster=cluster,
+                              init_op_list=op_sched.init_op_list)
+    return new_op_sched

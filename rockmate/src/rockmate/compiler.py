@@ -105,7 +105,7 @@ class RK_Storage:
 
 
 class RK_Fct:
-    def __init__(self, target_name, storage, **kwargs):
+    def __init__(self, target_name: str, storage: RK_Storage, **kwargs):
         self.storage = storage
         self.target_name = target_name
         for k, v in kwargs.items():
@@ -128,7 +128,8 @@ class Fct_del(RK_Fct):
         self.del_mode = del_mode
 
     def __call__(self):
-        self.del_fcts[self.del_mode]()
+        with torch.cuda.stream(self.storage.gd["main_stream"]):
+            self.del_fcts[self.del_mode]()
 
     def del_data(self):
         self.storage.ld[self.target_name].data = torch.empty(0)
@@ -553,8 +554,9 @@ class Fct_record_event(RK_Fct):
         self.stream = stream
 
     def __call__(self):
-        self.storage.events[self.target_name] = torch.cuda.Event()
-        self.storage.events[self.target_name].record(self.storage.gd[self.stream])
+        with torch.cuda.stream(self.storage.gd[self.stream]):
+            self.storage.events[self.target_name] = torch.cuda.Event()
+            self.storage.events[self.target_name].record(self.storage.gd[self.stream])
 
 class Fct_wait_event(RK_Fct):
     def __init__(self, target_name, stream:str, storage: RK_Storage, **kwargs):
@@ -562,7 +564,7 @@ class Fct_wait_event(RK_Fct):
         self.stream = stream
 
     def __call__(self):
-        self.storage.gd[self.stream].wait_event(self.storage.events[self.target_name])
+        self.storage.events[self.target_name].wait(self.storage.gd[self.stream])
 
 
 class Fct_RNG_state(RK_Fct):
@@ -684,8 +686,8 @@ class Compiler:
                 stream = "offload_stream"
             if isinstance(op, PrefetchOp):
                 stream = "prefetch_stream"
-            for event in op.wait_events:
-                op.add_fct(Fct_wait_event(event, stream, self.storage))
+            for wait_op in op.wait_events:
+                op.add_fct(Fct_wait_event(id(wait_op), stream, self.storage))
             self.compile_op[op_type](op)
             if op.record_event:
                 op.add_fct(Fct_record_event(id(op), stream, self.storage))

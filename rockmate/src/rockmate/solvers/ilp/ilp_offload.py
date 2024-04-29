@@ -22,6 +22,7 @@ class ModelPULPOffload(ModelPULP):
 
     def build(self):
         # OVERWRITTING METHOD
+        self.config_offload()
         super().add_variables()
         self.add_offload_param_variables()
         if self.activation_offload:
@@ -32,6 +33,16 @@ class ModelPULPOffload(ModelPULP):
         # super().add_objective()
         self.add_offload_objective()
         self.add_offload_time_constraints()
+
+    def config_offload(self):
+        self.schedule_offload_time = []
+        self.schedule_prefetch_time = []
+        for list_sched in self.list_list_sched:
+            self.schedule_offload_time.append([])
+            self.schedule_prefetch_time.append([])
+            for sched in list_sched:
+                self.schedule_offload_time[-1].append(sched.offload_time)
+                self.schedule_prefetch_time[-1].append(sched.prefetch_time)
 
     def add_offload_time_constraints(self):
         for t in range(self.T):
@@ -477,6 +488,12 @@ class ModelPULPOffload(ModelPULP):
     #     return self.fraction_constant_param(w) + self.fraction_instant_updated_param(w)
 
     def time_step_offload(self,t, k):
+        j = self.hcn2sub_c[k]
+        sub_sched_time = lpSum(
+                        self.Comp[t, k, o] * 
+                        self.schedule_offload_time[j][o] 
+                        for o in range(self.nSched[k])
+                    )
         mem = 0
         for w in range(self.W):
             mem += self.parameter_size[w] * self.OflW[t, k, w]
@@ -485,7 +502,8 @@ class ModelPULPOffload(ModelPULP):
         if self.activation_offload:
             for j in range(self.J):
                 mem += self.OflP[t, k, j]    
-        return mem/self.bandwidthOfl
+
+        return mem/self.bandwidthOfl + sub_sched_time
 
     def time_step_offload_self(self,t, k):
         mem = 0
@@ -501,6 +519,13 @@ class ModelPULPOffload(ModelPULP):
         return mem/self.bandwidthOfl
 
     def time_step_prefetch(self,t, k):
+        j = self.hcn2sub_c[k]
+        sub_sched_time = lpSum(
+                        self.Comp[t, k, o] * 
+                        self.schedule_prefetch_time[j][o] 
+                        for o in range(self.nSched[k])
+                    )
+        
         mem = 0
         for w in range(self.W):
             mem += self.parameter_size[w] * self.PrfW[t, k, w]
@@ -510,7 +535,7 @@ class ModelPULPOffload(ModelPULP):
             for j in range(self.J):
                 mem += self.PrfP[t, k, j]
             
-        return mem/self.bandwidthPrf
+        return mem/self.bandwidthPrf + sub_sched_time
 
 
     def time_step_prefetch_self(self,t, k):
@@ -556,3 +581,5 @@ class ModelPULPOffload(ModelPULP):
 
     def time_step_compute(self,t, k):
         return lpSum(self.Comp[t, k, o] * self.time[k][o] for o in range(self.nComp[k]))
+
+        
