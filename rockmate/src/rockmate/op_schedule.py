@@ -676,7 +676,7 @@ class OpSchedule:
                             op.pos_info["input_names"].append(anode.main_target)
 
                     for pnode in op.target.required_parameter_nodes_real:
-                        if self.is_occurred(DeleteOp(Parameter(anode)).name, prev_i, index):
+                        if self.is_occurred(DeleteOp(Parameter(pnode)).name, prev_i, index):
                             op.pos_info["input_names"].append(pnode.param_name)
                     if not op.pos_info["input_names"]:
                         op.disabled = True
