@@ -78,8 +78,10 @@ class CheapSolver(Solver):
             bwd_op_list.append(DeleteOp(Activation(anode)))
         for cnode in cheap_cnodes:
             bwd_op_list.append(ComputeOp(cnode))
-        for cnode in cluster.list_cnodes[loss_idx+1:]:
+        for i, cnode in enumerate(cluster.list_cnodes[loss_idx+1:]):
             bwd_op_list.append(ComputeOp(cnode))
+            for anode in anodes_del_idx[i+loss_idx+1]:
+                bwd_op_list.append(DeleteOp(Activation(anode)))
 
         op_sched = OpSchedule(fwd_op_list+bwd_op_list, 
                               loss_idx=len(fwd_op_list)-1,
