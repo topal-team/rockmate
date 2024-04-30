@@ -1,4 +1,7 @@
-from rkgb.lowlevel.ast_add_on import make_str_assign, make_str_list_assign
+from rkgb.lowlevel.ast_add_on import (make_str_assign, 
+                                      make_str_list_assign, 
+                                      ast_to_str, 
+                                      make_ast_list_assign)
 from rkgb.core.backward import ComputationNode, AllocationNode
 import torch
 import numpy as np
@@ -1087,6 +1090,13 @@ class Compiler:
                          with_proxy=isinstance(op.target, Activation) and op.target.info.requires_grad
                          ) 
         )
+        if isinstance(op.target, Activation):
+            for cnode in op.target.anode.deps:
+                code = cnode.make_body_code_ast()
+                ast_view_code = make_ast_list_assign(code)
+                op.add_fct(Fct_run_fwd(op.target, 
+                                       storage=self.storage, 
+                                       code=ast_to_str(ast_view_code)))
         pass
 
     def Allocate(self, op: AllocateOp):
