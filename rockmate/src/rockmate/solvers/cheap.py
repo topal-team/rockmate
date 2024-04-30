@@ -40,20 +40,32 @@ class CheapSolver(Solver):
         cnode_idx = {cnode.name: i for i,cnode in enumerate(cluster.list_cnodes)}
         
         anodes_del_idx = {i:[] for i, _ in enumerate(cluster.list_cnodes)}
+        output_anodes = []
         for anode in cluster.list_anodes:
             if "source" in anode.name:continue
-            last_user_idx = max(cnode_idx[cnode.name]
-                                for cnode in anode.users_real)
-            anodes_del_idx[last_user_idx].append(anode)
+            user_indices = [cnode_idx[cnode.name]
+                                for cnode in anode.users_real
+                                if cnode.name in cnode_idx]
+            if user_indices:
+                last_user_idx = max(user_indices)
+                anodes_del_idx[last_user_idx].append(anode)
+            else:
+                output_anodes.append(anode)
+            
 
             if (all(is_cheap(cnode) for cnode in anode.deps) 
                 and anode.allocation_type == "data"):
-                last_user_idx_fwd = max(cnode_idx[cnode.name] 
+                user_indices_fwd = [cnode_idx[cnode.name] 
                                     for cnode in anode.users_real
-                                    if cnode.is_fwd)
+                                    if cnode.is_fwd and 
+                                    cnode.name in cnode_idx]
+                if user_indices_fwd:
+                    last_user_idx_fwd = max(user_indices_fwd)
+
                 anodes_del_idx[last_user_idx_fwd].append(anode)
         
         fwd_op_list = []
+        bwd_op_list = []
         for i, cnode in enumerate(cluster.list_cnodes):
             fwd_op_list.append(ComputeOp(cnode, disabled="loss" in cnode.name))
             if "loss" in cnode.name:
@@ -62,7 +74,8 @@ class CheapSolver(Solver):
             for anode in anodes_del_idx[i]:
                 fwd_op_list.append(DeleteOp(Activation(anode)))
 
-        bwd_op_list = []
+        for anode in output_anodes:
+            bwd_op_list.append(DeleteOp(Activation(anode)))
         for cnode in cheap_cnodes:
             bwd_op_list.append(ComputeOp(cnode))
         for cnode in cluster.list_cnodes[loss_idx+1:]:
