@@ -67,11 +67,11 @@ class Step():
                 prf_ops.append(op)
             elif isinstance(op, OptimizeOp) and op.is_cpu:
                 opt_ops.append(op)
-            elif isinstance(op, ComputeOp) or (
-                isinstance(op, DeleteOp) and isinstance(op.target, Activation)) or(
-                isinstance(op, OptimizeOp) and not op.is_cpu):
-                # all happen in the main stream
-                comp_ops.append(op)
+            # elif isinstance(op, ComputeOp) or (
+            #     isinstance(op, DeleteOp) and isinstance(op.target, Activation)) or(
+            #     isinstance(op, OptimizeOp) and not op.is_cpu):
+            #     # all happen in the main stream
+            #     comp_ops.append(op)
             elif isinstance(op, DeleteOp) and isinstance(op.target, Parameter):
                 self.del_ops.append(op)
             else:
