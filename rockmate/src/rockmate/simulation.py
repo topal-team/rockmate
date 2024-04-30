@@ -59,9 +59,11 @@ class Step():
         self.alloc_ops = []
         self.del_ops = []
         for op in op_list:
-            if isinstance(op, OffloadOp):
+            if isinstance(op, SynchronizeOp) or isinstance(op, AllocateOp):
+                self.alloc_ops.append(op)
+            elif isinstance(op, OffloadOp) and not op.record_event:
                 ofl_ops.append(op)
-            elif isinstance(op, PrefetchOp):
+            elif isinstance(op, PrefetchOp) and not op.record_event:
                 prf_ops.append(op)
             elif isinstance(op, OptimizeOp) and op.is_cpu:
                 opt_ops.append(op)
@@ -72,8 +74,8 @@ class Step():
                 comp_ops.append(op)
             elif isinstance(op, DeleteOp) and isinstance(op.target, Parameter):
                 self.del_ops.append(op)
-            else:#if isinstance(op, AllocateOp):
-                self.alloc_ops.append(op)
+            else:
+                comp_ops.append(op)
 
         self.ofl_ops = ListOp(ofl_ops)
         self.prf_ops = ListOp(prf_ops)
