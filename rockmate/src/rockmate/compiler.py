@@ -233,6 +233,7 @@ class Fct_run_fwd(RK_Fct):
         target_name: str,
         storage: RK_Storage,
         code,
+        stream = "main_stream",
         no_save_list=[],
         fwd_mode="with_grad",
         **kwargs,
@@ -243,6 +244,7 @@ class Fct_run_fwd(RK_Fct):
         self.no_save_list = no_save_list
         self.fwd_fct = {"with_grad": self.fwd_with_grad, "no_grad": self.fwd_no_grad}
         self.fwd_mode = fwd_mode
+        self.stream = stream
 
     def fwd_with_grad(self):
         with torch.enable_grad():
@@ -256,7 +258,7 @@ class Fct_run_fwd(RK_Fct):
             exec(self.code, self.storage.gd, self.storage.ld)
 
     def __call__(self):
-        with torch.cuda.stream(self.storage.gd["main_stream"]):
+        with torch.cuda.stream(self.storage.gd[self.stream]):
             self.fwd_fct[self.fwd_mode]()
 
     def fct_get_pack(self, no_save_list, sanity_check=False):
@@ -1096,7 +1098,8 @@ class Compiler:
                 ast_view_code = make_ast_list_assign(code)
                 op.add_fct(Fct_run_fwd(op.target, 
                                        storage=self.storage, 
-                                       code=ast_to_str(ast_view_code)))
+                                       code=ast_to_str(ast_view_code),
+                                       stream="prefetch_stream"))
         pass
 
     def Allocate(self, op: AllocateOp):
