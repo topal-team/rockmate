@@ -419,7 +419,7 @@ class OpSchedule:
             self.save_mem[i] = self._sum_mem(alive_status, self.interface_names)
             if op.disabled:
                 continue
-            self.time[i] = op.time
+            self.time[i] = op.time if not (isinstance(op, OffloadOp) or isinstance(op, PrefetchOp)) else 0
             self.overhead[i] = op.overhead
             
     def get_sched_info(self):
