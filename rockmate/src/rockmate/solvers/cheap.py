@@ -37,7 +37,7 @@ class CheapSolver(Solver):
             if cnode.time is None:return False
             return cnode.time < avg_time/2
         cnode_idx = {cnode.name: i for i,cnode in enumerate(cluster.list_cnodes)}
-        loss_idx = len([cnode for cnode in cluster.list_cnodes if cnode.is_fwd])
+        loss_idx = len([cnode for cnode in cluster.list_cnodes if cnode.is_fwd]) - 1
         cheap_cnodes = {}
         for cnode in cluster.list_cnodes:
             user_cnodes = [user_cnode 
@@ -89,15 +89,19 @@ class CheapSolver(Solver):
             #     break
             for anode in anodes_del_idx[i]:
                 fwd_op_list.append(DeleteOp(Activation(anode)))
+        
+        fwd_op_list.append(ComputeOp(cluster.list_cnodes[loss_idx], disabled=True))
 
         for anode in output_anodes:
             bwd_op_list.append(DeleteOp(Activation(anode)))
         for cnode in cheap_cnodes.values():
             bwd_op_list.append(ComputeOp(cnode))
+        for anode in anodes_del_idx[loss_idx]:
+            bwd_op_list.append(DeleteOp(Activation(anode)))
 
-        for i, cnode in enumerate(cluster.list_cnodes[loss_idx:]):
+        for i, cnode in enumerate(cluster.list_cnodes[loss_idx+1:]):
             bwd_op_list.append(ComputeOp(cnode))
-            for anode in anodes_del_idx[i+loss_idx]:
+            for anode in anodes_del_idx[i+loss_idx+1]:
                 bwd_op_list.append(DeleteOp(Activation(anode)))
 
         op_sched = OpSchedule(fwd_op_list+bwd_op_list, 
