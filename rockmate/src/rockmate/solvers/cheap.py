@@ -36,22 +36,38 @@ class CheapSolver(Solver):
             if not cnode.is_fwd:return False
             if cnode.time is None:return False
             return cnode.time < avg_time/2
-        cheap_cnodes = [cnode for cnode in cluster.list_cnodes if is_cheap(cnode)]
         cnode_idx = {cnode.name: i for i,cnode in enumerate(cluster.list_cnodes)}
+        loss_idx = len([cnode for cnode in cluster.list_cnodes if cnode.is_fwd])
+        cheap_cnodes = {}
+        for cnode in cluster.list_cnodes:
+            user_cnodes = [user_cnode 
+                           for anode in cnode.users
+                           for user_cnode in anode.users_real
+                           if user_cnode.name in cnode_idx]
+            has_bwd_user = any(not user_cnode.is_fwd for user_cnode in user_cnodes)
+            if is_cheap(cnode) and has_bwd_user:
+                cheap_cnodes[cnode.name] = cnode
         
         anodes_del_idx = {i:[] for i, _ in enumerate(cluster.list_cnodes)}
         output_anodes = []
         for anode in cluster.list_anodes:
             if "source" in anode.name:continue
-            user_indices = [cnode_idx[cnode.name]
-                                for cnode in anode.users_real
-                                if cnode.name in cnode_idx]
+            user_indices = []
+            for cnode in anode.users_real:
+                if cnode.name in cnode_idx:
+                    user_indices.append(cnode_idx[cnode.name])
+                if cnode.name in cheap_cnodes:
+                    user_indices.append(loss_idx)
+            
             if user_indices:
                 last_user_idx = max(user_indices)
                 anodes_del_idx[last_user_idx].append(anode)
             else:
                 output_anodes.append(anode)
-            
+
+            regenerated = any(cnode.name in cheap_cnodes for cnode in anode.deps)
+            if regenerated:
+                anodes_del_idx[loss_idx].append(anode)
 
             if (all(is_cheap(cnode) for cnode in anode.deps) 
                 and anode.allocation_type == "data"):
@@ -66,21 +82,22 @@ class CheapSolver(Solver):
         
         fwd_op_list = []
         bwd_op_list = []
-        for i, cnode in enumerate(cluster.list_cnodes):
+        for i, cnode in enumerate(cluster.list_cnodes[:loss_idx]):
             fwd_op_list.append(ComputeOp(cnode, disabled="loss" in cnode.name))
-            if "loss" in cnode.name:
-                loss_idx = i
-                break
+            # if "loss" in cnode.name:
+            #     loss_idx = i
+            #     break
             for anode in anodes_del_idx[i]:
                 fwd_op_list.append(DeleteOp(Activation(anode)))
 
         for anode in output_anodes:
             bwd_op_list.append(DeleteOp(Activation(anode)))
-        for cnode in cheap_cnodes:
+        for cnode in cheap_cnodes.values():
             bwd_op_list.append(ComputeOp(cnode))
-        for i, cnode in enumerate(cluster.list_cnodes[loss_idx+1:]):
+
+        for i, cnode in enumerate(cluster.list_cnodes[loss_idx:]):
             bwd_op_list.append(ComputeOp(cnode))
-            for anode in anodes_del_idx[i+loss_idx+1]:
+            for anode in anodes_del_idx[i+loss_idx]:
                 bwd_op_list.append(DeleteOp(Activation(anode)))
 
         op_sched = OpSchedule(fwd_op_list+bwd_op_list, 
