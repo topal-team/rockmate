@@ -253,6 +253,10 @@ class AllocateOp(Op):
         self.target = alloc
         self.op_type = f"Allocate_{alloc.alloc_type}"
         self.is_optim_states=is_optim_states
+    
+    @property
+    def target_name(self):
+        return self.target.name
 
 class OffloadOp(Op):
     def __init__(
@@ -293,6 +297,10 @@ class PrefetchOp(Op):
         # self.is_optim_states = is_optim_states
         self._time = time
         self.op_type = f"Prefetch"
+
+    @property
+    def target_name(self):
+        return self.target.name
     
 class OptimizeOp(Op):
     def __init__(self, 
@@ -435,7 +443,7 @@ class OpSchedule:
         """
         self.get_occurrences()
         alive_list = self.create_alive_list()
-        # self.alive_list = alive_list
+        self.alive_list = alive_list
         self.get_memory(alive_list)
 
         self.mem = self.save_mem[self.loss_idx]
