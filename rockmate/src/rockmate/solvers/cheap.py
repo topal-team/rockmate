@@ -44,8 +44,8 @@ class CheapSolver(Solver):
                            for anode in cnode.users
                            for user_cnode in anode.users_real
                            if user_cnode.name in cnode_idx]
-            has_bwd_user = any(not user_cnode.is_fwd for user_cnode in user_cnodes)
-            if is_cheap(cnode) and has_bwd_user:
+            # has_bwd_user = any(not user_cnode.is_fwd for user_cnode in user_cnodes)
+            if is_cheap(cnode):# and has_bwd_user:
                 cheap_cnodes[cnode.name] = cnode
         
         anodes_del_idx = {i:[] for i, _ in enumerate(cluster.list_cnodes)}
