@@ -92,8 +92,8 @@ class Step():
             opt_ops = self.opt_ops
         return (self.alloc_ops
                 +self.ofl_ops
-                +self.prf_ops
                 +self.comp_ops
+                +self.prf_ops
                 +opt_ops
                 +self.del_ops
                 )
