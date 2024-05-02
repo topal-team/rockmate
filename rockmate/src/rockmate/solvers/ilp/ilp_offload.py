@@ -18,7 +18,7 @@ class ModelPULPOffload(ModelPULP):
         self.grad_mode = grad_mode
         self.activation_offload = activation_offload
         self.optimize_metrics = optimize_metrics
-        self.correction_term = False
+        self.use_correction_term = True
 
     def build(self):
         # OVERWRITTING METHOD
