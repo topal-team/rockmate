@@ -173,7 +173,7 @@ class ModelPULPOffload(ModelPULP):
                                         * self.parameter_gradient_size[w]
                                         * self.optimizer_overhead_factor
                                         for w in l_w)
-        return optimizer_overhead
+        return [optimizer_overhead]
 
     def all_param_mem(self,t, k, with_multiplier=True):
         return (self.parameter_mem(t,k)

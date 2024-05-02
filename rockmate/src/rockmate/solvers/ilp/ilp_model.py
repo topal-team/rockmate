@@ -613,19 +613,20 @@ class ModelPULP:
                             for eidx_d, (k_, i_) in enumerate(self.delete_list)
                             if k == k_
                         )
-        return overhead
+        return [overhead]
     
     def correction_term_overhead(self, t, k):
         j = self.hcn2sub_c[k]
         cluster = self.sub_clusters[j]
         hcn = self.hgraph.list_HCNs[k]
+        overhead_terms = []
         for o, op_sched in enumerate(self.list_list_sched[j]):
             correction_terms = (op_sched.fwd_overhead_correction
                                 if hcn.is_fwd
                                 else op_sched.bwd_overhead_correction)
             if not correction_terms:
-                return (
-                    + self.Comp[t, k, o] * self.overhead[k][o]
+                overhead_terms.append(
+                    self.Comp[t, k, o] * self.overhead[k][o]
                     + lpSum(
                         self.mem[i_] * self.delete[t, eidx_d]
                         for eidx_d, (k_, i_) in enumerate(self.delete_list)
@@ -668,13 +669,14 @@ class ModelPULP:
                         not_kept_alive = self.create[t, eidx]
                     correction_term += not_kept_alive * inter_mem
                 
-                return (self.Comp[t, k, o] * overhead / self.gcd
-                    + correction_term
+                overhead_terms.append(self.Comp[t, k, o] * overhead / self.gcd
+                    + correction_term / self.gcd
                     + lpSum(
                         self.mem[i_] * self.delete[t, eidx_d]
                         for eidx_d, (k_, i_) in enumerate(self.delete_list)
                         if k == k_
                     ))
+        return overhead_terms
             
 
     def add_memory_constrains(self):
@@ -686,11 +688,12 @@ class ModelPULP:
             for k in self.krange(t):
                 self.md += self.save_mem(t,k) >= 0
                 self.md += self.save_mem(t,k) <= (self.peak_budget)
-                self.md += (
-                    self.save_mem(t,k)
-                    + self.overhead_mem(t,k)
-                    <= self.peak_budget
-                )
+                for overhead in self.overhead_mem(t,k):
+                    self.md += (
+                        self.save_mem(t,k)
+                        + overhead
+                        <= self.peak_budget
+                    )
                 
     def add_abar_constraint(self, save_budget):
         # self.save_budget = save_budget / self.gcd
