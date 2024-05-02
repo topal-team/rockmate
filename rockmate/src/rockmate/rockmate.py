@@ -53,6 +53,7 @@ class Rockmate(torch.nn.Module):
         gpu_optim = torch.optim.Adam,
         optim_kwargs = {},
         minor_offload_size = 10*1024**2,
+        keep_outputs = False,
     ):
         super().__init__()
         ref_verbose[0] = verbose
@@ -67,6 +68,7 @@ class Rockmate(torch.nn.Module):
         self.exec_with_record_time = False
         self.budget = budget
         self.rkgb_res = rkgb_res
+        self.keep_outputs = keep_outputs
         self.list_solutions = []
         object.__setattr__(self, "original_mod", original_mod)
         
@@ -179,7 +181,8 @@ class Rockmate(torch.nn.Module):
                 solver.config.optimize_metrics = self.global_dict["optimize_metrics"]
         for solver in list_solvers:
             if isinstance(solver, HILP):
-                # solver.config.protected_names += self.output_names
+                if self.keep_outputs:
+                    solver.config.protected_names += self.output_names
                 if rotor_solver:
                     solver.config.nb_bdg_save = 10
                     solver.config.nb_bdg_peak = 10
@@ -582,17 +585,15 @@ def define_autograd_Function(RkMod: Rockmate):
                 RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes,
                 grad_outs):
                 out = RkMod.compiler.get_val(out_node.main_target)
-                out.grad = out_grad.data.as_strided_(out.shape, out.stride(), out.storage_offset())
+                if out_grad.mean()!=0:
+                    out.grad = out_grad.data.as_strided_(out.shape, out.stride(), out.storage_offset())
                 # print(out_node.main_target, out.grad.mean)
                 out_grad.data = torch.empty(0)
-            
-            for target in RkMod.output_targets:
-                RkMod.compiler.storage.ld[target].data = torch.empty(0)
-                RkMod.compiler.storage.ld[target].grad = None
 
-            # TODO: let users to decide from hyperparameter whether to keep the output
-            # for out_node in RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes:
-            #         RkMod.compiler.get_val(f"out_{out_node.main_target}").data = torch.empty(0)
+            if not RkMod.keep_outputs:
+                for target in RkMod.output_targets:
+                    RkMod.compiler.storage.ld[target].data = torch.empty(0)
+                    RkMod.compiler.storage.ld[target].grad = None
                 
             loss_idx = RkMod.op_sched.loss_idx
             #  * record_mem stuff *
