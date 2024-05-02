@@ -219,7 +219,7 @@ def translate(cluster:HierarchicalCluster, op_list):
     translator_re = cluster.representee_cluster.translator
     translator = cluster.translator
     translated_op_list = deepcopy(op_list)
-    for op in translated_op_list:
+    def translate_op(op):
         if isinstance(op, ComputeOp):
             ana_kn = translator_re.to_ano(op.target)
             op.target = translator.from_ano(ana_kn)
@@ -228,7 +228,12 @@ def translate(cluster:HierarchicalCluster, op_list):
             op.target = Activation(translator.from_ano(ana_kn))
         else:
             raise ValueError
-            
+        
+    for op in translated_op_list:
+        translate_op(op)
+        for e in op.wait_events:
+            re_node = translator_re.to_ano(e[1])
+            e[1] = translator.from_ano(re_node)
     return translated_op_list
 
 

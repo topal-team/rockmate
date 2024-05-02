@@ -128,21 +128,21 @@ def add_activation_offload(op_sched:OpSchedule) -> OpSchedule:
         op_sched.op_list[i].record_event = True
         comp_op = op_sched.op_list[i]
         offload_op = OffloadOp(Activation(anode), time=anode.mem/1e7)
-        offload_op.wait_events.append(comp_op.name)
+        offload_op.wait_events.append([comp_op.op_type, comp_op.target.name])
         offload_op.record_event = True
         fwd_op_list.append(offload_op)
         del_op = DeleteOp(Activation(anode))
-        del_op.wait_events.append(offload_op.name)
+        del_op.wait_events.append([offload_op.op_type, offload_op.target.anode.name])
         fwd_op_list.append(del_op)
 
         prefetch_op_list.append(AllocateOp(Activation(anode)))
         prefetch_op = PrefetchOp(Activation(anode), time=anode.mem/1e7)
         prefetch_op.record_event = True
-        prefetch_op.wait_events.append(offload_op.name)
+        prefetch_op.wait_events.append([offload_op.op_type, offload_op.target.anode.name])
         prefetch_op_list.append(prefetch_op)
         for op in bwd_op_list:
             if isinstance(op, ComputeOp) and op.target in anode.users_real:
-                op.wait_events.append(prefetch_op.name)
+                op.wait_events.append([prefetch_op.op_type, prefetch_op.target.anode.name])
 
     bwd_op_list = bwd_op_list[:1] + prefetch_op_list+bwd_op_list[1:]
 

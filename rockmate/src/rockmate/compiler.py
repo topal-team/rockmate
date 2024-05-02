@@ -691,11 +691,11 @@ class Compiler:
                 stream = "offload_stream"
             if isinstance(op, PrefetchOp):
                 stream = "prefetch_stream"
-            for wait_op in op.wait_events:
-                op.add_fct(Fct_wait_event(wait_op, stream, self.storage))
+            for (_op_type, target_name) in op.wait_events:
+                op.add_fct(Fct_wait_event(f"{_op_type}({target_name})", stream, self.storage))
             self.compile_op[op_type](op)
             if op.record_event:
-                op.add_fct(Fct_record_event(op.name, stream, self.storage))
+                op.add_fct(Fct_record_event(f"{op.op_type}({op.target.name})", stream, self.storage))
 
 
     def _activation_placehold(self, prep_op: Op, cluster, output_nodes):
