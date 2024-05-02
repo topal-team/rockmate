@@ -92,13 +92,15 @@ class FastSolver(Solver):
             cluster,
             no_del_names=no_del_names,
         )
-        recompute_op_list = (ff_op_list + [ComputeOp(ComputationNode("loss"))]
-                             + deepcopy(autograd_op_list))
+        autograd_loss_idx = autograd_op_list.index(ComputeOp(ComputationNode("loss"), disabled=True))
         autograd_sched = OpSchedule(
                 autograd_op_list,
                 cluster=cluster,
-                loss_idx=autograd_op_list.index(ComputeOp(ComputationNode("loss"), disabled=True))
+                loss_idx=autograd_loss_idx
             )
+        re_autograd_op_list = deepcopy(autograd_op_list)
+        loss_op = re_autograd_op_list.pop(autograd_loss_idx)
+        recompute_op_list = (ff_op_list + [loss_op]+ re_autograd_op_list)
         list_sched.append(autograd_sched)
         
         list_sched.append(
@@ -128,7 +130,8 @@ class FastSolver(Solver):
                 if cnode in list_cnode[i + 1 :]:
                     return False
             
-            if anode in cluster.loss_cnode.deps_real and i<= loss_i:
+            fwd = not with_backward or i<= loss_i
+            if anode in cluster.loss_cnode.deps_real and fwd:
                 return False
             # if anode in cluster.interfaces["input_data_anodes"]:
             #     return False

@@ -162,6 +162,19 @@ class ModelPULPOffload(ModelPULP):
         # OVERWRITTING METHOD
         return self.activation_mem(t,k) + self.all_param_mem(t,k)
 
+    def overhead_mem(self, t, k):
+        return self.act_overhead(t,k) + self.param_overhead(t,k)
+    
+    def param_overhead(self, t,k):
+        optimizer_overhead = 0
+        if k > self.loss_idx:# and k in self.hcn2param:
+            l_w = self.hcn2param[k]
+            optimizer_overhead += sum((self.req_w-self.sumOptC[w])
+                                        * self.parameter_gradient_size[w]
+                                        * self.optimizer_overhead_factor
+                                        for w in l_w)
+        return optimizer_overhead
+
     def all_param_mem(self,t, k, with_multiplier=True):
         return (self.parameter_mem(t,k)
                 + self.param_grad_mem[t,k]
@@ -198,14 +211,7 @@ class ModelPULPOffload(ModelPULP):
                     self.parameter_gradient_size[w] *
                     self.optimizer_states_factor)
                     for w in range(self.W))
-        optimizer_overhead = 0
-        if k > self.loss_idx:# and k in self.hcn2param:
-            l_w = self.hcn2param[k]
-            optimizer_overhead += sum((self.req_w-self.sumOptC[w])
-                                        * self.parameter_gradient_size[w]
-                                        * self.optimizer_overhead_factor
-                                        for w in l_w)
-        return optimizer_states_mem + optimizer_overhead*with_overhead
+        return optimizer_states_mem
 
 
     def prefill_offload(self,):

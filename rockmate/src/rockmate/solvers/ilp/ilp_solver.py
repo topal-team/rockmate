@@ -180,6 +180,7 @@ class HILP(Solver):
             nb_sched = max(
                 self.config.nb_total_sched * w // sum(weights), 1
             )  # at least 1 sched
+            nb_sched = 3 if i<30 else nb_sched
             if hcn.sub_cluster is not None:
                 # list_sched = hcn.sub_cluster.get_sched(pareto=True)
                 list_sched = hcn.sub_cluster.representee_cluster.list_schedules

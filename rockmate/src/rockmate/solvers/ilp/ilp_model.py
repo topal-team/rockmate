@@ -51,7 +51,7 @@ class ModelPULP:
         self.protected_names = protected_names
         self.hgraph = hgraph
         self.md = LpProblem(f"rockmateMILP", LpMinimize)
-        self.correction_term = accurate_mem
+        self.use_correction_term = accurate_mem
 
         self.config()
         
@@ -595,6 +595,87 @@ class ModelPULP:
     def save_mem(self, t, k):
         # OVERWRITTING METHOD IN OFFLOAD
         return self.U[t, k]
+    
+    def overhead_mem(self, t, k):
+        # OVERWRITTING METHOD IN OFFLOAD
+        return self.act_overhead(t,k)
+    
+    def act_overhead(self, t, k):
+        j = self.hcn2sub_c[k]
+        if self.use_correction_term and not j is None:
+            return self.correction_term_overhead(t,k)
+        overhead =  lpSum(
+                            self.Comp[t, k, o] * self.overhead[k][o]
+                            for o in range(self.nComp[k])
+                        )
+        overhead += lpSum(
+                            self.mem[i_] * self.delete[t, eidx_d]
+                            for eidx_d, (k_, i_) in enumerate(self.delete_list)
+                            if k == k_
+                        )
+        return overhead
+    
+    def correction_term_overhead(self, t, k):
+        j = self.hcn2sub_c[k]
+        cluster = self.sub_clusters[j]
+        hcn = self.hgraph.list_HCNs[k]
+        for o, op_sched in enumerate(self.list_list_sched[j]):
+            correction_terms = (op_sched.fwd_overhead_correction
+                                if hcn.is_fwd
+                                else op_sched.bwd_overhead_correction)
+            if not correction_terms:
+                return (
+                    + self.Comp[t, k, o] * self.overhead[k][o]
+                    + lpSum(
+                        self.mem[i_] * self.delete[t, eidx_d]
+                        for eidx_d, (k_, i_) in enumerate(self.delete_list)
+                        if k == k_
+                    )
+                )
+            for correction in correction_terms:
+                correction_term = 0
+                overhead = (correction["save"] + correction["overhead"]) - (
+                    op_sched.mem if hcn.is_fwd else 0
+                )
+                for inter_position, inter_mem in correction.items():
+                    if (
+                        inter_position == "save"
+                        or inter_position == "overhead"
+                    ):
+                        continue
+
+                    i_ = [
+                        han.anode.name for han in self.hgraph.list_HANs
+                    ].index(
+                        # self.sub_clusters[j]
+                        cluster.translate_representee_node(
+                        op_sched.cluster
+                        .list_anodes[inter_position[0]])
+                        .name
+                    )
+                    if inter_position[1] == "always":
+                        not_kept_alive = 1
+                    elif not inter_position[1]:  # ending status
+                        if (k, i_) in self.delete_list:
+                            eidx = self.delete_list.index((k, i_))
+                            not_kept_alive = self.delete[t, eidx]
+                        else:  # when output_data is not deps, but we care about it
+                            # eidx = self.delete_list.index((k, i_))
+                            k_ = max([kk for kk in self.han_deps[i_] if kk < k])
+                            not_kept_alive = self.alive[(t, k_, i_)]
+                    else:  # start status
+                        eidx = self.create_list.index((k, i_))
+                        not_kept_alive = self.create[t, eidx]
+                    correction_term += not_kept_alive * inter_mem
+                
+                return (self.Comp[t, k, o] * overhead / self.gcd
+                    + correction_term
+                    + lpSum(
+                        self.mem[i_] * self.delete[t, eidx_d]
+                        for eidx_d, (k_, i_) in enumerate(self.delete_list)
+                        if k == k_
+                    ))
+            
 
     def add_memory_constrains(self):
         self.add_activation_deletion()
@@ -603,95 +684,14 @@ class ModelPULP:
         
         for t in range(self.T):
             for k in self.krange(t):
-                j = self.hcn2sub_c[k]
                 self.md += self.save_mem(t,k) >= 0
                 self.md += self.save_mem(t,k) <= (self.peak_budget)
-                if j is None or not self.correction_term:
-                # if True:
-                    # don't consider correction_term
-                    self.md += (
-                        self.save_mem(t,k)
-                        + lpSum(
-                            self.Comp[t, k, o] * self.overhead[k][o]
-                            for o in range(self.nComp[k])
-                        )
-                        + lpSum(
-                            self.mem[i_] * self.delete[t, eidx_d]
-                            for eidx_d, (k_, i_) in enumerate(self.delete_list)
-                            if k == k_
-                        )
-                        <= self.peak_budget
-                    )
-                else:
-                    cluster = self.sub_clusters[j]
-                    hcn = self.hgraph.list_HCNs[k]
-                    for o, op_sched in enumerate(self.list_list_sched[j]):
-                        for correction in (
-                            op_sched.fwd_overhead_correction
-                            if hcn.is_fwd
-                            else op_sched.bwd_overhead_correction
-                        ):
-                            correction_term = 0
-                            overhead = (correction["save"] + correction["overhead"]) - (
-                                op_sched.mem if hcn.is_fwd else 0
-                            )
-                            for inter_position, inter_mem in correction.items():
-                                if (
-                                    inter_position == "save"
-                                    or inter_position == "overhead"
-                                ):
-                                    continue
-
-                                i_ = [
-                                    han.anode.name for han in self.hgraph.list_HANs
-                                ].index(
-                                    # self.sub_clusters[j]
-                                    cluster.translate_representee_node(
-                                    op_sched.cluster
-                                    .list_anodes[inter_position[0]])
-                                    .name
-                                )
-                                if inter_position[1] == "always":
-                                    not_kept_alive = 1
-                                elif not inter_position[1]:  # ending status
-                                    if (k, i_) in self.delete_list:
-                                        eidx = self.delete_list.index((k, i_))
-                                        not_kept_alive = self.delete[t, eidx]
-                                    else:  # when output_data is not deps, but we care about it
-                                        # eidx = self.delete_list.index((k, i_))
-                                        k_ = max([kk for kk in self.han_deps[i_] if kk < k])
-                                        not_kept_alive = self.alive[(t, k_, i_)]
-                                else:  # start status
-                                    eidx = self.create_list.index((k, i_))
-                                    not_kept_alive = self.create[t, eidx]
-                                correction_term += not_kept_alive * inter_mem
-                            self.md += (
-                                self.U[t, k]
-                                + self.Comp[t, k, o] * overhead / self.gcd
-                                + correction_term
-                                + lpSum(
-                                    self.mem[i_] * self.delete[t, eidx_d]
-                                    for eidx_d, (k_, i_) in enumerate(self.delete_list)
-                                    if k == k_
-                                )
-                                <= self.peak_budget
-                            )
-                        if not (
-                            op_sched.fwd_overhead_correction
-                            if hcn.is_fwd
-                            else op_sched.bwd_overhead_correction
-                        ):
-                            self.md += (
-                                self.U[t, k]
-                                + self.Comp[t, k, o] * self.overhead[k][o]
-                                + lpSum(
-                                    self.mem[i_] * self.delete[t, eidx_d]
-                                    for eidx_d, (k_, i_) in enumerate(self.delete_list)
-                                    if k == k_
-                                )
-                                <= self.peak_budget
-                            )
-    
+                self.md += (
+                    self.save_mem(t,k)
+                    + self.overhead_mem(t,k)
+                    <= self.peak_budget
+                )
+                
     def add_abar_constraint(self, save_budget):
         # self.save_budget = save_budget / self.gcd
         for k in range(self.T):
