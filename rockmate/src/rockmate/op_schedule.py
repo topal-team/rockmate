@@ -417,14 +417,18 @@ class OpSchedule:
                 mem += d.mem
         return mem
     
-    def get_memory(self, alive_list):
+    def get_memory(self, alive_list, exclude_interfaces=True):
         L = len(self.op_list)
         self.time = np.zeros(L)
         self.save_mem = np.zeros(L)
         self.overhead = np.zeros(L)
 
+        if exclude_interfaces: 
+            exclude_names = self.interface_names
+        else:
+            exclude_names = []
         for i, (op, alive_status) in enumerate(zip(self.op_list, alive_list)):
-            self.save_mem[i] = self._sum_mem(alive_status, self.interface_names)
+            self.save_mem[i] = self._sum_mem(alive_status, exclude_names)
             if op.disabled:
                 continue
             self.time[i] = op.time if not (isinstance(op, OffloadOp) or isinstance(op, PrefetchOp)) else 0
