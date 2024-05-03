@@ -102,11 +102,14 @@ class RK_Storage:
         self.rng_state = RngState()
         self.events = dict()
         self.gd = gd
+        self.manager = AllocationManager(self)
 
     def add_val(self, val, x):
         self.ld[val] = x
 
     def get_val(self, val):
+        if val in self.manager.indices:
+            return self.manager.get_val(val)
         if val in self.ld:
             return self.ld[val]
         elif val in self.gd:
@@ -114,6 +117,30 @@ class RK_Storage:
         else:
             raise Exception(f"{val} not defined in executing RK_Env")
 
+class AllocationManager:
+    """
+    Allocation manager will alloc added tensors together which reduces RAM usage.
+    It also keeps the index of tensors which allows to retrieve allocation as a slice
+    """
+    def __init__(self, storage:RK_Storage, dtype=torch.float32) -> None:
+        self.size = 0
+        self.storage = storage
+        self.index = 0
+        self.indices = {}
+        self.dtype = dtype
+
+    def add_tensor(self, target_name, shape):
+        self.indices[target_name] = (self.index, self.index + shape.numel())
+        self.index += shape.numel()
+
+    def alloc_op(self):
+        return Fct_mem_alloc(target_name="allocation",
+                             storage=self.storage,
+                             shape=torch.Size(self.index),
+                             dtype=self.dtype)
+    
+    def get_val(self, val):
+        return self.storage.ld["allocation"][self.indices[val][0]:self.indices[val][1]]
 
 class RK_Fct:
     def __init__(self, target_name: str, storage: RK_Storage, **kwargs):
@@ -376,12 +403,13 @@ class Fct_mem_alloc(RK_Fct):
         self.dtype = dtype
 
     def alloc_optim_states(self):
+        if self.shape:
+            shape = self.shape
+        else:
+            shape = self.storage.shapes[self.shape_name]
         for k, v in self.storage.get_val(f"Optimize_({self.target_name})").state.items():
-            v["exp_avg"].data = torch.empty_like(
-                self.storage.get_val(f"exp_avg_{self.target_name}"), device=self.device
-            )
-            v["exp_avg_sq"].data = torch.empty_like(
-                self.storage.get_val(f"exp_avg_sq_{self.target_name}"), device=self.device
+            v["exp_avg"].data = torch.empty(shape, device=self.device)
+            v["exp_avg_sq"].data = torch.empty(shape, device=self.device
             )
 
     def alloc_grad(self):
@@ -461,11 +489,11 @@ class Fct_offload(RK_Fct):
     def offload_optim_states(self):
         for k, v in self.storage.get_val(f"Optimize_({self.target_name})").state.items():
             self.storage.get_val(f"exp_avg_{self.target_name}").copy_(
-                v["exp_avg"].view(self.storage.get_val(f"exp_avg_{self.target_name}").shape), 
+                v["exp_avg"].reshape(self.storage.get_val(f"exp_avg_{self.target_name}").shape), 
                 non_blocking=True
             )
             self.storage.get_val(f"exp_avg_sq_{self.target_name}").copy_(
-                v["exp_avg_sq"].view(self.storage.get_val(f"exp_avg_sq_{self.target_name}").shape), 
+                v["exp_avg_sq"].reshape(self.storage.get_val(f"exp_avg_sq_{self.target_name}").shape), 
                 non_blocking=True
             )
         pass
@@ -520,11 +548,11 @@ class Fct_prefetch(RK_Fct):
     def prefetch_optim_states(self):
         for k, v in self.storage.get_val(f"Optimize_({self.target_name})").state.items():
             v["exp_avg"].copy_(
-                self.storage.get_val(f"exp_avg_{self.target_name}").view(v["exp_avg"].shape),
+                self.storage.get_val(f"exp_avg_{self.target_name}").reshape(v["exp_avg"].shape),
                 non_blocking=True
             )
             v["exp_avg_sq"].copy_(
-                self.storage.get_val(f"exp_avg_sq_{self.target_name}").view(v["exp_avg_sq"].shape),
+                self.storage.get_val(f"exp_avg_sq_{self.target_name}").reshape(v["exp_avg_sq"].shape),
                 non_blocking=True
             )
         pass
@@ -649,6 +677,53 @@ class Fct_add_optimizer(RK_Fct):
             [self.storage.get_val(self.is_cpu * "cpu_" + p) for p in self.list_params],
             **self.kwargs,
         ))
+
+class Fct_add_tensor(RK_Fct):
+    def __init__(
+        self,
+        target_name: str,
+        storage: RK_Storage,
+        shape=False,
+        **kwargs,
+    ):
+        super().__init__(
+            target_name=target_name,
+            storage=storage,
+        )
+        self.target_name = target_name
+        self.kwargs = kwargs
+        if isinstance(shape, torch.Size):
+            self.shape = shape
+        else:
+            self.shape = False
+            self.shape_name = shape
+
+    def __call__(self):
+        if self.shape:
+            shape = self.shape
+        else:
+            shape = self.storage.shapes[self.shape_name]
+        self.storage.manager.add_tensor(self.target_name, shape)
+
+class Fct_manager_alloc(RK_Fct):
+    def __init__(
+        self,
+        target_name: str,
+        storage: RK_Storage,
+        **kwargs,
+    ):
+        super().__init__(
+            target_name=target_name,
+            storage=storage,
+        )
+        self.target_name = target_name
+        self.kwargs = kwargs
+
+    def __call__(self):
+        self.storage.add_val("allocation", torch.empty(self.storage.manager.index,
+                                                       device="cpu",
+                                                       pin_memory=True))
+
 
 
 class Compiler:
@@ -820,25 +895,29 @@ class Compiler:
                 and op.target.is_optim_states
             ):
                 var_name = op.target.param_name
-                # CPU optim states are placeholder for offload, they are not necessarily attached to the optimizers
-                prep_op.add_fct(
-                    Fct_mem_alloc(
-                        f"exp_avg_{var_name}",
-                        storage=self.storage,
-                        alloc_mode="tensor",
-                        shape=var_name,
-                        device=torch.device("cpu"),
-                    )
-                )
-                prep_op.add_fct(
-                    Fct_mem_alloc(
-                        f"exp_avg_sq_{var_name}",
-                        storage=self.storage,
-                        alloc_mode="tensor",
-                        shape=var_name,
-                        device=torch.device("cpu"),
-                    )
-                )
+                # CPU optim states are placeholder for offload, 
+                # they are not attached to the optimizers
+                prep_op.add_fct(Fct_add_tensor(f"exp_avg_{var_name}", self.storage, shape=var_name))
+                prep_op.add_fct(Fct_add_tensor(f"exp_avg_sq_{var_name}", self.storage, shape=var_name))
+                # prep_op.add_fct(
+                #     Fct_mem_alloc(
+                #         f"exp_avg_{var_name}",
+                #         storage=self.storage,
+                #         alloc_mode="tensor",
+                #         shape=var_name,
+                #         device=torch.device("cpu"),
+                #     )
+                # )
+                # prep_op.add_fct(
+                #     Fct_mem_alloc(
+                #         f"exp_avg_sq_{var_name}",
+                #         storage=self.storage,
+                #         alloc_mode="tensor",
+                #         shape=var_name,
+                #         device=torch.device("cpu"),
+                #     )
+                # )
+        prep_op.add_fct(Fct_manager_alloc("allocation", self.storage))
 
         if minor_param_nodes:
             minor_parameters = [pnode.param_name for pnode in minor_param_nodes]
