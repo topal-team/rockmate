@@ -268,7 +268,7 @@ class Fct_run_fwd(RK_Fct):
     def __call__(self):
         with torch.cuda.stream(self.storage.gd[self.stream]):
             self.fwd_fct[self.fwd_mode]()
-            
+
     def fct_get_pack(self, no_save_list, sanity_check=False):
         # no_save_list contains a list of names
         def pack(x):
@@ -446,14 +446,14 @@ class Fct_offload(RK_Fct):
 
     def offload_tensor(self):
         self.storage.get_val(f"cpu_{self.target_name}").data.copy_(
-            self.storage.get_val(self.target_name).data,
+            self.storage.get_val(self.target_name).data.view(self.storage.get_val(f"cpu_{self.target_name}").shape),
             non_blocking=True,
         )
         pass
 
     def offload_grad(self):
         self.storage.get_val(f"cpu_{self.target_name}").grad.data.copy_(
-            self.storage.get_val(self.target_name).grad,
+            self.storage.get_val(self.target_name).grad.view(self.storage.get_val(f"cpu_{self.target_name}").shape),
             non_blocking=True,
         )
         pass
@@ -461,11 +461,11 @@ class Fct_offload(RK_Fct):
     def offload_optim_states(self):
         for k, v in self.storage.get_val(f"Optimize_({self.target_name})").state.items():
             self.storage.get_val(f"exp_avg_{self.target_name}").copy_(
-                v["exp_avg"], 
+                v["exp_avg"].view(self.storage.get_val(f"exp_avg_{self.target_name}").shape), 
                 non_blocking=True
             )
             self.storage.get_val(f"exp_avg_sq_{self.target_name}").copy_(
-                v["exp_avg_sq"], 
+                v["exp_avg_sq"].view(self.storage.get_val(f"exp_avg_sq_{self.target_name}").shape), 
                 non_blocking=True
             )
         pass
@@ -506,7 +506,7 @@ class Fct_prefetch(RK_Fct):
 
     def prefetch_tensor(self):
         self.storage.get_val(self.target_name).data.copy_(
-            self.storage.get_val(f"cpu_{self.target_name}").data,
+            self.storage.get_val(f"cpu_{self.target_name}").view(self.storage.get_val(self.target_name).shape),
             non_blocking=True,
         )
         if self.with_proxy:
@@ -520,10 +520,12 @@ class Fct_prefetch(RK_Fct):
     def prefetch_optim_states(self):
         for k, v in self.storage.get_val(f"Optimize_({self.target_name})").state.items():
             v["exp_avg"].copy_(
-                self.storage.get_val(f"exp_avg_{self.target_name}"), non_blocking=True
+                self.storage.get_val(f"exp_avg_{self.target_name}").view(v["exp_avg"].shape),
+                non_blocking=True
             )
             v["exp_avg_sq"].copy_(
-                self.storage.get_val(f"exp_avg_sq_{self.target_name}"), non_blocking=True
+                self.storage.get_val(f"exp_avg_sq_{self.target_name}").view(v["exp_avg_sq"].shape),
+                non_blocking=True
             )
         pass
 
