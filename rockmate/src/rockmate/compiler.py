@@ -4,6 +4,7 @@ from rkgb.lowlevel.ast_add_on import (make_str_assign,
                                       make_ast_list_assign)
 from rkgb.core.backward import ComputationNode, AllocationNode
 import torch
+import math
 import numpy as np
 from .op_schedule import (
     Allocation,
@@ -108,7 +109,7 @@ class RK_Storage:
         self.ld[val] = x
 
     def get_val(self, val):
-        if val in self.manager.indices:
+        if val in self.manager.target_allocations:
             return self.manager.get_val(val)
         if val in self.ld:
             return self.ld[val]
@@ -122,25 +123,62 @@ class AllocationManager:
     Allocation manager will alloc added tensors together which reduces RAM usage.
     It also keeps the index of tensors which allows to retrieve allocation as a slice
     """
-    def __init__(self, storage:RK_Storage, dtype=torch.float32) -> None:
+    def __init__(self, storage:RK_Storage, dtype=torch.float32, minor_size=10*1024**2) -> None:
         self.size = 0
         self.storage = storage
         self.index = 0
-        self.indices = {}
+        self.allocations = []
+        self.target_indices = {}
+        self.target_allocations = {}
+        self.target_sizes = {}
         self.dtype = dtype
+        self.minor_size = minor_size
 
     def add_tensor(self, target_name, shape):
-        self.indices[target_name] = (self.index, self.index + shape.numel())
+        # self.target_indices[target_name] = (self.index, self.index + shape.numel())
+        self.target_sizes[target_name] = shape.numel()
         self.index += shape.numel()
 
-    def alloc_op(self):
-        return Fct_mem_alloc(target_name="allocation",
-                             storage=self.storage,
-                             shape=torch.Size(self.index),
-                             dtype=self.dtype)
+    # def alloc_op(self):
+    #     return Fct_mem_alloc(target_name="allocation",
+    #                          storage=self.storage,
+    #                          shape=torch.Size(self.index),
+    #                          dtype=self.dtype)
     
     def get_val(self, val):
-        return self.storage.ld["allocation"][self.indices[val][0]:self.indices[val][1]]
+        alloc = self.allocations[self.target_allocations[val]]
+        return self.storage.ld[alloc[0]][self.target_indices[val][0]:self.target_indices[val][1]]
+    
+    def create_allocation(self, size):
+        i = len(self.allocations)
+        self.allocations.append((f"allocation_{i}", size))
+
+    def add_tensor_to_allocation(self, target, allocation):
+        self.target_allocations[target] = allocation
+
+    def split(self):
+        targets = list(sorted(self.target_sizes.keys(), key=lambda x:self.target_sizes[x]))
+        remain_size = sum(self.target_sizes[target] for target in targets)
+        while remain_size > 0:
+            i = len(self.allocations)
+            n = int(math.log(remain_size, 2))
+            if self.target_sizes[targets[-1]] >= 2**n or remain_size<self.minor_size:
+                alloction_size = remain_size
+                alloc_targets = targets
+            else:
+                alloction_size = 0
+                alloc_targets = []
+                while alloction_size + self.target_sizes[targets[-1]] < 2**n:
+                    target = targets.pop()
+                    alloction_size += self.target_sizes[target]
+                    alloc_targets.append(target)
+            
+            self.create_allocation(alloction_size)
+            index = 0
+            for target in alloc_targets:
+                self.target_allocations[target] = i
+                self.target_indices[target] = (index, index+self.target_sizes[target])
+            remain_size -= alloction_size
 
 class RK_Fct:
     def __init__(self, target_name: str, storage: RK_Storage, **kwargs):
@@ -720,9 +758,11 @@ class Fct_manager_alloc(RK_Fct):
         self.kwargs = kwargs
 
     def __call__(self):
-        self.storage.add_val("allocation", torch.empty(self.storage.manager.index,
-                                                       device="cpu",
-                                                       pin_memory=True))
+        self.storage.manager.split()
+        for (alloc, size) in self.storage.manager.allocations:
+            self.storage.add_val(alloc, torch.empty(size,
+                                 device="cpu",
+                                 pin_memory=True))
 
 
 
