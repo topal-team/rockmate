@@ -178,6 +178,7 @@ class AllocationManager:
             for target in alloc_targets:
                 self.target_allocations[target] = i
                 self.target_indices[target] = (index, index+self.target_sizes[target])
+                index += self.target_sizes[target]
             remain_size -= alloction_size
 
 class RK_Fct:
