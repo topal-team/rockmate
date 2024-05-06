@@ -336,6 +336,7 @@ class PrepareOp(Op):
         device: str= "cpu",
         cpu_placeholder = True,
         cpu_grad=False,
+        pin_memory=True,
         disabled: bool = False,
     ):
         super().__init__(alloc.name, disabled=disabled)
@@ -345,6 +346,7 @@ class PrepareOp(Op):
         self.disabled = disabled
         self.op_type = f"Prepare_{alloc.alloc_type}"
         self.cpu_grad = cpu_grad
+        self.pin_memory = pin_memory
 
 class OpSchedule:
     solver = None

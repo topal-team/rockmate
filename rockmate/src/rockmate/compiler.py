@@ -677,18 +677,19 @@ class Fct_to_storage(RK_Fct):
     and the real value should be empty.
     """
 
-    def __init__(self, target_name, storage: RK_Storage, pnode, device=None, **kwargs):
+    def __init__(self, target_name, storage: RK_Storage, pnode, device=None, pin_memory=True, **kwargs):
         super().__init__(target_name=target_name, storage=storage, **kwargs)
         self.target_name = target_name
         self.pnode = pnode
         self.device = device
+        self.pin_memory = pin_memory
 
     def __call__(self):
         self.storage.add_val(self.pnode.param_name, self.pnode.get_value(
             self.storage.gd["self"]
         ))
         
-        x = torch.empty_like(self.storage.get_val(self.pnode.param_name), pin_memory=True)
+        x = torch.empty_like(self.storage.get_val(self.pnode.param_name), pin_memory=self.pin_memory)
         x.copy_(self.storage.get_val(self.pnode.param_name))
         self.storage.add_val(f"cpu_{self.pnode.param_name}", torch.nn.Parameter(x))
         
@@ -846,16 +847,20 @@ class Compiler:
                 )
             )
             if OffloadOp(Activation(anode)).name in self.ops:#offload activation
-                prep_op.add_fct(
-                    Fct_mem_alloc(
-                        f"cpu_{anode.main_target}",
-                        storage=self.storage,
-                        shape=anode.info.tensor_size,#TODO: not compatible with dynamic input shape
-                        dtype=torch.float32,
-                        alloc_mode="tensor",
-                        device=torch.device("cpu"),
-                    )
-            )
+                prep_op.add_fct(Fct_add_tensor(f"cpu_{anode.main_target}", 
+                                               self.storage, 
+                                               shape=anode.info.tensor_size))
+                # prep_op.add_fct(
+                #     Fct_mem_alloc(
+                #         f"cpu_{anode.main_target}",
+                #         storage=self.storage,
+                #         shape=anode.info.tensor_size,#TODO: not compatible with dynamic input shape
+                #         dtype=torch.float32,
+                #         alloc_mode="tensor",
+                #         device=torch.device("cpu"),
+                #         pin_memory=True
+                #     )
+                # )
 
         for out_anode in list(cluster.interfaces["output_data_anodes"]):
             for out_target in out_anode.all_targets:
@@ -869,55 +874,6 @@ class Compiler:
                         requires_grad=out_anode.info.requires_grad,
                     )
                 )
-
-    def _parameter_placehold(self, prep_op: Op, cluster, minor_param_nodes):
-        for pnode in cluster.parameter_nodes:
-            ignore = False
-            if pnode.is_buffer or pnode in minor_param_nodes:
-                device = self.storage.gd["device"]
-                ignore = True
-            else:
-                device = torch.device("cpu")
-            prep_op.add_fct(
-                Fct_to_storage(
-                    pnode.param_name, storage=self.storage, pnode=pnode, device=device
-                )
-            )
-
-            prep_op.add_fct(
-                Fct_run_fwd(
-                    pnode.param_name, storage=self.storage, code=pnode.get_code()
-                )
-            )
-
-            prep_op.add_fct(Fct_get_shape(pnode.param_name, storage=self.storage))
-            prep_op.add_fct(Fct_RNG_state(pnode.param_name, storage=self.storage))
-            if (
-                not ignore
-            ):  # TODO: check if cpu preparation is necessary for the parameter
-                prep_op.add_fct(
-                    Fct_mem_alloc(
-                        f"cpu_{pnode.param_name}",
-                        storage=self.storage,
-                        alloc_mode="tensor",
-                        device=torch.device("cpu"),
-                        pin_memory=True,
-                    )
-                )
-                prep_op.add_fct(
-                    Fct_offload(pnode.param_name, storage=self.storage, pin_memory=True)
-                )
-                prep_op.add_fct(Fct_del(pnode.param_name, storage=self.storage))
-                if pnode.requires_grad:
-                    prep_op.add_fct(
-                        Fct_mem_alloc(
-                            f"cpu_{pnode.param_name}",
-                            storage=self.storage,
-                            device=torch.device("cpu"),
-                            alloc_mode="grad",
-                            pin_memory=True,
-                        )
-                    )
 
     def _optimizer_placehold(self, prep_op: Op, op_list, minor_param_nodes):
         for op in op_list:
@@ -1307,7 +1263,8 @@ class Compiler:
                     pnode.param_name, 
                     storage=self.storage, 
                     pnode=pnode, 
-                    device=op.device
+                    device=op.device,
+                    pin_memory=True#op.pin_memory
                 )
             )
         

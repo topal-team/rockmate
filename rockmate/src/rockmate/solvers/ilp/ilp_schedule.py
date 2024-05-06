@@ -101,7 +101,8 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
             alloc = Parameter(pnode)
             if alloc.name not in init_ops:
                 init_op_list.append(PrepareOp(alloc, device=device, 
-                                            cpu_grad=OffloadOp(Parameter(pnode, is_grad=True)).name in op_name_list))
+                                            cpu_grad=OffloadOp(Parameter(pnode, is_grad=True)).name in op_name_list,
+                                            pin_memory=OffloadOp(Parameter(pnode)).name in op_name_list))
 
     else:
         op_list = []
@@ -315,10 +316,10 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
                 else:
                     op_list.append(op)
             for op in md.del_ops[t,k]:
-                if op.target.target_name in self_targets:
-                    wait_op_3.append(op)
-                else:
-                    op_list.append(op)
+                # if op.target.target_name in self_targets:
+                wait_op_3.append(op)
+                # else:
+                #     op_list.append(op)
             for op in md.prf_ops[t,k]:
                 op_list.append(op)
 
