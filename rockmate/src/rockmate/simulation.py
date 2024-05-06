@@ -54,6 +54,7 @@ class Step():
 
         ofl_ops = []
         prf_ops = []
+        prf_act_ops = []
         opt_ops = []
         comp_ops = []
         self.alloc_ops = []
@@ -74,11 +75,13 @@ class Step():
             #     comp_ops.append(op)
             elif isinstance(op, DeleteOp) and isinstance(op.target, Parameter):
                 self.del_ops.append(op)
+            elif isinstance(op, PrefetchOp) and op.record_event:
+                prf_act_ops.append(op)
             else:
                 comp_ops.append(op)
 
         self.ofl_ops = ListOp(ofl_ops)
-        self.prf_ops = ListOp(prf_ops)
+        self.prf_ops = ListOp(prf_act_ops+prf_ops)
         self.opt_ops = ListOp(opt_ops)
         self.comp_ops = ListOp(comp_ops)
 
@@ -92,8 +95,8 @@ class Step():
             opt_ops = self.opt_ops
         return (self.alloc_ops
                 +self.ofl_ops
-                +self.comp_ops
                 +self.prf_ops
+                +self.comp_ops
                 +opt_ops
                 +self.del_ops
                 )
