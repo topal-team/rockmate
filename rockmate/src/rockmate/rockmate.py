@@ -290,8 +290,8 @@ class Rockmate(torch.nn.Module):
             # timer.start()
             for op in (
                     step.ofl_ops
-                    +step.comp_ops
                     +step.prf_ops
+                    +step.comp_ops
                     +step.opt_ops
                     +step.del_ops):
                 self._exec(op)
