@@ -76,6 +76,7 @@ def make_gd(
         # "offload_stream": torch.cuda.current_stream(),
         "prefetch_stream": torch.cuda.Stream(device),
         "offload_stream": torch.cuda.Stream(device),
+        "cpu_stream": torch.cuda.Stream(device),
     }
 
 
@@ -248,7 +249,8 @@ class Fct_gen_fake_data(RK_Fct):
             if s == torch.Size([]):
                 x = m.sum()  # easy way to obtain a Tensor of shape []
             else:
-                x = m.expand(np.prod(s)).view(s)
+                # x = m.expand(np.prod(s)).view(s)
+                x = m.expand(*s)
             self.storage.get_val(self.target_name).data = x
             if self.with_proxy:
                 self.storage.get_val(f"_{self.target_name}").data = x
@@ -390,16 +392,17 @@ class Fct_get_shape(RK_Fct):
 
 class Fct_optimize(RK_Fct):
     def __init__(
-        self, target_name: str, storage: RK_Storage, del_grad_list: list = [], **kwargs
+        self, target_name: str, storage: RK_Storage, del_grad_list: list = [], stream="main_stream",**kwargs
     ):
         super().__init__(target_name=target_name, storage=storage, **kwargs)
         self.target_name = target_name
         self.del_grad_list = del_grad_list
+        self.stream = stream
 
     def __call__(self):
         # if "cpu" in self.target_name:
-        #     torch.cuda.synchronize()
-            # return None
+        #     return None
+        # with torch.cuda.stream(self.storage.gd[self.stream]):
         self.storage.get_val(self.target_name).step()
         # for p in self.del_grad_list:
         #     self.storage.get_val(p).grad.zero_()
@@ -572,6 +575,8 @@ class Fct_prefetch(RK_Fct):
             self.post_process_code = target.pnode.get_code()
 
     def prefetch_tensor(self):
+        # if self.with_proxy:
+        #     return None
         self.storage.get_val(self.target_name).data.copy_(
             self.storage.get_val(f"cpu_{self.target_name}").view(self.storage.get_val(self.target_name).shape),
             non_blocking=True,
@@ -637,6 +642,7 @@ class Fct_record_event(RK_Fct):
 
     def __call__(self):
         with torch.cuda.stream(self.storage.gd[self.stream]):
+            pass
             self.storage.events[self.target_name] = torch.cuda.Event()
             self.storage.events[self.target_name].record(self.storage.gd[self.stream])
 
@@ -646,6 +652,7 @@ class Fct_wait_event(RK_Fct):
         self.stream = stream
 
     def __call__(self):
+        pass
         self.storage.events[self.target_name].wait(self.storage.gd[self.stream])
 
 
@@ -990,6 +997,24 @@ class Compiler:
             )
         )
         cnode: ComputationNode = op.target
+        for pnode in cnode.required_parameter_nodes_real:
+            op.add_fct(
+                Fct_run_fwd(
+                    cnode.main_target,
+                    storage=self.storage,
+                    code=pnode.get_code(),
+                )
+            )
+
+        for anode in cnode.deps_real:
+            for dep_cnode in anode.deps:
+                code = dep_cnode.make_body_code_ast()
+                ast_view_code = make_ast_list_assign(code)
+                op.add_fct(Fct_run_fwd(op.target, 
+                                       storage=self.storage, 
+                                       code=ast_to_str(ast_view_code),
+                                       stream="main_stream"))
+                
         if not cnode.info.requires_grad:
             op.add_fct(
                 Fct_run_fwd(
@@ -1024,14 +1049,7 @@ class Compiler:
             force_special_kwargs=not op.pos_info["first_occurrence"],
         )
         main_code = main_code.replace(cnode.main_target, f"_{cnode.main_target}")
-        for pnode in cnode.required_parameter_nodes_real:
-            op.add_fct(
-                Fct_run_fwd(
-                    cnode.main_target,
-                    storage=self.storage,
-                    code=pnode.get_code(),
-                )
-            )
+        
 
         if not op.pos_info["last_before_bwd"]:
             for target in cnode.tensor_targets:
@@ -1223,13 +1241,24 @@ class Compiler:
                          ) 
         )
         if isinstance(op.target, Activation):
-            for cnode in op.target.anode.deps:
-                code = cnode.make_body_code_ast()
-                ast_view_code = make_ast_list_assign(code)
-                op.add_fct(Fct_run_fwd(op.target, 
-                                       storage=self.storage, 
-                                       code=ast_to_str(ast_view_code),
-                                       stream="prefetch_stream"))
+            pass
+            # for cnode in op.target.anode.deps:
+            #     code = cnode.make_body_code_ast()
+            #     ast_view_code = make_ast_list_assign(code)
+            #     op.add_fct(Fct_run_fwd(op.target, 
+            #                            storage=self.storage, 
+            #                            code=ast_to_str(ast_view_code),
+            #                            stream="prefetch_stream"))
+                
+        if isinstance(op.target, Parameter) and not (op.target.is_grad or op.target.is_optim_states):
+            pass
+            # for cnode in op.target.anode.deps:
+            #     code = cnode.make_body_code_ast()
+            #     ast_view_code = make_ast_list_assign(code)
+            # op.add_fct(Fct_run_fwd(op.target, 
+            #                            storage=self.storage, 
+            #                            code=op.target.pnode.get_code(),
+            #                            stream="prefetch_stream"))
         pass
 
     def Allocate(self, op: AllocateOp):
@@ -1250,6 +1279,7 @@ class Compiler:
                 op.name,
                 storage=self.storage,
                 del_grad_list=op.list_params if op.is_cpu else [],
+                stream = "main_stream"#"cpu_stream" if "cpu" in op.name else "main_stream",
             )
         )
 
