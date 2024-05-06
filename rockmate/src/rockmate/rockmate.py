@@ -273,12 +273,35 @@ class Rockmate(torch.nn.Module):
             raise e
         
     def exec_step(self, step):
-        timer.start()
-        for op in step.op_list:
-            self._exec(op)
-        torch.cuda.synchronize()
-        timer.end()
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            profile_memory=True
+        ) as p:
+            timer.start()
+            for op in step.alloc_ops:
+                self._exec(op)
+            # torch.cuda.synchronize()
+            # timer.end()
+            # self.step_alloc_time.append(timer.elapsed())
+
+            # timer.start()
+            for op in (
+                    step.ofl_ops
+                    +step.comp_ops
+                    +step.prf_ops
+                    +step.opt_ops
+                    +step.del_ops):
+                self._exec(op)
+            torch.cuda.synchronize()
+            timer.end()
+        p.export_chrome_trace(f"profiles/{len(self.step_profiles)}.json")
         self.step_time.append(timer.elapsed())
+        self.step_memory_stats.append(torch.cuda.memory_stats())
+        self.step_profiles.append(p.key_averages().table(
+                    sort_by="self_cuda_time_total", row_limit=-1))
             
     def init_fwd_exec(self):
         # TODO: rename to first forward; also do the first backward differently incase grad not exist
@@ -342,6 +365,9 @@ class Rockmate(torch.nn.Module):
         self.max_mem = []
         self.allo_mem = []
         self.step_time = []
+        self.step_alloc_time = []
+        self.step_memory_stats = []
+        self.step_profiles = []
         if not self.training:
             self.original_mod.eval()
             return self.original_mod(*args, **kwargs)
