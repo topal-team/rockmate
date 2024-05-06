@@ -241,6 +241,7 @@ class Simulator:
                     # for usr in opt_op.target.pnode.users_real:
                     #     if usr.name in [str(op) for op in step.comp_ops]:
                     for prf_op in step.prf_ops:
+                        if isinstance(prf_op.target, Activation):continue
                         if prf_op.target.param_name == opt_op.target.pnode.param_name:
                             # print(opt_op.name)
                             opt2user_step[opt_op.name] = i
