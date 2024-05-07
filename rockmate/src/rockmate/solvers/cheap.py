@@ -66,7 +66,7 @@ class CheapSolver(Solver):
                 output_anodes.append(anode)
 
             regenerated = any(cnode.name in cheap_cnodes for cnode in anode.deps)
-            if regenerated:
+            if regenerated and all(cnode.is_fwd for cnode in anode.deps):
                 anodes_del_idx[loss_idx].append(anode)
 
             if (all(is_cheap(cnode) for cnode in anode.deps) 
@@ -132,17 +132,17 @@ def add_activation_offload(op_sched:OpSchedule) -> OpSchedule:
         offload_op.record_event = True
         fwd_op_list.append(offload_op)
         del_op = DeleteOp(Activation(anode))
-        del_op.wait_events.append([offload_op.op_type, offload_op.target.anode.name])
+        del_op.wait_events.append([offload_op.op_type, offload_op.target.name])
         fwd_op_list.append(del_op)
 
         prefetch_op_list.append(AllocateOp(Activation(anode)))
         prefetch_op = PrefetchOp(Activation(anode), time=anode.mem/1e7)
         prefetch_op.record_event = True
-        prefetch_op.wait_events.append([offload_op.op_type, offload_op.target.anode.name])
+        prefetch_op.wait_events.append([offload_op.op_type, offload_op.target.name])
         prefetch_op_list.append(prefetch_op)
         for op in bwd_op_list:
             if isinstance(op, ComputeOp) and op.target in anode.users_real:
-                op.wait_events.append([prefetch_op.op_type, prefetch_op.target.anode.name])
+                op.wait_events.append([prefetch_op.op_type, prefetch_op.target.name])
 
     bwd_op_list = bwd_op_list[:1] + prefetch_op_list+bwd_op_list[1:]
 
