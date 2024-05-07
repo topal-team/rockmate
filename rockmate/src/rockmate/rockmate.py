@@ -281,20 +281,20 @@ class Rockmate(torch.nn.Module):
             profile_memory=True
         ) as p:
             timer.start()
-            for op in step.alloc_ops:
+            for op in step.op_list:
                 self._exec(op)
             # torch.cuda.synchronize()
             # timer.end()
             # self.step_alloc_time.append(timer.elapsed())
 
             # timer.start()
-            for op in (
-                    step.ofl_ops
-                    +step.prf_ops
-                    +step.comp_ops
-                    +step.opt_ops
-                    +step.del_ops):
-                self._exec(op)
+            # for op in (
+            #         step.ofl_ops
+            #         +step.prf_ops
+            #         +step.comp_ops
+            #         +step.opt_ops
+            #         +step.del_ops):
+            #     self._exec(op)
             torch.cuda.synchronize()
             timer.end()
         p.export_chrome_trace(f"profiles/{len(self.step_profiles)}.json")

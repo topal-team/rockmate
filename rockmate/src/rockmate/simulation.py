@@ -60,9 +60,12 @@ class Step():
         self.alloc_ops = []
         self.del_ops = []
         for op in op_list:
-            if isinstance(op, SynchronizeOp) or isinstance(op, AllocateOp):
+            if (isinstance(op, SynchronizeOp) and
+                not op.wait_events) or isinstance(op, AllocateOp):
                 self.alloc_ops.append(op)
-            elif isinstance(op, OffloadOp) and not op.record_event:
+            elif ((isinstance(op, OffloadOp) and isinstance(op.target, Parameter))
+                  or (isinstance(op, SynchronizeOp) and op.wait_events
+                  and op.stream=="offload_stream")):
                 ofl_ops.append(op)
             elif isinstance(op, PrefetchOp) and not op.record_event:
                 prf_ops.append(op)
@@ -73,7 +76,9 @@ class Step():
             #     isinstance(op, OptimizeOp) and not op.is_cpu):
             #     # all happen in the main stream
             #     comp_ops.append(op)
-            elif isinstance(op, DeleteOp) and isinstance(op.target, Parameter):
+            elif (isinstance(op, DeleteOp) and isinstance(op.target, Parameter)
+                or (isinstance(op, SynchronizeOp) and op.wait_events
+                and op.stream=="main_stream")):
                 self.del_ops.append(op)
             elif isinstance(op, PrefetchOp) and op.record_event:
                 prf_act_ops.append(op)
@@ -94,9 +99,9 @@ class Step():
             list_params = [p for op in self.opt_ops for p in op.list_params]
             opt_ops = self.opt_ops
         return (self.alloc_ops
-                +self.ofl_ops
                 +self.prf_ops
                 +self.comp_ops
+                +self.ofl_ops
                 +opt_ops
                 +self.del_ops
                 )
@@ -268,7 +273,7 @@ class Simulator:
         self.steps: List[Step] = []
         step_op = []
         for i,op in enumerate(self.op_list):
-            if isinstance(op, SynchronizeOp):
+            if isinstance(op, SynchronizeOp) and op.stream is None:
                 if step_op:self.steps.append(Step(step_op))
                 step_op = []
             if i == self.loss_idx:

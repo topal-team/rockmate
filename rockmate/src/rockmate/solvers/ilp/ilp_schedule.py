@@ -296,6 +296,8 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
             # if md.sumComp[t, k].value() == 1:
             prefetch_list = []
             op_list += schedule_compute(md,t,k,hgraph)
+            last_op = op_list[-1]
+            last_op.record_event = True
             wait_op_1 = []
             wait_op_2 = []
             wait_op_3 = []
@@ -324,11 +326,22 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
                 op_list.append(op)
 
             if wait_op_1:# for the current layer, need to synchronize first
-                op_list.extend([SynchronizeOp(str(k))]+wait_op_1)
+                # op_list.append(SynchronizeOp(str(k)))
+                op_list.extend(wait_op_1)
+                last_op = wait_op_1[-1]
+                last_op.record_event = True
             if wait_op_2:# for the current layer, need to synchronize first
-                op_list.extend([SynchronizeOp(str(k))]+wait_op_2)
+                sync_op = SynchronizeOp(str(k), stream="offload_stream")
+                sync_op.wait_events.append((last_op.op_type,last_op.target.name))
+                op_list.append(sync_op)
+                op_list.extend(wait_op_2)
+                last_op = wait_op_2[-1]
+                last_op.record_event = True
             if wait_op_3:# for the current layer, need to synchronize first
-                op_list.extend([SynchronizeOp(str(k))]+wait_op_3)
+                sync_op = SynchronizeOp(str(k), stream="main_stream")
+                sync_op.wait_events.append((last_op.op_type, last_op.target.name))
+                op_list.append(sync_op)
+                op_list.extend(wait_op_3)
 
             op_list.extend(prefetch_list)
 

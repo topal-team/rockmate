@@ -1208,9 +1208,6 @@ class Compiler:
                 
         if isinstance(op.target, Parameter) and not (op.target.is_grad or op.target.is_optim_states):
             pass
-            # for cnode in op.target.anode.deps:
-            #     code = cnode.make_body_code_ast()
-            #     ast_view_code = make_ast_list_assign(code)
             # op.add_fct(Fct_run_fwd(op.target, 
             #                            storage=self.storage, 
             #                            code=op.target.pnode.get_code(),
@@ -1240,7 +1237,11 @@ class Compiler:
         )
 
     def Synchronize(self, op: SynchronizeOp):
-        op.add_fct(Fct_synchronize(storage=self.storage))
+        if not op.wait_events:
+            op.add_fct(Fct_synchronize(storage=self.storage))
+        else:
+            for e in op.wait_events:
+                op.add_fct(Fct_wait_event(f"{e[0]}({e[1]})", stream=op.stream, storage=self.storage))
 
     def Prepare(self, op:PrepareOp):
         pnode = op.target.pnode

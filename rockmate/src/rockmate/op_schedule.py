@@ -188,9 +188,10 @@ class Op:
 
 
 class SynchronizeOp(Op):
-    def __init__(self, name="", disabled=False):
+    def __init__(self, name="", disabled=False, stream=None):
         super().__init__(name, disabled=disabled)
         self.op_type = "Synchronize"
+        self.stream = stream
 
 class ComputeOp(Op):
     def __init__(self, 
