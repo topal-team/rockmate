@@ -199,6 +199,12 @@ class RawGraph(base.Graph):
             (value,name) for (name,value)
             in original_mod.named_buffers())
 
+        state_dict = {}
+        for n,p in dynamo_result.named_parameters():
+            state_dict[n] = p
+        for n,b in dynamo_result.named_buffers():
+            state_dict[n] = b
+
         for arg in dynamo_all_args:
             dynamo_arg_name = arg.arg # e.g. "arg15_1"
             # 1) Parameters:
@@ -207,7 +213,7 @@ class RawGraph(base.Graph):
                 # e.g. L__self___embeddings_word_embeddings.weight
                 # It's not as simple as changing the "_" by ".",
                 # here we look for "self.embeddings.word_embeddings.weight"
-                param_value = dynamo_result.state_dict[dynamo_param_name]
+                param_value = state_dict[dynamo_param_name]
                 param_real_name = dict_param_value_to_name[param_value]
                 dict_dynamo_name_to_correct_ast[dynamo_arg_name] \
                     = ast_add_on.make_ast_attribute_from_list(
@@ -216,7 +222,7 @@ class RawGraph(base.Graph):
             # 2) Buffers
             elif dynamo_arg_name in dynamo_signature.inputs_to_buffers:
                 dynamo_buffer_name = dynamo_signature.inputs_to_buffers[dynamo_arg_name]
-                buffer_value = dynamo_result.state_dict[dynamo_buffer_name]
+                buffer_value = state_dict[dynamo_buffer_name]
                 buffer_real_name = dict_buffer_value_to_name[buffer_value]
                 dict_dynamo_name_to_correct_ast[dynamo_arg_name] \
                     = ast_add_on.make_ast_attribute_from_list(
