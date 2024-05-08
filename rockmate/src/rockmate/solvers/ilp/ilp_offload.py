@@ -19,6 +19,7 @@ class ModelPULPOffload(ModelPULP):
         self.activation_offload = activation_offload
         self.optimize_metrics = optimize_metrics
         self.use_correction_term = True
+        self.cpu_constant_cost = 100
 
     def build(self):
         # OVERWRITTING METHOD
@@ -561,7 +562,7 @@ class ModelPULPOffload(ModelPULP):
         mem = 0
         for w in range(self.W):
             mem += self.parameter_gradient_size[w] * self.OptC[t, k, w]
-        return mem/self.cpu_optimize_speed
+        return mem/self.cpu_optimize_speed + self.cpu_constant_cost
 
 
     def time_step_optimize_self(self,t, k, cpu=True):
