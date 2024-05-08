@@ -54,6 +54,7 @@ class Rockmate(torch.nn.Module):
         optim_kwargs = {},
         minor_offload_size = 10*1024**2,
         keep_outputs = False,
+        dynamic_batch_dim = None,
     ):
         super().__init__()
         ref_verbose[0] = verbose
@@ -70,6 +71,7 @@ class Rockmate(torch.nn.Module):
         self.rkgb_res = rkgb_res
         self.keep_outputs = keep_outputs
         self.list_solutions = []
+        self.dynamic_batch_dim = dynamic_batch_dim 
         object.__setattr__(self, "original_mod", original_mod)
         
         self.config_partitioner()
@@ -106,7 +108,8 @@ class Rockmate(torch.nn.Module):
                     # wanted_graphs={"FB"},
                     partitioners=self.partitioners,
                     inspection_device=torch.device("cuda"),
-                    print_time_in_each_stage=True
+                    print_time_in_each_stage=True,
+                    dynamic_batch_dim=self.dynamic_batch_dim
                 )
             else:
                 self.rkgb_res = self.rkgb_res
@@ -227,6 +230,9 @@ class Rockmate(torch.nn.Module):
             storage = RK_Storage()
             storage.init(self.global_dict)
             self.compiler = Compiler(storage)
+            if self.dynamic_batch_dim is not None:
+                storage.dynamic_shapes = self.rkgb_res.raw_graph.dynamic_shapes
+                storage.dict_info = self.rkgb_res.forward_graph.dict_info
         
         self.minor_parameters = []
         if self.minor_param_nodes:
@@ -547,6 +553,11 @@ def define_autograd_Function(RkMod: Rockmate):
                         v_d = v.detach().requires_grad_(v.requires_grad)
                         dict_input_tensors_detach[v] = v_d
                         storage.ld[k] = v_d
+                        if RkMod.dynamic_batch_dim is not None:
+                            inspect_batch = storage.dict_info[k].tensor_size[RkMod.dynamic_batch_dim]
+                            batch_multiplier = v_d.shape[RkMod.dynamic_batch_dim]/inspect_batch
+                            storage.batch_multiplier = batch_multiplier
+                            
                     #  TODO elif iterables of Tensors ?
                     else:
                         storage.ld[k] = v

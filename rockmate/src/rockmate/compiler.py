@@ -90,6 +90,9 @@ class RK_Storage:
     _instance = None
 
     def __init__(self):
+        self.batch_multiplier = 1
+        self.dynamic_shapes = {}
+        self.dict_info = {}
         pass
 
     def __new__(cls, *args, **kwargs):
@@ -106,18 +109,31 @@ class RK_Storage:
         self.gd = gd
         self.manager = AllocationManager(self)
 
-    def add_val(self, val, x):
-        self.ld[val] = x
+    def add_val(self, target, x):
+        self.ld[target] = x
 
-    def get_val(self, val):
-        if val in self.manager.target_allocations:
-            return self.manager.get_val(val)
-        if val in self.ld:
-            return self.ld[val]
-        elif val in self.gd:
-            return self.gd[val]
+    def get_val(self, target):
+        if target in self.manager.target_allocations:
+            return self.manager.get_val(target)
+        if target in self.ld:
+            return self.ld[target]
+        elif target in self.gd:
+            return self.gd[target]
         else:
-            raise Exception(f"{val} not defined in executing RK_Env")
+            raise Exception(f"{target} not defined in executing RK_Env")
+        
+    def get_shape(self, target, shape=None):
+        if target in self.dynamic_shapes:
+            shape = self.dynamic_shapes[target]
+        if not shape and not target in self.shapes:
+            raise ValueError(f"shape of {target} is unkown")
+        l = list(shape)
+        for i, dim in enumerate(l):
+            if isinstance(dim, torch.SymInt):
+                l[i] = int(self.batch_multiplier * self.dict_info[target].tensor_size[i])
+        shape = torch.Size(l)
+        return shape
+
 
 class AllocationManager:
     """
@@ -731,6 +747,7 @@ class Fct_add_tensor(RK_Fct):
         target_name: str,
         storage: RK_Storage,
         shape=False,
+        dynamic_shape=False,
         **kwargs,
     ):
         super().__init__(
@@ -744,12 +761,16 @@ class Fct_add_tensor(RK_Fct):
         else:
             self.shape = False
             self.shape_name = shape
+        self.dynamic_shape = dynamic_shape
 
     def __call__(self):
-        if self.shape:
-            shape = self.shape
+        if self.dynamic_shape:
+            shape = self.storage.get_shape(self.shape_name)
         else:
-            shape = self.storage.shapes[self.shape_name]
+            if self.shape:
+                shape = self.shape
+            else:
+                shape = self.storage.shapes[self.shape_name]
         self.storage.manager.add_tensor(self.target_name, shape)
 
 class Fct_manager_alloc(RK_Fct):
@@ -849,7 +870,8 @@ class Compiler:
             if OffloadOp(Activation(anode)).name in self.ops:#offload activation
                 prep_op.add_fct(Fct_add_tensor(f"cpu_{anode.main_target}", 
                                                self.storage, 
-                                               shape=anode.info.tensor_size))
+                                               shape=anode.main_target,
+                                               dynamic_shape=True))
                 # prep_op.add_fct(
                 #     Fct_mem_alloc(
                 #         f"cpu_{anode.main_target}",

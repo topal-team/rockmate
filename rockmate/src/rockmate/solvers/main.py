@@ -52,7 +52,7 @@ class FastSolver(Solver):
             re_cluster.list_schedules += self.solve(re_cluster)
         list_sched = re_cluster.list_schedules
 
-        save_none_sched = list_sched[1]
+        save_none_sched = list_sched[-1]
         
         hcn.ff_time = save_none_sched.fwd_time
         hcn.ff_overhead = save_none_sched.fwd_overhead
@@ -126,7 +126,7 @@ class FastSolver(Solver):
         def _can_del(i, anode):
             if anode.name in no_del_names:
                 return False
-            for cnode in anode.users_real:
+            for cnode in anode.users_real:#.union(anode.users_fake):
                 if cnode in list_cnode[i + 1 :]:
                     return False
             
