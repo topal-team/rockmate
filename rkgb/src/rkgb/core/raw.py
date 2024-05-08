@@ -71,7 +71,6 @@ class RawNode(base.Node):
         if raw_parser is not None: raw_parser.all_raw_nodes.append(self)
 
 
-
 class RawGraph(base.Graph):
     """ Raw graph 
     => very few attributes = just what we get from jit or Dynamo"""
@@ -83,6 +82,7 @@ class RawGraph(base.Graph):
             # dynamo_constraints = None,
             use_jit_instead_of_dynamo = False,
             jit_impose_device=True,
+            dynamo_kwargs={}
         ):
         super().__init__()
         if use_jit_instead_of_dynamo:
@@ -97,10 +97,11 @@ class RawGraph(base.Graph):
                 example_inputs,
                 # dynamo_all_dynamic_shapes,
                 # dynamo_constraints
+                dynamo_kwargs=dynamo_kwargs
             )
         self.toposort_and_keep_only_useful_nodes()
         self.clear_redundancies_in_self_nodes()
-            
+        
 
     def _init_using_jit(self,
             original_mod : torch.nn.Module,
@@ -145,7 +146,8 @@ class RawGraph(base.Graph):
     
     def _init_using_dynamo(self,
             original_mod : torch.nn.Module,
-            example_inputs : preprocess_samples.ExampleInputs):
+            example_inputs : preprocess_samples.ExampleInputs,
+            dynamo_kwargs = {}):
             # dynamo_all_dynamic_shapes = True,
             # dynamo_constraints = None):
         self.tracer_used = "dynamo"
@@ -166,7 +168,8 @@ class RawGraph(base.Graph):
             original_mod,
             # args=ordered_example_inputs, # UNUSED
             args = tuple(),
-            kwargs=example_inputs.dict
+            kwargs=example_inputs.dict,
+            **dynamo_kwargs
             )
             # constraints=dynamo_constraints)
         dynamo_graph = dynamo_result.graph
@@ -266,7 +269,10 @@ class RawGraph(base.Graph):
 
         dynamo_all_nodes = dynamo_graph.nodes
         dynamo_assignment_nodes = []
+        dynamo_input_nodes = {}
         for dynamo_node in dynamo_all_nodes:
+            if dynamo_node.target in dynamo_signature.user_inputs:
+                dynamo_input_nodes[dynamo_node.target] = dynamo_node
             if dynamo_node.op == "call_function":
                 dynamo_assignment_nodes.append(dynamo_node)
             elif dynamo_node.op == "get_attr":
@@ -289,6 +295,10 @@ class RawGraph(base.Graph):
                 raise Exception(f"Unknown Dynamo Node's operation type {dynamo_node.op}")
             
         assert(len(dynamo_assignment_nodes)==len(assignment_codes))
+        self.dynamic_shapes = {}
+        for dynamo_input_name, dynamo_input_node in dynamo_input_nodes.items():
+            raw_node = dict_dynamo_name_to_raw_node[dynamo_input_name]
+            self.dynamic_shapes[raw_node.target] = dynamo_input_node.meta["val"].shape
         for dynamo_node,node_code in zip(
                 dynamo_assignment_nodes,
                 assignment_codes):
@@ -314,6 +324,8 @@ class RawGraph(base.Graph):
                 fct=dynamo_node.target.__name__,
                 raw_parser=parser)
             dict_dynamo_name_to_raw_node[dynamo_node.name] = raw_node
+            val = dynamo_node.meta["val"]
+            self.dynamic_shapes[raw_node.target] = val.shape if hasattr(val, "shape") else None
             # Deps :
             raw_node.deps = set(
                 dict_dynamo_name_to_raw_node[dep_id]
@@ -336,8 +348,6 @@ class RawGraph(base.Graph):
             self.output_nodes.append(output_raw_node)
             self.output_targets.append(output_raw_node.target)
         self.original_mod_output_targets = list(self.output_targets)
-            
-
         
         
 

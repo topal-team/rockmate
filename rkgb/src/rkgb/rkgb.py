@@ -10,7 +10,7 @@ from rkgb.core.simplified import SimplifiedGraph
 from rkgb.core.backward import ForwardAndBackwardGraph
 from rkgb.core import partitioned
 from rkgb.core.hierarchical import HierarchicalStructure
-
+from torch.export import Dim
 
 class Result():
     raw_graph = None
@@ -31,6 +31,7 @@ class Result():
             partitioners = None,
             print_time_in_each_stage = False,
             do_inspection = True,
+            dynamic_batch_dim = None
             ):
         self.original_mod = model
         self.inspection_device = inspection_device
@@ -48,8 +49,13 @@ class Result():
         self.example_inputs = preprocess_samples.ExampleInputs(model,model_args,model_kwargs)
         self.current_device = preprocess_device.get_device_and_check_all_same_device(model,self.example_inputs)
 
+        batch = Dim("batch")
+        dynamo_kwargs = {}
+        if dynamic_batch_dim is not None:
+            dynamo_kwargs["dynamic_shapes"] = {k:{dynamic_batch_dim:batch} 
+                                               for k in self.example_inputs.dict.keys()}
         # 2) Build everything
-        if "R" in wanted_graphs: self.build_raw()
+        if "R" in wanted_graphs: self.build_raw(dynamo_kwargs=dynamo_kwargs)
         if "F" in wanted_graphs: self.build_forward()
         if "S" in wanted_graphs: self.build_simplified()
         if "P" in wanted_graphs: self.build_partitioned()
@@ -64,7 +70,7 @@ class Result():
             clean_time_taken = time.strftime("%H:%M:%S", time.gmtime(time_taken))
             print(f"Stage {stage} took {clean_time_taken}")
 
-    def build_raw(self):
+    def build_raw(self, dynamo_kwargs={}):
         if self.raw_graph is None:
             self.start_time()
             self.raw_graph = RawGraph(
@@ -73,7 +79,8 @@ class Result():
                 # dynamo_all_dynamic_shapes=self.dynamo_all_dynamic_shapes,
                 # dynamo_constraints=self.dynamo_constraints,
                 use_jit_instead_of_dynamo=self.use_jit_instead_of_dynamo,
-                jit_impose_device=self.jit_impose_device)
+                jit_impose_device=self.jit_impose_device,
+                dynamo_kwargs=dynamo_kwargs)
             self.show_time("Raw")
             
     def build_forward(self):
