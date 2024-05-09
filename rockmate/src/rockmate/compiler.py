@@ -102,7 +102,7 @@ class RK_Storage:
 
     def init(self, gd):
         self.ld = dict()
-        self.shapes = {"Empty_size": torch.Size([0])}
+        self.measured_shapes = {"Empty_size": torch.Size([0])}
         self.dtypes = dict()
         self.rng_state = RngState()
         self.events = dict()
@@ -123,15 +123,19 @@ class RK_Storage:
             raise Exception(f"{target} not defined in executing RK_Env")
         
     def get_shape(self, target, shape=None):
+        if target in self.measured_shapes:
+            return self.measured_shapes[target]
         if target in self.dynamic_shapes:
             shape = self.dynamic_shapes[target]
-        if not shape and not target in self.shapes:
+            l = list(shape)
+            for i, dim in enumerate(l):
+                if isinstance(dim, torch.SymInt):
+                    l[i] = int(self.batch_multiplier * self.dict_info[target].tensor_size[i])
+            shape = torch.Size(l)
+        elif target in self.dict_info:
+            shape = self.dict_info[target].tensor_size
+        if shape is None:
             raise ValueError(f"shape of {target} is unkown")
-        l = list(shape)
-        for i, dim in enumerate(l):
-            if isinstance(dim, torch.SymInt):
-                l[i] = int(self.batch_multiplier * self.dict_info[target].tensor_size[i])
-        shape = torch.Size(l)
         return shape
 
 
@@ -152,15 +156,8 @@ class AllocationManager:
         self.minor_size = minor_size
 
     def add_tensor(self, target_name, shape):
-        # self.target_indices[target_name] = (self.index, self.index + shape.numel())
         self.target_sizes[target_name] = shape.numel()
         self.index += shape.numel()
-
-    # def alloc_op(self):
-    #     return Fct_mem_alloc(target_name="allocation",
-    #                          storage=self.storage,
-    #                          shape=torch.Size(self.index),
-    #                          dtype=self.dtype)
     
     def get_val(self, val):
         alloc = self.allocations[self.target_allocations[val]]
@@ -261,7 +258,7 @@ class Fct_gen_fake_data(RK_Fct):
                 if self.storage.dtypes[self.target_name].is_complex
                 else self.storage.gd["meta"]
             )
-            s = self.storage.shapes[self.target_name]
+            s = self.storage.get_shape(self.target_name)
             if s == torch.Size([]):
                 x = m.sum()  # easy way to obtain a Tensor of shape []
             else:
@@ -400,8 +397,8 @@ class Fct_get_shape(RK_Fct):
             target = self.storage.get_val(self.target_name)
 
         with torch.cuda.stream(self.storage.gd["main_stream"]):
-            self.storage.shapes[self.target_name] = target.shape
-            self.storage.shapes[f"cpu_{self.target_name}"] = target.shape
+            self.storage.measured_shapes[self.target_name] = target.shape
+            self.storage.measured_shapes[f"cpu_{self.target_name}"] = target.shape
             self.storage.dtypes[self.target_name] = target.dtype
             self.storage.dtypes[f"cpu_{self.target_name}"] = target.dtype
 
@@ -452,29 +449,19 @@ class Fct_mem_alloc(RK_Fct):
         self.kwargs = kwargs
         if self.device == torch.device("cpu"):
             self.kwargs["pin_memory"] = True
-        if isinstance(shape, torch.Size):
-            self.shape = shape
-        else:
-            self.shape = False
-            self.shape_name = target_name if shape is None else shape
+        self.shape_name = target_name if shape is None else shape
         
         self.dtype = dtype
 
     def alloc_optim_states(self):
-        if self.shape:
-            shape = self.shape
-        else:
-            shape = self.storage.shapes[self.shape_name]
+        shape = self.storage.get_shape(self.shape_name)
         for k, v in self.storage.get_val(f"Optimize_({self.target_name})").state.items():
             v["exp_avg"].data = torch.empty(shape, device=self.device)
             v["exp_avg_sq"].data = torch.empty(shape, device=self.device
             )
 
     def alloc_grad(self):
-        if self.shape:
-            shape = self.shape
-        else:
-            shape = self.storage.shapes[self.shape_name]
+        shape = self.storage.get_shape(self.shape_name)
         dtype = (
             self.storage.dtypes[self.shape_name] if self.dtype is None else self.dtype
         )
@@ -483,10 +470,7 @@ class Fct_mem_alloc(RK_Fct):
         )
 
     def alloc_data(self):
-        if self.shape:
-            shape = self.shape
-        else:
-            shape = self.storage.shapes[self.shape_name]
+        shape = self.storage.get_shape(self.shape_name)
         dtype = (
             self.storage.dtypes[self.shape_name] if self.dtype is None else self.dtype
         )
@@ -495,10 +479,7 @@ class Fct_mem_alloc(RK_Fct):
         )
 
     def alloc_tensor(self):
-        if self.shape:
-            shape = self.shape
-        else:
-            shape = self.storage.shapes[self.shape_name]
+        shape = self.storage.get_shape(self.shape_name)
         dtype = (
             self.storage.dtypes[self.shape_name] if self.dtype is None else self.dtype
         )
@@ -591,8 +572,6 @@ class Fct_prefetch(RK_Fct):
             self.post_process_code = target.pnode.get_code()
 
     def prefetch_tensor(self):
-        # if self.with_proxy:
-        #     return None
         self.storage.get_val(self.target_name).data.copy_(
             self.storage.get_val(f"cpu_{self.target_name}").view(self.storage.get_val(self.target_name).shape),
             non_blocking=True,
@@ -600,11 +579,6 @@ class Fct_prefetch(RK_Fct):
         if self.with_proxy:
             self.storage.get_val(f"_{self.target_name}").data = self.storage.get_val(f"{self.target_name}").data
 
-    # def prefetch_grad(self):
-    #     self.storage.get_val(f"cpu_{self.target_name}").grad.data.copy_(
-    #                 self.storage.get_val(self.target_name).grad,
-    #                 non_blocking=True,
-    #             )
     def prefetch_optim_states(self):
         for k, v in self.storage.get_val(f"Optimize_({self.target_name})").state.items():
             v["exp_avg"].copy_(
@@ -756,21 +730,11 @@ class Fct_add_tensor(RK_Fct):
         )
         self.target_name = target_name
         self.kwargs = kwargs
-        if isinstance(shape, torch.Size):
-            self.shape = shape
-        else:
-            self.shape = False
-            self.shape_name = shape
+        self.shape_name = shape
         self.dynamic_shape = dynamic_shape
 
     def __call__(self):
-        if self.dynamic_shape:
-            shape = self.storage.get_shape(self.shape_name)
-        else:
-            if self.shape:
-                shape = self.shape
-            else:
-                shape = self.storage.shapes[self.shape_name]
+        shape = self.storage.get_shape(self.shape_name)
         self.storage.manager.add_tensor(self.target_name, shape)
 
 class Fct_manager_alloc(RK_Fct):
@@ -871,18 +835,7 @@ class Compiler:
                 prep_op.add_fct(Fct_add_tensor(f"cpu_{anode.main_target}", 
                                                self.storage, 
                                                shape=anode.main_target,
-                                               dynamic_shape=True))
-                # prep_op.add_fct(
-                #     Fct_mem_alloc(
-                #         f"cpu_{anode.main_target}",
-                #         storage=self.storage,
-                #         shape=anode.info.tensor_size,#TODO: not compatible with dynamic input shape
-                #         dtype=torch.float32,
-                #         alloc_mode="tensor",
-                #         device=torch.device("cpu"),
-                #         pin_memory=True
-                #     )
-                # )
+                                               dynamic_shape=self.storage.dynamic_shapes))
 
         for out_anode in list(cluster.interfaces["output_data_anodes"]):
             for out_target in out_anode.all_targets:

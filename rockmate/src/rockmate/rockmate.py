@@ -229,10 +229,10 @@ class Rockmate(torch.nn.Module):
         if new_compiler:
             storage = RK_Storage()
             storage.init(self.global_dict)
+            storage.dict_info = self.rkgb_res.forward_graph.dict_info
             self.compiler = Compiler(storage)
             if self.dynamic_batch_dim is not None:
                 storage.dynamic_shapes = self.rkgb_res.raw_graph.dynamic_shapes
-                storage.dict_info = self.rkgb_res.forward_graph.dict_info
         
         self.minor_parameters = []
         if self.minor_param_nodes:
