@@ -20,7 +20,7 @@ class ModelPULPOffload(ModelPULP):
         grad_mode="free",
         optimize_metrics=None,
         activation_offload=False,
-        batch_multiplier=1,
+        dynamic_batch_size=False,
     ):
         super().__init__(
             hgraph,
@@ -45,6 +45,7 @@ class ModelPULPOffload(ModelPULP):
         self.optimize_metrics = optimize_metrics
         self.use_correction_term = True
         self.cpu_constant_cost = 100
+        self.dynamic_batch_size = dynamic_batch_size
 
     def build(self):
         # OVERWRITTING METHOD
@@ -138,8 +139,8 @@ class ModelPULPOffload(ModelPULP):
         ]  # minor weight size
         self.bandwidth = optimize_metrics["bandwidth"]  # bandwidth
 
-        self.req_w = RkLpVariable("Required_w", lowBound=0, upBound=1, cat="Continuous")
-        self.req_w = 1.0
+        lb = 0 if self.dynamic_batch_size else 1
+        self.req_w = RkLpVariable("Required_w", lowBound=lb, upBound=1, cat="Continuous")
 
         self.param2hcn = dict()
         self.parameters = []
@@ -645,7 +646,7 @@ class ModelPULPOffload(ModelPULP):
         mem = 0
         for w in range(self.W):
             mem += self.parameter_gradient_size[w] * self.OptC[t, k, w]
-        return mem / self.cpu_optimize_speed + self.cpu_constant_cost
+        return mem / self.cpu_optimize_speed + self.cpu_constant_cost * self.req_w
 
     def time_step_optimize_self(self, t, k, cpu=True):
         """

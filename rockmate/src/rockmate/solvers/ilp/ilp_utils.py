@@ -20,9 +20,9 @@ def clean_hg_parameter_groups(hg):
 
 
 class RkLpVariable(LpVariable):
-    def __init__(self, name, lowBound=None, upBound=None, cat="Continuous", e=None):
+    def __init__(self, name, lowBound=None, upBound=None, cat="Continuous", e=None, solution=None):
         super().__init__(name=name, lowBound=lowBound, upBound=upBound, cat=cat, e=e)
-        self.solution = None
+        self.solution = solution
 
     def value(self):
         return self.solution or self.varValue
