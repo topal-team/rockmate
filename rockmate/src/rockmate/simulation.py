@@ -55,6 +55,16 @@ class ListOp(list):
 
 class Step:
     def __init__(self, op_list: List[Op]) -> None:
+        main_op_list = [op_list[0]]
+        self_op_list = []
+        sync = False
+        for op in op_list[1:]:
+            if isinstance(op, SynchronizeOp):
+                sync = True
+            if not sync:
+                main_op_list.append(op)
+            else:
+                self_op_list.append(op)
 
         ofl_ops = []
         prf_ops = []
@@ -63,35 +73,21 @@ class Step:
         comp_ops = []
         self.alloc_ops = []
         self.del_ops = []
-        for op in op_list:
-            if (isinstance(op, SynchronizeOp) and not op.wait_events) or isinstance(
+        self.cpu_constant_cost = 50
+        
+        for op in main_op_list:
+            if (isinstance(op, SynchronizeOp)) or isinstance(
                 op, AllocateOp
             ):
                 self.alloc_ops.append(op)
-            elif (isinstance(op, OffloadOp) and isinstance(op.target, Parameter)) or (
-                isinstance(op, SynchronizeOp)
-                and op.wait_events
-                and op.stream == "offload_stream"
-            ):
+            elif isinstance(op, OffloadOp) and isinstance(op.target, Parameter):
                 ofl_ops.append(op)
             elif isinstance(op, PrefetchOp) and not op.record_event:
                 prf_ops.append(op)
             elif isinstance(op, OptimizeOp) and op.is_cpu:
                 opt_ops.append(op)
-            # elif isinstance(op, ComputeOp) or (
-            #     isinstance(op, DeleteOp) and isinstance(op.target, Activation)) or(
-            #     isinstance(op, OptimizeOp) and not op.is_cpu):
-            #     # all happen in the main stream
-            #     comp_ops.append(op)
-            elif (
-                isinstance(op, DeleteOp)
-                and isinstance(op.target, Parameter)
-                or (
-                    isinstance(op, SynchronizeOp)
-                    and op.wait_events
-                    and op.stream == "main_stream"
-                )
-            ):
+            elif isinstance(op, DeleteOp)
+                and isinstance(op.target, Parameter):
                 self.del_ops.append(op)
             elif isinstance(op, PrefetchOp) and op.record_event:
                 prf_act_ops.append(op)
@@ -102,6 +98,8 @@ class Step:
         self.prf_ops = ListOp(prf_act_ops + prf_ops)
         self.opt_ops = ListOp(opt_ops)
         self.comp_ops = ListOp(comp_ops)
+        self.self_ops = ListOp(self_op_list)
+
 
     @property
     def op_list(self):
@@ -118,13 +116,17 @@ class Step:
             + self.ofl_ops
             + opt_ops
             + self.del_ops
+            + self.self_ops
         )
 
     @property
     def time(self):
         return max(
-            self.ofl_ops.time, self.prf_ops.time, self.opt_ops.time, self.comp_ops.time
-        )
+            self.ofl_ops.time, 
+            self.prf_ops.time, 
+            self.opt_ops.time + self.cpu_constant_cost, 
+            self.comp_ops.time
+        ) + self.self_ops.time
 
     def all_time(self):
         return (
