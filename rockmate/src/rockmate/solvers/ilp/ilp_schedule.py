@@ -43,7 +43,7 @@ class knapsack:
         res1 = self.solve(frac, i + 1, sizes)
         res2 = self.solve(frac - sizes[i], i + 1, sizes)
         res2 = [i] + res2
-        if self.get_size(res1, sizes) <= self.get_size(res2, sizes) + sizes[i]:
+        if self.get_size(res1, sizes) <= self.get_size(res2, sizes):
             return res1
         else:
             return res2
@@ -709,7 +709,7 @@ def group_optimizer_states(md, w, gpu_optimize_param):
                 else:
                     raise ValueError
             if (
-                md.sol(md.AliveO[(t_, k_, w)] + md.sumOptC[w] - md.req_w + 1)
+                md.sol(md.AliveO[(t_, k_, w)] + md.sumOptC[w] - md.req_w)
                 or k_ == bwd_i
             ):
 
