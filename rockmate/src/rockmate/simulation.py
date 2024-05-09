@@ -185,6 +185,14 @@ class AliveSimulator:
                 if isinstance(self.dict_alloc[alloc_name], Parameter)
             ]
         )
+        self.categories["optim_states"] = np.array(
+            [
+                self.alloc_names.index(alloc_name)
+                for alloc_name in self.alloc_names
+                if isinstance(self.dict_alloc[alloc_name], Parameter)
+                and self.dict_alloc[alloc_name].is_optim_states
+            ]
+        )
         for k, v in alloc_categories.items():
             self.categories[k] = np.array(
                 [self.alloc_names.index(alloc_name) for alloc_name in v]
@@ -202,12 +210,7 @@ class AliveSimulator:
         if isinstance(idx_range, int):
             idx_range = range(idx_range, idx_range + 1)
         return self.alive_np[idx_range, key]
-
-    # def _mem(self, idx:int, category=None):
-    #     if category:
-    #         return np.sum((self.alive_np[idx]*self.alloc_mem_np)[self.categories[category]])
-    #     return np.matmul(self.alive_np[idx], self.alloc_mem_np)
-
+  
     def _mem(self, idx_range: range, category=None):
         """
         Return a (idx_range,)-shape array of memory over the steps range.
