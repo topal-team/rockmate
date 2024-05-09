@@ -5,13 +5,38 @@ from rkgb.core.hierarchical import HierarchicalGraph
 from .ilp_utils import RkLpVariable
 from .ilp_model import ModelPULP
 
+
 class ModelPULPOffload(ModelPULP):
-    def __init__(self, hgraph: HierarchicalGraph, peak_budget: int, save_budget=None, ilp_solver_params: Dict[str, Any] = ..., gcd=None, accurate_mem=False, protected_names=..., grouping=True, grad_mode="free", optimize_metrics=None, activation_offload=False, batch_multiplier=1):
-        super().__init__(hgraph, peak_budget, save_budget, ilp_solver_params, gcd, accurate_mem, protected_names)
+    def __init__(
+        self,
+        hgraph: HierarchicalGraph,
+        peak_budget: int,
+        save_budget=None,
+        ilp_solver_params: Dict[str, Any] = ...,
+        gcd=None,
+        accurate_mem=False,
+        protected_names=...,
+        grouping=True,
+        grad_mode="free",
+        optimize_metrics=None,
+        activation_offload=False,
+        batch_multiplier=1,
+    ):
+        super().__init__(
+            hgraph,
+            peak_budget,
+            save_budget,
+            ilp_solver_params,
+            gcd,
+            accurate_mem,
+            protected_names,
+        )
 
         self.with_grad = accurate_mem
-        self.with_optimizer_states = accurate_mem#optimizer states will be offloaded
-        self.gradient_accumulation = 0# if 0, no gradient/optimizer states alive from previous iters
+        self.with_optimizer_states = accurate_mem  # optimizer states will be offloaded
+        self.gradient_accumulation = (
+            0  # if 0, no gradient/optimizer states alive from previous iters
+        )
         self.single_fwd = accurate_mem
         self.single_bwd = accurate_mem
         self.grouping = grouping
@@ -49,24 +74,28 @@ class ModelPULPOffload(ModelPULP):
         for t in range(self.T):
             for k in self.krange(t):
                 self.md += self.Time[t, k] >= self.time_step_prefetch(t, k)
-                self.md += self.Time[t, k] >= (self.time_step_offload(t, k)
-                                        + self.time_step_optimize_self(t, k))
+                self.md += self.Time[t, k] >= (
+                    self.time_step_offload(t, k) + self.time_step_optimize_self(t, k)
+                )
                 self.md += self.Time[t, k] >= self.time_step_optimize(t, k)
-                self.md += self.Time[t, k] >= (self.time_step_compute(t, k) 
-                                        + self.time_step_optimize_self(t, k, cpu=False)
-                                        + self.time_step_offload_self(t, k)
-                                        + self.time_step_optimize_self(t, k, cpu=True))
-
+                self.md += self.Time[t, k] >= (
+                    self.time_step_compute(t, k)
+                    + self.time_step_optimize_self(t, k, cpu=False)
+                    + self.time_step_offload_self(t, k)
+                    + self.time_step_optimize_self(t, k, cpu=True)
+                )
 
     def add_offload_activation_variables(self):
         """
         We assume single forward/backward mode for ILP, thus only
         one possible source/user for phantom activations.
         """
-        phantom_idx = [(t, k, j) 
-                for t in range(self.T) 
-                for k in self.krange(t)
-                for j in range(self.J)]
+        phantom_idx = [
+            (t, k, j)
+            for t in range(self.T)
+            for k in self.krange(t)
+            for j in range(self.J)
+        ]
         # at step (t,k), removal of phantom of the j-th node.
         # self.RemovalP = RkLpVariable.dicts("RemovalP", phantom_idx)
         self.OflP = RkLpVariable.dicts("OflP", phantom_idx, lowBound=0, upBound=None)
@@ -74,127 +103,160 @@ class ModelPULPOffload(ModelPULP):
         # pass
         self.phantoms = {}
         for j in range(self.J):
-            for o,sched in enumerate(self.list_list_sched[j]):
+            for o, sched in enumerate(self.list_list_sched[j]):
                 sub_cluster = self.sub_clusters[j]
-                phantoms = [sub_cluster.translate_representee_node(re_anode)
-                            for re_anode in sched.phantoms
-                            if (re_anode.allocation_type == "data"# Only support data offload
-                            and re_anode.mem > self.minor_offload_size)
-                            ]
-                self.phantoms[(j,o)] = phantoms
+                phantoms = [
+                    sub_cluster.translate_representee_node(re_anode)
+                    for re_anode in sched.phantoms
+                    if (
+                        re_anode.allocation_type == "data"  # Only support data offload
+                        and re_anode.mem > self.minor_offload_size
+                    )
+                ]
+                self.phantoms[(j, o)] = phantoms
 
-    def add_offload_param_variables(self,):
+    def add_offload_param_variables(
+        self,
+    ):
         optimize_metrics = self.optimize_metrics
 
         self.cpu_optimize = True
-        self.optimizer_states_factor = optimize_metrics["optimizer_states_size"]#*weight size
-        self.cpu_optimize_speed = optimize_metrics["cpu_optimize_speed"]/self.gcd#B/ms
-        self.gpu_optimize_speed = optimize_metrics["gpu_optimize_speed"]/self.gcd#B/ms
-        self.optimizer_overhead_factor = optimize_metrics["optimizer_overhead"]#*weight size
-        self.minor_offload_size = optimize_metrics["minor_offload_size"]# minor weight size
-        self.bandwidth = optimize_metrics["bandwidth"]# bandwidth
-        
+        self.optimizer_states_factor = optimize_metrics[
+            "optimizer_states_size"
+        ]  # *weight size
+        self.cpu_optimize_speed = (
+            optimize_metrics["cpu_optimize_speed"] / self.gcd
+        )  # B/ms
+        self.gpu_optimize_speed = (
+            optimize_metrics["gpu_optimize_speed"] / self.gcd
+        )  # B/ms
+        self.optimizer_overhead_factor = optimize_metrics[
+            "optimizer_overhead"
+        ]  # *weight size
+        self.minor_offload_size = optimize_metrics[
+            "minor_offload_size"
+        ]  # minor weight size
+        self.bandwidth = optimize_metrics["bandwidth"]  # bandwidth
+
         self.req_w = RkLpVariable("Required_w", lowBound=0, upBound=1, cat="Continuous")
-        self.req_w = 1.
+        self.req_w = 1.0
 
         self.param2hcn = dict()
         self.parameters = []
-        for k,v in self.hgraph.parameter_groups.items():
+        for k, v in self.hgraph.parameter_groups.items():
             self.param2hcn[len(self.parameters)] = k
             self.parameters.append(v)
 
-        self.hcn2param = {t:[] for t in range(self.T)}
+        self.hcn2param = {t: [] for t in range(self.T)}
 
-        for p,hcn_s in self.param2hcn.items():
+        for p, hcn_s in self.param2hcn.items():
             for hcn in hcn_s:
                 self.hcn2param[hcn].append(p)
 
-        self.parameter_size = [sum(pnode.mem for pnode in p)/self.gcd for p in self.parameters]
-        self.parameter_gradient_size = [sum(pnode.mem for pnode in p if pnode.info.requires_grad
-                                            )/self.gcd for p in self.parameters]
+        self.parameter_size = [
+            sum(pnode.mem for pnode in p) / self.gcd for p in self.parameters
+        ]
+        self.parameter_gradient_size = [
+            sum(pnode.mem for pnode in p if pnode.info.requires_grad) / self.gcd
+            for p in self.parameters
+        ]
         self.W = len(self.parameters)
 
-        param_idx = [(t, k, w) 
-                for t in range(self.T) 
-                for k in self.krange(t)
-                for w in range(self.W)]
+        param_idx = [
+            (t, k, w)
+            for t in range(self.T)
+            for k in self.krange(t)
+            for w in range(self.W)
+        ]
 
-        self.AliveW = RkLpVariable.dicts("AliveW", param_idx)  # parameter w is alive at the start of step j.
-        self.AliveG = RkLpVariable.dicts("AliveG", param_idx)  # w.grad is alive at the start of step j.
-        self.AliveO = RkLpVariable.dicts("AliveO", param_idx)  # w.grad is alive at the start of step j.
-        self.OflW = RkLpVariable.dicts("OflW", param_idx)# Offload weight
-        self.OflG = RkLpVariable.dicts("OflG", param_idx)# Offload gradient
-        self.PrfW = RkLpVariable.dicts("PrfW", param_idx)# Prefetch gradient
-        self.PrfG = RkLpVariable.dicts("PrfG", param_idx)# Prefetch gradient
-        self.OflO = RkLpVariable.dicts("OflO", param_idx)# Offload optimizer states
-        self.PrfO = RkLpVariable.dicts("PrfO", param_idx)# Prefetch optimizer states
+        self.AliveW = RkLpVariable.dicts(
+            "AliveW", param_idx
+        )  # parameter w is alive at the start of step j.
+        self.AliveG = RkLpVariable.dicts(
+            "AliveG", param_idx
+        )  # w.grad is alive at the start of step j.
+        self.AliveO = RkLpVariable.dicts(
+            "AliveO", param_idx
+        )  # w.grad is alive at the start of step j.
+        self.OflW = RkLpVariable.dicts("OflW", param_idx)  # Offload weight
+        self.OflG = RkLpVariable.dicts("OflG", param_idx)  # Offload gradient
+        self.PrfW = RkLpVariable.dicts("PrfW", param_idx)  # Prefetch gradient
+        self.PrfG = RkLpVariable.dicts("PrfG", param_idx)  # Prefetch gradient
+        self.OflO = RkLpVariable.dicts("OflO", param_idx)  # Offload optimizer states
+        self.PrfO = RkLpVariable.dicts("PrfO", param_idx)  # Prefetch optimizer states
 
-        self.OptC = RkLpVariable.dicts("OptC", param_idx)# Optimize on cpu
+        self.OptC = RkLpVariable.dicts("OptC", param_idx)  # Optimize on cpu
         self.sumOptC = dict()
         for w in self.param2hcn:
-            self.sumOptC[w] = lpSum(self.OptC[t,k,w] for t in range(self.T) for k in self.krange(t))    
+            self.sumOptC[w] = lpSum(
+                self.OptC[t, k, w] for t in range(self.T) for k in self.krange(t)
+            )
 
-        self.param_grad_mem = {(t,k):0 for t in range(self.T) for k in self.krange(t)}
+        self.param_grad_mem = {(t, k): 0 for t in range(self.T) for k in self.krange(t)}
 
-        self.bandwidthOfl = optimize_metrics["bandwidth"]/self.gcd  # byte/ms
-        self.bandwidthPrf = optimize_metrics["bandwidth"]/self.gcd  # byte/ms
+        self.bandwidthOfl = optimize_metrics["bandwidth"] / self.gcd  # byte/ms
+        self.bandwidthPrf = optimize_metrics["bandwidth"] / self.gcd  # byte/ms
         self.prefill_offload()
 
-    def accumC_grad(self,w):
-        #if grad_accumulation, gradient stored on CPU from previous iterations
+    def accumC_grad(self, w):
+        # if grad_accumulation, gradient stored on CPU from previous iterations
         return self.sumOptC[w]
 
-    def accumC_optimizer_states(self,w):
-        #if grad_accumulation, optimizer states stored on CPU from previous iterations
+    def accumC_optimizer_states(self, w):
+        # if grad_accumulation, optimizer states stored on CPU from previous iterations
         return self.accumC_grad(w)
 
-    def max_OflGProg(self,t, k, w):
-        return self.OflGProg[t, k, w]+(self.OflWProg[t, k, w]*(self.grad_mode=="free")
-                                        *self.w_by_wg(w))
+    def max_OflGProg(self, t, k, w):
+        return self.OflGProg[t, k, w] + (
+            self.OflWProg[t, k, w] * (self.grad_mode == "free") * self.w_by_wg(w)
+        )
 
-    def w_by_wg(self,w):
-        if self.parameter_gradient_size[w]==0:return 0
-        return self.parameter_size[w]/self.parameter_gradient_size[w]
+    def w_by_wg(self, w):
+        if self.parameter_gradient_size[w] == 0:
+            return 0
+        return self.parameter_size[w] / self.parameter_gradient_size[w]
 
     def activation_mem(self, t, k):
         return self.U[t, k] - self.removal_phantom_mem(t, k)
 
     def save_mem(self, t, k):
         # OVERWRITTING METHOD
-        return self.activation_mem(t,k) + self.all_param_mem(t,k)
+        return self.activation_mem(t, k) + self.all_param_mem(t, k)
 
     def overhead_mem(self, t, k):
-        return self.act_overhead(t,k) + self.param_overhead(t,k)
-    
-    def param_overhead(self, t,k):
+        return self.act_overhead(t, k) + self.param_overhead(t, k)
+
+    def param_overhead(self, t, k):
         optimizer_overhead = 0
-        if k > self.loss_idx:# and k in self.hcn2param:
+        if k > self.loss_idx:  # and k in self.hcn2param:
             l_w = self.hcn2param[k]
-            optimizer_overhead += sum((self.req_w-self.sumOptC[w])
-                                        * self.parameter_gradient_size[w]
-                                        * self.optimizer_overhead_factor
-                                        for w in l_w)
+            optimizer_overhead += sum(
+                (self.req_w - self.sumOptC[w])
+                * self.parameter_gradient_size[w]
+                * self.optimizer_overhead_factor
+                for w in l_w
+            )
         return [optimizer_overhead]
 
-    def all_param_mem(self,t, k, with_multiplier=True):
-        return (self.parameter_mem(t,k)
-                + self.param_grad_mem[t,k]
-                + self.optimizer_states_mem(t,k)
-                + (1-self.req_w)*self.peak_budget*with_multiplier
-                )
+    def all_param_mem(self, t, k, with_multiplier=True):
+        return (
+            self.parameter_mem(t, k)
+            + self.param_grad_mem[t, k]
+            + self.optimizer_states_mem(t, k)
+            + (1 - self.req_w) * self.peak_budget * with_multiplier
+        )
 
     def removal_phantom_mem(self, t, k):
         if not self.activation_offload:
             return 0
         mem = 0
         for j in range(self.J):
-            mem += (self.OflPProg[t,k,j] -self.PrfPProg[t,k,j])
+            mem += self.OflPProg[t, k, j] - self.PrfPProg[t, k, j]
         return mem
 
-    def parameter_mem(self,t, k):
+    def parameter_mem(self, t, k):
         parameter_mem = lpSum(
-            (self.AliveW[t, k, w] + self.PrfW[t, k, w])
-            * self.parameter_size[w]
+            (self.AliveW[t, k, w] + self.PrfW[t, k, w]) * self.parameter_size[w]
             for w in range(self.W)
         )
         return parameter_mem
@@ -207,26 +269,31 @@ class ModelPULPOffload(ModelPULP):
     #     )
     #     return grad_mem
 
-    def optimizer_states_mem(self,t, k, with_overhead=True):    
-        optimizer_states_mem = lpSum(((self.AliveO[t, k, w]+self.PrfO[t, k, w])*
-                    self.parameter_gradient_size[w] *
-                    self.optimizer_states_factor)
-                    for w in range(self.W))
+    def optimizer_states_mem(self, t, k, with_overhead=True):
+        optimizer_states_mem = lpSum(
+            (
+                (self.AliveO[t, k, w] + self.PrfO[t, k, w])
+                * self.parameter_gradient_size[w]
+                * self.optimizer_states_factor
+            )
+            for w in range(self.W)
+        )
         return optimizer_states_mem
 
-
-    def prefill_offload(self,):
+    def prefill_offload(
+        self,
+    ):
         for t in range(self.T):
-            for k in range(self.T):                
+            for k in range(self.T):
                 for w in range(self.W):
                     if k not in self.krange(t):
                         self.PrfW[t, k, w] = 0
                         self.OflW[t, k, w] = 0
-                    
+
                     # fwd_i, bwd_i = self.param2hcn[w]
                     fwd_i = min(self.param2hcn[w])
                     bwd_i = max(self.param2hcn[w])
-                    if k not in self.krange(t) or (t>fwd_i and t<bwd_i):
+                    if k not in self.krange(t) or (t > fwd_i and t < bwd_i):
                         self.OptC[t, k, w] = 0
 
         if not self.gradient_accumulation:
@@ -235,47 +302,48 @@ class ModelPULPOffload(ModelPULP):
 
         # if not self.with_optimizer_states:
         if not self.optimize_metrics["optimizer_states_size"]:
-            for (t,k,w) in self.AliveO:
-                self.AliveO[(t,k,w)] = (self.req_w-self.accumC_optimizer_states(w))
-                self.PrfO[(t,k,w)] = 0
-                self.OflO[(t,k,w)] = 0
+            for t, k, w in self.AliveO:
+                self.AliveO[(t, k, w)] = self.req_w - self.accumC_optimizer_states(w)
+                self.PrfO[(t, k, w)] = 0
+                self.OflO[(t, k, w)] = 0
         if self.grad_mode in ["free"]:
             # If gradient is freed ASAP, OflG will be merged into OflW
-            for (t,k,w) in self.OflG:
-                self.OflG[(t,k,w)] = 0
-            for (t,k,w) in self.AliveG:
+            for t, k, w in self.OflG:
+                self.OflG[(t, k, w)] = 0
+            for t, k, w in self.AliveG:
                 grad_size = self.parameter_gradient_size[w]
                 if len(self.param2hcn[w]) <= 2:
-                    self.AliveG[(t,k,w)] = 0
+                    self.AliveG[(t, k, w)] = 0
                     if k == max(self.param2hcn[w]):
                         # self.overhead[k] = [v+grad_size for v in self.overhead[k]]
-                        self.param_grad_mem[t,k] += grad_size * self.req_w
-                else:#shared weight
-                    bwd_first = min(x for x in self.param2hcn[w] if x>self.loss_idx)
+                        self.param_grad_mem[t, k] += grad_size * self.req_w
+                else:  # shared weight
+                    bwd_first = min(x for x in self.param2hcn[w] if x > self.loss_idx)
                     bwd_last = max(self.param2hcn[w])
-                    if t<=bwd_first or t>bwd_last:#assume single bwd
-                        self.AliveG[(t,k,w)] = 0
+                    if t <= bwd_first or t > bwd_last:  # assume single bwd
+                        self.AliveG[(t, k, w)] = 0
                     else:
-                        self.AliveG[(t,k,w)] = 1
-                        if k in self.param2hcn[w] and k>bwd_first:
+                        self.AliveG[(t, k, w)] = 1
+                        if k in self.param2hcn[w] and k > bwd_first:
                             # self.overhead[k] = [v+grad_size for v in self.overhead[k]]
-                            self.param_grad_mem[t,k] += grad_size * self.req_w
+                            self.param_grad_mem[t, k] += grad_size * self.req_w
         elif self.grad_mode in ["accumulate"]:
-            for (t,k,w) in self.AliveG:
-                self.AliveG[(t,k,w)] = 1
+            for t, k, w in self.AliveG:
+                self.AliveG[(t, k, w)] = 1
                 # if k == max(self.param2hcn[w]):
                 #     self.overhead[k] = [v+grad_size for v in self.overhead[k]]
                 # TODO: add offload gradient variables for gradient accumulation
-        
+
         for t in range(self.T):
             for k in self.krange(t):
-                self.param_grad_mem[t,k] += lpSum(
-                                self.AliveG[t, k, w]
-                                * self.parameter_gradient_size[w]
-                                for w in range(self.W)
-                            )
+                self.param_grad_mem[t, k] += lpSum(
+                    self.AliveG[t, k, w] * self.parameter_gradient_size[w]
+                    for w in range(self.W)
+                )
 
-    def add_offload_param_constraints(self,):
+    def add_offload_param_constraints(
+        self,
+    ):
         # if with_grad, AliveG is a variable
         # if with_optimizer_states, AliveO is a variable
         self.OflWProg = dict()
@@ -285,21 +353,20 @@ class ModelPULPOffload(ModelPULP):
         self.PrfGProg = dict()
         self.OflOProg = dict()
         self.PrfOProg = dict()
-        
+
         def get_progress(op, t, k, w):
             bwd_i = max(self.param2hcn[w])
             if bwd_i < t:  # after bwd of w
-                progress = (lpSum(
-                    op[t, kk, w] for kk in self.krange(t) if kk < k
-                ) + lpSum(
-                    op[tt, kk, w]
-                    for tt in range(bwd_i+1, t) 
-                    for kk in self.krange(tt)
-                )
-                + lpSum(
-                    op[bwd_i, kk, w]
-                    for kk in self.krange(bwd_i) if kk>= bwd_i
-                ) # offload right after bwd_i
+                progress = (
+                    lpSum(op[t, kk, w] for kk in self.krange(t) if kk < k)
+                    + lpSum(
+                        op[tt, kk, w]
+                        for tt in range(bwd_i + 1, t)
+                        for kk in self.krange(tt)
+                    )
+                    + lpSum(
+                        op[bwd_i, kk, w] for kk in self.krange(bwd_i) if kk >= bwd_i
+                    )  # offload right after bwd_i
                 )
             else:
                 progress = (
@@ -307,12 +374,11 @@ class ModelPULPOffload(ModelPULP):
                     + lpSum(op[tt, kk, w] for tt in range(t) for kk in self.krange(tt))
                     + lpSum(
                         op[tt, kk, w]
-                        for tt in range(bwd_i+1, self.T)
+                        for tt in range(bwd_i + 1, self.T)
                         for kk in self.krange(tt)
                     )
                     + lpSum(
-                        op[bwd_i, kk, w]
-                        for kk in self.krange(bwd_i) if kk>= bwd_i
+                        op[bwd_i, kk, w] for kk in self.krange(bwd_i) if kk >= bwd_i
                     )
                 )
             return progress
@@ -324,62 +390,81 @@ class ModelPULPOffload(ModelPULP):
                 # self.md += self.Time[t, k] >= (self.time_step_offload(t, k)
                 #                            + self.time_step_optimize_self(t, k))
                 # self.md += self.Time[t, k] >= self.time_step_optimize(t, k)
-                # self.md += self.Time[t, k] >= (self.time_step_compute(t, k) 
+                # self.md += self.Time[t, k] >= (self.time_step_compute(t, k)
                 #                            + self.time_step_optimize_self(t, k, cpu=False)
                 #                            + self.time_step_offload_self(t, k)
                 #                            + self.time_step_optimize_self(t, k, cpu=True))
 
                 for w in range(self.W):
-                    self.PrfWProg[t,k,w] = get_progress(self.PrfW, t, k, w)
-                    self.PrfGProg[t,k,w] = get_progress(self.PrfG, t, k, w)
-                    self.OflWProg[t,k,w] = get_progress(self.OflW, t, k, w)
-                    self.OflGProg[t,k,w] = get_progress(self.OflG, t, k, w)
-                    self.OflOProg[t,k,w] = get_progress(self.OflO, t, k, w)
-                    self.PrfOProg[t,k,w] = get_progress(self.PrfO, t, k, w)
-                    self.OptCProg[t,k,w] = get_progress(self.OptC, t, k, w)
-                    
+                    self.PrfWProg[t, k, w] = get_progress(self.PrfW, t, k, w)
+                    self.PrfGProg[t, k, w] = get_progress(self.PrfG, t, k, w)
+                    self.OflWProg[t, k, w] = get_progress(self.OflW, t, k, w)
+                    self.OflGProg[t, k, w] = get_progress(self.OflG, t, k, w)
+                    self.OflOProg[t, k, w] = get_progress(self.OflO, t, k, w)
+                    self.PrfOProg[t, k, w] = get_progress(self.PrfO, t, k, w)
+                    self.OptCProg[t, k, w] = get_progress(self.OptC, t, k, w)
+
                     self.md += self.AliveW[t, k, w] <= self.req_w
                     self.md += self.OflWProg[t, k, w] <= self.req_w
                     self.md += self.OflGProg[t, k, w] <= self.accumC_grad(w)
-                    self.md += self.OptCProg[t, k, w] <= self.max_OflGProg(t,k,w)
-                    self.md += self.OptCProg[t, k, w] <= self.PrfWProg[t, k, w]*self.w_by_wg(w)
-                
-                    self.md += (self.AliveW[t, k, w] + self.OflWProg[t, k, w]
-                                >= self.fraction_constant_param(w)
-                                + self.fraction_instant_updated_param(w))
-                    self.md += (self.AliveG[t, k, w] + self.OflGProg[t, k, w] 
-                                >= self.fraction_remaining_gradients(w))
-                
-                    to_be_prefetched = self.parameter_size[w] * (self.req_w -
-                            self.AliveW[t_, k_, w] - self.PrfW[t_, k_, w])
-                    to_be_optimized = self.parameter_gradient_size[w] * (self.sumOptC[w] - self.OptCProg[t, k, w])
+                    self.md += self.OptCProg[t, k, w] <= self.max_OflGProg(t, k, w)
+                    self.md += self.OptCProg[t, k, w] <= self.PrfWProg[
+                        t, k, w
+                    ] * self.w_by_wg(w)
+
+                    self.md += self.AliveW[t, k, w] + self.OflWProg[
+                        t, k, w
+                    ] >= self.fraction_constant_param(
+                        w
+                    ) + self.fraction_instant_updated_param(
+                        w
+                    )
+                    self.md += self.AliveG[t, k, w] + self.OflGProg[
+                        t, k, w
+                    ] >= self.fraction_remaining_gradients(w)
+
+                    to_be_prefetched = self.parameter_size[w] * (
+                        self.req_w - self.AliveW[t_, k_, w] - self.PrfW[t_, k_, w]
+                    )
+                    to_be_optimized = self.parameter_gradient_size[w] * (
+                        self.sumOptC[w] - self.OptCProg[t, k, w]
+                    )
                     self.md += to_be_prefetched >= to_be_optimized
-                    
+
                     diffW = self.AliveW[t_, k_, w] - self.AliveW[t, k, w]
                     self.md += diffW <= self.PrfW[t, k, w]
 
                     diffG = self.AliveG[t_, k_, w] - self.AliveG[t, k, w]
-                    self.md += (diffG <= 1*(k in self.param2hcn[w] 
-                                            and k>self.loss_idx)#backward operations
-                                            +self.PrfG[t, k, w])
+                    self.md += (
+                        diffG
+                        <= 1
+                        * (
+                            k in self.param2hcn[w] and k > self.loss_idx
+                        )  # backward operations
+                        + self.PrfG[t, k, w]
+                    )
 
                     diffO = self.AliveO[t_, k_, w] - self.AliveO[t, k, w]
-                    self.md += diffO <= self.PrfO[t,k,w]
+                    self.md += diffO <= self.PrfO[t, k, w]
 
                     self.md += self.OflOProg[t, k, w] >= self.PrfOProg[t, k, w]
-                    self.md += (self.AliveO[t, k, w] + self.OflOProg[t, k, w]
-                                >= self.fraction_gpu_optimized(w))
-                    self.md += (self.OflOProg[t, k, w] <= self.fraction_gpu_optimized(w))
-            
+                    self.md += self.AliveO[t, k, w] + self.OflOProg[
+                        t, k, w
+                    ] >= self.fraction_gpu_optimized(w)
+                    self.md += self.OflOProg[t, k, w] <= self.fraction_gpu_optimized(w)
+
         # parameters and their user operations
         for w in self.param2hcn:
             fwd_i = min(self.param2hcn[w])
             bwd_i = max(self.param2hcn[w])
-            self.md += self.PrfWProg[fwd_i,fwd_i,w] >= self.sumOptC[w]
+            self.md += self.PrfWProg[fwd_i, fwd_i, w] >= self.sumOptC[w]
             self.md += self.req_w - self.sumOptC[w] <= self.AliveO[bwd_i, bwd_i, w]
             if self.gradient_accumulation:
                 self.md += self.OflGProg[bwd_i, bwd_i, w] == self.accumC_grad(w)
-                self.md += self.PrfGProg[bwd_i, bwd_i, w] == self.accumC_grad(w) - self.sumOptC[w]
+                self.md += (
+                    self.PrfGProg[bwd_i, bwd_i, w]
+                    == self.accumC_grad(w) - self.sumOptC[w]
+                )
             t_, k_ = self.next_idx(bwd_i, bwd_i)
             # self.md += self.AliveO[t_, k_, w] - self.AliveO[bwd_i, bwd_i, w] <= 1 - self.gradient_accumulation
             # self.md += self.AliveG[t_, k_, w] - self.AliveG[bwd_i, bwd_i, w] <= 1# - self.gradient_accumulation
@@ -387,187 +472,184 @@ class ModelPULPOffload(ModelPULP):
                 for k in self.param2hcn[w]:
                     if k not in self.krange(t):
                         continue
-                    self.md += self.sumComp[t, k] -1 <= self.AliveW[t, k, w] - self.req_w
+                    self.md += (
+                        self.sumComp[t, k] - 1 <= self.AliveW[t, k, w] - self.req_w
+                    )
 
     def add_offload_activation_constraints(self):
         self.PrfPProg = dict()
         self.OflPProg = dict()
-        
+
         def get_progress_phantom(op, t, k, j):
             fwd_i = min(self.sub_c2hcn[j])
             bwd_i = max(self.sub_c2hcn[j])
 
-            if bwd_i < t or fwd_i>t:  # after bwd of w
+            if bwd_i < t or fwd_i > t:  # after bwd of w
                 return 0
 
-            progress = (lpSum(
-                op[t, kk, j] for kk in self.krange(t) if kk < k
-            ) + lpSum(
-                op[tt, kk, j]
-                for tt in range(fwd_i+1, t)
-                for kk in self.krange(tt)
+            progress = (
+                lpSum(op[t, kk, j] for kk in self.krange(t) if kk < k)
+                + lpSum(
+                    op[tt, kk, j]
+                    for tt in range(fwd_i + 1, t)
+                    for kk in self.krange(tt)
+                )
+                + lpSum(op[fwd_i, kk, j] for kk in self.krange(fwd_i) if kk >= fwd_i)
             )
-            + lpSum(
-                op[fwd_i, kk, j]
-                for kk in self.krange(fwd_i) if kk>= fwd_i
-            ))
 
             return progress
-        
+
         for j in range(self.J):
             fwd_i = min(self.sub_c2hcn[j])
             bwd_i = max(self.sub_c2hcn[j])
             saved_mem = lpSum(
-                              # self.saved_mem[j][o]*
-                              sum(anode.mem for anode in self.phantoms[j,o])/self.gcd *
-                              self.Comp[fwd_i, fwd_i, o] 
-                              for o, sched in enumerate(self.list_list_sched[j]))
+                # self.saved_mem[j][o]*
+                sum(anode.mem for anode in self.phantoms[j, o])
+                / self.gcd
+                * self.Comp[fwd_i, fwd_i, o]
+                for o, sched in enumerate(self.list_list_sched[j])
+            )
             for t in range(self.T):
                 for k in self.krange(t):
-                    if t >=fwd_i and t<= bwd_i:
-                        self.PrfPProg[t,k,j] = get_progress_phantom(self.PrfP, t, k, j)
-                        self.OflPProg[t,k,j] = get_progress_phantom(self.OflP, t, k, j)
+                    if t >= fwd_i and t <= bwd_i:
+                        self.PrfPProg[t, k, j] = get_progress_phantom(
+                            self.PrfP, t, k, j
+                        )
+                        self.OflPProg[t, k, j] = get_progress_phantom(
+                            self.OflP, t, k, j
+                        )
 
                         # removal cannot be higher than phantom created during fwd
-                        self.md += (self.OflPProg[t,k,j] <= saved_mem)
+                        self.md += self.OflPProg[t, k, j] <= saved_mem
                     else:
-                        self.PrfPProg[t,k,j] = 0
-                        self.OflPProg[t,k,j] = 0
-                
-            self.md += (self.PrfPProg[bwd_i, bwd_i, j] == self.OflPProg[bwd_i, bwd_i, j])
+                        self.PrfPProg[t, k, j] = 0
+                        self.OflPProg[t, k, j] = 0
 
+            self.md += self.PrfPProg[bwd_i, bwd_i, j] == self.OflPProg[bwd_i, bwd_i, j]
 
-    def add_offload_objective(self,bandwidth_cost=0.01):
-        prf_cost = (
-            bandwidth_cost
-            * lpSum(
-                (self.PrfW[t, k, w] + self.PrfG[t, k, w] + self.PrfO[t, k, w])
-                * self.parameter_size[w] / self.bandwidthPrf
-                for t in range(self.T)
-                for k in self.krange(t)
-                for w in range(self.W)
-            )
+    def add_offload_objective(self, bandwidth_cost=0.01):
+        prf_cost = bandwidth_cost * lpSum(
+            (self.PrfW[t, k, w] + self.PrfG[t, k, w] + self.PrfO[t, k, w])
+            * self.parameter_size[w]
+            / self.bandwidthPrf
+            for t in range(self.T)
+            for k in self.krange(t)
+            for w in range(self.W)
         )
-        ofl_cost = (
-            bandwidth_cost
-            * lpSum(
-                (self.OflW[t, k, w] + self.OflG[t, k, w] + self.OflO[t, k, w])
-                * self.parameter_size[w] / self.bandwidthOfl
-                for t in range(self.T)
-                for k in self.krange(t)
-                for w in range(self.W)
-            )
+        ofl_cost = bandwidth_cost * lpSum(
+            (self.OflW[t, k, w] + self.OflG[t, k, w] + self.OflO[t, k, w])
+            * self.parameter_size[w]
+            / self.bandwidthOfl
+            for t in range(self.T)
+            for k in self.krange(t)
+            for w in range(self.W)
         )
         self.md += (
-                lpSum(self.Time[t, k] for t in range(self.T) for k in self.krange(t))
-                + prf_cost
-                + ofl_cost
-            )
-        
+            lpSum(self.Time[t, k] for t in range(self.T) for k in self.krange(t))
+            + prf_cost
+            + ofl_cost
+        )
+
     """
     The following functions are meant to be used for building constraints with
     meaningful names. They are not supposed to be called outside this file.
     By default, index t is for stage, k for step and w for the parameter group.
     """
 
-    def fraction_gpu_optimized(self,w):
-        return self.req_w-self.sumOptC[w]
+    def fraction_gpu_optimized(self, w):
+        return self.req_w - self.sumOptC[w]
 
-    def fraction_constant_param(self,w):
-        return 1 - self.parameter_gradient_size[w]/self.parameter_size[w]
+    def fraction_constant_param(self, w):
+        return 1 - self.parameter_gradient_size[w] / self.parameter_size[w]
 
-    def fraction_instant_updated_param(self,w):
+    def fraction_instant_updated_param(self, w):
         if self.gradient_accumulation:
             # TODO: not fully supported now
             return 0
-        if self.grad_mode =="free":
+        if self.grad_mode == "free":
             return self.req_w
-        return self.req_w-self.sumOptC[w]
+        return self.req_w - self.sumOptC[w]
 
-    def fraction_remaining_gradients(self,w):
+    def fraction_remaining_gradients(self, w):
         if self.gradient_accumulation:
             # TODO: not fully supported now
             return self.req_w
-        if self.grad_mode =="free":
+        if self.grad_mode == "free":
             return 0
 
     # def fraction_after_bwd(self,w):
     #     return self.fraction_constant_param(w) + self.fraction_instant_updated_param(w)
 
-    def time_step_offload(self,t, k):
+    def time_step_offload(self, t, k):
         j = self.hcn2sub_c[k]
         sub_sched_time = lpSum(
-                        self.Comp[t, k, o] * 
-                        self.schedule_offload_time[j][o] 
-                        for o in range(self.nSched[k])
-                    )
+            self.Comp[t, k, o] * self.schedule_offload_time[j][o]
+            for o in range(self.nSched[k])
+        )
         mem = 0
         for w in range(self.W):
             mem += self.parameter_size[w] * self.OflW[t, k, w]
-            optim_state = self.optimizer_states_factor * self.OflO[t,k,w]
+            optim_state = self.optimizer_states_factor * self.OflO[t, k, w]
             mem += self.parameter_gradient_size[w] * (self.OflG[t, k, w] + optim_state)
         if self.activation_offload:
             for j in range(self.J):
-                mem += self.OflP[t, k, j]    
+                mem += self.OflP[t, k, j]
 
-        return mem/self.bandwidthOfl + sub_sched_time
+        return mem / self.bandwidthOfl + sub_sched_time
 
-    def time_step_offload_self(self,t, k):
+    def time_step_offload_self(self, t, k):
         mem = 0
         for w in self.hcn2param[k]:
             mem += self.parameter_size[w] * self.OflW[t, k, w]
-            optim_state = self.optimizer_states_factor * self.OflO[t,k,w]
+            optim_state = self.optimizer_states_factor * self.OflO[t, k, w]
             mem += self.parameter_gradient_size[w] * (self.OflG[t, k, w] + optim_state)
         if self.activation_offload:
             j = self.hcn2sub_c[k]
             if j is not None:
                 mem += self.OflP[t, k, j]
-            
-        return mem/self.bandwidthOfl
 
-    def time_step_prefetch(self,t, k):
+        return mem / self.bandwidthOfl
+
+    def time_step_prefetch(self, t, k):
         j = self.hcn2sub_c[k]
         sub_sched_time = lpSum(
-                        self.Comp[t, k, o] * 
-                        self.schedule_prefetch_time[j][o] 
-                        for o in range(self.nSched[k])
-                    )
-        
+            self.Comp[t, k, o] * self.schedule_prefetch_time[j][o]
+            for o in range(self.nSched[k])
+        )
+
         mem = 0
         for w in range(self.W):
             mem += self.parameter_size[w] * self.PrfW[t, k, w]
-            optim_state = self.optimizer_states_factor * self.PrfO[t,k,w]
+            optim_state = self.optimizer_states_factor * self.PrfO[t, k, w]
             mem += self.parameter_gradient_size[w] * (self.PrfG[t, k, w] + optim_state)
         if self.activation_offload:
             for j in range(self.J):
                 mem += self.PrfP[t, k, j]
-            
-        return mem/self.bandwidthPrf + sub_sched_time
 
+        return mem / self.bandwidthPrf + sub_sched_time
 
-    def time_step_prefetch_self(self,t, k):
+    def time_step_prefetch_self(self, t, k):
         mem = 0
         for w in self.hcn2param[k]:
             mem += self.parameter_size[w] * self.PrfW[t, k, w]
-            optim_state = self.optimizer_states_factor * self.PrfO[t,k,w]
+            optim_state = self.optimizer_states_factor * self.PrfO[t, k, w]
             mem += self.parameter_gradient_size[w] * (self.PrfG[t, k, w] + optim_state)
-            
-        return mem/self.bandwidthPrf
 
-    def time_step_optimize(self,t, k, cpu=True):
+        return mem / self.bandwidthPrf
+
+    def time_step_optimize(self, t, k, cpu=True):
         """
-        We assume that GPU optimization happens only right after 
+        We assume that GPU optimization happens only right after
         the backward, which should be accessed from time_step_optimize_self.
         """
         mem = 0
         for w in range(self.W):
             mem += self.parameter_gradient_size[w] * self.OptC[t, k, w]
-        return mem/self.cpu_optimize_speed + self.cpu_constant_cost
+        return mem / self.cpu_optimize_speed + self.cpu_constant_cost
 
-
-    def time_step_optimize_self(self,t, k, cpu=True):
+    def time_step_optimize_self(self, t, k, cpu=True):
         """
-        We assume that GPU optimization happens only right after 
+        We assume that GPU optimization happens only right after
         the backward, but CPU optimization could happen anytime and
         represented by self.OptC.
         """
@@ -576,17 +658,15 @@ class ModelPULPOffload(ModelPULP):
             for w in self.hcn2param[k]:
                 opt_fraction = self.OptC[t, k, w]
                 mem += self.parameter_gradient_size[w] * opt_fraction
-            return mem/self.cpu_optimize_speed
-        
-        elif k <= self.loss_idx:#forward
+            return mem / self.cpu_optimize_speed
+
+        elif k <= self.loss_idx:  # forward
             return 0
         else:
             for w in self.hcn2param[k]:
                 opt_fraction = self.fraction_instant_updated_param(w)
                 mem += self.parameter_gradient_size[w] * opt_fraction
-            return mem/self.gpu_optimize_speed
+            return mem / self.gpu_optimize_speed
 
-    def time_step_compute(self,t, k):
+    def time_step_compute(self, t, k):
         return lpSum(self.Comp[t, k, o] * self.time[k][o] for o in range(self.nComp[k]))
-
-        

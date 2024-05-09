@@ -1,7 +1,9 @@
-from rkgb.lowlevel.ast_add_on import (make_str_assign, 
-                                      make_str_list_assign, 
-                                      ast_to_str, 
-                                      make_ast_list_assign)
+from rkgb.lowlevel.ast_add_on import (
+    make_str_assign,
+    make_str_list_assign,
+    ast_to_str,
+    make_ast_list_assign,
+)
 from rkgb.core.backward import ComputationNode, AllocationNode
 import torch
 import math
@@ -121,7 +123,7 @@ class RK_Storage:
             return self.gd[target]
         else:
             raise Exception(f"{target} not defined in executing RK_Env")
-        
+
     def get_shape(self, target, shape=None):
         if target in self.measured_shapes:
             return self.measured_shapes[target]
@@ -130,7 +132,9 @@ class RK_Storage:
             l = list(shape)
             for i, dim in enumerate(l):
                 if isinstance(dim, torch.SymInt):
-                    l[i] = int(self.batch_multiplier * self.dict_info[target].tensor_size[i])
+                    l[i] = int(
+                        self.batch_multiplier * self.dict_info[target].tensor_size[i]
+                    )
             shape = torch.Size(l)
         elif target in self.dict_info:
             shape = self.dict_info[target].tensor_size
@@ -144,7 +148,10 @@ class AllocationManager:
     Allocation manager will alloc added tensors together which reduces RAM usage.
     It also keeps the index of tensors which allows to retrieve allocation as a slice
     """
-    def __init__(self, storage:RK_Storage, dtype=torch.float32, minor_size=10*1024**2) -> None:
+
+    def __init__(
+        self, storage: RK_Storage, dtype=torch.float32, minor_size=10 * 1024**2
+    ) -> None:
         self.size = 0
         self.storage = storage
         self.index = 0
@@ -158,11 +165,13 @@ class AllocationManager:
     def add_tensor(self, target_name, shape):
         self.target_sizes[target_name] = shape.numel()
         self.index += shape.numel()
-    
+
     def get_val(self, val):
         alloc = self.allocations[self.target_allocations[val]]
-        return self.storage.ld[alloc[0]][self.target_indices[val][0]:self.target_indices[val][1]]
-    
+        return self.storage.ld[alloc[0]][
+            self.target_indices[val][0] : self.target_indices[val][1]
+        ]
+
     def create_allocation(self, size):
         i = len(self.allocations)
         self.allocations.append((f"allocation_{i}", size))
@@ -171,12 +180,14 @@ class AllocationManager:
         self.target_allocations[target] = allocation
 
     def split(self):
-        targets = list(sorted(self.target_sizes.keys(), key=lambda x:self.target_sizes[x]))
+        targets = list(
+            sorted(self.target_sizes.keys(), key=lambda x: self.target_sizes[x])
+        )
         remain_size = sum(self.target_sizes[target] for target in targets)
         while remain_size > 0:
             i = len(self.allocations)
             n = int(math.log(remain_size, 2))
-            if self.target_sizes[targets[-1]] >= 2**n or remain_size<self.minor_size:
+            if self.target_sizes[targets[-1]] >= 2**n or remain_size < self.minor_size:
                 alloction_size = remain_size
                 alloc_targets = targets
             else:
@@ -186,14 +197,15 @@ class AllocationManager:
                     target = targets.pop()
                     alloction_size += self.target_sizes[target]
                     alloc_targets.append(target)
-            
+
             self.create_allocation(alloction_size)
             index = 0
             for target in alloc_targets:
                 self.target_allocations[target] = i
-                self.target_indices[target] = (index, index+self.target_sizes[target])
+                self.target_indices[target] = (index, index + self.target_sizes[target])
                 index += self.target_sizes[target]
             remain_size -= alloction_size
+
 
 class RK_Fct:
     def __init__(self, target_name: str, storage: RK_Storage, **kwargs):
@@ -238,7 +250,9 @@ class Fct_del(RK_Fct):
         self.storage.get_val(self.target_name).data = torch.empty(0)
 
     def del_optim_states(self):
-        for k, v in self.storage.get_val(f"Optimize_({self.target_name})").state.items():
+        for k, v in self.storage.get_val(
+            f"Optimize_({self.target_name})"
+        ).state.items():
             v["exp_avg"].data = torch.empty(0)
             v["exp_avg_sq"].data = torch.empty(0)
 
@@ -280,7 +294,9 @@ class Fct_detach(RK_Fct):
         Fake detach is to solve it by merging the operations.
         TODO: test on ResNet
         """
-        self.storage.add_val(self.target_name, self.storage.get_val(f"_{self.target_name}"))
+        self.storage.add_val(
+            self.target_name, self.storage.get_val(f"_{self.target_name}")
+        )
         self.storage.add_val(f"_{self.target_name}", torch.empty(0))
 
     def __call__(self):
@@ -322,7 +338,7 @@ class Fct_run_fwd(RK_Fct):
         target_name: str,
         storage: RK_Storage,
         code,
-        stream = "main_stream",
+        stream="main_stream",
         no_save_list=[],
         fwd_mode="with_grad",
         **kwargs,
@@ -405,7 +421,12 @@ class Fct_get_shape(RK_Fct):
 
 class Fct_optimize(RK_Fct):
     def __init__(
-        self, target_name: str, storage: RK_Storage, del_grad_list: list = [], stream="main_stream",**kwargs
+        self,
+        target_name: str,
+        storage: RK_Storage,
+        del_grad_list: list = [],
+        stream="main_stream",
+        **kwargs,
     ):
         super().__init__(target_name=target_name, storage=storage, **kwargs)
         self.target_name = target_name
@@ -450,15 +471,16 @@ class Fct_mem_alloc(RK_Fct):
         if self.device == torch.device("cpu"):
             self.kwargs["pin_memory"] = True
         self.shape_name = target_name if shape is None else shape
-        
+
         self.dtype = dtype
 
     def alloc_optim_states(self):
         shape = self.storage.get_shape(self.shape_name)
-        for k, v in self.storage.get_val(f"Optimize_({self.target_name})").state.items():
+        for k, v in self.storage.get_val(
+            f"Optimize_({self.target_name})"
+        ).state.items():
             v["exp_avg"].data = torch.empty(shape, device=self.device)
-            v["exp_avg_sq"].data = torch.empty(shape, device=self.device
-            )
+            v["exp_avg_sq"].data = torch.empty(shape, device=self.device)
 
     def alloc_grad(self):
         shape = self.storage.get_shape(self.shape_name)
@@ -483,9 +505,10 @@ class Fct_mem_alloc(RK_Fct):
         dtype = (
             self.storage.dtypes[self.shape_name] if self.dtype is None else self.dtype
         )
-        self.storage.add_val(self.target_name, torch.empty(
-            shape, dtype=dtype, device=self.device, **self.kwargs
-        ))
+        self.storage.add_val(
+            self.target_name,
+            torch.empty(shape, dtype=dtype, device=self.device, **self.kwargs),
+        )
 
     def __call__(self):
         with torch.cuda.stream(self.storage.gd["main_stream"]):
@@ -513,27 +536,37 @@ class Fct_offload(RK_Fct):
 
     def offload_tensor(self):
         self.storage.get_val(f"cpu_{self.target_name}").data.copy_(
-            self.storage.get_val(self.target_name).data.view(self.storage.get_val(f"cpu_{self.target_name}").shape),
+            self.storage.get_val(self.target_name).data.view(
+                self.storage.get_val(f"cpu_{self.target_name}").shape
+            ),
             non_blocking=True,
         )
         pass
 
     def offload_grad(self):
         self.storage.get_val(f"cpu_{self.target_name}").grad.data.copy_(
-            self.storage.get_val(self.target_name).grad.view(self.storage.get_val(f"cpu_{self.target_name}").shape),
+            self.storage.get_val(self.target_name).grad.view(
+                self.storage.get_val(f"cpu_{self.target_name}").shape
+            ),
             non_blocking=True,
         )
         pass
 
     def offload_optim_states(self):
-        for k, v in self.storage.get_val(f"Optimize_({self.target_name})").state.items():
+        for k, v in self.storage.get_val(
+            f"Optimize_({self.target_name})"
+        ).state.items():
             self.storage.get_val(f"exp_avg_{self.target_name}").copy_(
-                v["exp_avg"].reshape(self.storage.get_val(f"exp_avg_{self.target_name}").shape), 
-                non_blocking=True
+                v["exp_avg"].reshape(
+                    self.storage.get_val(f"exp_avg_{self.target_name}").shape
+                ),
+                non_blocking=True,
             )
             self.storage.get_val(f"exp_avg_sq_{self.target_name}").copy_(
-                v["exp_avg_sq"].reshape(self.storage.get_val(f"exp_avg_sq_{self.target_name}").shape), 
-                non_blocking=True
+                v["exp_avg_sq"].reshape(
+                    self.storage.get_val(f"exp_avg_sq_{self.target_name}").shape
+                ),
+                non_blocking=True,
             )
         pass
 
@@ -550,7 +583,7 @@ class Fct_prefetch(RK_Fct):
         storage: RK_Storage,
         prefetch_mode="tensor",
         stream="prefetch_stream",
-        with_proxy = False,
+        with_proxy=False,
         **kwargs,
     ):
         super().__init__(target_name=target.name, storage=storage)
@@ -573,21 +606,31 @@ class Fct_prefetch(RK_Fct):
 
     def prefetch_tensor(self):
         self.storage.get_val(self.target_name).data.copy_(
-            self.storage.get_val(f"cpu_{self.target_name}").view(self.storage.get_val(self.target_name).shape),
+            self.storage.get_val(f"cpu_{self.target_name}").view(
+                self.storage.get_val(self.target_name).shape
+            ),
             non_blocking=True,
         )
         if self.with_proxy:
-            self.storage.get_val(f"_{self.target_name}").data = self.storage.get_val(f"{self.target_name}").data
+            self.storage.get_val(f"_{self.target_name}").data = self.storage.get_val(
+                f"{self.target_name}"
+            ).data
 
     def prefetch_optim_states(self):
-        for k, v in self.storage.get_val(f"Optimize_({self.target_name})").state.items():
+        for k, v in self.storage.get_val(
+            f"Optimize_({self.target_name})"
+        ).state.items():
             v["exp_avg"].copy_(
-                self.storage.get_val(f"exp_avg_{self.target_name}").reshape(v["exp_avg"].shape),
-                non_blocking=True
+                self.storage.get_val(f"exp_avg_{self.target_name}").reshape(
+                    v["exp_avg"].shape
+                ),
+                non_blocking=True,
             )
             v["exp_avg_sq"].copy_(
-                self.storage.get_val(f"exp_avg_sq_{self.target_name}").reshape(v["exp_avg_sq"].shape),
-                non_blocking=True
+                self.storage.get_val(f"exp_avg_sq_{self.target_name}").reshape(
+                    v["exp_avg_sq"].shape
+                ),
+                non_blocking=True,
             )
         pass
 
@@ -625,8 +668,9 @@ class Fct_synchronize(RK_Fct):
         else:
             self.sync_all()
 
+
 class Fct_record_event(RK_Fct):
-    def __init__(self, target_name, stream:str, storage: RK_Storage, **kwargs):
+    def __init__(self, target_name, stream: str, storage: RK_Storage, **kwargs):
         super().__init__(target_name, storage, **kwargs)
         self.stream = stream
 
@@ -636,8 +680,9 @@ class Fct_record_event(RK_Fct):
             self.storage.events[self.target_name] = torch.cuda.Event()
             self.storage.events[self.target_name].record(self.storage.gd[self.stream])
 
+
 class Fct_wait_event(RK_Fct):
-    def __init__(self, target_name, stream:str, storage: RK_Storage, **kwargs):
+    def __init__(self, target_name, stream: str, storage: RK_Storage, **kwargs):
         super().__init__(target_name, storage, **kwargs)
         self.stream = stream
 
@@ -667,7 +712,15 @@ class Fct_to_storage(RK_Fct):
     and the real value should be empty.
     """
 
-    def __init__(self, target_name, storage: RK_Storage, pnode, device=None, pin_memory=True, **kwargs):
+    def __init__(
+        self,
+        target_name,
+        storage: RK_Storage,
+        pnode,
+        device=None,
+        pin_memory=True,
+        **kwargs,
+    ):
         super().__init__(target_name=target_name, storage=storage, **kwargs)
         self.target_name = target_name
         self.pnode = pnode
@@ -675,14 +728,16 @@ class Fct_to_storage(RK_Fct):
         self.pin_memory = pin_memory
 
     def __call__(self):
-        self.storage.add_val(self.pnode.param_name, self.pnode.get_value(
-            self.storage.gd["self"]
-        ))
-        
-        x = torch.empty_like(self.storage.get_val(self.pnode.param_name), pin_memory=self.pin_memory)
+        self.storage.add_val(
+            self.pnode.param_name, self.pnode.get_value(self.storage.gd["self"])
+        )
+
+        x = torch.empty_like(
+            self.storage.get_val(self.pnode.param_name), pin_memory=self.pin_memory
+        )
         x.copy_(self.storage.get_val(self.pnode.param_name))
         self.storage.add_val(f"cpu_{self.pnode.param_name}", torch.nn.Parameter(x))
-        
+
         self.storage.get_val(self.pnode.param_name).data = torch.empty(0)
         # self.storage.get_val(self.target_name).data = self.storage.ld[
         #     self.pnode.param_name
@@ -710,10 +765,17 @@ class Fct_add_optimizer(RK_Fct):
         self.is_cpu = is_cpu
 
     def __call__(self):
-        self.storage.add_val(self.target_name, self.optim(
-            [self.storage.get_val(self.is_cpu * "cpu_" + p) for p in self.list_params],
-            **self.kwargs,
-        ))
+        self.storage.add_val(
+            self.target_name,
+            self.optim(
+                [
+                    self.storage.get_val(self.is_cpu * "cpu_" + p)
+                    for p in self.list_params
+                ],
+                **self.kwargs,
+            ),
+        )
+
 
 class Fct_add_tensor(RK_Fct):
     def __init__(
@@ -737,6 +799,7 @@ class Fct_add_tensor(RK_Fct):
         shape = self.storage.get_shape(self.shape_name)
         self.storage.manager.add_tensor(self.target_name, shape)
 
+
 class Fct_manager_alloc(RK_Fct):
     def __init__(
         self,
@@ -753,11 +816,10 @@ class Fct_manager_alloc(RK_Fct):
 
     def __call__(self):
         self.storage.manager.split()
-        for (alloc, size) in self.storage.manager.allocations:
-            self.storage.add_val(alloc, torch.empty(size,
-                                 device="cpu",
-                                 pin_memory=True))
-
+        for alloc, size in self.storage.manager.allocations:
+            self.storage.add_val(
+                alloc, torch.empty(size, device="cpu", pin_memory=True)
+            )
 
 
 class Compiler:
@@ -810,16 +872,21 @@ class Compiler:
                 stream = "offload_stream"
             if isinstance(op, PrefetchOp):
                 stream = "prefetch_stream"
-            for (_op_type, target_name) in op.wait_events:
-                op.add_fct(Fct_wait_event(f"{_op_type}({target_name})", stream, self.storage))
+            for _op_type, target_name in op.wait_events:
+                op.add_fct(
+                    Fct_wait_event(f"{_op_type}({target_name})", stream, self.storage)
+                )
             self.compile_op[op_type](op)
             if op.record_event:
-                op.add_fct(Fct_record_event(f"{op.op_type}({op.target.name})", stream, self.storage))
-
+                op.add_fct(
+                    Fct_record_event(
+                        f"{op.op_type}({op.target.name})", stream, self.storage
+                    )
+                )
 
     def _activation_placehold(self, prep_op: Op, cluster, output_nodes):
         for anode in cluster.list_anodes:
-            if not anode.info or not anode.allocation_type=="data":
+            if not anode.info or not anode.allocation_type == "data":
                 continue  # source anode
             prep_op.add_fct(
                 Fct_mem_alloc(
@@ -831,11 +898,15 @@ class Compiler:
                     requires_grad=anode.info.requires_grad,
                 )
             )
-            if OffloadOp(Activation(anode)).name in self.ops:#offload activation
-                prep_op.add_fct(Fct_add_tensor(f"cpu_{anode.main_target}", 
-                                               self.storage, 
-                                               shape=anode.main_target,
-                                               dynamic_shape=self.storage.dynamic_shapes))
+            if OffloadOp(Activation(anode)).name in self.ops:  # offload activation
+                prep_op.add_fct(
+                    Fct_add_tensor(
+                        f"cpu_{anode.main_target}",
+                        self.storage,
+                        shape=anode.main_target,
+                        dynamic_shape=self.storage.dynamic_shapes,
+                    )
+                )
 
         for out_anode in list(cluster.interfaces["output_data_anodes"]):
             for out_target in out_anode.all_targets:
@@ -874,10 +945,16 @@ class Compiler:
                 and op.target.is_optim_states
             ):
                 var_name = op.target.param_name
-                # CPU optim states are placeholder for offload, 
+                # CPU optim states are placeholder for offload,
                 # they are not attached to the optimizers
-                prep_op.add_fct(Fct_add_tensor(f"exp_avg_{var_name}", self.storage, shape=var_name))
-                prep_op.add_fct(Fct_add_tensor(f"exp_avg_sq_{var_name}", self.storage, shape=var_name))
+                prep_op.add_fct(
+                    Fct_add_tensor(f"exp_avg_{var_name}", self.storage, shape=var_name)
+                )
+                prep_op.add_fct(
+                    Fct_add_tensor(
+                        f"exp_avg_sq_{var_name}", self.storage, shape=var_name
+                    )
+                )
                 # prep_op.add_fct(
                 #     Fct_mem_alloc(
                 #         f"exp_avg_{var_name}",
@@ -919,7 +996,7 @@ class Compiler:
         # self._parameter_placehold(prep_op, cluster, minor_param_nodes)
         if op_sched.with_parameters:
             self._optimizer_placehold(prep_op, op_list, minor_param_nodes)
-        op_sched.init_op_list = init_op_list+ [prep_op]
+        op_sched.init_op_list = init_op_list + [prep_op]
 
     def _compute_fwd(self, op: ComputeOp):
         op.add_fct(
@@ -941,11 +1018,15 @@ class Compiler:
             for dep_cnode in anode.deps:
                 code = dep_cnode.make_body_code_ast()
                 ast_view_code = make_ast_list_assign(code)
-                op.add_fct(Fct_run_fwd(op.target, 
-                                       storage=self.storage, 
-                                       code=ast_to_str(ast_view_code),
-                                       stream="main_stream"))
-                
+                op.add_fct(
+                    Fct_run_fwd(
+                        op.target,
+                        storage=self.storage,
+                        code=ast_to_str(ast_view_code),
+                        stream="main_stream",
+                    )
+                )
+
         if not cnode.info.requires_grad:
             op.add_fct(
                 Fct_run_fwd(
@@ -980,7 +1061,6 @@ class Compiler:
             force_special_kwargs=not op.pos_info["first_occurrence"],
         )
         main_code = main_code.replace(cnode.main_target, f"_{cnode.main_target}")
-        
 
         if not op.pos_info["last_before_bwd"]:
             for target in cnode.tensor_targets:
@@ -1134,12 +1214,12 @@ class Compiler:
             if del_mode == "data":
                 for target in op.target.pnode.view_targets:
                     op.add_fct(
-                    Fct_del(
-                        target_name=target,
-                        storage=self.storage,
-                        del_mode="data",
+                        Fct_del(
+                            target_name=target,
+                            storage=self.storage,
+                            del_mode="data",
+                        )
                     )
-                )       
 
     def Offload(self, op: OffloadOp):
         target: Parameter = op.target
@@ -1165,26 +1245,30 @@ class Compiler:
             if target.is_optim_states:
                 prefetch_mode = "optim_states"
         op.add_fct(
-            Fct_prefetch(target, 
-                         storage=self.storage, 
-                         prefetch_mode=prefetch_mode,
-                         with_proxy=isinstance(op.target, Activation) and op.target.info.requires_grad
-                         ) 
+            Fct_prefetch(
+                target,
+                storage=self.storage,
+                prefetch_mode=prefetch_mode,
+                with_proxy=isinstance(op.target, Activation)
+                and op.target.info.requires_grad,
+            )
         )
         if isinstance(op.target, Activation):
             pass
             # for cnode in op.target.anode.deps:
             #     code = cnode.make_body_code_ast()
             #     ast_view_code = make_ast_list_assign(code)
-            #     op.add_fct(Fct_run_fwd(op.target, 
-            #                            storage=self.storage, 
+            #     op.add_fct(Fct_run_fwd(op.target,
+            #                            storage=self.storage,
             #                            code=ast_to_str(ast_view_code),
             #                            stream="prefetch_stream"))
-                
-        if isinstance(op.target, Parameter) and not (op.target.is_grad or op.target.is_optim_states):
+
+        if isinstance(op.target, Parameter) and not (
+            op.target.is_grad or op.target.is_optim_states
+        ):
             pass
-            # op.add_fct(Fct_run_fwd(op.target, 
-            #                            storage=self.storage, 
+            # op.add_fct(Fct_run_fwd(op.target,
+            #                            storage=self.storage,
             #                            code=op.target.pnode.get_code(),
             #                            stream="prefetch_stream"))
         pass
@@ -1207,7 +1291,7 @@ class Compiler:
                 op.name,
                 storage=self.storage,
                 del_grad_list=op.list_params if op.is_cpu else [],
-                stream = "main_stream"#"cpu_stream" if "cpu" in op.name else "main_stream",
+                stream="main_stream",  # "cpu_stream" if "cpu" in op.name else "main_stream",
             )
         )
 
@@ -1216,11 +1300,15 @@ class Compiler:
             op.add_fct(Fct_synchronize(storage=self.storage))
         else:
             for e in op.wait_events:
-                op.add_fct(Fct_wait_event(f"{e[0]}({e[1]})", stream=op.stream, storage=self.storage))
+                op.add_fct(
+                    Fct_wait_event(
+                        f"{e[0]}({e[1]})", stream=op.stream, storage=self.storage
+                    )
+                )
 
-    def Prepare(self, op:PrepareOp):
+    def Prepare(self, op: PrepareOp):
         pnode = op.target.pnode
-        on_cpu = op.device=="cpu"
+        on_cpu = op.device == "cpu"
         op.add_fct(Fct_get_shape(pnode.param_name, pnode=pnode, storage=self.storage))
 
         # if op.cpu_placeholder:
@@ -1235,17 +1323,17 @@ class Compiler:
         #     )
 
         op.add_fct(
-                Fct_to_storage(
-                    pnode.param_name, 
-                    storage=self.storage, 
-                    pnode=pnode, 
-                    device=op.device,
-                    pin_memory=True#op.pin_memory
-                )
+            Fct_to_storage(
+                pnode.param_name,
+                storage=self.storage,
+                pnode=pnode,
+                device=op.device,
+                pin_memory=True,  # op.pin_memory
             )
-        
+        )
+
         # op.add_fct(Fct_RNG_state(pnode.param_name, storage=self.storage))
-        
+
         # op.add_fct(
         #     Fct_offload(pnode.param_name, storage=self.storage, pin_memory=True)
         # )
@@ -1272,7 +1360,7 @@ class Compiler:
                 )
             )
 
-    def ExecCode(self, op:ExecCodeOp):
+    def ExecCode(self, op: ExecCodeOp):
         op.add_fct(Fct_run_fwd(op.name, storage=self.storage, code=op.code))
 
     def get_val(self, val):

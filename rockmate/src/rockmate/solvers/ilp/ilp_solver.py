@@ -17,10 +17,10 @@ from .ilp_model import ModelPULP
 from .ilp_offload import ModelPULPOffload
 from .ilp_schedule import schedule
 from .ilp_utils import (
-    set_hcn_list_sched, 
+    set_hcn_list_sched,
     set_hg_parameter_groups,
-    clean_hcn_list_sched, 
-    clean_hg_parameter_groups
+    clean_hcn_list_sched,
+    clean_hg_parameter_groups,
 )
 import psutil
 
@@ -36,9 +36,12 @@ class HILP(Solver):
             ilp_solver_params={
                 "LogToConsole": 0,
                 "IntegralityFocus": 1,
-                "NodeFileStart":0.5,
+                "NodeFileStart": 0.5,
             },
-            protected_names=[f"{init_target_string} data", f"{init_target_string} grad"],
+            protected_names=[
+                f"{init_target_string} data",
+                f"{init_target_string} grad",
+            ],
             nb_total_sched=100,
             nb_total_nodes_top_level=100,
             nb_total_nodes=20,
@@ -72,8 +75,8 @@ class HILP(Solver):
 
     def __init__(self, config=None, ilp_solver=None):
         super().__init__(config)
-        self.ilp_solver = ilp_solver# or solver_name[0]
-        
+        self.ilp_solver = ilp_solver  # or solver_name[0]
+
         try:
             solver = pulp.get_solver(self.ilp_solver, msg=0)
         except:
@@ -96,8 +99,12 @@ class HILP(Solver):
         min_bdg = get_hgraph_budget_lb(hgraph)
         max_bdg = get_hgraph_budget_ub(hgraph)
         # interfaces_mem = sum(kdn.mem for kdn in hgraph.cluster.all_interfaces)
-        interfaces_mem = sum(kdn.mem for kdn in hgraph.cluster.interfaces["input_data_anodes"])
-        interfaces_mem += sum(kdn.mem for kdn in hgraph.cluster.interfaces["output_data_anodes"])
+        interfaces_mem = sum(
+            kdn.mem for kdn in hgraph.cluster.interfaces["input_data_anodes"]
+        )
+        interfaces_mem += sum(
+            kdn.mem for kdn in hgraph.cluster.interfaces["output_data_anodes"]
+        )
 
         budgets = []
         l_bd_peak = (
@@ -118,17 +125,25 @@ class HILP(Solver):
         all_params = {}
         param2hcn = {}
 
-        for i,hcn in enumerate(hg.list_HCNs):
-            if not hasattr(hcn, "required_parameter_nodes_real"):continue
-            if hcn.sub_cluster is not None and hasattr(hcn.sub_cluster, "parameter_nodes"):
+        for i, hcn in enumerate(hg.list_HCNs):
+            if not hasattr(hcn, "required_parameter_nodes_real"):
+                continue
+            if hcn.sub_cluster is not None and hasattr(
+                hcn.sub_cluster, "parameter_nodes"
+            ):
                 # if FWD/BWD hcns have different req_pnodes, parameters may be needed for recomputation
                 req_pnodes = hcn.sub_cluster.parameter_nodes
             else:
-                h_pnodes = hcn.required_parameter_nodes_real|hcn.required_parameter_nodes_fake
+                h_pnodes = (
+                    hcn.required_parameter_nodes_real
+                    | hcn.required_parameter_nodes_fake
+                )
                 req_pnodes = [pnode.original_param_node for pnode in h_pnodes]
             for pnode in req_pnodes:
-                if pnode.is_buffer:continue
-                if pnode.mem < self.config.optimize_metrics["minor_offload_size"]:continue
+                if pnode.is_buffer:
+                    continue
+                if pnode.mem < self.config.optimize_metrics["minor_offload_size"]:
+                    continue
                 if pnode not in param2hcn:
                     param2hcn[pnode] = {i}
                 else:
@@ -143,7 +158,7 @@ class HILP(Solver):
                 #     param2hcn[pnode.param_name] = {i}
                 # else:
                 #     param2hcn[pnode.param_name].add(i)
-                    
+
         parameter_groups = {}
         for p, c in param2hcn.items():
             c_ = tuple(sorted(c))
@@ -157,7 +172,7 @@ class HILP(Solver):
         # parameters = []
         # param_group2hcn = {}
         # for hcn, v in result.items():
-        #     param_group2hcn[len(parameters)] = 
+        #     param_group2hcn[len(parameters)] =
         #     parameters.append([all_params[p] for p in v])
         # return param_group2hcn, parameters
 
@@ -180,7 +195,7 @@ class HILP(Solver):
             nb_sched = max(
                 self.config.nb_total_sched * w // sum(weights), 1
             )  # at least 1 sched
-            nb_sched = 3 if i<30 else nb_sched
+            nb_sched = 3 if i < 30 else nb_sched
             if hcn.sub_cluster is not None:
                 # list_sched = hcn.sub_cluster.get_sched(pareto=True)
                 list_sched = hcn.sub_cluster.representee_cluster.list_schedules
@@ -201,9 +216,12 @@ class HILP(Solver):
 
                 while len(sel_sched) < nb_sched:
                     # add the one with most different .mem with all selected sched
-                    if np.max(
-                        [min(abs(x - y) for y in sel_mem) for x in indices[:, 1]]
-                    ) == 0:#no different schedules:
+                    if (
+                        np.max(
+                            [min(abs(x - y) for y in sel_mem) for x in indices[:, 1]]
+                        )
+                        == 0
+                    ):  # no different schedules:
                         break
                     argmax_diff = np.argmax(
                         [min(abs(x - y) for y in sel_mem) for x in indices[:, 1]]
@@ -217,7 +235,11 @@ class HILP(Solver):
                 hcn.list_sched = []
 
     def solve(
-        self, cluster: HierarchicalCluster, budgets=None, accurate_mem=False, gc_collect=True
+        self,
+        cluster: HierarchicalCluster,
+        budgets=None,
+        accurate_mem=False,
+        gc_collect=True,
     ):
         print(f"solving {cluster.name}")
         list_op_sched = []
@@ -280,17 +302,19 @@ class HILP(Solver):
             save_budget = [save_budget]
         # start = time.time()
         ilp_solver_params = self.config.ilp_solver_params
-        if accurate_mem: 
+        if accurate_mem:
             ilp_solver_params["TimeLimit"] = self.config.time_limit_top
         else:
             ilp_solver_params["TimeLimit"] = self.config.time_limit
 
-        def solve_md(ilp_solver_params=ilp_solver_params, 
-                     model_ilp = self.model_ilp,
-                     protected_names=self.config.protected_names,
-                     accurate_mem=False,
-                     ilp_solver = self.ilp_solver):
-            
+        def solve_md(
+            ilp_solver_params=ilp_solver_params,
+            model_ilp=self.model_ilp,
+            protected_names=self.config.protected_names,
+            accurate_mem=False,
+            ilp_solver=self.ilp_solver,
+        ):
+
             md = model_ilp(
                 hg,
                 peak_budget=peak_budget,
@@ -298,8 +322,8 @@ class HILP(Solver):
                 ilp_solver_params=ilp_solver_params,
                 accurate_mem=accurate_mem,
                 protected_names=protected_names,
-                optimize_metrics = self.config.optimize_metrics,
-                activation_offload=self.config.activation_offload
+                optimize_metrics=self.config.optimize_metrics,
+                activation_offload=self.config.activation_offload,
             )
             md.build()
             # print(f"model building: {time.time()-start}")
@@ -350,11 +374,13 @@ class HILP(Solver):
                     return list_op_sched, md
             # if accurate_mem:print(md.feasible)
             return list_op_sched, md if accurate_mem else None
-        
-        list_op_sched, md = solve_md(ilp_solver_params=ilp_solver_params, 
-                     model_ilp = self.model_ilp,
-                     accurate_mem=accurate_mem,
-                     protected_names=self.config.protected_names,
-                     ilp_solver = self.ilp_solver)
+
+        list_op_sched, md = solve_md(
+            ilp_solver_params=ilp_solver_params,
+            model_ilp=self.model_ilp,
+            accurate_mem=accurate_mem,
+            protected_names=self.config.protected_names,
+            ilp_solver=self.ilp_solver,
+        )
         self.md = md
         return list_op_sched

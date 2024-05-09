@@ -13,7 +13,11 @@ from rkgb.lowlevel.preprocess_samples import ExampleInputs
 from rkgb.lowlevel.measure import tensor_memory_size, TimerCUDA
 from rkgb.lowlevel.constants import ref_verbose, ExceptionModuleDoesNotReqGrad
 from rkgb.lowlevel.ast_add_on import ast_to_str, make_str_list_assign
-from rkgb.core.partitioned import PartitionerBottomToTop, PartitionerSequence, Partitioner
+from rkgb.core.partitioned import (
+    PartitionerBottomToTop,
+    PartitionerSequence,
+    Partitioner,
+)
 from rkgb.lowlevel.constants import init_target_string
 
 from .op_schedule import *
@@ -25,6 +29,7 @@ from .compiler import Compiler, RK_Storage, make_gd
 import psutil
 
 timer = TimerCUDA(torch.device("cuda"))
+
 
 class Rockmate(torch.nn.Module):
     compiler = None
@@ -49,52 +54,53 @@ class Rockmate(torch.nn.Module):
         model_kwargs=None,
         partitioners=None,
         max_size_S_graph_for_no_partitioning=40,
-        cpu_optim = torch.optim.Adam,
-        gpu_optim = torch.optim.Adam,
-        optim_kwargs = {},
-        minor_offload_size = 10*1024**2,
-        keep_outputs = False,
-        dynamic_batch_dim = None,
+        cpu_optim=torch.optim.Adam,
+        gpu_optim=torch.optim.Adam,
+        optim_kwargs={},
+        minor_offload_size=10 * 1024**2,
+        keep_outputs=False,
+        dynamic_batch_dim=None,
     ):
         super().__init__()
         ref_verbose[0] = verbose
         default_time_limit[0] = ilp_time_limit
         self.ilp_time_limit_top = ilp_time_limit_top
         list_solvers = list_solvers or [HILP(ilp_solver=ilp_solver)]
-        
+
         self.partitioners = partitioners
         self.list_solvers = list_solvers
-        self.device = torch.device("cuda")# Not obtaining from model
+        self.device = torch.device("cuda")  # Not obtaining from model
         self.exec_with_record_mem = False
         self.exec_with_record_time = False
         self.budget = budget
         self.rkgb_res = rkgb_res
         self.keep_outputs = keep_outputs
         self.list_solutions = []
-        self.dynamic_batch_dim = dynamic_batch_dim 
+        self.dynamic_batch_dim = dynamic_batch_dim
         object.__setattr__(self, "original_mod", original_mod)
-        
+
         self.config_partitioner()
-        
+
         self.get_rkgb_result(model_inputs, model_kwargs, minor_offload_size)
-        
-        self.optimize_metrics = get_optimize_metrics(list(original_mod.parameters())[0], 
-                                            cpu_optim=cpu_optim, 
-                                            gpu_optim=gpu_optim,
-                                            optim_kwargs=optim_kwargs,
-                                            minor_offload_size=minor_offload_size)
-        
+
+        self.optimize_metrics = get_optimize_metrics(
+            list(original_mod.parameters())[0],
+            cpu_optim=cpu_optim,
+            gpu_optim=gpu_optim,
+            optim_kwargs=optim_kwargs,
+            minor_offload_size=minor_offload_size,
+        )
+
         self.global_dict = make_gd(
-            self.device, 
-            self.original_mod, 
+            self.device,
+            self.original_mod,
             self.dict_constants,
-            optimize_metrics = self.optimize_metrics
+            optimize_metrics=self.optimize_metrics,
         )
 
         if solve_sched:
             self.solve_sched()
             self.get_compiled_fct()
-
 
     def get_rkgb_result(self, model_inputs, model_kwargs, minor_offload_size):
         # -- use rkGB --
@@ -109,29 +115,30 @@ class Rockmate(torch.nn.Module):
                     partitioners=self.partitioners,
                     inspection_device=torch.device("cuda"),
                     print_time_in_each_stage=True,
-                    dynamic_batch_dim=self.dynamic_batch_dim
+                    dynamic_batch_dim=self.dynamic_batch_dim,
                 )
             else:
                 self.rkgb_res = self.rkgb_res
-            
+
         except ExceptionModuleDoesNotReqGrad:
             self.module_does_not_req_grad = True
-        
+
         self.dict_constants = self.rkgb_res.forward_and_backward_graph.dict_constants
         self.init_code = ast_to_str(self.rkgb_res.forward_and_backward_graph.init_code)
-        self.output_names = [o.name for o in self.rkgb_res.forward_and_backward_graph.list_output_data_anodes]
-        
+        self.output_names = [
+            o.name
+            for o in self.rkgb_res.forward_and_backward_graph.list_output_data_anodes
+        ]
+
         self.minor_param_nodes = []
         for pnode in self.rkgb_res.hierarchical_cluster.parameter_nodes:
             if pnode.mem < minor_offload_size and not pnode.is_buffer:
                 self.minor_param_nodes.append(pnode)
         self.minor_param_nodes += self.rkgb_res.S.init_node.required_parameter_nodes
-    
+
     def config_partitioner(self):
         if self.partitioners is None:
-            self.partitioners = [
-                PartitionerBottomToTop(can_use_rotor=False)
-            ]
+            self.partitioners = [PartitionerBottomToTop(can_use_rotor=False)]
         # ensure HILP config match partitioner config
         for partitioner in self.partitioners:
             if isinstance(partitioner, PartitionerBottomToTop):
@@ -145,7 +152,6 @@ class Rockmate(torch.nn.Module):
                             solver.config.nb_total_nodes_top_level,
                             partitioner.config.max_estimate_for_main_graph,
                         )
-        
 
     def preprocess(self):
         solver = FastSolver()
@@ -154,9 +160,10 @@ class Rockmate(torch.nn.Module):
                 solver.preprocess(
                     cluster,
                     no_del_names=[
-                        f"{init_target_string} data", 
+                        f"{init_target_string} data",
                         f"{init_target_string} grad",
-                    ] + self.output_names
+                    ]
+                    + self.output_names,
                 )
 
     def solver_recursive(self, list_solvers=None, only_preprocess=False):
@@ -164,10 +171,12 @@ class Rockmate(torch.nn.Module):
         self.preprocess()
 
         solve_recursive(
-            self.rkgb_res.hierarchical_cluster, list_solvers=list_solvers, skip_self=True
+            self.rkgb_res.hierarchical_cluster,
+            list_solvers=list_solvers,
+            skip_self=True,
         )
 
-    def solve_sched(self, budget: float=None, list_solvers=None, recursive=True):
+    def solve_sched(self, budget: float = None, list_solvers=None, recursive=True):
         # if multiple solvers in list_solvers,
         # will choose the one with minimum time
         budget = budget or self.budget
@@ -193,7 +202,7 @@ class Rockmate(torch.nn.Module):
         if (
             True
             in [
-                isinstance(solver, HILP)# or isinstance(solver, RK_rotor)
+                isinstance(solver, HILP)  # or isinstance(solver, RK_rotor)
                 for solver in list_solvers
             ]
             and recursive
@@ -206,12 +215,16 @@ class Rockmate(torch.nn.Module):
                 solver.config.solve_top_level = True
                 # print("temporarily changing total_nodes for top level hilp")
                 list_solutions.extend(
-                    solver(self.rkgb_res.hierarchical_cluster, [budget], accurate_mem=True)
+                    solver(
+                        self.rkgb_res.hierarchical_cluster, [budget], accurate_mem=True
+                    )
                 )
                 solver.config.solve_top_level = False  # in case further usage
 
             else:
-                list_solutions.extend(solver(self.rkgb_res.hierarchical_cluster, [budget]))
+                list_solutions.extend(
+                    solver(self.rkgb_res.hierarchical_cluster, [budget])
+                )
 
         self.rkgb_res.hierarchical_cluster.list_schedules.extend(list_solutions)
         if not list_solutions:
@@ -233,30 +246,36 @@ class Rockmate(torch.nn.Module):
             self.compiler = Compiler(storage)
             if self.dynamic_batch_dim is not None:
                 storage.dynamic_shapes = self.rkgb_res.raw_graph.dynamic_shapes
-        
+
         self.minor_parameters = []
         if self.minor_param_nodes:
-            self.minor_parameters = [self.original_mod.get_parameter(pnode.param_name) 
-                                for pnode in self.minor_param_nodes]
+            self.minor_parameters = [
+                self.original_mod.get_parameter(pnode.param_name)
+                for pnode in self.minor_param_nodes
+            ]
+
             def optimize():
                 self.compiler.storage.ld["Optimize_minors"].step()
-                for p in self.minor_parameters:p.grad=None
+                for p in self.minor_parameters:
+                    p.grad = None
                 for pnode in self.minor_param_nodes:
                     code = make_str_list_assign(pnode.view_code, suffix=".data")
                     exec(code, self.global_dict, self.compiler.storage.ld)
+
             self.op_list[-1].add_fct(optimize)
-        
+
         self.autograd_Function = define_autograd_Function(self)
         self.inherits_original_mod_attributes_and_methods()
-        self.compiler.compile_preparation(self.rkgb_res.hierarchical_cluster,
-                                          self.op_sched,
-                                          self.minor_param_nodes,
-                                          self.rkgb_res.forward_graph.output_nodes
-                                          )
-        
+        self.compiler.compile_preparation(
+            self.rkgb_res.hierarchical_cluster,
+            self.op_sched,
+            self.minor_param_nodes,
+            self.rkgb_res.forward_graph.output_nodes,
+        )
+
         self.compiler.compile_sched(self.op_sched)
 
-    def _exec(self, op:Op, disable=False):
+    def _exec(self, op: Op, disable=False):
         try:
             if self.exec_with_record_mem:
                 torch.cuda.reset_peak_memory_stats()
@@ -277,14 +296,14 @@ class Rockmate(torch.nn.Module):
         except Exception as e:
             print(f"Failed to execute {op}")
             raise e
-        
+
     def exec_step(self, step):
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
                 torch.profiler.ProfilerActivity.CUDA,
             ],
-            profile_memory=True
+            profile_memory=True,
         ) as p:
             timer.start()
             for op in step.op_list:
@@ -306,9 +325,10 @@ class Rockmate(torch.nn.Module):
         p.export_chrome_trace(f"profiles/{len(self.step_profiles)}.json")
         self.step_time.append(timer.elapsed())
         self.step_memory_stats.append(torch.cuda.memory_stats())
-        self.step_profiles.append(p.key_averages().table(
-                    sort_by="self_cuda_time_total", row_limit=-1))
-            
+        self.step_profiles.append(
+            p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1)
+        )
+
     def init_fwd_exec(self):
         # TODO: rename to first forward; also do the first backward differently incase grad not exist
         """
@@ -317,42 +337,44 @@ class Rockmate(torch.nn.Module):
         2. set placeholders for activations;
         3. run forward the first time so no parameter gradients.
         """
-        
+
         for op in self.op_sched.init_op_list:
             self._exec(op)
         torch.cuda.synchronize()
         with torch.enable_grad():
             exec(self.init_code, self.global_dict, self.compiler.storage.ld)
-            for op in self.op_list[:self.op_sched.loss_idx+1]:
+            for op in self.op_list[: self.op_sched.loss_idx + 1]:
                 disable = False
                 if isinstance(op, OffloadOp) and isinstance(op.target, Parameter):
                     if op.target.is_grad or op.target.is_optim_states:
-                        disable = True#first iteration without grad offload
+                        disable = True  # first iteration without grad offload
                 if isinstance(op, OptimizeOp):
-                    disable = True#first iteration no need to optimize
+                    disable = True  # first iteration no need to optimize
                 self._exec(op, disable=disable)
                 # torch.cuda.synchronize()
-        
+
     def restore_exec(self, keep_grad=False):
         """
         After the training iteration, restore parameters to original_mod.
         All the updated parameters of the original_mod will be kept on CPU.
         """
 
-        if self.compiler.storage.ld == {}:return None
+        if self.compiler.storage.ld == {}:
+            return None
         self.zero_grad()
         for l in self.restore_fct_list:
             self._exec(l)
         for p in self.minor_parameters:
             p.data = p.data.to("cpu")
 
-        for k,v in self.op_sched.dict_alloc_param.items():
+        for k, v in self.op_sched.dict_alloc_param.items():
             if v.pnode.is_buffer or v.pnode in self.minor_param_nodes:
                 target = v.pnode.get_value(self.original_mod)
                 target.data = target.data.to("cpu")
                 continue
 
-            if v.is_grad or v.is_optim_states:continue
+            if v.is_grad or v.is_optim_states:
+                continue
 
             target = v.pnode.get_value(self.original_mod)
             target.data = self.compiler.storage.ld[v.target_name].data
@@ -391,9 +413,7 @@ class Rockmate(torch.nn.Module):
                     "define_autograd_Function"
                 )
             # -> Send the inputs to Function.forward via the buffer (Rem 1)
-            self.inputs_buffer = ExampleInputs(
-                self.original_mod, args, kwargs
-            )
+            self.inputs_buffer = ExampleInputs(self.original_mod, args, kwargs)
             self.dict_inputs_buffer = dict_inputs = self.inputs_buffer.dict
 
             # -> Pass the inputs which req grad to prepare their backward (Rem 1)
@@ -416,12 +436,13 @@ class Rockmate(torch.nn.Module):
             # for main_target, set_output_targets in self.rkgb_res.simplified_graph.dict_output_mt_to_targets_sent.items():
             for main_target in self.rkgb_res.forward_and_backward_graph.output_targets:
                 # anode = self.rkgb_res.hierarchical_cluster.dict_nodes[main_target]
-                cnode = self.rkgb_res.hierarchical_cluster.dict_nodes[f"FWD[{main_target}]"]
+                cnode = self.rkgb_res.hierarchical_cluster.dict_nodes[
+                    f"FWD[{main_target}]"
+                ]
                 code = make_str_list_assign(cnode.body_code)
                 for out_target in cnode.all_targets:
                     code = code.replace(out_target, f"out_{out_target}")
                     self.output_targets.append(f"out_{out_target}")
-                
 
                 # for output_target in set_output_targets:
                 #     # ast_code = self.rkgb_res.simplified_graph.dict_output_viewing_code[main_target]
@@ -436,13 +457,14 @@ class Rockmate(torch.nn.Module):
                 #     else:
                 #         code = ""
                 self.out_code.append(code)
-                exec(code,
-                        self.compiler.storage.gd,
-                        self.compiler.storage.ld)
+                exec(code, self.compiler.storage.gd, self.compiler.storage.ld)
 
             # -> Output what's defined in module
             output_nodes = self.rkgb_res.forward_graph.output_nodes
-            final_outputs = [self.compiler.get_val(f"out_{output.main_target}") for output in output_nodes]
+            final_outputs = [
+                self.compiler.get_val(f"out_{output.main_target}")
+                for output in output_nodes
+            ]
             return tuple(final_outputs)
 
     def zero_grad(self, set_to_none=True, remain_for_offload=True):
@@ -452,7 +474,7 @@ class Rockmate(torch.nn.Module):
             #     if v.is_grad and self.op_sched.alive_list[-1][k]:
             #     # if v.is_grad and self.op_sched.init_alive_status[k]:
             #         remains.append(v.pnode.param_name)
-            for k,p in self.original_mod.named_parameters():
+            for k, p in self.original_mod.named_parameters():
                 if k not in remains and p.grad is not None:
                     # p.grad = None if set_to_none else torch.zeros_like(p)
                     p.grad.zero_()
@@ -461,9 +483,10 @@ class Rockmate(torch.nn.Module):
 
     @property
     def minor_size(self):
-        return (sum([pnode.mem for pnode in self.minor_param_nodes]) * 
-                   (self.global_dict["optimize_metrics"]["optimizer_states_size"]+1))
-    
+        return sum([pnode.mem for pnode in self.minor_param_nodes]) * (
+            self.global_dict["optimize_metrics"]["optimizer_states_size"] + 1
+        )
+
     @property
     def op_list(self):
         return self.op_sched.op_list
@@ -510,7 +533,9 @@ def define_autograd_Function(RkMod: Rockmate):
                 ctx.name_of_inputs_which_req_grad = (
                     RkMod.name_of_inputs_which_req_grad_buffer
                 )
-                dict_inputs = RkMod.dict_inputs_buffer#args are passed in RkMod.forward
+                dict_inputs = (
+                    RkMod.dict_inputs_buffer
+                )  # args are passed in RkMod.forward
                 #  -> Detach input tensors (Rem 3) and store all the inputs
                 dict_input_tensors_detach = dict()  #  dict : input -> detached input
                 for k, v in dict_inputs.items():
@@ -521,26 +546,28 @@ def define_autograd_Function(RkMod: Rockmate):
                     #  TODO elif iterables of Tensors ?
                     else:
                         storage.ld[k] = v
-                
+
                 with torch.enable_grad():
-                    exec(RkMod.init_code, RkMod.global_dict, storage.ld)  # is compiler.global_dict
-                    if RkMod.exec_with_record_time and RkMod.op_sched.loss_step>0:
-                        for step in RkMod.op_sched.steps[:RkMod.op_sched.loss_step]:
+                    exec(
+                        RkMod.init_code, RkMod.global_dict, storage.ld
+                    )  # is compiler.global_dict
+                    if RkMod.exec_with_record_time and RkMod.op_sched.loss_step > 0:
+                        for step in RkMod.op_sched.steps[: RkMod.op_sched.loss_step]:
                             RkMod.exec_step(step)
                     else:
-                        for op in RkMod.op_list[:RkMod.op_sched.loss_idx]:
+                        for op in RkMod.op_list[: RkMod.op_sched.loss_idx]:
                             RkMod._exec(op)
             else:
                 # *** INITIALIZATION PART ***
                 #  -> Get the inputs using the buffer (Rem 1)
                 dict_inputs = RkMod.dict_inputs_buffer
                 RkMod.dict_inputs_buffer = None
-                
+
                 #  -> Create the RK_Storage for this run, and store it in ctx
                 ctx.RK_Storage = storage = RkMod.compiler.storage
                 storage.init(RkMod.global_dict)
                 RkMod.compiler.storage = storage
-                
+
                 #  -> Store what we need to return inputs' grad (Rem 1)
                 ctx.name_of_inputs_which_req_grad = (
                     RkMod.name_of_inputs_which_req_grad_buffer
@@ -554,10 +581,14 @@ def define_autograd_Function(RkMod: Rockmate):
                         dict_input_tensors_detach[v] = v_d
                         storage.ld[k] = v_d
                         if RkMod.dynamic_batch_dim is not None:
-                            inspect_batch = storage.dict_info[k].tensor_size[RkMod.dynamic_batch_dim]
-                            batch_multiplier = v_d.shape[RkMod.dynamic_batch_dim]/inspect_batch
+                            inspect_batch = storage.dict_info[k].tensor_size[
+                                RkMod.dynamic_batch_dim
+                            ]
+                            batch_multiplier = (
+                                v_d.shape[RkMod.dynamic_batch_dim] / inspect_batch
+                            )
                             storage.batch_multiplier = batch_multiplier
-                            
+
                     #  TODO elif iterables of Tensors ?
                     else:
                         storage.ld[k] = v
@@ -570,16 +601,20 @@ def define_autograd_Function(RkMod: Rockmate):
             #  *** EXECUTION PART ***
             # -> Autograd turns off itself before giving use the control.
             # -> But we need it to forward/backward each node.
-            
+
             # -> Get the output
             outs = []
-            for out_node in RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes:
+            for (
+                out_node
+            ) in RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes:
                 out_mt = out_node.main_target
                 # if out_mt == RkMod.rkgb_res.forward_graph.nodes[-1].main_target:
                 #     # Last output node; its grad_fn will not be called again
                 #     outs.append(RkMod.compiler.get_val(out_mt))
                 #     continue
-                RkMod.compiler.get_val(f"out_{out_mt}").data = RkMod.compiler.get_val(out_mt)
+                RkMod.compiler.get_val(f"out_{out_mt}").data = RkMod.compiler.get_val(
+                    out_mt
+                )
                 o = RkMod.compiler.get_val(f"out_{out_mt}")
                 outs.append(o)
 
@@ -620,10 +655,13 @@ def define_autograd_Function(RkMod: Rockmate):
             # -> Put grad_out in out.grad (Rem 4)
             for out_node, out_grad in zip(
                 RkMod.rkgb_res.forward_and_backward_graph.list_output_data_anodes,
-                grad_outs):
+                grad_outs,
+            ):
                 out = RkMod.compiler.get_val(out_node.main_target)
-                if out_grad.mean()!=0:
-                    out.grad = out_grad.data.as_strided_(out.shape, out.stride(), out.storage_offset())
+                if out_grad.mean() != 0:
+                    out.grad = out_grad.data.as_strided_(
+                        out.shape, out.stride(), out.storage_offset()
+                    )
                 # print(out_node.main_target, out.grad.mean)
                 out_grad.data = torch.empty(0)
 
@@ -631,7 +669,7 @@ def define_autograd_Function(RkMod: Rockmate):
                 for target in RkMod.output_targets:
                     RkMod.compiler.storage.ld[target].data = torch.empty(0)
                     RkMod.compiler.storage.ld[target].grad = None
-                
+
             loss_idx = RkMod.op_sched.loss_idx
             #  * record_mem stuff *
             # if RkMod.exec_with_record_mem:
@@ -642,16 +680,18 @@ def define_autograd_Function(RkMod: Rockmate):
 
             stop = RkMod.backward_stop
             if stop:
-                for i, op in enumerate(RkMod.op_list[loss_idx+1:loss_idx+stop+1]):
+                for i, op in enumerate(
+                    RkMod.op_list[loss_idx + 1 : loss_idx + stop + 1]
+                ):
                     with torch.enable_grad():
                         RkMod._exec(op)
             else:
-                
+
                 if RkMod.exec_with_record_time:
-                    for step in RkMod.op_sched.steps[RkMod.op_sched.loss_step:]:
+                    for step in RkMod.op_sched.steps[RkMod.op_sched.loss_step :]:
                         RkMod.exec_step(step)
                 else:
-                    for op in RkMod.op_list[loss_idx+1:]:
+                    for op in RkMod.op_list[loss_idx + 1 :]:
                         RkMod._exec(op)
                 # if RkMod.exec_with_record_mem and RkMod.backward_add_output_grad:
                 #     RkMod.allo_mem[loss_idx] += RkMod.output_size
@@ -661,7 +701,7 @@ def define_autograd_Function(RkMod: Rockmate):
                     for inp in ctx.name_of_inputs_which_req_grad
                 )
                 grads = (torch.ones(1),) + grad_inputs
-                    
+
                 return grads
 
         # === END OF BACKWARD FUNCTION ===

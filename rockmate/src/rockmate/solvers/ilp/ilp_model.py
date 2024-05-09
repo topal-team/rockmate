@@ -15,6 +15,7 @@ from pulp import (
 from rkgb.core.hierarchical import HierarchicalGraph
 from .ilp_utils import RkLpVariable
 
+
 class ModelPULP:
     """
     Build the ILP model by given Hgraph and budget.
@@ -34,7 +35,7 @@ class ModelPULP:
         gcd=None,
         accurate_mem=False,
         protected_names=[],
-        **kwargs
+        **kwargs,
     ):
         self.gcd = gcd if gcd else 1024**2
         self.peak_budget = peak_budget / self.gcd
@@ -54,7 +55,7 @@ class ModelPULP:
         self.use_correction_term = accurate_mem
 
         self.config()
-        
+
     def build(self):
         # OVERWRITTING METHOD IN OFFLOAD
         self.add_variables()
@@ -125,15 +126,15 @@ class ModelPULP:
         self.I = len(self.hgraph.list_HANs)
         self.J = len(self.list_list_sched)
 
-        self.hcn2idx = {hcn:i for i, hcn in enumerate(self.hgraph.list_HCNs)}
-        self.han2idx = {hcn:i for i, hcn in enumerate(self.hgraph.list_HANs)}
-        
+        self.hcn2idx = {hcn: i for i, hcn in enumerate(self.hgraph.list_HCNs)}
+        self.han2idx = {hcn: i for i, hcn in enumerate(self.hgraph.list_HANs)}
+
         self.protected_indices = []
         self.input_grad_indices = []
         self.input_data_indices = []
         self.han_deps = []
         self.han_users = []
-        self.han_users_real = []# without sched-dependent users
+        self.han_users_real = []  # without sched-dependent users
 
         for i, han in enumerate(self.hgraph.list_HANs):
             if han.anode.name in self.protected_names:
@@ -143,9 +144,10 @@ class ModelPULP:
             if han in self.hgraph.input_data_HANs:
                 self.input_data_indices.append(i)
             self.han_deps.append([self.hcn2idx[hcn] for hcn in han.deps])
-            self.han_users.append([self.hcn2idx[hcn] for hcn in han.users
-                                   if hcn in self.hcn2idx])# current sub-graph users
-        
+            self.han_users.append(
+                [self.hcn2idx[hcn] for hcn in han.users if hcn in self.hcn2idx]
+            )  # current sub-graph users
+
         self.han_users_real = self.han_users.copy()
         self.hcn_users = [
             [self.han2idx[han] for han in self.hgraph.list_HCNs[k].users]
@@ -165,8 +167,8 @@ class ModelPULP:
                     self_anode = cluster.translate_representee_node(anode)
                     # Without specifying schedule, we assume it's possible to use han here
                     for i in range(self.I):
-                        if (self_anode.name
-                            == self.hgraph.list_HANs[i].anode.name
+                        if (
+                            self_anode.name == self.hgraph.list_HANs[i].anode.name
                             and k not in self.han_users[i]
                         ):
                             self.han_users[i].append(k)
@@ -174,7 +176,9 @@ class ModelPULP:
         ##############################
 
         self.create_list = [(k, i) for k in range(self.T) for i in self.hcn_users[k]]
-        self.delete_list = [(k, i) for i in range(self.I) for k in self.han_deps[i] + self.han_users[i]]
+        self.delete_list = [
+            (k, i) for i in range(self.I) for k in self.han_deps[i] + self.han_users[i]
+        ]
 
         self.Cr = len(self.create_list)
         self.De = len(self.delete_list)
@@ -206,26 +210,19 @@ class ModelPULP:
                 t_ = t + 1
         return (t_, i_)
 
-
     def add_objective(self, bandwidth_cost=0.01):
-        self.md += (
-            lpSum(self.Time[t, k] for t in range(self.T) for k in self.krange(t))
-        )
+        self.md += lpSum(self.Time[t, k] for t in range(self.T) for k in self.krange(t))
 
     def add_constraints(self):
         self.add_valid_constraints()
         self.add_memory_constrains()
-            
+
         ##### Time constraints
         for t in range(self.T):
             for k in self.krange(t):
-                self.md += (
-                    self.Time[t, k]
-                    >= lpSum(
-                        self.Comp[t, k, o] * self.time[k][o] for o in range(self.nComp[k])
-                    )
+                self.md += self.Time[t, k] >= lpSum(
+                    self.Comp[t, k, o] * self.time[k][o] for o in range(self.nComp[k])
                 )
-
 
     def add_variables(self):
         self.Comp = RkLpVariable.dicts(
@@ -264,11 +261,11 @@ class ModelPULP:
             ],
             cat=self.bin_type,
         )
-        
+
         self.sumAliveP = {}
         for j in range(self.J):
             for t in range(self.T + 1):
-                self.sumAliveP[t,j] = lpSum(
+                self.sumAliveP[t, j] = lpSum(
                     self.AliveP[t, j, o] for o in range(len(self.list_list_sched[j]))
                 )
 
@@ -277,28 +274,32 @@ class ModelPULP:
             self.active_stages[i] = []
             for t in range(self.T):
                 for k in self.krange(t):
-                    if k in self.han_deps[i]+self.han_users[i]:
+                    if k in self.han_deps[i] + self.han_users[i]:
                         self.active_stages[i].append(t)
-            if not self.hgraph.list_HANs[i].deps:# src node
+            if not self.hgraph.list_HANs[i].deps:  # src node
                 self.active_stages[i].append(-1)
 
         # to present whether one saved tensor can be inherited from the last stage
         self.AliveA = RkLpVariable.dicts(
-            "AliveA", [(t, c)
-                       for t in range(1,self.T) 
-                       for c, (k, i) in enumerate(self.create_list)
-                    #    if t-1 in self.active_stages[i]
-                       ], 
-                       cat=self.bin_type
+            "AliveA",
+            [
+                (t, c)
+                for t in range(1, self.T)
+                for c, (k, i) in enumerate(self.create_list)
+                #    if t-1 in self.active_stages[i]
+            ],
+            cat=self.bin_type,
         )  # activation
 
         self.AliveT = RkLpVariable.dicts(
-            "AliveT", [(t, i)
-                       for t in range(self.T) 
-                       for i in range(self.I)
-                    #    if t-1 in self.active_stages[i]
-                       ], 
-                       cat=self.bin_type
+            "AliveT",
+            [
+                (t, i)
+                for t in range(self.T)
+                for i in range(self.I)
+                #    if t-1 in self.active_stages[i]
+            ],
+            cat=self.bin_type,
         )  # tensor that can be shared by acts
 
         self.create = RkLpVariable.dicts(
@@ -321,12 +322,13 @@ class ModelPULP:
             ],
             cat=self.bin_type,
         )
-        
+
         self.Time = RkLpVariable.dicts(
-            "Time", [(t, k) for t in range(self.T) for k in self.krange(t)], 
-            lowBound=None, 
+            "Time",
+            [(t, k) for t in range(self.T) for k in self.krange(t)],
+            lowBound=None,
             upBound=None,
-            cat="Continuous"
+            cat="Continuous",
         )
         self.prefill_compute()
         # if self.with_offload:
@@ -337,7 +339,9 @@ class ModelPULP:
         for i in self.input_grad_indices:
             for j_, (k_, i_) in enumerate(self.create_list):
                 if i_ == i:
-                    self.md += self.AliveA[self.T - 1, j_] + self.sumComp[self.T - 1, k_] == 1
+                    self.md += (
+                        self.AliveA[self.T - 1, j_] + self.sumComp[self.T - 1, k_] == 1
+                    )
 
         # # In the first stage, assume input data is alive
         # for i in self.input_data_indices:
@@ -371,7 +375,7 @@ class ModelPULP:
         for t in range(self.T + 1):
             for j in range(self.J):
                 self.md += (
-                    self.sumAliveP[t,j] <= 1
+                    self.sumAliveP[t, j] <= 1
                 )  # assuming two copies of saved tensors won't be kept at the same time
 
         #### Option-free constraints: from rk-checkmate
@@ -492,7 +496,7 @@ class ModelPULP:
                     # elif i>9:
                     #     print(i)
                     else:
-                        self.md += self.AliveT[self.T-1, i] == 0
+                        self.md += self.AliveT[self.T - 1, i] == 0
 
         def _num_hazards(t, i, k):
             if i in self.protected_indices:
@@ -595,35 +599,36 @@ class ModelPULP:
     def save_mem(self, t, k):
         # OVERWRITTING METHOD IN OFFLOAD
         return self.U[t, k]
-    
+
     def overhead_mem(self, t, k):
         # OVERWRITTING METHOD IN OFFLOAD
-        return self.act_overhead(t,k)
-    
+        return self.act_overhead(t, k)
+
     def act_overhead(self, t, k):
         j = self.hcn2sub_c[k]
         if self.use_correction_term and not j is None:
-            return self.correction_term_overhead(t,k)
-        overhead =  lpSum(
-                            self.Comp[t, k, o] * self.overhead[k][o]
-                            for o in range(self.nComp[k])
-                        )
+            return self.correction_term_overhead(t, k)
+        overhead = lpSum(
+            self.Comp[t, k, o] * self.overhead[k][o] for o in range(self.nComp[k])
+        )
         overhead += lpSum(
-                            self.mem[i_] * self.delete[t, eidx_d]
-                            for eidx_d, (k_, i_) in enumerate(self.delete_list)
-                            if k == k_
-                        )
+            self.mem[i_] * self.delete[t, eidx_d]
+            for eidx_d, (k_, i_) in enumerate(self.delete_list)
+            if k == k_
+        )
         return [overhead]
-    
+
     def correction_term_overhead(self, t, k):
         j = self.hcn2sub_c[k]
         cluster = self.sub_clusters[j]
         hcn = self.hgraph.list_HCNs[k]
         overhead_terms = []
         for o, op_sched in enumerate(self.list_list_sched[j]):
-            correction_terms = (op_sched.fwd_overhead_correction
-                                if hcn.is_fwd
-                                else op_sched.bwd_overhead_correction)
+            correction_terms = (
+                op_sched.fwd_overhead_correction
+                if hcn.is_fwd
+                else op_sched.bwd_overhead_correction
+            )
             if not correction_terms:
                 overhead_terms.append(
                     self.Comp[t, k, o] * self.overhead[k][o]
@@ -639,20 +644,14 @@ class ModelPULP:
                     op_sched.mem if hcn.is_fwd else 0
                 )
                 for inter_position, inter_mem in correction.items():
-                    if (
-                        inter_position == "save"
-                        or inter_position == "overhead"
-                    ):
+                    if inter_position == "save" or inter_position == "overhead":
                         continue
 
-                    i_ = [
-                        han.anode.name for han in self.hgraph.list_HANs
-                    ].index(
+                    i_ = [han.anode.name for han in self.hgraph.list_HANs].index(
                         # self.sub_clusters[j]
                         cluster.translate_representee_node(
-                        op_sched.cluster
-                        .list_anodes[inter_position[0]])
-                        .name
+                            op_sched.cluster.list_anodes[inter_position[0]]
+                        ).name
                     )
                     if inter_position[1] == "always":
                         not_kept_alive = 1
@@ -668,37 +667,34 @@ class ModelPULP:
                         eidx = self.create_list.index((k, i_))
                         not_kept_alive = self.create[t, eidx]
                     correction_term += not_kept_alive * inter_mem
-                
-                overhead_terms.append(self.Comp[t, k, o] * overhead / self.gcd
+
+                overhead_terms.append(
+                    self.Comp[t, k, o] * overhead / self.gcd
                     + correction_term / self.gcd
                     + lpSum(
                         self.mem[i_] * self.delete[t, eidx_d]
                         for eidx_d, (k_, i_) in enumerate(self.delete_list)
                         if k == k_
-                    ))
+                    )
+                )
         return overhead_terms
-            
 
     def add_memory_constrains(self):
         self.add_activation_deletion()
         self.add_activation_mem()
-        self.add_abar_constraint(self.save_budget*self.gcd)
-        
+        self.add_abar_constraint(self.save_budget * self.gcd)
+
         for t in range(self.T):
             for k in self.krange(t):
-                self.md += self.save_mem(t,k) >= 0
-                self.md += self.save_mem(t,k) <= (self.peak_budget)
-                for overhead in self.overhead_mem(t,k):
-                    self.md += (
-                        self.save_mem(t,k)
-                        + overhead
-                        <= self.peak_budget
-                    )
-                
+                self.md += self.save_mem(t, k) >= 0
+                self.md += self.save_mem(t, k) <= (self.peak_budget)
+                for overhead in self.overhead_mem(t, k):
+                    self.md += self.save_mem(t, k) + overhead <= self.peak_budget
+
     def add_abar_constraint(self, save_budget):
         # self.save_budget = save_budget / self.gcd
         for k in range(self.T):
-            self.md += self.U[(self.loss_idx, k)] <= save_budget/self.gcd
+            self.md += self.U[(self.loss_idx, k)] <= save_budget / self.gcd
 
     def prefill_compute(self):
         self.active_stages = dict()
@@ -706,33 +702,33 @@ class ModelPULP:
             self.active_stages[i] = []
             for t in range(self.T):
                 for k in self.krange(t):
-                    if k in self.han_deps[i]+self.han_users[i]:
+                    if k in self.han_deps[i] + self.han_users[i]:
                         self.active_stages[i].append(t)
-            if not self.hgraph.list_HANs[i].deps:# src node
+            if not self.hgraph.list_HANs[i].deps:  # src node
                 self.active_stages[i].append(-1)
 
         for j, list_sched in enumerate(self.list_list_sched):
             for o in range(len(list_sched)):
                 # if (0,j,o) not in self.AliveP:
-                self.AliveP[0,j,o] = 0
-                for t in range(1,self.T + 1):
+                self.AliveP[0, j, o] = 0
+                for t in range(1, self.T + 1):
                     # if (t,j,o) not in self.AliveP:
-                    if not t-1 in self.sub_c2hcn[j]:
-                        self.AliveP[t,j,o] = self.AliveP[t-1,j,o]
+                    if not t - 1 in self.sub_c2hcn[j]:
+                        self.AliveP[t, j, o] = self.AliveP[t - 1, j, o]
 
         for c, (k, i) in enumerate(self.create_list):
-            self.AliveA[0,c] = 0
+            self.AliveA[0, c] = 0
             for t in range(1, self.T):
-                if not t-1 in self.active_stages[i]:
-                    self.AliveA[t,c] = self.AliveA[t-1,c]
+                if not t - 1 in self.active_stages[i]:
+                    self.AliveA[t, c] = self.AliveA[t - 1, c]
 
         for i in range(self.I):
-            if not -1 in self.active_stages[i]:#src node
-                self.AliveT[0,i] = 0
+            if not -1 in self.active_stages[i]:  # src node
+                self.AliveT[0, i] = 0
             for t in range(1, self.T):
-                if not t-1 in self.active_stages[i]:
-                    self.AliveT[t,i] = self.AliveT[t-1,i]
-    
+                if not t - 1 in self.active_stages[i]:
+                    self.AliveT[t, i] = self.AliveT[t - 1, i]
+
         for t in range(self.T):
             for i in range(self.Cr):
                 if self.create_list[i][0] not in self.krange(t):
@@ -743,14 +739,15 @@ class ModelPULP:
             if self.single_fwd:
                 for d in range(self.De):
                     (k, i) = self.delete_list[d]
-                    if i in self.protected_indices:continue
+                    if i in self.protected_indices:
+                        continue
                     if k == max(self.han_deps[i] + self.han_users[i]) and k == t:
                         self.delete[t, d] = 1
                         pass
- 
+
     def solve(self, solver=""):
         # some solvers have no support of 'Time limit reached' status
-        
+
         # print(f"time limit {self.ilp_solver_params['TimeLimit']}")
         try:
             solver = get_solver(
