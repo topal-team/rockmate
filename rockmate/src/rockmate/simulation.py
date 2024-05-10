@@ -28,13 +28,14 @@ from .op_schedule import (
 
 
 class ListOp(list):
-    def __init__(self, ops: List[Op]):
+    def __init__(self, ops: List[Op], constant_cost=0):
         super(ListOp, self).__init__(ops)
         self._pop = super(ListOp, self).pop
         self._remove = super(ListOp, self).remove
         self._append = super(ListOp, self).append
         self._insert = super(ListOp, self).insert
-        self.time = sum(op.time for op in ops)
+        self.constant_cost = constant_cost
+        self.time = sum(op.time for op in ops)+self.constant_cost
 
     def pop(self, index):
         self.time -= self[index].time
@@ -57,6 +58,8 @@ class Step:
     def __init__(self, op_list: List[Op]) -> None:
         main_op_list = [op_list[0]]
         self_op_list = []
+        self.del_ops = []
+
         sync = False
         for op in op_list[1:]:
             if isinstance(op, SynchronizeOp):
@@ -64,7 +67,10 @@ class Step:
             if not sync:
                 main_op_list.append(op)
             else:
-                self_op_list.append(op)
+                if isinstance(op, DeleteOp): 
+                    self.del_ops.append(op)
+                else:
+                    self_op_list.append(op)
 
         ofl_ops = []
         prf_ops = []
@@ -72,7 +78,6 @@ class Step:
         opt_ops = []
         comp_ops = []
         self.alloc_ops = []
-        self.del_ops = []
         self.cpu_constant_cost = 50
         
         for op in main_op_list:
@@ -95,7 +100,7 @@ class Step:
 
         self.ofl_ops = ListOp(ofl_ops)
         self.prf_ops = ListOp(prf_act_ops + prf_ops)
-        self.opt_ops = ListOp(opt_ops)
+        self.opt_ops = ListOp(opt_ops, self.cpu_constant_cost)
         self.comp_ops = ListOp(comp_ops)
         self.self_ops = ListOp(self_op_list)
 
@@ -113,9 +118,9 @@ class Step:
             + self.prf_ops
             + self.comp_ops
             + self.ofl_ops
+            + self.self_ops
             + opt_ops
             + self.del_ops
-            + self.self_ops
         )
 
     @property
@@ -123,10 +128,10 @@ class Step:
         return max(
             max(
             self.ofl_ops.time, 
-            self.prf_ops.time, 
             self.comp_ops.time
         ) + self.self_ops.time,
-            self.opt_ops.time + self.cpu_constant_cost)
+            self.prf_ops.time, 
+            self.opt_ops.time)
     
 
     def all_time(self):
