@@ -217,11 +217,12 @@ class ComputeOp(Op):
         self.overhead = cnode.mem_overhead
         self.pos_info = {}  # positional information to be filled before compiling
         self.op_type = "Compute"
+        self.time_mutiplier = 1# for dynamic batch
 
     @property
     def time(self):
         # cnode can be replaced during translation
-        return self.target.time if self.target.time is not None else 0
+        return self.target.time * self.time_mutiplier if self.target.time is not None else 0
 
     @property
     def target_name(self):
