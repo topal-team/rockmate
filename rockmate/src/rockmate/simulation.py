@@ -121,11 +121,13 @@ class Step:
     @property
     def time(self):
         return max(
+            max(
             self.ofl_ops.time, 
             self.prf_ops.time, 
-            self.opt_ops.time + self.cpu_constant_cost, 
             self.comp_ops.time
-        ) + self.self_ops.time
+        ) + self.self_ops.time,
+            self.opt_ops.time + self.cpu_constant_cost)
+    
 
     def all_time(self):
         return (
