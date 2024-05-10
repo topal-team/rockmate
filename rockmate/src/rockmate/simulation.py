@@ -86,8 +86,7 @@ class Step:
                 prf_ops.append(op)
             elif isinstance(op, OptimizeOp) and op.is_cpu:
                 opt_ops.append(op)
-            elif isinstance(op, DeleteOp)
-                and isinstance(op.target, Parameter):
+            elif isinstance(op, DeleteOp) and isinstance(op.target, Parameter):
                 self.del_ops.append(op)
             elif isinstance(op, PrefetchOp) and op.record_event:
                 prf_act_ops.append(op)
