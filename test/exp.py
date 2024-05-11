@@ -5,7 +5,7 @@ import torch.nn as nn
 from copy import deepcopy
 import numpy as np
 # from models import *
-# from models.LLM import *
+from models.LLM import *
 from rockmate import Rockmate
 from rockmate.op_schedule import *
 from rockmate.simulation import Simulator
@@ -76,20 +76,6 @@ def analyze_mem(rkmod, print_status=False, with_param=True, with_grad=True, deta
     # return (max_i, max_t, max_k)
     return max(mem.values())*md.gcd, rkmod.op_sched.get_peak_mem(with_interface=True)
 
-
-def get7Bllama(batch, seq_len, nlayers=32, dtype=torch.float32):
-    #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
-    sample = torch.randint(0, 600, (int(batch), int(seq_len)))
-    # Initializing a LLaMA llama-7b style configuration
-    configuration = LlamaConfig(num_hidden_layers=nlayers,
-                                hidden_size=4096,
-                                output_hidden_states=False,
-                                output_attentions=False,
-                                # use_cache=False
-                                )
-    # Initializing a model from the llama-7b style configuration
-    model = LlamaModel(configuration)#.to(dtype)
-    return model, [sample]
 
 def check_correctness(model, sample, budget=1e9, optim=torch.optim.Adam):
     dtype = torch.float64
@@ -172,8 +158,10 @@ def manual_lora(model:nn.Module, target_modules, num_adapters=10, freeze_all=Tru
                 raise AttributeError("`" + item + "` is not "
                                         "an nn.Module")
 
-def add_sched_stats(stats, rkmod):
-    stats[f"Original module iter time"] = sum(kcn.time for kcn in rkmod.rkgb_res.hierarchical_cluster.list_cnodes if kcn.time)
+def get_sched_stats(rkmod):
+    stats = {}
+    stats[f"Original module fwd+bwd time"] = sum(kcn.time for kcn in rkmod.rkgb_res.hierarchical_cluster.list_cnodes if kcn.time)
+    stats[f"Original module optimize time"] = sum(pnode.mem for pnode in rkmod.rkgb_res.hierarchical_cluster.parameter_nodes)/rkmod.optimize_metrics["gpu_optimize_speed"]
     stats[f"Schedule_total_time"] = sum(step.time for step in rkmod.op_sched.steps)
     stats[f"Schedule_total_compute_time"] = sum(step.comp_ops.time for step in rkmod.op_sched.steps)
     stats[f"Schedule_total_offload_time"] = sum(step.ofl_ops.time for step in rkmod.op_sched.steps)
@@ -182,6 +170,7 @@ def add_sched_stats(stats, rkmod):
     stats[f"Schedule_time_from_waiting_cpu optimize"] = sum((step.time - step.comp_ops.time) for step in rkmod.op_sched.steps if step.time == step.opt_ops.time)
     stats[f"Schedule_time_from_waiting_offload"] = sum((step.time - step.max2nd()) for step in rkmod.op_sched.steps if step.time == step.ofl_ops.time)
     stats[f"Schedule_time_from_waiting_prefetch"] = sum((step.time - step.max2nd()) for step in rkmod.op_sched.steps if step.time == step.prf_ops.time)
+    return stats
 
 def Loss(y, labels=None):
     return y.mean()
@@ -212,8 +201,8 @@ def exec(model,
     if optimize_fct:optimize_fct()
     timer.start()
     for i in range(niters):
-        if print_mem:print(f"Mem before fwd {torch.cuda.memory_allocated()}")
         if zero_grad:model.zero_grad()
+        if print_mem:print(f"Mem before fwd {torch.cuda.memory_allocated()}")
         ys = model(*sample, **kwargs)
         y = ys[0]
         assert y.requires_grad
@@ -223,14 +212,17 @@ def exec(model,
         loss.backward()
         # torch.cuda.synchronize()
         # print(f"grad: {model.wte.weight.grad[0,0]}")
-        # if optimize_fct:optimize_fct()
+        if print_mem:print(f"Mem after bwd {torch.cuda.memory_allocated()}")
+        if optimize_fct:optimize_fct()
         # for s in sample:
         #     s.grad = None
-        for _y in ys:
-            _y.data = torch.empty(0)
-            _y.grad = None
-            del _y
-        torch.cuda.empty_cache()
+        # for _y in ys:
+        #     if not isinstance(_y, torch.Tensor):
+        #         continue
+        #     _y.data = torch.empty(0)
+        #     _y.grad = None
+        #     del _y
+        # torch.cuda.empty_cache()
     timer.end()
     return timer.elapsed()
     
@@ -255,6 +247,7 @@ def exec_pt(model, sample, optim=torch.optim.Adam, niters=10, device="cuda", **k
     def optimize():
         optimizer.step()
     mem = torch.cuda.memory_allocated()
+    print(f"Memory allocated before exec {mem}")
     time = exec(model, sample, niters, optimize_fct=optimize, zero_grad=True, **kwargs)
     peak_mem = torch.cuda.max_memory_allocated() - mem
     return time, peak_mem
