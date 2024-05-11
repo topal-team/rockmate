@@ -687,7 +687,8 @@ class Fct_wait_event(RK_Fct):
         self.stream = stream
 
     def __call__(self):
-        pass
+        if self.target_name not in self.storage.events:
+            return
         self.storage.events[self.target_name].wait(self.storage.gd[self.stream])
 
 
