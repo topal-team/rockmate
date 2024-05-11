@@ -96,8 +96,7 @@ class CheapSolver(Solver):
                 ]
                 if user_indices_fwd:
                     last_user_idx_fwd = max(user_indices_fwd)
-
-                anodes_del_idx[last_user_idx_fwd].append(anode)
+                    anodes_del_idx[last_user_idx_fwd].append(anode)
 
         fwd_op_list = []
         bwd_op_list = []
