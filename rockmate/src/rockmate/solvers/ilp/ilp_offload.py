@@ -1,3 +1,4 @@
+from psutil import virtual_memory
 from typing import Any, Dict
 from pulp import lpSum
 
@@ -21,6 +22,7 @@ class ModelPULPOffload(ModelPULP):
         optimize_metrics=None,
         activation_offload=False,
         dynamic_batch_size=False,
+        ram_budget=None,
     ):
         super().__init__(
             hgraph,
@@ -46,6 +48,7 @@ class ModelPULPOffload(ModelPULP):
         self.use_correction_term = True
         self.cpu_constant_cost = 100
         self.dynamic_batch_size = dynamic_batch_size
+        self.ram_budget = ram_budget or virtual_memory().available * 0.9/self.gcd
 
     def build(self):
         # OVERWRITTING METHOD
@@ -57,19 +60,63 @@ class ModelPULPOffload(ModelPULP):
             self.add_offload_activation_constraints()
         super().add_constraints()
         self.add_offload_param_constraints()
+        self.add_ram_constraints()
         # super().add_objective()
         self.add_offload_objective()
         self.add_offload_time_constraints()
 
     def config_offload(self):
+        optimize_metrics = self.optimize_metrics
+
+        self.cpu_optimize = True
+        self.optimizer_states_factor = optimize_metrics[
+            "optimizer_states_size"
+        ]  # *weight size
+        self.cpu_optimize_speed = (
+            optimize_metrics["cpu_optimize_speed"] / self.gcd
+        )  # B/ms
+        self.gpu_optimize_speed = (
+            optimize_metrics["gpu_optimize_speed"] / self.gcd
+        )  # B/ms
+        self.optimizer_overhead_factor = optimize_metrics[
+            "optimizer_overhead"
+        ]  # *weight size
+        self.minor_offload_size = optimize_metrics[
+            "minor_offload_size"
+        ]  # minor weight size
+        self.bandwidth = optimize_metrics["bandwidth"]  # bandwidth
+        self.bandwidthOfl = self.optimize_metrics["bandwidth"] / self.gcd  # byte/ms
+        self.bandwidthPrf = self.optimize_metrics["bandwidth"] / self.gcd  # byte/ms
+        
         self.schedule_offload_time = []
         self.schedule_prefetch_time = []
         for list_sched in self.list_list_sched:
             self.schedule_offload_time.append([])
             self.schedule_prefetch_time.append([])
             for sched in list_sched:
-                self.schedule_offload_time[-1].append(sched.offload_time)
-                self.schedule_prefetch_time[-1].append(sched.prefetch_time)
+                self.schedule_offload_time[-1].append(sched.offload_mem/self.bandwidthOfl)
+                self.schedule_prefetch_time[-1].append(sched.prefetch_mem/self.bandwidthPrf)
+
+        self.param2hcn = dict()
+        self.parameters = []
+        for k, v in self.hgraph.parameter_groups.items():
+            self.param2hcn[len(self.parameters)] = k
+            self.parameters.append(v)
+
+        self.hcn2param = {t: [] for t in range(self.T)}
+
+        for p, hcn_s in self.param2hcn.items():
+            for hcn in hcn_s:
+                self.hcn2param[hcn].append(p)
+
+        self.parameter_size = [
+            sum(pnode.mem for pnode in p) / self.gcd for p in self.parameters
+        ]
+        self.parameter_gradient_size = [
+            sum(pnode.mem for pnode in p if pnode.info.requires_grad) / self.gcd
+            for p in self.parameters
+        ]
+        self.W = len(self.parameters)
 
     def add_offload_time_constraints(self):
         for t in range(self.T):
@@ -88,7 +135,7 @@ class ModelPULPOffload(ModelPULP):
 
     def add_offload_activation_variables(self):
         """
-        We assume single forward/backward mode for ILP, thus only
+        We assume single forwarard/backward mode for ILP, thus only
         one possible source/user for phantom activations.
         """
         phantom_idx = [
@@ -119,49 +166,9 @@ class ModelPULPOffload(ModelPULP):
     def add_offload_param_variables(
         self,
     ):
-        optimize_metrics = self.optimize_metrics
-
-        self.cpu_optimize = True
-        self.optimizer_states_factor = optimize_metrics[
-            "optimizer_states_size"
-        ]  # *weight size
-        self.cpu_optimize_speed = (
-            optimize_metrics["cpu_optimize_speed"] / self.gcd
-        )  # B/ms
-        self.gpu_optimize_speed = (
-            optimize_metrics["gpu_optimize_speed"] / self.gcd
-        )  # B/ms
-        self.optimizer_overhead_factor = optimize_metrics[
-            "optimizer_overhead"
-        ]  # *weight size
-        self.minor_offload_size = optimize_metrics[
-            "minor_offload_size"
-        ]  # minor weight size
-        self.bandwidth = optimize_metrics["bandwidth"]  # bandwidth
-
         lb = 0 if self.dynamic_batch_size else 1
         self.req_w = RkLpVariable("Required_w", lowBound=lb, upBound=1, cat="Continuous")
 
-        self.param2hcn = dict()
-        self.parameters = []
-        for k, v in self.hgraph.parameter_groups.items():
-            self.param2hcn[len(self.parameters)] = k
-            self.parameters.append(v)
-
-        self.hcn2param = {t: [] for t in range(self.T)}
-
-        for p, hcn_s in self.param2hcn.items():
-            for hcn in hcn_s:
-                self.hcn2param[hcn].append(p)
-
-        self.parameter_size = [
-            sum(pnode.mem for pnode in p) / self.gcd for p in self.parameters
-        ]
-        self.parameter_gradient_size = [
-            sum(pnode.mem for pnode in p if pnode.info.requires_grad) / self.gcd
-            for p in self.parameters
-        ]
-        self.W = len(self.parameters)
 
         param_idx = [
             (t, k, w)
@@ -195,8 +202,6 @@ class ModelPULPOffload(ModelPULP):
 
         self.param_grad_mem = {(t, k): 0 for t in range(self.T) for k in self.krange(t)}
 
-        self.bandwidthOfl = optimize_metrics["bandwidth"] / self.gcd  # byte/ms
-        self.bandwidthPrf = optimize_metrics["bandwidth"] / self.gcd  # byte/ms
         self.prefill_offload()
 
     def accumC_grad(self, w):
@@ -527,6 +532,34 @@ class ModelPULPOffload(ModelPULP):
                         self.OflPProg[t, k, j] = 0
 
             self.md += self.PrfPProg[bwd_i, bwd_i, j] == self.OflPProg[bwd_i, bwd_i, j]
+
+    def add_ram_constraints(self):
+        self.md += self.ram_usage() <= self.ram_budget
+
+    def ram_usage(self):
+        mem_usage = 0
+        # activation on cpu
+        for t in range(self.loss_idx):
+            for k in self.krange(t):
+                j = self.hcn2sub_c[k]
+                mem_usage += lpSum(
+                    self.Comp[t, k, o] * self.list_list_sched[k][o].offload_mem/self.gcd
+                    for o in range(self.nSched[k])
+                )
+        for w in range(self.W):
+            bwd_i = max(self.param2hcn[w])
+            mem_usage += self.parameter_size[w] * self.OflWProg[bwd_i, bwd_i, w]
+            mem_usage += (self.parameter_gradient_size[w] 
+                          * self.OflOProg[bwd_i, bwd_i, w]
+                          * self.optimizer_states_factor)
+            mem_usage += (self.parameter_gradient_size[w] 
+                          * self.sumOptC[w] 
+                          * (self.optimizer_states_factor+1))
+            
+        #parameters are already in RAM
+        mem_usage -= sum(self.parameter_size[w])
+        return mem_usage
+        
 
     def add_offload_objective(self, bandwidth_cost=0.01):
         prf_cost = bandwidth_cost * lpSum(

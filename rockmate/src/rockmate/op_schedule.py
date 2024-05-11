@@ -529,11 +529,11 @@ class OpSchedule:
         if self.correct_overhead:
             self.add_correction_term(alive_list)
 
-        self.offload_time = sum(
-            op.time for op in self.op_list if isinstance(op, OffloadOp)
+        self.offload_mem = sum(
+            op.target.mem for op in self.op_list if isinstance(op, OffloadOp)
         )
-        self.prefetch_time = sum(
-            op.time for op in self.op_list if isinstance(op, PrefetchOp)
+        self.prefetch_mem = sum(
+            op.target.mem for op in self.op_list if isinstance(op, PrefetchOp)
         )
 
     def add_correction_term(self, alive_list):
