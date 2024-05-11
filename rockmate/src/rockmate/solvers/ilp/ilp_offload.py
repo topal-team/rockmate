@@ -557,7 +557,7 @@ class ModelPULPOffload(ModelPULP):
                           * (self.optimizer_states_factor+1))
             
         #parameters are already in RAM
-        mem_usage -= sum(self.parameter_size[w])
+        mem_usage -= sum(self.parameter_size)
         return mem_usage
         
 
