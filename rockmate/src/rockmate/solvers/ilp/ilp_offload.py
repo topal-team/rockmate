@@ -94,8 +94,8 @@ class ModelPULPOffload(ModelPULP):
             self.schedule_offload_time.append([])
             self.schedule_prefetch_time.append([])
             for sched in list_sched:
-                self.schedule_offload_time[-1].append(sched.offload_mem/self.bandwidthOfl)
-                self.schedule_prefetch_time[-1].append(sched.prefetch_mem/self.bandwidthPrf)
+                self.schedule_offload_time[-1].append(sched.offload_mem/self.bandwidthOfl / self.gcd)
+                self.schedule_prefetch_time[-1].append(sched.prefetch_mem/self.bandwidthPrf / self.gcd)
 
         self.param2hcn = dict()
         self.parameters = []
