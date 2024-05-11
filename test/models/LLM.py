@@ -14,6 +14,7 @@ from torch.nn.modules.normalization import LayerNorm
 from transformers.models.llama.modeling_llama import LlamaMLP, LlamaConfig
 from transformers.models.bloom.modeling_bloom import BloomMLP, BloomConfig
 from transformers import LlamaModel, LlamaConfig
+from transformers import PhiModel, PhiConfig
 
 class Conv1D(nn.Module):
     def __init__(self, nx, nf):
@@ -270,31 +271,70 @@ class Bloom(nn.Module):
             module.bias.data.zero_()
             module.weight.data.normal_(mean=0., std=0.02)
     
-def get3Bllm(batch, seq_len, nlayers=30):
-    #https://huggingface.co/bigscience/bloom-3b#model-details
-    sample = torch.randn(batch, seq_len, 2560)
-    return Bloom(nlayers=nlayers, hidden_size=2560, n_head=32), [sample]
+# def get3Bllm(batch, seq_len, nlayers=30):
+#     #https://huggingface.co/bigscience/bloom-3b#model-details
+#     sample = torch.randn(batch, seq_len, 2560)
+#     return Bloom(nlayers=nlayers, hidden_size=2560, n_head=32), [sample]
 
-def get3Bllm_embed(batch, seq_len, nlayers=30):
-    #https://huggingface.co/bigscience/bloom-3b#model-details
-    sample = torch.randint(0, 600, [batch, seq_len])
-    return Bloom(nlayers=nlayers, hidden_size=2560, n_head=32, embedding=True), [sample]
+# def get3Bllm_embed(batch, seq_len, nlayers=30):
+#     #https://huggingface.co/bigscience/bloom-3b#model-details
+#     sample = torch.randint(0, 600, [batch, seq_len])
+#     return Bloom(nlayers=nlayers, hidden_size=2560, n_head=32, embedding=True), [sample]
 
-def get7Bllm(batch, seq_len, nlayers=32):
-    #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
-    sample = torch.randn(batch, seq_len, 4096)
-    return Llama(nlayers=nlayers, hidden_size=4096, n_head=32), [sample]
+# def get7Bllm(batch, seq_len, nlayers=32):
+#     #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
+#     sample = torch.randn(batch, seq_len, 4096)
+#     return Llama(nlayers=nlayers, hidden_size=4096, n_head=32), [sample]
 
-def get7Bllm_embed(batch, seq_len, nlayers=32):
-    #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
-    sample = torch.randint(0, 600, [batch, seq_len])
-    return Llama(nlayers=nlayers, hidden_size=4096, n_head=32, embedding=True), [sample]
+# def get7Bllm_embed(batch, seq_len, nlayers=32):
+#     #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
+#     sample = torch.randint(0, 600, [batch, seq_len])
+#     return Llama(nlayers=nlayers, hidden_size=4096, n_head=32, embedding=True), [sample]
 
-def get7Bllm_hf(batch, seq_len, nlayers=32):
+def get7Bllama(batch, seq_len, nlayers=32, dtype=torch.float32, llama3=False):
     #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
     sample = torch.randint(0, 600, [batch, seq_len])
     # Initializing a LLaMA llama-7b style configuration
-    configuration = LlamaConfig()
+    vocab_size = 128256 if llama3 else 32000
+    configuration = LlamaConfig(
+                                vocab_size=vocab_size,
+                                num_hidden_layers=nlayers,
+                                hidden_size=4096,
+                                output_hidden_states=False,
+                                output_attentions=False,
+                                # use_cache=False
+                                )
+    configuration._attn_implementation="eager"
+    configuration._attn_implementation_internal="eager"
     # Initializing a model from the llama-7b style configuration
-    model = LlamaModel(configuration)
+    model = LlamaModel(configuration)#.to(dtype)
+    return model, [sample]
+
+def get13Bllama(batch, seq_len, nlayers=40, dtype=torch.float32, llama3=False):
+    #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
+    sample = torch.randint(0, 600, [batch, seq_len])
+    # Initializing a LLaMA llama-7b style configuration
+    vocab_size = 128256 if llama3 else 32000
+    configuration = LlamaConfig(
+                        vocab_size=vocab_size,
+                        num_hidden_layers=nlayers, 
+                        hidden_size=5120,
+                        intermediate_size=13824,
+                        num_attention_heads=40,
+                        output_hidden_states=False,
+                        output_attentions=False,
+                        )
+    # Initializing a model from the llama-7b style configuration
+    model = LlamaModel(configuration)#.to(dtype)
+    return model, [sample]
+
+def get3BPhi_2(batch, seq_len, nlayers=32):
+    # 2.7B parameters
+    configuration = PhiConfig(intermediate_size= 10240,
+                            hidden_size=2560,
+                            num_hidden_layers=nlayers)
+    sample = torch.randint(0, 600, [batch, seq_len])
+    model = PhiModel(configuration)
+    configuration._attn_implementation="eager"
+    configuration._attn_implementation_internal="eager"
     return model, [sample]
