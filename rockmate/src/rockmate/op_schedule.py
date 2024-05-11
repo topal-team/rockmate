@@ -356,7 +356,7 @@ class PrepareOp(Op):
         alloc: Allocation,
         device: str = "cpu",
         cpu_placeholder=True,
-        cpu_grad=False,
+        cpu_optimize=False,
         pin_memory=True,
         disabled: bool = False,
     ):
@@ -366,7 +366,7 @@ class PrepareOp(Op):
         self.cpu_placeholder = cpu_placeholder
         self.disabled = disabled
         self.op_type = f"Prepare_{alloc.alloc_type}"
-        self.cpu_grad = cpu_grad
+        self.cpu_optimize = cpu_optimize
         self.pin_memory = pin_memory
 
 

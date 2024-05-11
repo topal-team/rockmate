@@ -108,7 +108,7 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
                     PrepareOp(
                         alloc,
                         device=device,
-                        cpu_grad=OffloadOp(Parameter(pnode, is_grad=True)).name
+                        cpu_optimize=OffloadOp(Parameter(pnode, is_grad=True)).name
                         in op_name_list,
                         pin_memory=OffloadOp(Parameter(pnode)).name in op_name_list,
                     )
@@ -452,7 +452,7 @@ def group(md, w, tol=1):
                     p_alloc = Parameter(parameters[p])
                     # init_ops.append((t, k, AllocateOp(p_alloc)))
                     init_ops.append(
-                        (t, k, PrepareOp(p_alloc, device="cuda", cpu_grad=True))
+                        (t, k, PrepareOp(p_alloc, device="cuda", cpu_optimize=True))
                     )
                     init_alive.append(p_alloc)
                     # op = PrefetchOp(

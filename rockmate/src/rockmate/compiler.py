@@ -720,6 +720,7 @@ class Fct_to_storage(RK_Fct):
         pnode,
         device=None,
         pin_memory=True,
+        create_tensor = True,
         **kwargs,
     ):
         super().__init__(target_name=target_name, storage=storage, **kwargs)
@@ -727,22 +728,16 @@ class Fct_to_storage(RK_Fct):
         self.pnode = pnode
         self.device = device
         self.pin_memory = pin_memory
+        self.create_tensor = create_tensor
 
     def __call__(self):
         self.storage.add_val(
             self.pnode.param_name, self.pnode.get_value(self.storage.gd["self"])
         )
-
-        x = torch.empty_like(
-            self.storage.get_val(self.pnode.param_name), pin_memory=self.pin_memory
-        )
-        x.copy_(self.storage.get_val(self.pnode.param_name))
-        self.storage.add_val(f"cpu_{self.pnode.param_name}", torch.nn.Parameter(x))
-
-        self.storage.get_val(self.pnode.param_name).data = torch.empty(0)
-        # self.storage.get_val(self.target_name).data = self.storage.ld[
-        #     self.pnode.param_name
-        # ].data.to(self.device)
+        w = self.storage.get_val(self.pnode.param_name)
+        if self.create_tensor:
+            x = torch.empty_like(w, pin_memory=self.pin_memory)
+            self.storage.add_val(f"cpu_{self.pnode.param_name}", torch.nn.Parameter(x))
 
 
 class Fct_add_optimizer(RK_Fct):
@@ -858,8 +853,6 @@ class Compiler:
     def compile_sched(self, op_sched: OpSchedule):
         self.with_parameters = op_sched.with_parameters
         op_sched.add_pos_info()
-        for i, op in enumerate(op_sched.init_op_list):
-            self.compile_op[op.__class__.__name__](op)
         for i, op in enumerate(op_sched.op_list):
             if op.disabled:
                 continue
@@ -956,24 +949,6 @@ class Compiler:
                         f"exp_avg_sq_{var_name}", self.storage, shape=var_name
                     )
                 )
-                # prep_op.add_fct(
-                #     Fct_mem_alloc(
-                #         f"exp_avg_{var_name}",
-                #         storage=self.storage,
-                #         alloc_mode="tensor",
-                #         shape=var_name,
-                #         device=torch.device("cpu"),
-                #     )
-                # )
-                # prep_op.add_fct(
-                #     Fct_mem_alloc(
-                #         f"exp_avg_sq_{var_name}",
-                #         storage=self.storage,
-                #         alloc_mode="tensor",
-                #         shape=var_name,
-                #         device=torch.device("cpu"),
-                #     )
-                # )
         prep_op.add_fct(Fct_manager_alloc("allocation", self.storage))
 
         if minor_param_nodes:
@@ -991,13 +966,15 @@ class Compiler:
     def compile_preparation(self, cluster, op_sched, minor_param_nodes, output_nodes):
         op_list = op_sched.op_list
         self.ops = {op.name: op for op in op_list}
+        self.post_op_list = []
         init_op_list = op_sched.init_op_list
+        for i, op in enumerate(op_sched.init_op_list):
+            self.compile_op[op.__class__.__name__](op)
         prep_op = Op("Preparation")
         self._activation_placehold(prep_op, cluster, output_nodes)
-        # self._parameter_placehold(prep_op, cluster, minor_param_nodes)
         if op_sched.with_parameters:
             self._optimizer_placehold(prep_op, op_list, minor_param_nodes)
-        op_sched.init_op_list = init_op_list + [prep_op]
+        op_sched.init_op_list = init_op_list + [prep_op] + self.post_op_list
 
     def _compute_fwd(self, op: ComputeOp):
         op.add_fct(
@@ -1311,46 +1288,28 @@ class Compiler:
         pnode = op.target.pnode
         on_cpu = op.device == "cpu"
         op.add_fct(Fct_get_shape(pnode.param_name, pnode=pnode, storage=self.storage))
-
-        # if op.cpu_placeholder:
-        # op.add_fct(
-        #         Fct_mem_alloc(
-        #             f"cpu_{pnode.param_name}",
-        #             storage=self.storage,
-        #             alloc_mode="tensor",
-        #             device=torch.device("cpu"),
-        #             pin_memory=True,
-        #         )
-        #     )
-
-        op.add_fct(
-            Fct_to_storage(
-                pnode.param_name,
-                storage=self.storage,
-                pnode=pnode,
-                device=op.device,
-                pin_memory=True,  # op.pin_memory
-            )
-        )
-
-        # op.add_fct(Fct_RNG_state(pnode.param_name, storage=self.storage))
-
-        # op.add_fct(
-        #     Fct_offload(pnode.param_name, storage=self.storage, pin_memory=True)
-        # )
-        if on_cpu:
-            pass
-            # op.add_fct(Fct_del(pnode.param_name, storage=self.storage))
+        if not op.cpu_optimize:
+            op.add_fct(Fct_add_tensor(f"cpu_{pnode.param_name}",
+                                      self.storage, 
+                                      shape=pnode.param_name))
+            op.add_fct(Fct_to_storage(pnode.param_name,
+                                           storage=self.storage,
+                                           pnode=pnode,
+                                           device=op.device,
+                                           create_tensor=False))
+            post_op = Op(pnode.param_name)
+            self.post_op_list.append(post_op)
+            prep_op = post_op
         else:
-            op.add_fct(Fct_mem_alloc(pnode.param_name, storage=self.storage))
-            op.add_fct(Fct_prefetch(op.target, storage=self.storage))
             op.add_fct(
-                Fct_run_fwd(
-                    pnode.param_name, storage=self.storage, code=pnode.get_code()
+                Fct_to_storage(
+                    pnode.param_name,
+                    storage=self.storage,
+                    pnode=pnode,
+                    device=op.device,
+                    pin_memory=True,  # op.pin_memory
                 )
             )
-
-        if op.cpu_grad:
             op.add_fct(
                 Fct_mem_alloc(
                     f"cpu_{pnode.param_name}",
@@ -1360,6 +1319,20 @@ class Compiler:
                     pin_memory=True,
                 )
             )
+            prep_op = op
+
+        prep_op.add_fct(Fct_offload(pnode.param_name, storage=self.storage))
+        prep_op.add_fct(Fct_del(pnode.param_name, storage=self.storage))
+        if not on_cpu:
+            prep_op.add_fct(Fct_mem_alloc(pnode.param_name, storage=self.storage))
+            prep_op.add_fct(Fct_prefetch(op.target, storage=self.storage))
+            prep_op.add_fct(
+                Fct_run_fwd(
+                    pnode.param_name, storage=self.storage, code=pnode.get_code()
+                )
+            )
+
+        
 
     def ExecCode(self, op: ExecCodeOp):
         op.add_fct(Fct_run_fwd(op.name, storage=self.storage, code=op.code))
