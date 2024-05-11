@@ -61,18 +61,19 @@ class FastSolver(Solver):
             re_cluster.list_schedules += self.solve(re_cluster)
         list_sched = re_cluster.list_schedules
 
-        save_none_sched = list_sched[-1]
+        autograd_sched = list_sched[0]
 
-        hcn.ff_time = save_none_sched.fwd_time
-        hcn.ff_overhead = save_none_sched.fwd_overhead
+        hcn.ff_time = autograd_sched.fwd_time
+        hcn.ff_overhead = autograd_sched.fwd_overhead
         hcn.ff_op_list = translate(
-            hcn.sub_cluster, save_none_sched.op_list[: save_none_sched.loss_idx]
+            hcn.sub_cluster, autograd_sched.op_list[: autograd_sched.loss_idx]
         )
 
     def solve(
         self,
         cluster: HierarchicalCluster,
         no_del_names=[f"{init_target_string} data", f"{init_target_string} grad"],
+        recompute_sched=False,
     ):
         """
         Return basic schedules for the cluster:
@@ -114,9 +115,10 @@ class FastSolver(Solver):
         recompute_op_list = ff_op_list + [loss_op] + re_autograd_op_list
         list_sched.append(autograd_sched)
 
-        list_sched.append(
-            OpSchedule(recompute_op_list, cluster=cluster, loss_idx=len(ff_op_list))
-        )
+        if recompute_sched:
+            list_sched.append(
+                OpSchedule(recompute_op_list, cluster=cluster, loss_idx=len(ff_op_list))
+            )
         return list_sched
 
     def single_compute_op_list(
