@@ -23,7 +23,7 @@ from rkgb.lowlevel.constants import init_target_string
 from .op_schedule import *
 from .simulation import Simulator
 from .solvers.main import preprocess, solve_recursive, get_optimize_metrics, FastSolver
-from .solvers import HILP
+from .solvers import HILP, CheapSolver
 from .solvers.ilp.ilp_solver import default_time_limit
 from .compiler import Compiler, RK_Storage, make_gd
 import psutil
@@ -60,6 +60,7 @@ class Rockmate(torch.nn.Module):
         minor_offload_size=10 * 1024**2,
         keep_outputs=False,
         dynamic_batch_dim=None,
+        solve_recursive=True,
     ):
         super().__init__()
         ref_verbose[0] = verbose
@@ -99,7 +100,7 @@ class Rockmate(torch.nn.Module):
         )
 
         if solve_sched:
-            self.solve_sched()
+            self.solve_sched(recursive=solve_recursive)
             self.get_compiled_fct()
 
     def get_rkgb_result(self, model_inputs, model_kwargs, minor_offload_size):
@@ -168,7 +169,6 @@ class Rockmate(torch.nn.Module):
 
     def solver_recursive(self, list_solvers=None, only_preprocess=False):
         list_solvers = list_solvers or self.list_solvers
-        self.preprocess()
 
         solve_recursive(
             self.rkgb_res.hierarchical_cluster,
@@ -189,7 +189,6 @@ class Rockmate(torch.nn.Module):
             if isinstance(solver, HILP):
                 # TODO: if no partitioning is allowed, update solver max nodes
                 hilp_solver = True
-                solver.config.time_limit_top = self.ilp_time_limit_top
                 solver.config.optimize_metrics = self.global_dict["optimize_metrics"]
         for solver in list_solvers:
             if isinstance(solver, HILP):
@@ -200,19 +199,22 @@ class Rockmate(torch.nn.Module):
                     solver.config.nb_bdg_peak = 10
 
         if (
-            True
-            in [
+            any([
                 isinstance(solver, HILP)  # or isinstance(solver, RK_rotor)
                 for solver in list_solvers
-            ]
-            and recursive
+            ])
         ):
-            self.solver_recursive()
+            self.preprocess()
+            if recursive:
+                self.solver_recursive()
 
         list_solutions = []
         for solver in list_solvers:
+            if isinstance(solver, CheapSolver):
+                continue
             if isinstance(solver, HILP):
                 solver.config.solve_top_level = True
+                solver.config.time_limit_top = self.ilp_time_limit_top
                 # print("temporarily changing total_nodes for top level hilp")
                 list_solutions.extend(
                     solver(
@@ -238,7 +240,7 @@ class Rockmate(torch.nn.Module):
 
     def get_compiled_fct(self, new_compiler=True, simulate=True):
         if simulate:
-            self.op_sched.simulate_update(Simulator, refine_optimize=False)
+            self.op_sched.simulate_update(Simulator, refine_optimize=True)
         if new_compiler:
             storage = RK_Storage()
             storage.init(self.global_dict)

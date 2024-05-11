@@ -60,6 +60,7 @@ class HILP(Solver):
             self.nb_bdg_save = nb_bdg_save
             self.nb_bdg_peak = nb_bdg_peak
             self.solve_top_level = False
+            self.solve_only_top_level = False
             self.time_limit_ = time_limit
             self.time_limit_top = time_limit
             self.optimize_metrics = {}
@@ -89,6 +90,8 @@ class HILP(Solver):
     #     return f"HILP solver"
 
     def can_solve(self, hg: HierarchicalGraph):
+        if self.config.solve_only_top_level and not self.config.solve_top_level:
+            return False
         if self.config.solve_top_level:
             limit = self.config.nb_total_nodes_top_level
         else:
