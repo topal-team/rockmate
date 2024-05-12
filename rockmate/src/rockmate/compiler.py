@@ -68,7 +68,7 @@ def make_gd(
         "device": device,
         "torch": torch,
         "meta": torch.ones(1).to(device),
-        "cmeta": torch.view_as_complex(torch.ones(2)).to(device),
+        # "cmeta": torch.view_as_complex(torch.ones(2)).to(device),
         "cpu_optim": optimize_metrics["cpu_optim"],
         "gpu_optim": optimize_metrics["gpu_optim"],
         "opt_kwargs": optimize_metrics["optim_kwargs"],
@@ -102,14 +102,16 @@ class RK_Storage:
             cls._instance = super().__new__(cls, *args, **kwargs)
         return cls._instance
 
-    def init(self, gd):
+    def init(self, gd, dtype=torch.bfloat16):
         self.ld = dict()
         self.measured_shapes = {"Empty_size": torch.Size([0])}
         self.dtypes = dict()
         self.rng_state = RngState()
         self.events = dict()
+        self.dtype = dtype
         self.gd = gd
-        self.manager = AllocationManager(self)
+        self.gd["meta"] = self.gd["meta"].to(self.dtype)
+        self.manager = AllocationManager(self, dtype=dtype)
 
     def add_val(self, target, x):
         self.ld[target] = x
@@ -235,7 +237,7 @@ class Fct_del(RK_Fct):
             self.del_fcts[self.del_mode]()
 
     def del_data(self):
-        self.storage.get_val(self.target_name).data = torch.empty(0)
+        self.storage.get_val(self.target_name).data = torch.empty(0, dtype=self.storage.dtype)
         # pass
 
     def del_grad(self):
@@ -244,17 +246,17 @@ class Fct_del(RK_Fct):
     def del_base(self):
         if self.storage.get_val(self.target_name)._base is None:
             return
-        self.storage.get_val(self.target_name)._base.data = torch.empty(0)
+        self.storage.get_val(self.target_name)._base.data = torch.empty(0, dtype=self.storage.dtype)
 
     def del_var(self):
-        self.storage.get_val(self.target_name).data = torch.empty(0)
+        self.storage.get_val(self.target_name).data = torch.empty(0, dtype=self.storage.dtype)
 
     def del_optim_states(self):
         for k, v in self.storage.get_val(
             f"Optimize_({self.target_name})"
         ).state.items():
-            v["exp_avg"].data = torch.empty(0)
-            v["exp_avg_sq"].data = torch.empty(0)
+            v["exp_avg"].data = torch.empty(0, dtype=self.storage.dtype)
+            v["exp_avg_sq"].data = torch.empty(0, dtype=self.storage.dtype)
 
 
 class Fct_gen_fake_data(RK_Fct):
@@ -279,6 +281,7 @@ class Fct_gen_fake_data(RK_Fct):
                 # x = m.expand(np.prod(s)).view(s)
                 x = m.expand(*s)
             self.storage.get_val(self.target_name).data = x
+            assert self.storage.get_val(self.target_name).dtype == torch.bfloat16
             if self.with_proxy:
                 self.storage.get_val(f"_{self.target_name}").data = x
 
@@ -297,7 +300,7 @@ class Fct_detach(RK_Fct):
         self.storage.add_val(
             self.target_name, self.storage.get_val(f"_{self.target_name}")
         )
-        self.storage.add_val(f"_{self.target_name}", torch.empty(0))
+        self.storage.add_val(f"_{self.target_name}", torch.empty(0, dtype=self.storage.dtype))
 
     def __call__(self):
         with torch.cuda.stream(self.storage.gd["main_stream"]):
@@ -479,13 +482,13 @@ class Fct_mem_alloc(RK_Fct):
         for k, v in self.storage.get_val(
             f"Optimize_({self.target_name})"
         ).state.items():
-            v["exp_avg"].data = torch.empty(shape, device=self.device)
-            v["exp_avg_sq"].data = torch.empty(shape, device=self.device)
+            v["exp_avg"].data = torch.empty(shape, dtype=self.dtype, device=self.device)
+            v["exp_avg_sq"].data = torch.empty(shape, dtype=self.dtype, device=self.device)
 
     def alloc_grad(self):
         shape = self.storage.get_shape(self.shape_name)
         dtype = (
-            self.storage.dtypes[self.shape_name] if self.dtype is None else self.dtype
+            self.storage.dtypes[self.shape_name] if self.shape_name in self.storage.dtypes else self.dtype
         )
         self.storage.get_val(self.target_name).grad = torch.empty(
             shape, dtype=dtype, device=self.device, **self.kwargs
@@ -494,7 +497,7 @@ class Fct_mem_alloc(RK_Fct):
     def alloc_data(self):
         shape = self.storage.get_shape(self.shape_name)
         dtype = (
-            self.storage.dtypes[self.shape_name] if self.dtype is None else self.dtype
+            self.storage.dtypes[self.shape_name] if self.shape_name in self.storage.dtypes else self.dtype
         )
         self.storage.get_val(self.target_name).data = torch.empty(
             shape, dtype=dtype, device=self.device, **self.kwargs
@@ -503,7 +506,7 @@ class Fct_mem_alloc(RK_Fct):
     def alloc_tensor(self):
         shape = self.storage.get_shape(self.shape_name)
         dtype = (
-            self.storage.dtypes[self.shape_name] if self.dtype is None else self.dtype
+            self.storage.dtypes[self.shape_name] if self.shape_name in self.storage.dtypes else self.dtype
         )
         self.storage.add_val(
             self.target_name,
@@ -536,7 +539,7 @@ class Fct_offload(RK_Fct):
 
     def offload_tensor(self):
         self.storage.get_val(f"cpu_{self.target_name}").data.copy_(
-            self.storage.get_val(self.target_name).data.view(
+            self.storage.get_val(self.target_name).data.reshape(
                 self.storage.get_val(f"cpu_{self.target_name}").shape
             ),
             non_blocking=True,
@@ -814,7 +817,10 @@ class Fct_manager_alloc(RK_Fct):
         self.storage.manager.split()
         for alloc, size in self.storage.manager.allocations:
             self.storage.add_val(
-                alloc, torch.empty(size, device="cpu", pin_memory=True)
+                alloc, torch.empty(size, 
+                                   device="cpu", 
+                                   pin_memory=True, 
+                                   dtype=self.storage.manager.dtype)
             )
 
 
@@ -887,7 +893,7 @@ class Compiler:
                     anode.main_target,
                     storage=self.storage,
                     shape="Empty_size",
-                    dtype=torch.float32,
+                    dtype=self.storage.dtype,
                     alloc_mode="tensor",
                     requires_grad=anode.info.requires_grad,
                 )
@@ -909,7 +915,7 @@ class Compiler:
                         f"out_{out_target}",
                         storage=self.storage,
                         shape="Empty_size",
-                        dtype=torch.float32,
+                        dtype=self.storage.dtype,
                         alloc_mode="tensor",
                         requires_grad=out_anode.info.requires_grad,
                     )
@@ -1259,7 +1265,7 @@ class Compiler:
                 alloc_mode = "optim_states"
         op.add_fct(
             Fct_mem_alloc(
-                target.target_name, storage=self.storage, alloc_mode=alloc_mode
+                target.target_name, storage=self.storage, alloc_mode=alloc_mode, dtype=self.storage.dtype
             )
         )
 
@@ -1324,7 +1330,7 @@ class Compiler:
         prep_op.add_fct(Fct_offload(pnode.param_name, storage=self.storage))
         prep_op.add_fct(Fct_del(pnode.param_name, storage=self.storage))
         if not on_cpu:
-            prep_op.add_fct(Fct_mem_alloc(pnode.param_name, storage=self.storage))
+            prep_op.add_fct(Fct_mem_alloc(pnode.param_name, storage=self.storage, dtype=self.storage.dtype))
             prep_op.add_fct(Fct_prefetch(op.target, storage=self.storage))
             prep_op.add_fct(
                 Fct_run_fwd(

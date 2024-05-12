@@ -307,7 +307,7 @@ def get7Bllama(batch, seq_len, nlayers=32, dtype=torch.float32, llama3=False):
     configuration._attn_implementation="eager"
     configuration._attn_implementation_internal="eager"
     # Initializing a model from the llama-7b style configuration
-    model = LlamaModel(configuration)#.to(dtype)
+    model = LlamaModel(configuration).to(dtype)
     return model, [sample]
 
 def get13Bllama(batch, seq_len, nlayers=40, dtype=torch.float32, llama3=False):
@@ -325,16 +325,17 @@ def get13Bllama(batch, seq_len, nlayers=40, dtype=torch.float32, llama3=False):
                         output_attentions=False,
                         )
     # Initializing a model from the llama-7b style configuration
-    model = LlamaModel(configuration)#.to(dtype)
+    model = LlamaModel(configuration).to(dtype)
     return model, [sample]
 
-def get3BPhi_2(batch, seq_len, nlayers=32):
+def get3BPhi_2(batch, seq_len, dtype=torch.float32, nlayers=32):
     # 2.7B parameters
     configuration = PhiConfig(intermediate_size= 10240,
                             hidden_size=2560,
                             num_hidden_layers=nlayers)
-    sample = torch.randint(0, 600, [batch, seq_len])
-    model = PhiModel(configuration)
     configuration._attn_implementation="eager"
     configuration._attn_implementation_internal="eager"
+    sample = torch.randint(0, 600, [batch, seq_len])
+    model = PhiModel(configuration).to(dtype)
+    
     return model, [sample]
