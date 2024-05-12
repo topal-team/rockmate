@@ -162,7 +162,7 @@ def add_activation_offload(op_sched: OpSchedule) -> OpSchedule:
         prefetch_op.wait_events.append([offload_op.op_type, offload_op.target.name])
         prefetch_op_list.append(prefetch_op)
         for op in bwd_op_list:
-            if isinstance(op, ComputeOp) and op.target in anode.users_real:
+            if isinstance(op, ComputeOp) and op.target in anode.users_real.union(anode.users_fake):
                 op.wait_events.append([prefetch_op.op_type, prefetch_op.target.name])
 
     bwd_op_list = bwd_op_list[:1] + prefetch_op_list + bwd_op_list[1:]
