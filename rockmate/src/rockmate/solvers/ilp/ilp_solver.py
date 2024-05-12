@@ -59,13 +59,10 @@ class HILP(Solver):
             self.nb_total_nodes = nb_total_nodes
             self.nb_bdg_save = nb_bdg_save
             self.nb_bdg_peak = nb_bdg_peak
-            self.solve_top_level = False
             self.solve_only_top_level = False
-            self.time_limit_ = time_limit
-            self.time_limit_top = time_limit
-            self.optimize_metrics = {}
+            self.solve_kwargs = {"time_limit":time_limit}
+            self.top_solve_kwargs = {"time_limit":time_limit}
             self.offload = offload
-            self.activation_offload = activation_offload
 
         @property
         def time_limit(self):
@@ -77,7 +74,7 @@ class HILP(Solver):
     def __init__(self, config=None, ilp_solver=None):
         super().__init__(config)
         self.ilp_solver = ilp_solver  # or solver_name[0]
-
+        self.solve_top = False
         try:
             solver = pulp.get_solver(self.ilp_solver, msg=0)
         except:
@@ -90,9 +87,9 @@ class HILP(Solver):
     #     return f"HILP solver"
 
     def can_solve(self, hg: HierarchicalGraph):
-        if self.config.solve_only_top_level and not self.config.solve_top_level:
+        if self.config.solve_only_top_level and not self.solve_top:
             return False
-        if self.config.solve_top_level:
+        if self.solve_top:
             limit = self.config.nb_total_nodes_top_level
         else:
             limit = self.config.nb_total_nodes
@@ -124,7 +121,7 @@ class HILP(Solver):
             budgets.append((bd_peak, l_bd_save))
         return budgets
 
-    def _group_parameters(self, hg: HierarchicalGraph):
+    def _group_parameters(self, hg: HierarchicalGraph, minor_size=10*1024**2):
         all_params = {}
         param2hcn = {}
 
@@ -145,7 +142,7 @@ class HILP(Solver):
             for pnode in req_pnodes:
                 if pnode.is_buffer:
                     continue
-                if pnode.mem < self.config.optimize_metrics["minor_offload_size"]:
+                if pnode.mem<minor_size:
                     continue
                 if pnode not in param2hcn:
                     param2hcn[pnode] = {i}
@@ -247,7 +244,7 @@ class HILP(Solver):
         print(f"solving {cluster.name}")
         list_op_sched = []
 
-        if self.config.solve_top_level and self.config.offload:
+        if self.solve_top and self.config.offload:
             self.model_ilp = ModelPULPOffload
         else:
             self.model_ilp = ModelPULP
@@ -300,15 +297,22 @@ class HILP(Solver):
 
         list_op_sched = []
         self._select_sched(hg, overall_budget=peak_budget)
-        self._group_parameters(hg)
+        
         if not hasattr(save_budget, "__iter__"):
             save_budget = [save_budget]
         # start = time.time()
-        ilp_solver_params = self.config.ilp_solver_params
-        if accurate_mem:
-            ilp_solver_params["TimeLimit"] = self.config.time_limit_top
+        if self.solve_top:
+            solve_kwargs = self.config.top_solve_kwargs
+            self._group_parameters(hg, 
+            minor_size= self.config.top_solve_kwargs["optimize_metrics"]["minor_offload_size"])
         else:
-            ilp_solver_params["TimeLimit"] = self.config.time_limit
+            solve_kwargs = self.config.solve_kwargs
+        ilp_solver_params = self.config.ilp_solver_params
+        ilp_solver_params["TimeLimit"] = solve_kwargs["time_limit"]
+        # if accurate_mem:
+        #     ilp_solver_params["TimeLimit"] = self.config.time_limit_top
+        # else:
+        #     ilp_solver_params["TimeLimit"] = self.config.time_limit
 
         def solve_md(
             ilp_solver_params=ilp_solver_params,
@@ -325,8 +329,7 @@ class HILP(Solver):
                 ilp_solver_params=ilp_solver_params,
                 accurate_mem=accurate_mem,
                 protected_names=protected_names,
-                optimize_metrics=self.config.optimize_metrics,
-                activation_offload=self.config.activation_offload,
+                **solve_kwargs
             )
             md.build()
             # print(f"model building: {time.time()-start}")

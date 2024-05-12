@@ -189,7 +189,7 @@ class Rockmate(torch.nn.Module):
             if isinstance(solver, HILP):
                 # TODO: if no partitioning is allowed, update solver max nodes
                 hilp_solver = True
-                solver.config.optimize_metrics = self.global_dict["optimize_metrics"]
+                solver.config.top_solve_kwargs["optimize_metrics"] = self.global_dict["optimize_metrics"]
         for solver in list_solvers:
             if isinstance(solver, HILP):
                 if self.keep_outputs:
@@ -213,15 +213,15 @@ class Rockmate(torch.nn.Module):
             if isinstance(solver, CheapSolver):
                 continue
             if isinstance(solver, HILP):
-                solver.config.solve_top_level = True
-                solver.config.time_limit_top = self.ilp_time_limit_top
+                solver.solve_top = True
+                solver.config.top_solve_kwargs["time_limit"] = self.ilp_time_limit_top
                 # print("temporarily changing total_nodes for top level hilp")
                 list_solutions.extend(
                     solver(
                         self.rkgb_res.hierarchical_cluster, [budget], accurate_mem=True
                     )
                 )
-                solver.config.solve_top_level = False  # in case further usage
+                solver.solve_top = False  # in case further usage
 
             else:
                 list_solutions.extend(

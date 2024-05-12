@@ -23,6 +23,8 @@ class ModelPULPOffload(ModelPULP):
         activation_offload=False,
         dynamic_batch_size=False,
         ram_budget=None,
+        cpu_optimize=True,
+        **kwargs
     ):
         super().__init__(
             hgraph,
@@ -49,6 +51,7 @@ class ModelPULPOffload(ModelPULP):
         self.cpu_constant_cost = 100
         self.dynamic_batch_size = dynamic_batch_size
         self.ram_budget = ram_budget or virtual_memory().available * 0.9/self.gcd
+        self.cpu_optimize = cpu_optimize
 
     def build(self):
         # OVERWRITTING METHOD
@@ -67,8 +70,6 @@ class ModelPULPOffload(ModelPULP):
 
     def config_offload(self):
         optimize_metrics = self.optimize_metrics
-
-        self.cpu_optimize = True
         self.optimizer_states_factor = optimize_metrics[
             "optimizer_states_size"
         ]  # *weight size
@@ -193,7 +194,10 @@ class ModelPULPOffload(ModelPULP):
         self.OflO = RkLpVariable.dicts("OflO", param_idx)  # Offload optimizer states
         self.PrfO = RkLpVariable.dicts("PrfO", param_idx)  # Prefetch optimizer states
 
-        self.OptC = RkLpVariable.dicts("OptC", param_idx)  # Optimize on cpu
+        if self.cpu_optimize:
+            self.OptC = RkLpVariable.dicts("OptC", param_idx)  # Optimize on cpu
+        else:
+            self.OptC = RkLpVariable.dicts("OptC", param_idx, lowBound=0, upBound=0)
         self.sumOptC = dict()
         for w in self.param2hcn:
             self.sumOptC[w] = lpSum(
