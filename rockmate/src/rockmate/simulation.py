@@ -76,6 +76,7 @@ class Step:
         prf_ops = []
         prf_act_ops = []
         ofl_act_ops = []
+        self_del_list = []
         opt_ops = []
         comp_ops = []
         self.alloc_ops = []
@@ -100,6 +101,8 @@ class Step:
                 opt_ops.append(op)
             elif isinstance(op, DeleteOp) and isinstance(op.target, Parameter):
                 self.del_ops.append(op)
+            elif isinstance(op, DeleteOp) and op.wait_events:
+                self_del_list.append(op)
             else:
                 comp_ops.append(op)
 
@@ -107,7 +110,7 @@ class Step:
         self.prf_ops = ListOp(prf_act_ops + prf_ops)
         self.opt_ops = ListOp(opt_ops, self.cpu_constant_cost)
         self.comp_ops = ListOp(comp_ops)
-        self.self_ops = ListOp(self_op_list)
+        self.self_ops = ListOp(self_del_list+self_op_list)
 
 
     @property
