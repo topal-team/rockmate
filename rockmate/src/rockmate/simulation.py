@@ -75,6 +75,7 @@ class Step:
         ofl_ops = []
         prf_ops = []
         prf_act_ops = []
+        ofl_act_ops = []
         opt_ops = []
         comp_ops = []
         self.alloc_ops = []
@@ -85,20 +86,24 @@ class Step:
                 op, AllocateOp
             ):
                 self.alloc_ops.append(op)
-            elif isinstance(op, OffloadOp) and isinstance(op.target, Parameter):
-                ofl_ops.append(op)
-            elif isinstance(op, PrefetchOp) and not op.record_event:
-                prf_ops.append(op)
+            elif isinstance(op, OffloadOp):
+                if isinstance(op.target, Parameter):
+                    ofl_ops.append(op)
+                else:
+                    ofl_act_ops.append(op)
+            elif isinstance(op, PrefetchOp):
+                if isinstance(op.target, Parameter):
+                    prf_ops.append(op)
+                else:
+                    prf_act_ops.append(op)
             elif isinstance(op, OptimizeOp) and op.is_cpu:
                 opt_ops.append(op)
             elif isinstance(op, DeleteOp) and isinstance(op.target, Parameter):
                 self.del_ops.append(op)
-            elif isinstance(op, PrefetchOp) and op.record_event:
-                prf_act_ops.append(op)
             else:
                 comp_ops.append(op)
 
-        self.ofl_ops = ListOp(ofl_ops)
+        self.ofl_ops = ListOp(ofl_ops + ofl_act_ops)
         self.prf_ops = ListOp(prf_act_ops + prf_ops)
         self.opt_ops = ListOp(opt_ops, self.cpu_constant_cost)
         self.comp_ops = ListOp(comp_ops)
@@ -107,7 +112,6 @@ class Step:
 
     @property
     def op_list(self):
-
         if not self.opt_ops:
             opt_ops = []
         else:
@@ -133,6 +137,43 @@ class Step:
             self.prf_ops.time, 
             self.opt_ops.time)
     
+    def simulate_schedule(self):
+        op_time = {}
+        time = 0
+        for op in self.prf_ops:
+            op_time[op.name] = time
+            time += op.time
+
+        time = 0
+        for op in self.comp_ops:
+            wait_time = [op_time[f"{e[0]}({e[1]})"] 
+                           for e in op.wait_events 
+                           if f"{e[0]}({e[1]})" in op_time]
+            if wait_time:
+                time = max(wait_time)
+            time += op.time
+            op_time[op.name] = time
+        
+        time = 0
+        for op in self.ofl_ops:
+            wait_time = [op_time[f"{e[0]}({e[1]})"] 
+                           for e in op.wait_events 
+                           if f"{e[0]}({e[1]})" in op_time]
+            if wait_time:
+                time = max(wait_time)
+            time += op.time
+            op_time[op.name] = time
+        
+        time = self.cpu_constant_cost
+        for op in self.opt_ops:
+            wait_time = [op_time[f"{e[0]}({e[1]})"] 
+                           for e in op.wait_events 
+                           if f"{e[0]}({e[1]})" in op_time]
+            if wait_time:
+                time = max(wait_time)
+            time += op.time
+            op_time[op.name] = time
+        return op_time
 
     def all_time(self):
         return (
