@@ -47,7 +47,7 @@ class CheapSolver(Solver):
                 return False
             if cnode.time is None:
                 return False
-            return cnode.time < avg_time / 2
+            return cnode.time < avg_time
 
         cnode_idx = {cnode.name: i for i, cnode in enumerate(cluster.list_cnodes)}
         loss_idx = len([cnode for cnode in cluster.list_cnodes if cnode.is_fwd]) - 1
@@ -140,6 +140,13 @@ def add_activation_offload(op_sched: OpSchedule) -> OpSchedule:
     bwd_op_list = op_list[op_sched.loss_idx :]
     prefetch_op_list = []
     phantoms = op_sched.phantoms
+
+    # for op in op_sched.op_list:
+    #     if isinstance(op, ComputeOp):
+
+    offload_ops = {}
+    prefetch_ops = {}
+
     for anode in phantoms:
         if not anode.allocation_type == "data":
             continue
@@ -151,21 +158,36 @@ def add_activation_offload(op_sched: OpSchedule) -> OpSchedule:
         offload_op = OffloadOp(Activation(anode), time=anode.mem / 1e7)
         offload_op.wait_events.append([comp_op.op_type, comp_op.target.name])
         offload_op.record_event = True
-        fwd_op_list.append(offload_op)
+        # fwd_op_list.append(offload_op)
+        offload_ops[offload_op] = i
+
+        i = max(
+            min(op_sched.occurrences[ComputeOp(cnode).name]) for cnode in anode.users_real
+        )
         del_op = DeleteOp(Activation(anode))
         del_op.wait_events.append([offload_op.op_type, offload_op.target.name])
-        fwd_op_list.append(del_op)
+        user_op = op_sched.op_list[i]
+        del_op.wait_events.append([user_op.op_type, user_op.target.name])
+        # fwd_op_list.append(del_op)
+        offload_ops[del_op] = i
 
-        prefetch_op_list.append(AllocateOp(Activation(anode)))
+        # prefetch_op_list.append()
+        alloc_op = AllocateOp(Activation(anode))
         prefetch_op = PrefetchOp(Activation(anode), time=anode.mem / 1e7)
         prefetch_op.record_event = True
         prefetch_op.wait_events.append([offload_op.op_type, offload_op.target.name])
-        prefetch_op_list.append(prefetch_op)
-        for op in bwd_op_list:
+        # prefetch_op_list.append(prefetch_op)
+        i = 0
+        for j, op in enumerate(bwd_op_list):
             if isinstance(op, ComputeOp) and op.target in anode.users_real.union(anode.users_fake):
                 op.wait_events.append([prefetch_op.op_type, prefetch_op.target.name])
+                i = j
 
-    bwd_op_list = bwd_op_list[:1] + prefetch_op_list + bwd_op_list[1:]
+        prefetch_ops[alloc_op] = j
+        prefetch_ops[prefetch_op] = j
+        
+    fwd_op_list += list(sorted(offload_ops.keys(), key=lambda x:offload_ops[x]))
+    bwd_op_list = bwd_op_list[:1] + list(sorted(prefetch_ops.keys(), key=lambda x:prefetch_ops[x])) + bwd_op_list[1:]
 
     new_op_sched = OpSchedule(
         fwd_op_list + bwd_op_list,
