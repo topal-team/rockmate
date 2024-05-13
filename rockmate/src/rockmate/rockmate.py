@@ -25,7 +25,7 @@ from .simulation import Simulator
 from .solvers.main import preprocess, solve_recursive, get_optimize_metrics, FastSolver
 from .solvers import HILP, CheapSolver
 from .solvers.ilp.ilp_solver import default_time_limit
-from .compiler import Compiler, RK_Storage, make_gd
+from .compiler import Compiler, RK_Storage, make_gd, Fct_record_event
 import psutil
 
 timer = TimerCUDA(torch.device("cuda"))
@@ -239,6 +239,8 @@ class Rockmate(torch.nn.Module):
         self.list_solutions.extend(list_solutions)
 
     def get_compiled_fct(self, new_compiler=True, simulate=True):
+        if self.op_sched is None:
+            return 
         if simulate:
             self.op_sched.simulate_update(Simulator, refine_optimize=True)
         if new_compiler:
@@ -295,6 +297,10 @@ class Rockmate(torch.nn.Module):
             else:
                 if not disable:
                     op()
+                else:
+                    for f in op.fct_list:
+                        if isinstance(f, Fct_record_event):
+                            f()
         except Exception as e:
             print(f"Failed to execute {op}")
             raise e
