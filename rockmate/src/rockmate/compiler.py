@@ -102,7 +102,7 @@ class RK_Storage:
             cls._instance = super().__new__(cls, *args, **kwargs)
         return cls._instance
 
-    def init(self, gd, dtype=torch.bfloat16):
+    def init(self, gd, dtype=torch.float32):
         self.ld = dict()
         self.measured_shapes = {"Empty_size": torch.Size([0])}
         self.dtypes = dict()
@@ -281,7 +281,6 @@ class Fct_gen_fake_data(RK_Fct):
                 # x = m.expand(np.prod(s)).view(s)
                 x = m.expand(*s)
             self.storage.get_val(self.target_name).data = x
-            assert self.storage.get_val(self.target_name).dtype == torch.bfloat16
             if self.with_proxy:
                 self.storage.get_val(f"_{self.target_name}").data = x
 
