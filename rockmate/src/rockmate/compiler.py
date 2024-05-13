@@ -102,13 +102,16 @@ class RK_Storage:
             cls._instance = super().__new__(cls, *args, **kwargs)
         return cls._instance
 
-    def init(self, gd, dtype=torch.float32):
+    def init(self, gd, dtype=None):
         self.ld = dict()
         self.measured_shapes = {"Empty_size": torch.Size([0])}
         self.dtypes = dict()
         self.rng_state = RngState()
         self.events = dict()
-        self.dtype = dtype
+        if dtype is None:
+            self.dtype = torch.get_default_dtype()
+        else:
+            self.dtype = dtype
         self.gd = gd
         self.gd["meta"] = self.gd["meta"].to(self.dtype)
         self.manager = AllocationManager(self, dtype=dtype)
@@ -538,7 +541,7 @@ class Fct_offload(RK_Fct):
 
     def offload_tensor(self):
         self.storage.get_val(f"cpu_{self.target_name}").data.copy_(
-            self.storage.get_val(self.target_name).data.reshape(
+            self.storage.get_val(self.target_name).data.view(
                 self.storage.get_val(f"cpu_{self.target_name}").shape
             ),
             non_blocking=True,
@@ -839,7 +842,7 @@ class Compiler:
     By default, it should be released during reinit process.
     """
 
-    def __init__(self, storage):
+    def __init__(self, storage: RK_Storage):
         self.storage = storage
 
         self.compile_op = {
@@ -898,13 +901,26 @@ class Compiler:
                 )
             )
             if OffloadOp(Activation(anode)).name in self.ops:  # offload activation
-                prep_op.add_fct(
-                    Fct_add_tensor(
-                        f"cpu_{anode.main_target}",
-                        self.storage,
-                        shape=anode.main_target,
-                        dynamic_shape=self.storage.dynamic_shapes,
+                dtype = self.storage.dict_info[anode.main_target].dtype
+                if dtype == self.storage.dtype:
+                    prep_op.add_fct(
+                        Fct_add_tensor(
+                            f"cpu_{anode.main_target}",
+                            self.storage,
+                            shape=anode.main_target,
+                            dynamic_shape=self.storage.dynamic_shapes,
+                        )
                     )
+                else:
+                    prep_op.add_fct(
+                        Fct_mem_alloc(
+                            f"cpu_{anode.main_target}",
+                            storage=self.storage,
+                            shape=anode.main_target,
+                            dtype=dtype,
+                            alloc_mode="tensor",
+                            device=torch.device("cpu"),
+                        )
                 )
 
         for out_anode in list(cluster.interfaces["output_data_anodes"]):
