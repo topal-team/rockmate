@@ -163,13 +163,16 @@ def add_activation_offload(op_sched: OpSchedule) -> OpSchedule:
         # fwd_op_list.append(offload_op)
         offload_ops[offload_op] = i
 
-        i = max(
-            min(op_sched.occurrences[ComputeOp(cnode).name]) for cnode in anode.users_real
-        )
+
         del_op = DeleteOp(Activation(anode))
         del_op.wait_events.append([offload_op.op_type, offload_op.target.name])
-        user_op = op_sched.op_list[i]
-        del_op.wait_events.append([user_op.op_type, user_op.target.name])
+        users = [min(op_sched.occurrences[ComputeOp(cnode).name]) 
+                 for cnode in anode.users_real
+                 if cnode.is_fwd]
+        if users:
+            user_op = op_sched.op_list[max(users)]
+            user_op.record_event = True
+            del_op.wait_events.append([user_op.op_type, user_op.target.name])
         # fwd_op_list.append(del_op)
         offload_ops[del_op] = i
 
