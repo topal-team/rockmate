@@ -304,68 +304,152 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
 
     for t in range(md.T):
         for k in md.krange(t):
-            op_list.append(SynchronizeOp(f"{(t,k)}"))
-            if t == md.loss_idx and k == md.loss_idx:
-                # loss_idx = len(op_list)
-                # loss_op = Op(K_C_node("loss"))
+            op_list.extend(schedule_step(md, t, k))
+            # op_list.append(SynchronizeOp(f"{(t,k)}"))
+            # if t == md.loss_idx and k == md.loss_idx:
+            #     # loss_idx = len(op_list)
+            #     # loss_op = Op(K_C_node("loss"))
 
-                op_list.append(ComputeOp(md.hgraph.cluster.loss_cnode, disabled=True))
-            if not sol(md.sumComp[t, k]):
-                continue
-            j = md.hcn2sub_c[k]
-            # if md.sumComp[t, k].value() == 1:
-            prefetch_list = []
-            op_list += schedule_compute(md, t, k, hgraph)
-            last_op = op_list[-1]
-            last_op.record_event = True
-            wait_op_1 = []
-            wait_op_2 = []
-            wait_op_3 = []
-            self_targets = [
-                p.param_name for w in md.hcn2param[k] for p in md.parameters[w]
-            ]
-            if md.hcn2sub_c[k] is not None and md.activation_offload:
-                self_targets += md.selected_phantoms[j]
-            for op in md.opt_ops[t, k]:
-                if op.target.target_name in self_targets:
-                    wait_op_1.append(op)
-                else:
-                    op_list.append(op)
-            for op in md.ofl_ops[t, k]:
-                if op.target.target_name in self_targets:
-                    wait_op_2.append(op)
-                else:
-                    op_list.append(op)
-            for op in md.del_ops[t, k]:
-                # if op.target.target_name in self_targets:
-                wait_op_3.append(op)
-                # else:
-                #     op_list.append(op)
-            for op in md.prf_ops[t, k]:
-                op_list.append(op)
+            #     op_list.append(ComputeOp(md.hgraph.cluster.loss_cnode, disabled=True))
+            # if not sol(md.sumComp[t, k]):
+            #     continue
+            # j = md.hcn2sub_c[k]
+            # # if md.sumComp[t, k].value() == 1:
+            # prefetch_list = []
+            # op_list += schedule_compute(md, t, k, hgraph)
+            # last_op = op_list[-1]
+            # last_op.record_event = True
+            # wait_op_1 = []
+            # wait_op_2 = []
+            # wait_op_3 = []
+            # self_targets = [
+            #     p.param_name for w in md.hcn2param[k] for p in md.parameters[w]
+            # ]
+            # if md.hcn2sub_c[k] is not None and md.activation_offload:
+            #     self_targets += md.selected_phantoms[j]
+            # for op in md.opt_ops[t, k]:
+            #     if op.target.target_name in self_targets:
+            #         wait_op_1.append(op)
+            #     else:
+            #         op_list.append(op)
+            # for op in md.ofl_ops[t, k]:
+            #     if op.target.target_name in self_targets:
+            #         wait_op_2.append(op)
+            #     else:
+            #         op_list.append(op)
+            # for op in md.del_ops[t, k]:
+            #     # if op.target.target_name in self_targets:
+            #     wait_op_3.append(op)
+            #     # else:
+            #     #     op_list.append(op)
+            # for op in md.prf_ops[t, k]:
+            #     op_list.append(op)
 
-            if wait_op_1:  # for the current layer, need to synchronize first
-                # op_list.append(SynchronizeOp(str(k)))
-                op_list.extend(wait_op_1)
-                last_op = wait_op_1[-1]
-                last_op.record_event = True
-            if wait_op_2:  # for the current layer, need to synchronize first
-                sync_op = SynchronizeOp(str(k), stream="offload_stream")
-                sync_op.wait_events.append((last_op.op_type, last_op.target.name))
-                op_list.append(sync_op)
-                op_list.extend(wait_op_2)
-                last_op = wait_op_2[-1]
-                last_op.record_event = True
-            if wait_op_3:  # for the current layer, need to synchronize first
-                sync_op = SynchronizeOp(str(k), stream="main_stream")
-                sync_op.wait_events.append((last_op.op_type, last_op.target.name))
-                op_list.append(sync_op)
-                op_list.extend(wait_op_3)
+            # if wait_op_1:  # for the current layer, need to synchronize first
+            #     # op_list.append(SynchronizeOp(str(k)))
+            #     op_list.extend(wait_op_1)
+            #     last_op = wait_op_1[-1]
+            #     last_op.record_event = True
+            # if wait_op_2:  # for the current layer, need to synchronize first
+            #     sync_op = SynchronizeOp(str(k), stream="offload_stream")
+            #     sync_op.wait_events.append((last_op.op_type, last_op.target.name))
+            #     op_list.append(sync_op)
+            #     op_list.extend(wait_op_2)
+            #     last_op = wait_op_2[-1]
+            #     last_op.record_event = True
+            # if wait_op_3:  # for the current layer, need to synchronize first
+            #     sync_op = SynchronizeOp(str(k), stream="main_stream")
+            #     sync_op.wait_events.append((last_op.op_type, last_op.target.name))
+            #     op_list.append(sync_op)
+            #     op_list.extend(wait_op_3)
 
-            op_list.extend(prefetch_list)
+            # op_list.extend(prefetch_list)
 
     return op_list, init_alive_status, init_op_list, restore_op_list
 
+def schedule_step(md: ModelPULP, t, k):
+    op_list = []
+    if not md.sol(md.sumComp[t, k]):
+        return op_list
+    op_list.append(SynchronizeOp(f"{(t,k)}"))
+    if t == md.loss_idx and k == md.loss_idx:
+        # loss_idx = len(op_list)
+        # loss_op = Op(K_C_node("loss"))
+
+        op_list.append(ComputeOp(md.hgraph.cluster.loss_cnode, disabled=True))
+    
+    j = md.hcn2sub_c[k]
+    # if md.sumComp[t, k].value() == 1:
+    # prefetch_list = []
+    op_list += schedule_compute(md, t, k, md.hgraph)
+    last_op = op_list[-1]
+    last_op.record_event = True
+    self_ops = []
+    self_targets = [
+        p.param_name for w in md.hcn2param[k] for p in md.parameters[w]
+    ]
+    if md.hcn2sub_c[k] is not None and md.activation_offload:
+        self_targets += md.selected_phantoms[j]
+    for op in md.opt_ops[t, k]:
+        op_list.append(op)
+        if op.target.target_name in self_targets:
+            op.record_event = True
+        # else:
+        #     op_list.append(op)
+    for op in md.ofl_ops[t, k]:
+        if op.target.target_name in self_targets:
+            self_ops.append(op)
+        else:
+            op_list.append(op)
+    for op in md.del_ops[t, k]:
+        if op.target.target_name in self_targets:
+            self_ops.append(op)
+        else:
+            op_list.append(op)
+    for op in md.prf_ops[t, k]:
+        op_list.append(op)
+
+    # if self_ops:  # for the current layer, need to synchronize first
+    #     # op_list.append(SynchronizeOp(str(k)))
+    #     op_list.extend(self_ops)
+    #     last_op = self_ops[-1]
+    #     last_op.record_event = True
+    # if self_ops:  # for the current layer, need to synchronize first
+        # sync_op = SynchronizeOp(str(k), stream="offload_stream")
+        # sync_op.wait_events.append((last_op.op_type, last_op.target.name))
+        # op_list.append(sync_op)
+    op_list.extend(self_ops)
+
+    occurrences = dict()
+    for i, op in enumerate(op_list):
+        if op.name not in occurrences:
+            occurrences[op.name] = []
+        occurrences[op.name].append(i)
+    for op in self_ops:
+        if isinstance(op, OffloadOp):
+            op.record_event = True
+            opt_op_name = OptimizeOp([op.target.pnode.param_name],
+                        alloc=op.target).name
+            if opt_op_name in occurrences:
+                opt_op = op_list[max(occurrences[opt_op_name])]
+                op.wait_events.append((opt_op.op_type, opt_op.target.name))
+
+        if isinstance(op, DeleteOp):
+            ofl_op_name = OffloadOp(alloc=op.target).name
+            if ofl_op_name in occurrences:
+                ofl_op = op_list[max(occurrences[ofl_op_name])]
+                op.wait_events.append((ofl_op.op_type, ofl_op.target.name))
+            
+        # last_op = self_ops[-1]
+        # last_op.record_event = True
+    # if self_ops:  # for the current layer, need to synchronize first
+        # sync_op = SynchronizeOp(str(k), stream="main_stream")
+        # sync_op.wait_events.append((last_op.op_type, last_op.target.name))
+        # op_list.append(sync_op)
+        # op_list.extend(self_ops)
+
+    # op_list.extend(prefetch_list)
+    return op_list
 
 def group(md, w, tol=1):
     # Group the parameters of each block for the task
