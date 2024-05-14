@@ -1,5 +1,5 @@
 '''
-rkgb.Ktools.K_C_node -> rkgb.core.backward.AllocationNode
+rkgb.Ktools.K_D_node -> rkgb.core.backward.AllocationNode
 rkgb.Ktools.K_graph -> rkgb.core.backward.ForwardAndBackwardGraph
 
 rkgb.Htools.H_graph -> rkgb.core.hierarchical.HierarchicalGraph
@@ -12,20 +12,20 @@ from rockmate.solvers.def_op import RunOp, DelOp ->
 from .def_op import OpSchedule as OpSchedule_old -> ?
 
 K_graph vs. ForwardAndBackwardGraph
-    dict_kn -> dict_data_anodes ?
+    dict_kn -> dict_nodes ?
 
 H_graph vs. HierarchicalGraph
     list_hcn -> list_HCNs
     loss_hcn -> loss_hcn
     cluster -> cluster
-    outputs_hdn_data -> output_data_HANs (not including output_grad_HANs) ?
+    outputs_hdn_data -> output_data_HANs ?
 
 HierarchicalCluster
     get_sched() ->  solvers.main.get_sched(cluster)
-    translate_op_list() -> solvers.main.translate(cluster,op_list)
+    translate_op_list() -> solvers.main.translate(cluster, op_list)
     loss_kcn -> loss_cnode
     loss_kcn.time
-    possible_hg ->  partitionings ?
+    possible_hg ->  partitionings 
 
 H_C_node vs. HierarchicalComputationNode
     deps -> deps
@@ -44,11 +44,12 @@ K_C_node(RK_node) vs. ComputationNode(base.Node)
 K_D_node(RK_node) vs. AllocationNode(base.Node)
     
     RK_node
-        .main_target: str
+        .main_target: str (Python str which is executed)
     K_C_node
         self.name = f"fwd_{mt}" if is_fwd else f"bwd_{mt}"
     K_D_node
-        self.name = f"{main_target} {self.kdn_type}"
+        self.name = f"{main_target} {self.kdn_type}" (e.g., x.data or x.grad)
+        (self.kdn_type -> self.alloc_type)
 
     base.Node
         .main_target: str
@@ -58,6 +59,8 @@ K_D_node(RK_node) vs. AllocationNode(base.Node)
         self.name = f"{main_target} {self.allocation_type}"
 
 Allocation # Activation/Parameter/Buffer
+    self.name = f"{self.target_name} {self.alloc_type}"
+
 Activation(Allocation)(self, anode: AllocationNode)
     self.target_name = anode.main_target
     self.kdn = self.anode = anode
@@ -89,8 +92,8 @@ OpSched vs. OpSched
     .save_mem -> .save_mem
     .fwd_overhead -> .fwd_overhead
     .loss_idx -> .loss_idx
-    .interfaces -> .interfaces
-    .solver -> ? 
+    .interfaces -> .interfaces (nodes connectd to other clusters)
+    .solver -> ? (not useful)
 '''
 
 import time
@@ -204,7 +207,7 @@ class RK_rotor(Solver):
                     loss_idx=len(self.fwd_op_list),
                     cluster=hg.cluster,
                 )
-                op_sched.solver = "rk-rotor"
+                # op_sched.solver = "rk-rotor"
                 list_op_sched.append(op_sched)
             return list_op_sched
 
@@ -263,8 +266,8 @@ class RK_rotor(Solver):
                     # if op.kn.name == input_kdn_data.name:
                     #     print(op.kn.name)
                     #     op.disabled = True
-                    if op.target_name == input_kdn_data.name:
-                        print(op.target_name)
+                    if isinstance(op, DeleteOp) and op.target.anode.name == input_kdn_data.name:
+                        print(op.target.anode.name)
                         op.disabled = True
                 fc_op_list = ff_op_list.copy() + hcn.ff_op_list  # + [fwd_loss]
 
@@ -303,7 +306,7 @@ class RK_rotor(Solver):
                         # By default, bwd does not delete input data/grad
                         #if op.kn.main_target == input_kdn_data.main_target:
                         #    op.disabled = True
-                        if op.target_name == input_kdn_data.main_target:
+                        if isinstance(op, DeleteOp) and op.target.anode.main_target == input_kdn_data.main_target:
                            op.disabled = True
 
                     Fwd_sched = OpSchedule(
@@ -437,11 +440,10 @@ class RK_rotor(Solver):
 
         return chain
 
-    def get_new_op_sched(self, op_sched: OpSchedule_old, kg):
-        # op_list = [Op(kg.dict_kn[op.name]) for op in op_sched.op_list]
-        op_list = [Op(kg.dict_data_anodes[op.name]) for op in op_sched.op_list]
-        op_sched_new = OpSchedule(op_list)
-        return op_sched_new
+    # def get_new_op_sched(self, op_sched: OpSchedule_old, kg):
+    #     op_list = [Op(kg.dict_kn[op.name]) for op in op_sched.op_list] # op.name was op.kn.name
+    #     op_sched_new = OpSchedule(op_list)
+    #     return op_sched_new
 
     # def get_old_op_sched(self, op_sched: OpSchedule):
     #     op_list = []
