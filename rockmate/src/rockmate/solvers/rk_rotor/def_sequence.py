@@ -3,7 +3,9 @@
 # based on rotor/algorithms/sequence.py
 # ==========================
 
-from .def_op import OpSchedule
+# from .def_op import OpSchedule
+from ...op_schedule import OpSchedule
+
 
 ref_print_atoms = [True]
 

@@ -57,6 +57,7 @@ def get_rk_solution(list_kg, l_bd_abar, budget_all):
     return list_list_sols
 
 
+# can be avoided?
 class RK_Block_Solution:
     def __init__(self, fwd_sched, bwd_sched):
         self.fwd_sched, self.bwd_sched = fwd_sched, bwd_sched
@@ -69,6 +70,7 @@ class RK_Block_Solution:
         )
 
 
+# can be avoided?
 def get_rk_block(list_kg, nb_bdg_abar, nb_bdg_all):
     list_blocks = []
     for kg in list_kg:
@@ -101,7 +103,7 @@ def get_rk_block(list_kg, nb_bdg_abar, nb_bdg_all):
                         block.sols.append(s)
     return list_blocks
 
-
+# can be avoided?
 class RK_Block:
     def __init__(self, kg):
         self.block_name = (
