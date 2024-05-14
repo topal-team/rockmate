@@ -94,6 +94,7 @@ OpSched vs. OpSched
     .loss_idx -> .loss_idx
     .interfaces -> .interfaces (nodes connectd to other clusters)
     .solver -> ? (not useful)
+    .save -> .save_mem
 '''
 
 import time
@@ -103,6 +104,7 @@ import rkgb
 #from rkgb.Ktools import K_C_node
 #from rkgb.Htools import H_graph, H_cluster
 from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
+from rkgb.core.backward import ComputationNode, AllocationNode
 
 import math
 from ..main import Solver, get_cluster_budget
@@ -255,7 +257,8 @@ class RK_rotor(Solver):
                 for f_hcn in no_grad_hcns:
                     ff_op_list += f_hcn.ff_op_list
 
-                fwd_loss = Op(rkgb.Ktools.K_C_node("loss"), disabled=True)
+                # fwd_loss = Op(rkgb.Ktools.K_C_node("loss"), disabled=True)
+                fwd_loss = ComputeOp(ComputationNode("loss"), disabled=True)
                 fn_op_list = ff_op_list.copy() + hcn.ff_op_list  # + [fwd_loss]
                 first_hcn = hcn if not no_grad_hcns else no_grad_hcns[0]
                 # assume single input
@@ -325,10 +328,10 @@ class RK_rotor(Solver):
                         refine=False,
                         correct_overhead=False,
                     )  # so that solution can be read
-                    hcn.sub_cluster.loss_kcn.time = 0
+                    hcn.sub_cluster.loss_cnode.time = 0
                     Full_sched = OpSchedule(
                         fwd_op_list
-                        + [Op(hcn.sub_cluster.loss_kcn)]
+                        + [ComputeOp(hcn.sub_cluster.loss_cnode)]
                         + bwd_op_list,
                         len(fwd_op_list) - 1,
                         # cluster=hcn.sub_cluster,
