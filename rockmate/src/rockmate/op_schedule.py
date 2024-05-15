@@ -535,6 +535,8 @@ class OpSchedule:
         self.prefetch_mem = sum(
             op.target.mem for op in self.op_list if isinstance(op, PrefetchOp)
         )
+        self.fwd_wait_time = 0
+        self.bwd_wait_time = 0
 
     def add_correction_term(self, alive_list):
         interfaces_status = []
