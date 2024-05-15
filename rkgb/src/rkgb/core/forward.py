@@ -245,8 +245,9 @@ class ForwardGraph(base.Graph):
         # === SECOND WAY TO RECOGNIZE A VIEW ===
         # -> main_fct is a view/inplace function
         if not (is_inplace or is_view):
-            if (current_forward_node.fct in constants.list_view_functions
-            or current_forward_node.fct in constants.list_inplace_functions):
+            main_fct = current_forward_node.fct.split(".")[0]
+            if (main_fct in constants.list_view_functions
+            or main_fct in constants.list_inplace_functions):
                 data_parents = set()
                 for req_rn in current_forward_node.deps:
                     req_rn_info = self.dict_info[req_rn.target]

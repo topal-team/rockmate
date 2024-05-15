@@ -733,7 +733,7 @@ class SimplifiedGraph(base.Graph):
             if sn.main_fct == "getitem":
                 if not isinstance(sn.main_code[1].value, ast_add_on.ast.Call):
                     is_view = True
-                elif ast_add_on.ast_to_str(sn.main_code[1].value.func) in constants.list_view_functions:
+                elif sn.main_fct.split(".")[0] in constants.list_view_functions:
                     is_view = True
             if sn.deps == set() and is_view:
                 self.init_node.insert(sn,
