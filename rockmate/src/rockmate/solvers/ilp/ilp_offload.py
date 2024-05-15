@@ -91,12 +91,18 @@ class ModelPULPOffload(ModelPULP):
         
         self.schedule_offload_time = []
         self.schedule_prefetch_time = []
+        self.schedule_fwd_wait_time = []
+        self.schedule_bwd_wait_time = []
         for list_sched in self.list_list_sched:
             self.schedule_offload_time.append([])
             self.schedule_prefetch_time.append([])
+            self.schedule_fwd_wait_time.append([])
+            self.schedule_bwd_wait_time.append([])
             for sched in list_sched:
                 self.schedule_offload_time[-1].append(sched.offload_mem/self.bandwidthOfl / self.gcd)
                 self.schedule_prefetch_time[-1].append(sched.prefetch_mem/self.bandwidthPrf / self.gcd)
+                self.schedule_fwd_wait_time[-1].append(sched.fwd_wait_time)
+                self.schedule_bwd_wait_time[-1].append(sched.bwd_wait_time)
 
         self.param2hcn = dict()
         self.parameters = []
@@ -133,6 +139,10 @@ class ModelPULPOffload(ModelPULP):
                     + self.time_step_offload_self(t, k)
                     + self.time_step_optimize_self(t, k, cpu=True)
                 )
+
+                self.md += self.Time[t, k] >= (
+                    self.time_step_compute(t, k)+
+                    self.time_step_prefetch_self(t,k))
 
     def add_offload_activation_variables(self):
         """
@@ -636,6 +646,11 @@ class ModelPULPOffload(ModelPULP):
         return mem / self.bandwidthOfl + sub_sched_time
 
     def time_step_offload_self(self, t, k):
+        j = self.hcn2sub_c[k]
+        sub_sched_time = lpSum(
+            self.Comp[t, k, o] * self.schedule_fwd_wait_time[j][o]
+            for o in range(self.nSched[k])
+        )
         mem = 0
         for w in self.hcn2param[k]:
             mem += self.parameter_size[w] * self.OflW[t, k, w]
@@ -646,7 +661,7 @@ class ModelPULPOffload(ModelPULP):
             if j is not None:
                 mem += self.OflP[t, k, j]
 
-        return mem / self.bandwidthOfl
+        return mem / self.bandwidthOfl + sub_sched_time
 
     def time_step_prefetch(self, t, k):
         j = self.hcn2sub_c[k]
@@ -667,13 +682,18 @@ class ModelPULPOffload(ModelPULP):
         return mem / self.bandwidthPrf + sub_sched_time
 
     def time_step_prefetch_self(self, t, k):
+        j = self.hcn2sub_c[k]
+        sub_sched_time = lpSum(
+            self.Comp[t, k, o] * self.schedule_bwd_wait_time[j][o]
+            for o in range(self.nSched[k])
+        )
         mem = 0
         for w in self.hcn2param[k]:
             mem += self.parameter_size[w] * self.PrfW[t, k, w]
             optim_state = self.optimizer_states_factor * self.PrfO[t, k, w]
             mem += self.parameter_gradient_size[w] * (self.PrfG[t, k, w] + optim_state)
 
-        return mem / self.bandwidthPrf
+        return mem / self.bandwidthPrf + sub_sched_time
 
     def time_step_optimize(self, t, k, cpu=True):
         """
