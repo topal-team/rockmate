@@ -39,8 +39,9 @@ class Solver:
 
 
 class FastSolver(Solver):
-    def __init__(self, config=None):
+    def __init__(self, config=None, recompute_sched=True):
         super().__init__(config)
+        self.recompute_sched=recompute_sched
 
     def solve_hcn(self, hcn, cluster, no_del_names):
         if hcn.sub_cluster is None:  # fwd with no grad
@@ -115,7 +116,7 @@ class FastSolver(Solver):
         recompute_op_list = ff_op_list + [loss_op] + re_autograd_op_list
         list_sched.append(autograd_sched)
 
-        if recompute_sched:
+        if self.recompute_sched:
             list_sched.append(
                 OpSchedule(recompute_op_list, cluster=cluster, loss_idx=len(ff_op_list))
             )
