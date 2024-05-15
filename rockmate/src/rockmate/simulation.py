@@ -111,7 +111,7 @@ class Step:
         self.opt_ops = ListOp(opt_ops, self.cpu_constant_cost)
         self.comp_ops = ListOp(comp_ops)
         self.self_ops = ListOp(self_del_list+self_op_list)
-
+        self.op_time = self.simulate_schedule()
 
     @property
     def op_list(self):
@@ -132,13 +132,14 @@ class Step:
 
     @property
     def time(self):
-        return max(
-            max(
-            self.ofl_ops.time, 
-            self.comp_ops.time
-        ) + self.self_ops.time,
-            self.prf_ops.time, 
-            self.opt_ops.time)
+        # return max(
+        #     max(
+        #     self.ofl_ops.time, 
+        #     self.comp_ops.time
+        # ) + self.self_ops.time,
+        #     self.prf_ops.time, 
+        #     self.opt_ops.time)
+        return max(self.op_time.values())
     
     def simulate_schedule(self):
         op_time = {}
