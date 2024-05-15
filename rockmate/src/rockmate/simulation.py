@@ -153,7 +153,7 @@ class Step:
                            for e in op.wait_events 
                            if f"{e[0]}({e[1]})" in op_time]
             if wait_time:
-                time = max(wait_time)
+                time = max(wait_time+[time])
             time += op.time
             op_time[op.name] = time
         
@@ -163,7 +163,7 @@ class Step:
                            for e in op.wait_events 
                            if f"{e[0]}({e[1]})" in op_time]
             if wait_time:
-                time = max(wait_time)
+                time = max(wait_time+[time])
             time += op.time
             op_time[op.name] = time
         
@@ -173,7 +173,7 @@ class Step:
                            for e in op.wait_events 
                            if f"{e[0]}({e[1]})" in op_time]
             if wait_time:
-                time = max(wait_time)
+                time = max(wait_time+[time])
             time += op.time
             op_time[op.name] = time
         return op_time
