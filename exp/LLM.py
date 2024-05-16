@@ -23,7 +23,20 @@ def get7Bllama(batch, seq_len, nlayers=32, dtype=None, llama3=False, classificat
     sample = torch.randint(0, 600, [batch, seq_len])
     # Initializing a LLaMA llama-7b style configuration
     vocab_size = 128256 if llama3 else 32000
-    configuration = LlamaConfig(
+    
+    # Initializing a model from the llama-7b style configuration
+    if classification:
+        configuration = LlamaConfig(num_hidden_layers=nlayers,
+                                hidden_size=4096,
+                                output_hidden_states=False,
+                                output_attentions=False,
+                                pad_token_id=0,
+                                use_cache=False
+                                )
+        # Initializing a model from the llama-7b style configuration
+        model = LlamaForSequenceClassification(configuration).to(dtype)
+    else:
+        configuration = LlamaConfig(
                                 vocab_size=vocab_size,
                                 num_hidden_layers=nlayers,
                                 hidden_size=4096,
@@ -31,13 +44,8 @@ def get7Bllama(batch, seq_len, nlayers=32, dtype=None, llama3=False, classificat
                                 output_attentions=False,
                                 # use_cache=False
                                 )
-    configuration._attn_implementation="eager"
-    configuration._attn_implementation_internal="eager"
-    # Initializing a model from the llama-7b style configuration
-    if classification:
-        model = LlamaForSequenceClassification(configuration).to(dtype)
-        model.config.pad_token_id = 0
-    else:
+        configuration._attn_implementation="eager"
+        configuration._attn_implementation_internal="eager"
         model = LlamaModel(configuration).to(dtype)
     return model, [sample]
 

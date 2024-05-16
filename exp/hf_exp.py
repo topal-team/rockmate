@@ -16,9 +16,9 @@ from transformers import (
 from trl import SFTTrainer
 from exp import LlamaConfig
 
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, LlamaTokenizerFast
 from transformers import Trainer
-from models.LLM import get7Bllama, get3BPhi_2
+from LLM import get7Bllama, get3BPhi_2
 from datetime import datetime
 import torch
 
@@ -30,7 +30,9 @@ class MyDataset(torch.utils.data.Dataset):
         self.encodings = encodings
 
     def __getitem__(self, idx):
-        item = {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
+        item = {key: torch.tensor(val[idx]) 
+                for key, val in self.encodings.items()
+                if "input_ids" in key}
         item['labels'] = torch.tensor(self.labels[idx])
         return item
 
@@ -38,24 +40,24 @@ class MyDataset(torch.utils.data.Dataset):
         return len(self.encodings)
     
 
-from transformers import LlamaForSequenceClassification
-def get7Bllama(batch, seq_len, nlayers=32, dtype=torch.float32):
-    if dtype is None:
-        dtype = torch.get_default_dtype()
-    #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
-    sample = torch.randint(0, 600, [batch, seq_len])
-    # Initializing a LLaMA llama-7b style configuration
-    configuration = LlamaConfig(num_hidden_layers=nlayers,
-                                hidden_size=4096,
-                                output_hidden_states=False,
-                                output_attentions=False,
-                                pad_token_id=0,
-                                use_cache=False
-                                )
-    # Initializing a model from the llama-7b style configuration
-    model = LlamaForSequenceClassification(configuration).to(dtype)
-    # model = LlamaModel(configuration)#.to(dtype)
-    return model, [sample]
+# from transformers import LlamaForSequenceClassification
+# def get7Bllama(batch, seq_len, nlayers=32, dtype=torch.float32):
+#     if dtype is None:
+#         dtype = torch.get_default_dtype()
+#     #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
+#     sample = torch.randint(0, 600, [batch, seq_len])
+#     # Initializing a LLaMA llama-7b style configuration
+#     configuration = LlamaConfig(num_hidden_layers=nlayers,
+#                                 hidden_size=4096,
+#                                 output_hidden_states=False,
+#                                 output_attentions=False,
+#                                 pad_token_id=0,
+#                                 use_cache=False
+#                                 )
+#     # Initializing a model from the llama-7b style configuration
+#     model = LlamaForSequenceClassification(configuration).to(dtype)
+#     # model = LlamaModel(configuration)#.to(dtype)
+#     return model, [sample]
 
 def train_po(nlayers=4, batch =4, seq_len=512, get_model=get7Bllama):
     tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
@@ -64,7 +66,7 @@ def train_po(nlayers=4, batch =4, seq_len=512, get_model=get7Bllama):
 
     torch.cuda.reset_peak_memory_stats()
     mem = torch.cuda.memory_allocated()
-    model,_ = get_model(3, seq_len=seq_len, nlayers=nlayers, classification=True)
+    model,_ = get_model(4, seq_len=seq_len, nlayers=nlayers, classification=True)
     training_arguments = TrainingArguments(
     output_dir="/",
     num_train_epochs=1,
@@ -87,8 +89,8 @@ def train_po(nlayers=4, batch =4, seq_len=512, get_model=get7Bllama):
     results["nlayers"] = nlayers
     results["input_shape"] = (batch, seq_len)
     results["peak_mem"] = torch.cuda.max_memory_allocated() - mem
-    results["time"] = train_result.metrics['train_runtime']
-    results["time_per_sample"] = train_result.metrics["train_samples_per_second"]
+    results["time"] = train_result.metrics['train_runtime'] *1000
+    results["time_per_sample"] = train_result.metrics["train_samples_per_second"] *1000
     results["metrics"] = train_result.metrics
     return results
     
@@ -97,9 +99,15 @@ def train_po(nlayers=4, batch =4, seq_len=512, get_model=get7Bllama):
 def train_ds(nlayers=4, batch =4, seq_len=512, 
              ds_config="ds_config_zero3.json", 
              get_model=get7Bllama):
+    # import deepspeed
     tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
     encoding = tokenizer.batch_encode_plus(["a "*510]*20)#Fake data
     train_set = MyDataset(encoding)
+
+    # tokenizer = LlamaTokenizerFast.from_pretrained("hf-internal-testing/llama-tokenizer")
+    # encoding = tokenizer.batch_encode_plus(["a "*510]*20)#Fake data
+    # # encdoin
+    # train_set = MyDataset(encoding)
     
     torch.cuda.reset_peak_memory_stats()
     mem = torch.cuda.memory_allocated()
@@ -130,8 +138,8 @@ def train_ds(nlayers=4, batch =4, seq_len=512,
     results["nlayers"] = nlayers
     results["input_size"] = (4, seq_len)
     results["peak_mem"] = torch.cuda.max_memory_allocated() - mem
-    results["time"] = train_result.metrics['train_runtime']
-    results["time_per_sample"] = train_result.metrics["train_samples_per_second"]
+    results["time"] = train_result.metrics['train_runtime'] *1000
+    results["time_per_sample"] = train_result.metrics["train_samples_per_second"]*1000
     results["metrics"] = train_result.metrics
     results["gpu_type"] = torch.cuda.get_device_name()
     results["date"] = datetime.now().strftime("%x_%H:%M")
@@ -181,12 +189,12 @@ if __name__ == "__main__":
     else:
         results = {}
     try:
-        results[(nlayers, 4)] = methods[args.method](nlayers, 
+        results[nlayers] = methods[args.method](nlayers, 
                                                      batch=4, 
                                                      get_model=models[args.model],
                                                      **kwargs)
     except Exception as e:
-        results[(nlayers, 4)] = str(e)
+        results[nlayers] = str(e)
     with open(exp_id, "wb") as f:
         pickle.dump(results, f)
     print(results)
