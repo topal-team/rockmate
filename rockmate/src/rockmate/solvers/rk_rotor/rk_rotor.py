@@ -1,100 +1,21 @@
-'''
-rkgb.Ktools.K_D_node -> rkgb.core.backward.AllocationNode
-rkgb.Ktools.K_graph -> rkgb.core.backward.ForwardAndBackwardGraph
+''' HOW TO RUN ROCKMATE WITH UPDATED rk_rotor.py
+from rockmate.solvers.main import add_sched
 
-rkgb.Htools.H_graph -> rkgb.core.hierarchical.HierarchicalGraph
-rkgb.Htools.H_cluster -> rkgb.core.hierarchical.HierarchicalCluster
+# to get Fc/Fn schedules for clusters
+rkmod.preprocess()
 
+# to get Checkmate schedules for clusters
+for hcn in rkmod.rkgb_res.hierarchical_cluster.partitionings[0].list_HCNs:
+    print(hcn.sub_cluster)
+    if hcn.sub_cluster is None:continue
+    if not hcn.is_fwd: continue
+    solver = HILP(ilp_solver="PULP_CBC_CMD")
+    list_sched = solver(hcn.sub_cluster)
+    for sched in list_sched:
+        add_sched(hcn.sub_cluster, sched)
 
-from rockmate.solvers.def_op import RunOp, DelOp -> 
-   from rockmate.solvers.op_schedule import ComputeOp, DeleteOp
+# rkmod.get_compiled_fct()
 
-from .def_op import OpSchedule as OpSchedule_old -> ?
-
-K_graph vs. ForwardAndBackwardGraph
-    dict_kn -> dict_nodes ?
-
-H_graph vs. HierarchicalGraph
-    list_hcn -> list_HCNs
-    loss_hcn -> loss_hcn
-    cluster -> cluster
-    outputs_hdn_data -> output_data_HANs ?
-
-HierarchicalCluster
-    get_sched() ->  solvers.main.get_sched(cluster)
-    translate_op_list() -> solvers.main.translate(cluster, op_list)
-    loss_kcn -> loss_cnode
-    loss_kcn.time
-    possible_hg ->  partitionings 
-
-H_C_node vs. HierarchicalComputationNode
-    deps -> deps
-    users -> users
-    ff_op_list 
-    sub_cluster.get_sched()
-    sub_cluster.translate_op_list()
-    sub_cluster.loss_kcn
-    sub_cluster.loss_kcn.time
-
-H_D_node vs. HierarchicalAllocationNode
-    deps -> deps
-    users -> users
-
-K_C_node(RK_node) vs. ComputationNode(base.Node)
-K_D_node(RK_node) vs. AllocationNode(base.Node)
-    
-    RK_node
-        .main_target: str (Python str which is executed)
-    K_C_node
-        self.name = f"fwd_{mt}" if is_fwd else f"bwd_{mt}"
-    K_D_node
-        self.name = f"{main_target} {self.kdn_type}" (e.g., x.data or x.grad)
-        (self.kdn_type -> self.alloc_type)
-
-    base.Node
-        .main_target: str
-    ComputationNode
-        self.name = f"FWD[{main_target}]" if is_fwd else f"BWD[{main_target}]"
-    AllocationNode
-        self.name = f"{main_target} {self.allocation_type}"
-
-Allocation # Activation/Parameter/Buffer
-    self.name = f"{self.target_name} {self.alloc_type}"
-
-Activation(Allocation)(self, anode: AllocationNode)
-    self.target_name = anode.main_target
-    self.kdn = self.anode = anode
-
-Op(kn) vs. ComputeOp(Op)(anode), DeleteOp(Op)(alloc)
-    op.is_del = isinstance(kn, K_D_node)
-    op.name = op.kn.name -> op.target_name ? op.name?
-    op.disabled -> op.disabled
-    op.kn -> op.target ?
-    op.kn.name -> op.target_name ? (=op.target.name)
-    op.kn.main_target -> op.target.main_target ?
-    op.op_type -> op.op_type
-
-
-    Op # Compute/Delete/Mappong/Allocate/Offload/Prefetch
-        self.name = f"{self.op_type}({self.target_name})"
-
-    DeleteOp(Op)
-        self.target = alloc
-        self.target_name = self.target.name = alloc.name
-
-    ComputeOp(Op)(self, cnode: ComputationNode)
-        self.target = cnode
-        self.target_name = self.target.name = cnode.name
-
-OpSched vs. OpSched
-    .op_list -> .op_list
-    .fwd_time -> .fwd_time
-    .save_mem -> .save_mem
-    .fwd_overhead -> .fwd_overhead
-    .loss_idx -> .loss_idx
-    .interfaces -> .interfaces (nodes connectd to other clusters)
-    .solver -> ? (not useful)
-    .save -> .save_mem
 '''
 
 import time
@@ -109,19 +30,17 @@ from rkgb.core.backward import ComputationNode, AllocationNode
 import math
 from ..main import Solver, get_cluster_budget
 from ..main import get_sched, translate
-from .def_chain import RK_Chain
+# from .def_chain import RK_Chain
 #from .def_sequence import SeqBlockBwd, SeqBlockFe, RK_Sequence
 from .rotor_solver import seq_builder, solve_dp_functional
-from ...op_schedule import OpSchedule, Op
+from ...op_schedule import OpSchedule, ComputeOp, DeleteOp
 #from .def_op import OpSchedule as OpSchedule_old
 # from .def_op import RunOp, DelOp
 
-# can be avoided?
 class RK_block_:
     def __init__(self):
         pass
 
-# can be avoided?
 class RK_Block_Solution_:
     def __init__(self):
         pass
@@ -154,24 +73,20 @@ class RK_rotor(Solver):
         if budgets is None:
             budgets = get_cluster_budget(cluster.representee_cluster)
         # self.budget = budgets
-        if isinstance(cluster, RK_Chain) or isinstance(cluster, RK_Chain_):
-            list_seq = []
-            for budget in budgets:
-                list_seq.append(self.solve_rk_chain(cluster, budget))
-            return list_seq
-        elif isinstance(cluster, HierarchicalCluster):
+        # if isinstance(cluster, RK_Chain) or isinstance(cluster, RK_Chain_):
+        #     list_seq = []
+        #     for budget in budgets:
+        #         list_seq.append(self.solve_rk_chain(cluster, budget))
+        #     return list_seq
+        if isinstance(cluster, HierarchicalCluster):
             list_seq = []
             # for hg in cluster.possible_hg:
             for hg in cluster.partitionings:
                 list_seq.extend(self.solve_hg(hg, budgets))
             return list_seq
-
         else:
             warnings.warn(f"Unrecognized input type {type(cluster)}")
 
-    # modify hg_to_rk_chain
-    # check def_sequence file
-    # check def_chain file
     def solve_hg(self, hg: HierarchicalGraph, budgets=[]):
         if not self.is_sequential(hg):
             return []
@@ -253,6 +168,7 @@ class RK_rotor(Solver):
                 # WARNING: if hcn has no bwd, it has to be merged with the next one
                 no_grad_hcns.append(hcn)
             else:
+                # .ff_op_list for Fn/Fc is computed before by calling preprocess() 
                 ff_op_list = []
                 for f_hcn in no_grad_hcns:
                     ff_op_list += f_hcn.ff_op_list
@@ -263,6 +179,7 @@ class RK_rotor(Solver):
                 first_hcn = hcn if not no_grad_hcns else no_grad_hcns[0]
                 # assume single input
 
+                # .kdn can be replaced by .anode below?
                 input_kdn_data = list(first_hcn.deps)[0].kdn
                 output_kdn_data = list(hcn.users)[0].kdn
                 for op in ff_op_list:
@@ -272,6 +189,8 @@ class RK_rotor(Solver):
                     if isinstance(op, DeleteOp) and op.target.anode.name == input_kdn_data.name:
                         print(op.target.anode.name)
                         op.disabled = True
+                
+                
                 fc_op_list = ff_op_list.copy() + hcn.ff_op_list  # + [fwd_loss]
 
                 no_grad_hcns = []
@@ -293,6 +212,7 @@ class RK_rotor(Solver):
                 set_op_sched(Fc_sched)
                 set_op_sched(Fn_sched)
 
+                # checkmate schedules are computed before by calling HILP for each cluster
                 sols = []
 
                 # for op_sched in hcn.sub_cluster.get_sched():
@@ -375,6 +295,8 @@ class RK_rotor(Solver):
                         - Full_sched.mem,
                     )
                     sols.append(sol)
+
+                # find other schedules and add them to cluster.list_schedules
                 block = RK_block_()
                 setattr(block, "sols", sols)
                 setattr(block, "Fc_sched", Fc_sched)
@@ -460,3 +382,141 @@ class RK_rotor(Solver):
 
     #     op_sched_new = OpSchedule_old(op_list)
     #     return op_sched_new
+
+
+''' OLD vs. NEW API
+
+rkgb.Ktools.K_D_node -> rkgb.core.backward.AllocationNode
+rkgb.Ktools.K_graph -> rkgb.core.backward.ForwardAndBackwardGraph
+
+rkgb.Htools.H_graph -> rkgb.core.hierarchical.HierarchicalGraph
+rkgb.Htools.H_cluster -> rkgb.core.hierarchical.HierarchicalCluster
+
+
+from rockmate.solvers.def_op import RunOp, DelOp -> 
+   from rockmate.solvers.op_schedule import ComputeOp, DeleteOp
+
+from .def_op import OpSchedule as OpSchedule_old -> ?
+
+K_graph vs. ForwardAndBackwardGraph
+    dict_kn -> dict_nodes ?
+    list_kcn -> computation_nodes ?
+    list_kdn -> allocation_nodes ?
+    loss_kcn -> loss_cnode
+    input_kdn_data -> source_data_anode ?
+    input_kdn_grad -> source_grad_anode ?
+    output_kdn_data -> 
+    ? -> list_output_data_anodes
+    output_kdn_grad
+    ? -> list_output_grad_anodes
+
+    ? -> dict_data_anodes
+    ? -> dict_grad_anodes
+    ? -> dict_fwd_cnodes
+    ? -> dict_bwd_cnodes
+
+    do we use hierarchical cluster now instead?
+    -> 
+
+
+
+H_graph vs. HierarchicalGraph
+    list_hcn -> list_HCNs
+    ? -> list_HANs
+    loss_hcn -> loss_hcn
+    cluster -> cluster
+    outputs_hdn_data -> output_data_HANs ?
+    ? -> input_data_HANs: set
+    ? -> input_grad_HANs: set
+    ? -> output_data_HANs: set
+    ? -> output_grad_HANs
+
+HierarchicalCluster
+    get_sched() ->  solvers.main.get_sched(cluster)
+    translate_op_list() -> solvers.main.translate(cluster, op_list)
+    loss_kcn -> loss_cnode
+    loss_kcn.time
+    possible_hg ->  partitionings 
+    ? -> list_cnodes
+    ? -> list_anodes
+    ? -> loss_cnode
+    ? -> interfaces = {
+                "input_data_anodes" : ,
+                "output_data_anodes" : ,
+                "output_grad_anodes" : ,
+                "input_grad_anodes"  : 
+            }
+
+
+H_C_node vs. HierarchicalComputationNode
+    deps -> deps
+    users -> users
+    ff_op_list -> ff_op_list (created in main.py)
+    sub_cluster.get_sched()
+    sub_cluster.translate_op_list()
+    sub_cluster.loss_kcn
+    sub_cluster.loss_kcn.time
+
+H_D_node vs. HierarchicalAllocationNode
+    deps -> deps
+    users -> users
+  
+
+K_C_node(RK_node) vs. ComputationNode(base.Node)
+K_D_node(RK_node) vs. AllocationNode(base.Node)
+    
+    RK_node
+        .main_target: str (Python str which is executed)
+    K_C_node
+        self.name = f"fwd_{mt}" if is_fwd else f"bwd_{mt}"
+        self.overhead
+    K_D_node
+        self.name = f"{main_target} {self.kdn_type}" (e.g., x.data or x.grad)
+        (self.kdn_type -> self.alloc_type)
+        .mem
+
+    base.Node
+        .main_target: str
+    ComputationNode
+        self.name = f"FWD[{main_target}]" if is_fwd else f"BWD[{main_target}]"
+    AllocationNode
+        self.name = f"{main_target} {self.allocation_type}"
+
+Allocation # Activation/Parameter/Buffer
+    self.name = f"{self.target_name} {self.alloc_type}"
+
+Activation(Allocation)(self, anode: AllocationNode)
+    self.target_name = anode.main_target
+    self.kdn = self.anode = anode
+
+Op(kn) vs. ComputeOp(Op)(anode), DeleteOp(Op)(alloc)
+    op.is_del = isinstance(kn, K_D_node)
+    op.name = op.kn.name -> op.target_name ? op.name?
+    op.disabled -> op.disabled
+    op.kn -> op.target ?
+    op.kn.name -> op.target_name ? (=op.target.name)
+    op.kn.main_target -> op.target.main_target ?
+    op.op_type -> op.op_type
+
+
+    Op # Compute/Delete/Mappong/Allocate/Offload/Prefetch
+        self.name = f"{self.op_type}({self.target_name})"
+
+    DeleteOp(Op)
+        self.target = alloc
+        self.target_name = self.target.name = alloc.anode.name
+
+    ComputeOp(Op)(self, cnode: ComputationNode)
+        self.target = cnode
+        self.target_name = self.target.name = cnode.name
+
+OpSched vs. OpSched
+    .op_list -> .op_list
+    .fwd_time -> .fwd_time
+    .save_mem -> .save_mem
+    .fwd_overhead -> .fwd_overhead
+    .loss_idx -> .loss_idx
+    .interfaces -> .interfaces (nodes connectd to other clusters)
+    .solver -> ? (not useful)
+    .save -> .save_mem
+'''
