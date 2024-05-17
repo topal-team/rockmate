@@ -243,7 +243,7 @@ except:
     csolver_present = False
 
 
-def convert_sequence_from_C(chain: RK_Chain, original_sequence):
+def convert_sequence_from_C(chain, original_sequence):
     def convert_op(op):
         if isinstance(op, cs.SeqLoss):
             return SeqLoss()
