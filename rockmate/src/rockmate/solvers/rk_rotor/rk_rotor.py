@@ -28,6 +28,7 @@ from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
 from rkgb.core.backward import ComputationNode, AllocationNode
 
 import math
+from copy import deepcopy
 from ..main import Solver, get_cluster_budget
 from ..main import get_sched, translate
 # from .def_chain import RK_Chain
@@ -120,7 +121,7 @@ class RK_rotor(Solver):
                     for op in op_sched.op_list
                 ]
                 op_sched = OpSchedule(
-                    (self.fwd_op_list + self.bwd_op_list).copy(),
+                    (self.fwd_op_list + [ComputeOp(ComputationNode("loss"))] + self.bwd_op_list).copy(),
                     loss_idx=len(self.fwd_op_list),
                     cluster=hg.cluster,
                 )
@@ -175,18 +176,18 @@ class RK_rotor(Solver):
 
                 # fwd_loss = Op(rkgb.Ktools.K_C_node("loss"), disabled=True)
                 fwd_loss = ComputeOp(ComputationNode("loss"), disabled=True)
-                fn_op_list = ff_op_list.copy() + hcn.ff_op_list  # + [fwd_loss]
+                fn_op_list = deepcopy(ff_op_list) + hcn.ff_op_list  # + [fwd_loss]
                 first_hcn = hcn if not no_grad_hcns else no_grad_hcns[0]
                 # assume single input
 
                 # .kdn can be replaced by .anode below?
-                input_kdn_data = list(first_hcn.deps)[0].kdn
-                output_kdn_data = list(hcn.users)[0].kdn
+                input_anode_data = list(first_hcn.deps)[0].anode
+                output_anode_data = list(hcn.users)[0].anode
                 for op in ff_op_list:
-                    # if op.kn.name == input_kdn_data.name:
+                    # if op.kn.name == input_anode_data.name:
                     #     print(op.kn.name)
                     #     op.disabled = True
-                    if isinstance(op, DeleteOp) and op.target.anode.name == input_kdn_data.name:
+                    if isinstance(op, DeleteOp) and op.target.anode.name == input_anode_data.name:
                         print(op.target.anode.name)
                         op.disabled = True
                 
@@ -197,16 +198,14 @@ class RK_rotor(Solver):
 
                 Fn_sched = OpSchedule(
                     fn_op_list,
-                    len(fn_op_list) - 1,
-                    # cluster=hcn.sub_cluster,
-                    refine=False,
+                    loss_idx=len(fn_op_list) - 1,
+                    cluster=hcn.sub_cluster,
                     correct_overhead=False,
                 )
                 Fc_sched = OpSchedule(
                     fc_op_list,
-                    len(fc_op_list) - 1,
-                    # cluster=hcn.sub_cluster,
-                    refine=False,
+                    loss_idx=len(fc_op_list) - 1,
+                    cluster=hcn.sub_cluster,
                     correct_overhead=False,
                 )
                 set_op_sched(Fc_sched)
@@ -227,25 +226,23 @@ class RK_rotor(Solver):
                     )  # start with loss op
                     for op in bwd_op_list:
                         # By default, bwd does not delete input data/grad
-                        #if op.kn.main_target == input_kdn_data.main_target:
+                        #if op.kn.main_target == input_anode_data.main_target:
                         #    op.disabled = True
-                        if isinstance(op, DeleteOp) and op.target.anode.main_target == input_kdn_data.main_target:
+                        if isinstance(op, DeleteOp) and op.target.anode.main_target == input_anode_data.main_target:
                            op.disabled = True
 
                     Fwd_sched = OpSchedule(
                         fwd_op_list,
-                        len(fwd_op_list) - 1,
-                        # cluster=hcn.sub_cluster,
-                        refine=False,
+                        loss_idx=len(fwd_op_list) - 1,
+                        cluster=hcn.sub_cluster,
                         correct_overhead=False,
                     )
                     set_op_sched(Fwd_sched)
 
                     Bwd_sched = OpSchedule(
                         bwd_op_list,
-                        0,
-                        # cluster=hcn.sub_cluster,
-                        refine=False,
+                        loss_idx=0,
+                        cluster=hcn.sub_cluster,
                         correct_overhead=False,
                     )  # so that solution can be read
                     hcn.sub_cluster.loss_cnode.time = 0
@@ -253,22 +250,9 @@ class RK_rotor(Solver):
                         fwd_op_list
                         + [ComputeOp(hcn.sub_cluster.loss_cnode)]
                         + bwd_op_list,
-                        len(fwd_op_list) - 1,
-                        # cluster=hcn.sub_cluster,
-                        refine=False,
+                        loss_idx=len(fwd_op_list) - 1,
+                        cluster=hcn.sub_cluster,
                         correct_overhead=False,
-                        interfaces={
-                            "inputs_kdn_data": op_sched.interfaces[
-                                "inputs_kdn_data"
-                            ],
-                            "outputs_kdn_data": {output_kdn_data}
-                            if i == loss_idx - 1
-                            else {},
-                            "inputs_kdn_grad": op_sched.interfaces[
-                                "inputs_kdn_grad"
-                            ],
-                            "outputs_kdn_grad": set(),  # For now, no op will generate it
-                        },
                     )  # different from op_sched: may merge no_grad hcn's
                     setattr(Bwd_sched, "time", Full_sched.bwd_time)
                     setattr(
@@ -291,7 +275,6 @@ class RK_rotor(Solver):
                         "overhead_bwd",
                         # Full_sched.bwd_overhead + Full_sched.save_mem[-1]
                         max(Full_sched.save_mem + Full_sched.overhead)
-                        # - input_kdn_data.mem  # input_grad is counted in save_mem
                         - Full_sched.mem,
                     )
                     sols.append(sol)
@@ -301,12 +284,12 @@ class RK_rotor(Solver):
                 setattr(block, "sols", sols)
                 setattr(block, "Fc_sched", Fc_sched)
                 setattr(block, "Fn_sched", Fn_sched)
-                setattr(block, "mem_inp", input_kdn_data.mem)
+                setattr(block, "mem_inp", input_anode_data.mem)
                 # since interfaces is empty, output is counted in memory
                 setattr(
                     block,
                     "overhead_fast_fwd",
-                    Fc_sched.fwd_overhead + output_kdn_data.mem,
+                    Fc_sched.fwd_overhead + output_anode_data.mem,
                 )
                 setattr(block, "time_fast_fwd", Fc_sched.fwd_time)
 
