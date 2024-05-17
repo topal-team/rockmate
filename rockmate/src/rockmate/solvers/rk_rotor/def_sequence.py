@@ -3,7 +3,9 @@
 # based on rotor/algorithms/sequence.py
 # ==========================
 
-from .def_op import OpSchedule
+# from .def_op import OpSchedule
+from ...op_schedule import OpSchedule
+
 
 ref_print_atoms = [True]
 
@@ -48,7 +50,7 @@ class SeqBlockOp(SeqOp):
         self.index = index
         self.op_sched = op_sched
         self.time = self.op_sched.time  # sum(o.time for o in body)
-        self.mem = self.op_sched.save[-1]  # sum(o.mem  for o in body)
+        self.mem = self.op_sched.save_mem[-1]  # sum(o.mem  for o in body)
         self.overhead = self.op_sched.overhead
 
     def __str__(self):

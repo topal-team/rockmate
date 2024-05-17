@@ -4,8 +4,8 @@
 # based on rotor/algorithms/persistent.py
 # ==========================
 
-from rkgb.utils import print_debug
-from .def_chain import RK_Chain
+# from rkgb.utils import print_debug
+# from .def_chain import RK_Chain
 from .def_sequence import (
     SeqBlockFn,
     SeqBlockFc,
@@ -157,7 +157,7 @@ def psolve_dp_functional(chain, mmax, opt_table=None):
 
     solve_aux(mmax, 0, ln)
 
-    print_debug(f"Nb calls : {nb_call}")
+    # print_debug(f"Nb calls : {nb_call}")
     return (opt, what)
 
 
@@ -260,8 +260,8 @@ def convert_sequence_from_C(chain: RK_Chain, original_sequence):
     result = RK_Sequence([convert_op(op) for op in original_sequence])
     return result
 
-
-def csolve_dp_functional(chain: RK_Chain, mmax, opt_table=None):
+# chain is RK_Chain_
+def csolve_dp_functional(chain, mmax, opt_table=None):
     if opt_table is None:  ## TODO? if opt_table.mmax < mmax, create new table
         result = rs.RkTable(chain, mmax)
     else:
@@ -270,7 +270,7 @@ def csolve_dp_functional(chain: RK_Chain, mmax, opt_table=None):
     return result
 
 
-def cseq_builder(chain: RK_Chain, mmax, opt_table):
+def cseq_builder(chain, mmax, opt_table):
     result = opt_table.build_sequence(mmax)
     return convert_sequence_from_C(chain, result)
 

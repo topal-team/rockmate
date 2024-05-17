@@ -1,3 +1,4 @@
+# This file is not actually used after updating rk_rotor.py
 # ==========================
 # definition file of RK_Chain
 # also contains RK_Chain builder -> depends on use_chk.py
@@ -9,14 +10,14 @@ from rkgb.utils import imports_from_rotor as irotor
 # if solver_name[0] != "gurobi":
 #     from hrockmate.ILP_MIP import ModelMIP
 from .ILP_gurobi import ModelGurobi
-from .def_op import RunOp, DelOp, OpSchedule
+# from .def_op import RunOp, DelOp, OpSchedule
+from ...op_schedule import OpSchedule
 import math
 import numpy as np
 
 # ==========================
 # ======== RK Block ========
 # ==========================
-
 
 def get_rk_solution(list_kg, l_bd_abar, budget_all):
     if solver_name[0] == "gurobi":
@@ -69,6 +70,7 @@ class RK_Block_Solution:
         )
 
 
+# take cluster / fb_graph as input?
 def get_rk_block(list_kg, nb_bdg_abar, nb_bdg_all):
     list_blocks = []
     for kg in list_kg:

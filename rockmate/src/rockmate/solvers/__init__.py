@@ -5,6 +5,7 @@ __all__ = ["RK_checkmate", "HILP", "RK_rotor", "TwRemat", "CheapSolver"]
 from .ilp.ilp_solver import HILP
 from .cheap import CheapSolver
 
-# from .rk_rotor import RK_rotor
+from .rk_rotor import RK_rotor
+
 # from .rk_checkmate import RK_checkmate
 # from .twremat import TwRemat

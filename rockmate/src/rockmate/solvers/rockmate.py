@@ -1,3 +1,4 @@
+# This file is not actually used after updating rk_rotor.py
 import time
 from hrockmate.rkgb.utils import np
 
