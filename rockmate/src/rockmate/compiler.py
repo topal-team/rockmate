@@ -252,7 +252,7 @@ class Fct_del(RK_Fct):
         self.storage.get_val(self.target_name)._base.data = torch.empty(0, dtype=self.storage.dtype)
 
     def del_var(self):
-        self.storage.get_val(self.target_name).data = torch.empty(0, dtype=self.storage.dtype)
+        self.storage.ld[self.target_name] = torch.empty(0, dtype=self.storage.dtype)
 
     def del_optim_states(self):
         for k, v in self.storage.get_val(
