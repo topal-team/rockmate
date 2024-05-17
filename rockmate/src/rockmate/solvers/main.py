@@ -303,7 +303,7 @@ def get_cluster_budget(
 
     sizes = [anode.mem for anode in cluster.list_anodes]
     overheads = [
-        cnode.mem_overhead for cnode in cluster.list_cnodes if cnode.mem_overhead
+        cnode.mem_overhead for cnode in cluster.list_cnodes if cnode.mem_overhead is not None
     ]
 
     # overheads = [hcn.sub_cluster.ff_overhead for hcn in hg.list_HCNs] + [
