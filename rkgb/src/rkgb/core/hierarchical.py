@@ -678,7 +678,7 @@ class HierarchicalCluster():
         # ================ END SECOND CONSTRUCTOR ==================
 
     def translate_representee_node(self, re_node):
-        if self is self.representee_cluster:
+        if self is self.representee_cluster or re_node in self.list_anodes:
             return re_node
         try:
             ano_node = self.representee_cluster.translator.to_ano(re_node)
