@@ -462,6 +462,7 @@ class ForwardAndBackwardGraph(base.Graph):
         self.list_output_grad_anodes = [
             self.dict_grad_anodes[output_sn.main_target]
             for output_sn in simplified_graph.output_nodes
+            if output_sn.info.requires_grad
         ]
         # Loss:
         loss_cnode = ComputationNode(
