@@ -1,7 +1,7 @@
 from psutil import virtual_memory
 from typing import Any, Dict
 from pulp import lpSum
-
+import math
 from rkgb.core.hierarchical import HierarchicalGraph
 from .ilp_utils import RkLpVariable
 from .ilp_model import ModelPULP
@@ -233,7 +233,7 @@ class ModelPULPOffload(ModelPULP):
 
     def w_by_wg(self, w):
         if self.parameter_gradient_size[w] == 0:
-            return 0
+            return self.gcd
         return self.parameter_size[w] / self.parameter_gradient_size[w]
 
     def activation_mem(self, t, k):
@@ -303,6 +303,7 @@ class ModelPULPOffload(ModelPULP):
     def prefill_offload(
         self,
     ):
+        
         for t in range(self.T):
             for k in range(self.T):
                 for w in range(self.W):
@@ -332,6 +333,9 @@ class ModelPULPOffload(ModelPULP):
                 self.OflG[(t, k, w)] = 0
             for t, k, w in self.AliveG:
                 grad_size = self.parameter_gradient_size[w]
+                if grad_size == 0:
+                    self.AliveG[(t, k, w)] = 0
+                    continue
                 if len(self.param2hcn[w]) <= 2:
                     self.AliveG[(t, k, w)] = 0
                     if k == max(self.param2hcn[w]):
@@ -438,7 +442,7 @@ class ModelPULPOffload(ModelPULP):
                         w
                     ) + self.fraction_instant_updated_param(
                         w
-                    )
+                    ) * (1/self.w_by_wg(w))
                     self.md += self.AliveG[t, k, w] + self.OflGProg[
                         t, k, w
                     ] >= self.fraction_remaining_gradients(w)
