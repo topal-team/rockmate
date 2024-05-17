@@ -157,7 +157,7 @@ def manual_lora(model:nn.Module, target_modules, num_adapters=10, freeze_all=Tru
                 raise AttributeError("`" + item + "` is not "
                                         "an nn.Module")
 
-def get7Bllama_lora(batch, seq_len, num_adapters=256, nlayers=32, dtype=None, llama3=False, classification=False):
+def get7Bllama_lora(batch, seq_len, num_adapters=64, nlayers=32, dtype=None, llama3=False, classification=False):
     model, sample = get7Bllama(batch, 512, nlayers=nlayers, dtype=dtype, llama3=llama3, classification=classification)
     config = LoraConfig(
         r=num_adapters,
@@ -175,5 +175,7 @@ def get7Bllama_lora(batch, seq_len, num_adapters=256, nlayers=32, dtype=None, ll
     manual_lora(model, 
                 target_modules=target_modules,
                 num_adapters=num_adapters,
-                freeze_all=False)
+                freeze_all=True)
+    model.enable_input_require_grads()
+
     return model, sample

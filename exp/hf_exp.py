@@ -32,7 +32,8 @@ class MyDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         item = {key: torch.tensor(val[idx]) 
                 for key, val in self.encodings.items()
-                if "input_ids" in key}
+                # if "input_ids" in key
+                }
         item['labels'] = torch.tensor(self.labels[idx])
         return item
 
@@ -125,7 +126,7 @@ def train_ds(nlayers=4, batch =4, seq_len=512,
     learning_rate=1e-4,
     weight_decay=0,
     )
-    # model.gradient_checkpointing_enable()
+    model.gradient_checkpointing_enable()
     # def make_inputs_require_grad(module, input, output):
     #      output.requires_grad_(True)
 
