@@ -690,7 +690,8 @@ class OpSchedule:
                     self.with_parameters and not op.target.is_fwd
                 ):  # assume grad of parameters required by bwd will be generated
                     for pnode in op.target.required_parameter_nodes_real:
-                        alive_status[Parameter(pnode, is_grad=True).name] = True
+                        if pnode.info.requires_grad == True:
+                            alive_status[Parameter(pnode, is_grad=True).name] = True
             elif isinstance(op, AllocateOp):
                 alive_status[op.target.name] = True
             alive_list.append(alive_status.copy())
