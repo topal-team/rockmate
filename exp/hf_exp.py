@@ -18,7 +18,7 @@ from exp import LlamaConfig
 
 from transformers import AutoTokenizer, LlamaTokenizerFast
 from transformers import Trainer
-from LLM import get7Bllama, get3BPhi_2
+from LLM import get7Bllama, get3BPhi_2, get13Bllama, get7Bllama_lora
 from datetime import datetime
 import torch
 
@@ -99,7 +99,7 @@ def train_po(nlayers=4, batch =4, seq_len=512, get_model=get7Bllama):
 def train_ds(nlayers=4, batch =4, seq_len=512, 
              ds_config="ds_config_zero3.json", 
              get_model=get7Bllama):
-    # import deepspeed
+    import deepspeed
     tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
     encoding = tokenizer.batch_encode_plus(["a "*510]*20)#Fake data
     train_set = MyDataset(encoding)
@@ -111,8 +111,8 @@ def train_ds(nlayers=4, batch =4, seq_len=512,
     
     torch.cuda.reset_peak_memory_stats()
     mem = torch.cuda.memory_allocated()
-    with deepspeed.zero.Init():
-        model,_ = get_model(batch=batch, seq_len=seq_len, nlayers=nlayers, classification=True)
+    # with deepspeed.zero.Init():
+    model,_ = get_model(batch=batch, seq_len=seq_len, nlayers=nlayers, classification=True)
     training_arguments = TrainingArguments(
     output_dir="/",
     num_train_epochs=1,
@@ -125,7 +125,11 @@ def train_ds(nlayers=4, batch =4, seq_len=512,
     learning_rate=1e-4,
     weight_decay=0,
     )
-    model.gradient_checkpointing_enable()
+    # model.gradient_checkpointing_enable()
+    # def make_inputs_require_grad(module, input, output):
+    #      output.requires_grad_(True)
+
+    # model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
     trainer = Trainer(model, 
                         args=training_arguments, 
                         train_dataset=train_set,
@@ -167,7 +171,9 @@ if __name__ == "__main__":
     
     models = {
         "llama7b": get7Bllama,
+        "llama13b": get13Bllama,
         "phi2-3b": get3BPhi_2,
+        "llama7b_lora": get7Bllama_lora,
     }
 
     args = parser.parse_args()

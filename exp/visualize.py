@@ -18,8 +18,12 @@ def get_label(key):
     "offmate_no_cpu_optim":"OffMate w/o CPU Optimize",
     "llama7b": "Llama2-7B",
     "phi2-3b": "Phi-2",
-    "float32": "fp32",
-    "bfloat16": "bf16",
+    "float32": "FP32",
+    "bfloat16": "BF16",
+    "zero-3": "ZeRO-Infinity",
+    "zero-2": "ZeRO-2",
+    "paged_optim": "Paged Optimizer",
+    "llama13b": "Llama2-13B",
     }
     if key in d:
         return d[key]

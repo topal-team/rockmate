@@ -5,7 +5,7 @@ import torch.nn as nn
 from copy import deepcopy
 import numpy as np
 # from models import *
-from LLM import *
+from LLM import get13Bllama, get3BPhi_2, get7Bllama, get7Bllama_lora
 from rockmate import Rockmate
 from rockmate.op_schedule import *
 from rockmate.solvers import HILP, CheapSolver
@@ -379,7 +379,7 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B",
     exp_stats["optimize_stats"] = rkmod.optimize_metrics
     exp_stats["gpu_type"] = torch.cuda.get_device_name()
     exp_stats["budget"] = budget
-    exp_stats["RAM_1"] = psutil.virtual_memory()
+    
 
     ### Solve schedule
     # rkmod.preprocess()
@@ -408,7 +408,7 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B",
         exp_stats["time"] = time/niters
         exp_stats["peak_mem"] = mem
         exp_stats["date"] = datetime.now().strftime("%x_%H:%M")
-
+    exp_stats["RAM_1"] = psutil.virtual_memory()
     del rkmod
     gc.collect()
     print(exp_stats)
@@ -481,7 +481,9 @@ if __name__=="__main__":
               }
     models = {
         "llama7b": get7Bllama,
+        "llama13b": get13Bllama,
         "phi2-3b": get3BPhi_2,
+        "llama7b_lora":get7Bllama_lora,
     }
     kwargs = {
         "offmate":{},

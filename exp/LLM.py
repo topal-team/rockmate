@@ -14,6 +14,7 @@ from torch.nn.modules.normalization import LayerNorm
 from transformers.models.llama.modeling_llama import LlamaMLP, LlamaConfig
 from transformers.models.bloom.modeling_bloom import BloomMLP, BloomConfig
 from transformers import LlamaModel, LlamaConfig, LlamaForSequenceClassification
+from peft import LoraModel, LoraConfig
 
 def get7Bllama(batch, seq_len, nlayers=32, dtype=None, llama3=False, classification=False):
     if dtype is None:
@@ -65,8 +66,23 @@ def get13Bllama(batch, seq_len, nlayers=40, dtype=None, llama3=False, classifica
                         output_hidden_states=False,
                         output_attentions=False,
                         )
+    configuration._attn_implementation="eager"
+    configuration._attn_implementation_internal="eager"
     # Initializing a model from the llama-7b style configuration
     if classification:
+        configuration = LlamaConfig(
+                        vocab_size=vocab_size,
+                        num_hidden_layers=nlayers, 
+                        hidden_size=5120,
+                        intermediate_size=13824,
+                        num_attention_heads=40,
+                        output_hidden_states=False,
+                        output_attentions=False,
+                        pad_token_id=0,
+                        use_cache=False
+                        )
+        configuration._attn_implementation="eager"
+        configuration._attn_implementation_internal="eager"
         model = LlamaForSequenceClassification(configuration).to(dtype)
         model.config.pad_token_id = 0
     else:
@@ -91,3 +107,73 @@ def get3BPhi_2(batch, seq_len, dtype=None, nlayers=32, classification=False):
     else:
         model = PhiModel(configuration).to(dtype)
     return model, [sample]
+
+
+class LoraLinear(nn.Module):
+    def __init__(self, linear, num_adapters=10, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.linear = linear
+        self.linear.weight.requires_grad = False
+        if self.linear.bias is not None:
+            self.linear.bias.requires_grad = False
+        u = nn.Parameter(torch.randn(num_adapters, self.linear.weight.shape[0]), requires_grad=True)
+        v = nn.Parameter(torch.randn(self.linear.weight.shape[1], num_adapters), requires_grad=True)
+        self.register_parameter("u", u)
+        self.register_parameter("v", v)
+
+    def forward(self, x):
+        res1 = torch.matmul(x, self.v)
+        res2 = torch.matmul(res1, self.u)
+        y = self.linear(x)
+        out = y+res2
+        return out
+
+def manual_lora(model:nn.Module, target_modules, num_adapters=10, freeze_all=True):
+    if freeze_all:
+        for p in model.parameters():
+            p.requires_grad = False
+    for module_name in target_modules:
+        module = model.get_submodule(module_name)
+        if isinstance(module, nn.Linear):
+            new_module = LoraLinear(module, num_adapters=num_adapters)
+        else:
+            raise TypeError(f"manual lora does not work with {type(module)}")
+        # setattr(model, module_name, new_module)
+
+        atoms = module_name.split(".")
+        mod: torch.nn.Module = model
+
+        for item in atoms:
+            if not hasattr(mod, item):
+                raise AttributeError(mod._get_name() + " has no "
+                                        "attribute `" + item + "`")
+            if getattr(mod, item) == module:
+                # setattr(mod, item, new_module)
+                mod.add_module(item, new_module)
+                break
+
+            mod = getattr(mod, item)
+            if not isinstance(mod, torch.nn.Module):
+                raise AttributeError("`" + item + "` is not "
+                                        "an nn.Module")
+
+def get7Bllama_lora(batch, seq_len, num_adapters=256, nlayers=32, dtype=None, llama3=False, classification=False):
+    model, sample = get7Bllama(batch, 512, nlayers=nlayers, dtype=dtype, llama3=llama3, classification=classification)
+    config = LoraConfig(
+        r=num_adapters,
+        lora_alpha=32,
+        target_modules=["q_proj", "k_proj"],
+        lora_dropout=0.01,
+    )
+    # model = LoraModel(model, config, "default")
+
+    target_modules = [f"layers.{i}.self_attn.q_proj" for i in range(nlayers)]
+    target_modules += [f"layers.{i}.self_attn.k_proj" for i in range(nlayers)]
+    target_modules += [f"layers.{i}.self_attn.v_proj" for i in range(nlayers)]
+    if classification:
+        target_modules = ["model."+s for s in target_modules]
+    manual_lora(model, 
+                target_modules=target_modules,
+                num_adapters=num_adapters,
+                freeze_all=False)
+    return model, sample
