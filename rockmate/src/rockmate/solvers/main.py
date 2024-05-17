@@ -270,7 +270,7 @@ def get_hgraph_budget_lb(hgraph: HierarchicalGraph):
             )
         else:
             hcn_memory_budget.append(hcn.ff_overhead)
-    return max(hcn_memory_budget)
+    return max(hcn_memory_budget, default=0)
 
 
 def get_hgraph_budget_ub(hgraph: HierarchicalGraph):

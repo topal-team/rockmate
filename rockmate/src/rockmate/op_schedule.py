@@ -496,6 +496,8 @@ class OpSchedule:
                 self.save_mem[self.loss_idx + 1 :],
                 self.overhead[self.loss_idx + 1 :],
             )
+        else:
+            self.bwd_overhead = 0
 
         self.phantoms = set()
         for anode in self.list_anodes:
