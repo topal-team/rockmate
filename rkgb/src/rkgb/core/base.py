@@ -337,10 +337,25 @@ class Graph():
     def list_nodes(self,list_nodes):
         self.nodes = list_nodes
 
-    def __iter__(self):
-        return iter(self.nodes)
+    @property
+    def _lists_of_nodes(self):
+        return [self.nodes]
         # for graphs with Computation/Allocation nodes,
-        # iter over self.computation_nodes
+        # self._list_nodes is [self.computation_nodes,self.allocation_nodes]
+
+    def __iter__(self):
+        return iter(self._lists_of_nodes[0])
+
+    def get_node(self,id):
+        for list_of_nodes in self._lists_of_nodes:
+            for node in list_of_nodes:
+                if type(id) is int:
+                    if node.mt.startswith(f"__{id}_"):
+                        return node
+                elif type(id) is str:
+                    if id in node.mt:
+                        return node
+        return None
     # =================================
 
     # ===============================

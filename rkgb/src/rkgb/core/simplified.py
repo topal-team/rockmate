@@ -408,6 +408,7 @@ class SimplifiedGraph(base.Graph):
             self.simplify_lists_and_tuples()
             # self.optional_simplify_cheap_operations()
             self.simplify_sizes()
+            self.optional_simplify_small_direct_nodes()
             self.simplify_view()
 
             self.create_nodes_for_random_operations_from_dict_rand(original_mod,device)
@@ -675,13 +676,30 @@ class SimplifiedGraph(base.Graph):
                 sn.substitute_self_by_its_code_in_its_users(self)
         self.clear()
 
+
     def simplify_sizes_without_deps(self):
         # Special case: we simplify sizes nodes that don't have any req
         nodes = list(self.nodes)
         for sn in nodes:
-            if sn.deps == set() and sn.info.variable_type == torch.Size:
+            if ((sn.deps == set() or sn.deps == {self.init_node})
+            and sn.info.variable_type == torch.Size):
                 self.nodes.remove(sn)
                 self.init_node.insert(sn_to_insert=sn,strong=True,simplified_graph=self)
+
+
+    def optional_simplify_small_direct_nodes(self):
+        # Nodes that 1) do not 'requires_grad'
+        # 2) have a small `memsize`
+        # 3) whose deps are only the init_node
+        nodes = list(self.nodes)
+        for sn in nodes:
+            if ((sn.deps == set() or sn.deps == {self.init_node})
+            and not sn.info.requires_grad
+            and sn.info.memsize < 10000):
+                self.nodes.remove(sn)
+                self.init_node.insert(sn_to_insert=sn,strong=True,simplified_graph=self)
+                
+
 
     def simplify_sizes(self):
         """
@@ -720,6 +738,8 @@ class SimplifiedGraph(base.Graph):
         # only useful in: simplify_view, the next stage
         self.init_node.is_artifact = True
         self.clear()
+
+
 
     def simplify_view(self):
         """
@@ -812,6 +832,9 @@ class SimplifiedGraph(base.Graph):
                     sn.users = set()
         self.clear()
     # ===== END BLOCK 3 : SIMPLIFICATIONS =====
+
+
+
 
     def make_sequentialized_list_of_blocks_of_nodes(self,aggressive=None):
         """

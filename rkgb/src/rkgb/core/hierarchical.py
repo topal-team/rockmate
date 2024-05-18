@@ -356,8 +356,9 @@ class HierarchicalGraph(base.Graph):
 
     # **********************************
     # == OVERWRITE base.Graph METHODS ==
-    def __iter__(self):
-        return iter(self.list_HCNs)
+    @property
+    def _lists_of_nodes(self):
+        return [self.list_HCNs,self.list_HANs]
     
     def make_temporary_global_root_node_to_deps_relation(self):
         # OVERWRITE base.Graph METHOD

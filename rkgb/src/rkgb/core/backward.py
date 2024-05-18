@@ -548,8 +548,9 @@ class ForwardAndBackwardGraph(base.Graph):
 
     # **********************************
     # == OVERWRITE base.Graph METHODS ==
-    def __iter__(self):
-        return iter(self.computation_nodes)
+    @property
+    def _lists_of_nodes(self):
+        return [self.computation_nodes,self.allocation_nodes]
 
     def make_temporary_global_root_node_to_deps_relation(self):
         # OVERWRITE base.Graph METHOD
