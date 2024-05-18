@@ -62,7 +62,7 @@ class FastSolver(Solver):
             re_cluster.list_schedules += self.solve(re_cluster)
         list_sched = re_cluster.list_schedules
 
-        autograd_sched = list_sched[0]
+        autograd_sched = list_sched[1]
 
         hcn.ff_time = autograd_sched.fwd_time
         hcn.ff_overhead = autograd_sched.fwd_overhead
