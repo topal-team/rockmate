@@ -42,20 +42,10 @@ class Result():
         self.print_time_in_each_stage = print_time_in_each_stage
         self.do_inspection = do_inspection
         self.last_time = 0
-        # self.dynamo_all_dynamic_shapes = dynamo_all_dynamic_shapes
-        # self.dynamo_constraints = dynamo_constraints
+        self.dynamic_batch_dim = dynamic_batch_dim
 
-        # 1) device and inputs
-        self.example_inputs = preprocess_samples.ExampleInputs(model,model_args,model_kwargs)
-        self.current_device = preprocess_device.get_device_and_check_all_same_device(model,self.example_inputs)
-
-        batch = Dim("batch")
-        dynamo_kwargs = {}
-        if dynamic_batch_dim is not None:
-            dynamo_kwargs["dynamic_shapes"] = {k:{dynamic_batch_dim:batch} 
-                                               for k in self.example_inputs.dict.keys()}
-        # 2) Build everything
-        if "R" in wanted_graphs: self.build_raw(dynamo_kwargs=dynamo_kwargs)
+        self.process_model_args(model_args,model_kwargs)
+        if "R" in wanted_graphs: self.build_raw()
         if "F" in wanted_graphs: self.build_forward()
         if "S" in wanted_graphs: self.build_simplified()
         if "P" in wanted_graphs: self.build_partitioned()
@@ -70,7 +60,21 @@ class Result():
             clean_time_taken = time.strftime("%H:%M:%S", time.gmtime(time_taken))
             print(f"Stage {stage} took {clean_time_taken}")
 
-    def build_raw(self, dynamo_kwargs={}):
+    def process_model_args(self,model_args,model_kwargs):
+        self.example_inputs = preprocess_samples.ExampleInputs(
+            self.original_mod,model_args,model_kwargs)
+        self.current_device = preprocess_device.get_device_and_check_all_same_device(
+            self.original_mod,self.example_inputs)
+
+        batch = Dim("batch") # from torch.export
+        self.dynamo_kwargs = dynamo_kwargs = {}
+        if self.dynamic_batch_dim is not None:
+            dynamo_kwargs["dynamic_shapes"] \
+                =   {k:{self.dynamic_batch_dim : batch} 
+                    for k in self.example_inputs.dict.keys()}
+        
+
+    def build_raw(self):
         if self.raw_graph is None:
             self.start_time()
             self.raw_graph = RawGraph(
@@ -80,7 +84,7 @@ class Result():
                 # dynamo_constraints=self.dynamo_constraints,
                 use_jit_instead_of_dynamo=self.use_jit_instead_of_dynamo,
                 jit_impose_device=self.jit_impose_device,
-                dynamo_kwargs=dynamo_kwargs)
+                dynamo_kwargs=self.dynamo_kwargs)
             self.show_time("Raw")
             
     def build_forward(self):
