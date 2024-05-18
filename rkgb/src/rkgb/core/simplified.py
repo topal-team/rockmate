@@ -331,7 +331,8 @@ class SimplifiedGraph(base.Graph):
     def __init__(self,
             forward_graph : ForwardGraph = None,
             original_mod=None,
-            device=None
+            device=None,
+            small_memsize_fine_to_simplify=1024**2,
     ):
         # 2 constructors: if given a forward_graph, then move from F to S
         # otherwise return an empty simplified_graph
@@ -408,7 +409,7 @@ class SimplifiedGraph(base.Graph):
             self.simplify_lists_and_tuples()
             # self.optional_simplify_cheap_operations()
             self.simplify_sizes()
-            self.optional_simplify_small_direct_nodes()
+            self.optional_simplify_small_direct_nodes(small_memsize_fine_to_simplify)
             self.simplify_view()
 
             self.create_nodes_for_random_operations_from_dict_rand(original_mod,device)
@@ -687,7 +688,7 @@ class SimplifiedGraph(base.Graph):
                 self.init_node.insert(sn_to_insert=sn,strong=True,simplified_graph=self)
 
 
-    def optional_simplify_small_direct_nodes(self):
+    def optional_simplify_small_direct_nodes(self,small_memsize_fine_to_simplify):
         # Nodes that 1) do not 'requires_grad'
         # 2) have a small `memsize`
         # 3) whose deps are only the init_node
@@ -695,7 +696,7 @@ class SimplifiedGraph(base.Graph):
         for sn in nodes:
             if ((sn.deps == set() or sn.deps == {self.init_node})
             and not sn.info.requires_grad
-            and sn.info.memsize < 10000):
+            and sn.info.memsize <= small_memsize_fine_to_simplify):
                 self.nodes.remove(sn)
                 self.init_node.insert(sn_to_insert=sn,strong=True,simplified_graph=self)
                 

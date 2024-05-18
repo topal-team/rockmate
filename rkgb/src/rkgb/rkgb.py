@@ -31,7 +31,8 @@ class Result():
             partitioners = None,
             print_time_in_each_stage = False,
             do_inspection = True,
-            dynamic_batch_dim = None
+            dynamic_batch_dim = None,
+            small_memsize_fine_to_simplify = 1024**2,
             ):
         self.original_mod = model
         self.inspection_device = inspection_device
@@ -43,6 +44,7 @@ class Result():
         self.do_inspection = do_inspection
         self.last_time = 0
         self.dynamic_batch_dim = dynamic_batch_dim
+        self.small_memsize_fine_to_simplify = small_memsize_fine_to_simplify
 
         self.process_model_args(model_args,model_kwargs)
         if "R" in wanted_graphs: self.build_raw()
@@ -107,7 +109,8 @@ class Result():
             self.simplified_graph = SimplifiedGraph(
                 self.forward_graph,
                 self.original_mod,
-                self.current_device)
+                self.current_device,
+                self.small_memsize_fine_to_simplify)
             self.show_time("Simplifications")
 
     def build_anonymization(self):
