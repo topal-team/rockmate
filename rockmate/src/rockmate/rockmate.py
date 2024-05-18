@@ -135,7 +135,9 @@ class Rockmate(torch.nn.Module):
         for pnode in self.rkgb_res.hierarchical_cluster.parameter_nodes:
             if pnode.mem < minor_offload_size and not pnode.is_buffer:
                 self.minor_param_nodes.append(pnode)
-        self.minor_param_nodes += self.rkgb_res.S.init_node.required_parameter_nodes
+        for pnode in self.rkgb_res.S.init_node.required_parameter_nodes:
+            if not pnode.is_buffer:
+                self.minor_param_nodes.append(pnode)
 
     def config_partitioner(self):
         if self.partitioners is None:
@@ -256,7 +258,7 @@ class Rockmate(torch.nn.Module):
         self.minor_parameters = []
         if self.minor_param_nodes:
             self.minor_parameters = [
-                self.original_mod.get_parameter(pnode.param_name)
+                pnode.get_value(self.original_mod)
                 for pnode in self.minor_param_nodes
             ]
 
