@@ -16,6 +16,24 @@ from transformers.models.bloom.modeling_bloom import BloomMLP, BloomConfig
 from transformers import LlamaModel, LlamaConfig, LlamaForSequenceClassification
 from peft import LoraModel, LoraConfig
 
+class MyDataset(torch.utils.data.Dataset):
+    def __init__(self, encodings):
+        # self.encodings = {"input_ids":[torch.randint(0, 600, [batch, seq_len])
+        #                                for _ in range(30)]}
+        self.labels = [1 for _ in encodings]
+        self.encodings = encodings
+
+    def __getitem__(self, idx):
+        item = {key: torch.tensor(val[idx]) 
+                for key, val in self.encodings.items()
+                # if "input_ids" in key
+                }
+        item['labels'] = torch.tensor(self.labels[idx])
+        return item
+
+    def __len__(self):
+        return len(self.encodings)
+
 def get7Bllama(batch, seq_len, nlayers=32, dtype=None, llama3=False, classification=False):
     if dtype is None:
         dtype = torch.get_default_dtype()
@@ -25,29 +43,35 @@ def get7Bllama(batch, seq_len, nlayers=32, dtype=None, llama3=False, classificat
     # Initializing a LLaMA llama-7b style configuration
     vocab_size = 128256 if llama3 else 32000
     
-    # Initializing a model from the llama-7b style configuration
-    if classification:
-        configuration = LlamaConfig(num_hidden_layers=nlayers,
+
+    configuration = LlamaConfig(num_hidden_layers=nlayers,
                                 hidden_size=4096,
                                 output_hidden_states=False,
                                 output_attentions=False,
                                 pad_token_id=0,
                                 use_cache=False
                                 )
-        # Initializing a model from the llama-7b style configuration
-        model = LlamaForSequenceClassification(configuration).to(dtype)
-    else:
-        configuration = LlamaConfig(
-                                vocab_size=vocab_size,
-                                num_hidden_layers=nlayers,
-                                hidden_size=4096,
-                                output_hidden_states=False,
-                                output_attentions=False,
-                                # use_cache=False
-                                )
-        configuration._attn_implementation="eager"
-        configuration._attn_implementation_internal="eager"
-        model = LlamaModel(configuration).to(dtype)
+    # Initializing a model from the llama-7b style configuration
+    configuration._attn_implementation="eager"
+    configuration._attn_implementation_internal="eager"
+    model = LlamaForSequenceClassification(configuration).to(dtype)
+
+    # # Initializing a model from the llama-7b style configuration
+    # if classification:
+    # else:
+    #     configuration = LlamaConfig(
+    #                             vocab_size=vocab_size,
+    #                             num_hidden_layers=nlayers,
+    #                             hidden_size=4096,
+    #                             output_hidden_states=False,
+    #                             output_attentions=False,
+    #                             use_cache=False
+    #                             )
+    #     configuration._attn_implementation="eager"
+    #     configuration._attn_implementation_internal="eager"
+    #     model = LlamaModel(configuration).to(dtype)
+    #     model.enable_input_require_grads()
+
     return model, [sample]
 
 def get13Bllama(batch, seq_len, nlayers=40, dtype=None, llama3=False, classification=False):
@@ -69,24 +93,24 @@ def get13Bllama(batch, seq_len, nlayers=40, dtype=None, llama3=False, classifica
     configuration._attn_implementation="eager"
     configuration._attn_implementation_internal="eager"
     # Initializing a model from the llama-7b style configuration
-    if classification:
-        configuration = LlamaConfig(
-                        vocab_size=vocab_size,
-                        num_hidden_layers=nlayers, 
-                        hidden_size=5120,
-                        intermediate_size=13824,
-                        num_attention_heads=40,
-                        output_hidden_states=False,
-                        output_attentions=False,
-                        pad_token_id=0,
-                        use_cache=False
-                        )
-        configuration._attn_implementation="eager"
-        configuration._attn_implementation_internal="eager"
-        model = LlamaForSequenceClassification(configuration).to(dtype)
-        model.config.pad_token_id = 0
-    else:
-        model = LlamaModel(configuration).to(dtype)
+    # if classification:
+    configuration = LlamaConfig(
+                    vocab_size=vocab_size,
+                    num_hidden_layers=nlayers, 
+                    hidden_size=5120,
+                    intermediate_size=13824,
+                    num_attention_heads=40,
+                    output_hidden_states=False,
+                    output_attentions=False,
+                    pad_token_id=0,
+                    use_cache=False
+                    )
+    configuration._attn_implementation="eager"
+    configuration._attn_implementation_internal="eager"
+    model = LlamaForSequenceClassification(configuration).to(dtype)
+    model.config.pad_token_id = 0
+    # else:
+    #     model = LlamaModel(configuration).to(dtype)
 
     return model, [sample]
 
@@ -101,11 +125,11 @@ def get3BPhi_2(batch, seq_len, dtype=None, nlayers=32, classification=False):
     configuration._attn_implementation="eager"
     configuration._attn_implementation_internal="eager"
     sample = torch.randint(0, 600, [batch, seq_len])
-    if classification:
-        model = PhiForSequenceClassification(configuration).to(dtype)
-        model.config.pad_token_id = 0
-    else:
-        model = PhiModel(configuration).to(dtype)
+    # if classification:
+    model = PhiForSequenceClassification(configuration).to(dtype)
+    model.config.pad_token_id = 0
+    # else:
+    #     model = PhiModel(configuration).to(dtype)
     return model, [sample]
 
 
@@ -170,12 +194,13 @@ def get7Bllama_lora(batch, seq_len, num_adapters=64, nlayers=32, dtype=None, lla
     target_modules = [f"layers.{i}.self_attn.q_proj" for i in range(nlayers)]
     target_modules += [f"layers.{i}.self_attn.k_proj" for i in range(nlayers)]
     target_modules += [f"layers.{i}.self_attn.v_proj" for i in range(nlayers)]
-    if classification:
-        target_modules = ["model."+s for s in target_modules]
+    # if classification:
+    target_modules = ["model."+s for s in target_modules]
     manual_lora(model, 
                 target_modules=target_modules,
                 num_adapters=num_adapters,
                 freeze_all=True)
-    model.enable_input_require_grads()
+    if classification:
+        model.enable_input_require_grads()
 
     return model, sample

@@ -179,8 +179,9 @@ def get_sched_stats(rkmod):
     return stats
 
 def Loss(y, labels=None):
-    return y.mean()
+    labels = torch.ones(y.shape[0], dtype=torch.long, device=y.device)
     return torch.nn.CrossEntropyLoss()(y, labels)
+    return y#.mean()
 
 def execution(model, 
          sample, 
@@ -402,9 +403,8 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B",
             time, mem = exec_rk(rkmod, sample, niters=niters)
         except Exception as e:
             exp_stats["exception"] = e
+            raise e
         torch.cuda.synchronize()
-        print(time, mem)
-
         exp_stats["time"] = time/niters
         exp_stats["peak_mem"] = mem
         exp_stats["date"] = datetime.now().strftime("%x_%H:%M")
