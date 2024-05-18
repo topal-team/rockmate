@@ -495,7 +495,7 @@ class OpSchedule:
             self.bwd_overhead = get_overhead_(
                 self.save_mem[self.loss_idx + 1 :],
                 self.overhead[self.loss_idx + 1 :],
-            )
+            ) - self.save_mem[self.loss_idx]
         else:
             self.bwd_overhead = 0
 
