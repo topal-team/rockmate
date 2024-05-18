@@ -28,7 +28,6 @@ from .solvers.ilp.ilp_solver import default_time_limit
 from .compiler import Compiler, RK_Storage, make_gd, Fct_record_event
 import psutil
 
-timer = TimerCUDA(torch.device("cuda"))
 
 
 class Rockmate(torch.nn.Module):
@@ -78,6 +77,10 @@ class Rockmate(torch.nn.Module):
         self.keep_outputs = keep_outputs
         self.list_solutions = []
         self.dynamic_batch_dim = dynamic_batch_dim
+        if torch.cuda.is_available():
+            self.timer = TimerCUDA(torch.device("cuda"))
+        else:
+            self.timer = torch.device("cpu")
         object.__setattr__(self, "original_mod", original_mod)
 
         self.config_partitioner()
@@ -215,6 +218,8 @@ class Rockmate(torch.nn.Module):
             if isinstance(solver, HILP):
                 solver.solve_top = True
                 solver.config.top_solve_kwargs["time_limit"] = self.ilp_time_limit_top
+                if self.dynamic_batch_dim is not None:
+                    solver.config.top_solve_kwargs["dynamic_batch_size"] = True
                 # print("temporarily changing total_nodes for top level hilp")
                 list_solutions.extend(
                     solver(
@@ -313,7 +318,7 @@ class Rockmate(torch.nn.Module):
             ],
             profile_memory=True,
         ) as p:
-            timer.start()
+            self.timer.start()
             for op in step.op_list:
                 self._exec(op)
             # torch.cuda.synchronize()
@@ -329,9 +334,9 @@ class Rockmate(torch.nn.Module):
             #         +step.del_ops):
             #     self._exec(op)
             torch.cuda.synchronize()
-            timer.end()
+            self.timer.end()
         p.export_chrome_trace(f"profiles/{len(self.step_profiles)}.json")
-        self.step_time.append(timer.elapsed())
+        self.step_time.append(self.timer.elapsed())
         self.step_memory_stats.append(torch.cuda.memory_stats())
         self.step_profiles.append(
             p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1)
