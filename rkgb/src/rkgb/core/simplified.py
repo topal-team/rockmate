@@ -921,7 +921,7 @@ class SimplifiedGraph(base.Graph):
 
         # 3) init node
         if only_function_name: label = "INPUT"
-        else: label = "INPUT\n"+self.init_code
+        else: label = f"INPUT\n{self.init_code}"
         dot.node(self.init_node.main_target,
             label,
             color=color_special,
