@@ -678,11 +678,12 @@ class HierarchicalCluster():
         # ================ END SECOND CONSTRUCTOR ==================
 
     def translate_representee_node(self, re_node):
-        if self is self.representee_cluster or re_node in self.list_anodes:
+        if self is self.representee_cluster:
             return re_node
         try:
             ano_node = self.representee_cluster.translator.to_ano(re_node)
         except:
+            if re_node in self.list_anodes:return re_node
             raise TypeError(f"{re_node} cannot be translated to anonymized node")
         try:
             self_node = self.translator.from_ano(ano_node)
