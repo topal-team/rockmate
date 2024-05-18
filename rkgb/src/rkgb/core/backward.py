@@ -312,6 +312,9 @@ class ForwardAndBackwardGraph(base.Graph):
                 self.dict_data_anodes[req_target]
                 for req_target in bwd_real_dependencies
             )
+            for anode in fwd_cnode_deps:
+                if anode.mem < 1024**2 and anode not in bwd_cnode_deps_real:
+                    bwd_cnode_deps_real.add(anode)
             # - fake deps
             bwd_cnode_deps_fake = fwd_cnode_deps - bwd_cnode_deps_real
             # - phantoms
