@@ -17,6 +17,7 @@ def get_label(key):
     "offmate_no_act_offload":"OffMate w/o Act Offload",
     "offmate_no_cpu_optim":"OffMate w/o CPU Optimize",
     "llama7b": "Llama2-7B",
+    "llama7b_lora": "Llama2-7B-Lora",
     "phi2-3b": "Phi-2",
     "float32": "FP32",
     "bfloat16": "BF16",
@@ -50,7 +51,7 @@ class Viz:
         # ax.set_xticks([])
         # ax.set_yticks([])
         
-    def plot_torch(self, ax, ax2, i = 1, j = 2, match_coloer = "r"):
+    def plot_torch(self, ax, ax2, i = 1, j = 2, match_coloer = "purple"):
         method = "torch"
         results = read_res(f"exp_results/{method}-{self.model}-{self.dtype}-{self.id}.pkl")
         nlayers1 = list(sorted([k for k in results.keys() if "time" in results[k]]))
@@ -67,8 +68,20 @@ class Viz:
         ax.plot(nlayers2, t_exp, linestyle="dashed", color=match_coloer, label=get_label("Torch"))
         ax.plot(nlayers1, t, color=match_coloer)
 
-        mlabels = range(10,110, 10)
-        mticks = np.array([(mem*1024**3 -results[i]["peak_mem"])/k_m for mem in mlabels])+i
+        m_exp = [(results[i]["peak_mem"]/self.time_norm + k_m * (n-i)) for n in nlayers2]
+        
+        def generate_ticks(max_mem):
+            unit = 1024**3*10
+            while max_mem//unit > 7:
+                unit *= 2
+            max_l = max_mem//unit + 1
+            gb_unit = unit/1024**3
+            return np.arange(0, (max_l+1)*gb_unit, gb_unit, dtype=int), gb_unit
+        
+        # mlabels = range(10,110, 10)
+        mlabels, unit = generate_ticks(max(m_exp))
+        mticks = np.array([(mem*unit*1024**3 -results[i]["peak_mem"])/k_m for mem in mlabels])+i
+        ax2.set_xlim(ax.get_xlim())
         ax2.set_xticks(mticks)
         ax2.set_xticklabels(mlabels)
         ax2.xaxis.set_ticks_position('top')
