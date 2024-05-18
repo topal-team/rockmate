@@ -10,7 +10,7 @@ import warnings
 import gc
 import rkgb
 from rkgb.lowlevel.preprocess_samples import ExampleInputs
-from rkgb.lowlevel.measure import tensor_memory_size, TimerCUDA
+from rkgb.lowlevel.measure import tensor_memory_size, get_Timer
 from rkgb.lowlevel.constants import ref_verbose, ExceptionModuleDoesNotReqGrad
 from rkgb.lowlevel.ast_add_on import ast_to_str, make_str_list_assign
 from rkgb.core.partitioned import (
@@ -77,10 +77,7 @@ class Rockmate(torch.nn.Module):
         self.keep_outputs = keep_outputs
         self.list_solutions = []
         self.dynamic_batch_dim = dynamic_batch_dim
-        if torch.cuda.is_available():
-            self.timer = TimerCUDA(torch.device("cuda"))
-        else:
-            self.timer = torch.device("cpu")
+        self.timer = get_Timer(self.device)
         object.__setattr__(self, "original_mod", original_mod)
 
         self.config_partitioner()

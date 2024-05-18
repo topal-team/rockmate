@@ -72,7 +72,6 @@ class Result():
             dynamo_kwargs["dynamic_shapes"] \
                 =   {k:{self.dynamic_batch_dim : batch} 
                     for k in self.example_inputs.dict.keys()}
-        
 
     def build_raw(self):
         if self.raw_graph is None:

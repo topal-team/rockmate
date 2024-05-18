@@ -102,6 +102,11 @@ class TimerCUDA(Timer):
     def elapsed(self):
         return self.startEvent.elapsed_time(self.endEvent)
 
+
+def get_Timer(device):
+    if "cuda" in str(device): return TimerCUDA(device)
+    else: return TimerCPU()
+
 # =========
 
 
