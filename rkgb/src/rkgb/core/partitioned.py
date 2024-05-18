@@ -132,6 +132,7 @@ class PartitionedGraph(base.Graph):
                 self.output_nodes = set()
                 s_nodes = partitioned_cluster.s_nodes
                 list_blocks_s_nodes = []
+                dict_sn_to_pn = dict()
                 for block_i in range(nb_blocks):
                     (start_i,end_i) = list_of_blocks_indices[block_i]
                     # 'start' is included in the block; 'end' isn't
@@ -166,24 +167,30 @@ class PartitionedGraph(base.Graph):
                             break
 
                     # 3) Edges with the previous block
+                    for sn in block_s_nodes:
+                        dict_sn_to_pn[sn] = block_pn
                     list_blocks_s_nodes.append(set(block_s_nodes))
                     if block_i > 0:
-                        prev_pn : PartitionedNode = self.nodes[-2]
-                        block_pn.deps.add(prev_pn)
-                        block_pn.deps_global.add(prev_pn)
-                        prev_pn.users.add(block_pn)
-                        prev_pn.users_global.add(block_pn)
-                        # global edges are useless since not dynamic
-                        preceding_block_s_nodes = list_blocks_s_nodes[-2]
                         for sn in block_s_nodes:
+                            # deps:
+                            for req_sn in sn.deps:
+                                if req_sn not in block_s_nodes:
+                                    req_pn : PartitionedNode = dict_sn_to_pn[req_sn]
+                                    if req_pn not in block_pn.deps:
+                                        block_pn.deps.add(req_pn)
+                                        block_pn.deps_global.add(req_pn)
+                                        req_pn.users.add(block_pn)
+                                        req_pn.users_global.add(block_pn)
+                            # deps through artifacts:
                             for req_sn in sn.deps_through_artifacts:
-                                if req_sn in preceding_block_s_nodes:
-                                    block_pn.deps_through_artifacts.add(prev_pn)
-                                    block_pn.deps_through_artifacts_global.add(prev_pn)
-                                    prev_pn.users_through_artifacts.add(block_pn)
-                                    prev_pn.users_through_artifacts_global.add(block_pn)
+                                if req_sn not in block_s_nodes:
+                                    req_pn : PartitionedNode = dict_sn_to_pn[req_sn]
+                                    if req_pn not in block_pn.deps_through_artifacts:
+                                        block_pn.deps_through_artifacts.add(req_pn)
+                                        block_pn.deps_through_artifacts_global.add(req_pn)
+                                        req_pn.users_through_artifacts.add(block_pn)
+                                        req_pn.users_through_artifacts_global.add(block_pn)
                         # artifact edges are redundant with classic ones -> useless
-
 
             # 2) SECOND CONSTRUCTOR:
             # - Default constructor translating partitioner_cluster.s_nodes
