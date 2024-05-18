@@ -389,10 +389,6 @@ class Partitioner():
         self.config : self.__class__.Config = None
     def __call__(self, cluster):
         return PartitionedGraph(cluster)
-        # raise Exception(
-            # "Base class of partitioners. __call__ method "\
-            # "must be overwritten by all subclasses")
-
 
 
 
@@ -700,23 +696,6 @@ class PartitionedStructure():
     def __str__(self):
         return "PartitionedStructure whose main cluster is:\n"+str(self.main_cluster)
     
-    # def render(self,
-            # name=None,
-            # view=True,
-            # only_function_name=False,
-            # include_artifact_edges=True,
-            # directory=base.Graph.default_render_directory,
-            # render_format=base.Graph.default_render_format,
-            # render=True,
-            # dot=None):
-        # self.main_cluster.render(
-            # name,view,only_function_name,
-            # include_artifact_edges,
-            # directory,render_format,
-            # render,dot
-        # )
-                
-
 
 
 class PartitionedDynamicManipulation(): # only contains staticmethod
@@ -942,6 +921,7 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
                 pn.name = f"PN({sub_cluster.name})"
                 pn.sub_graph = None # no longer dynamic
                 if sub_cluster.representee_cluster is sub_cluster:
+                    sub_graph.cluster = sub_cluster
                     sub_cluster.partitionings.append(sub_graph)
                     sub_cluster.partitioners_already_used.append(partitioner)
                     PartitionedDynamicManipulation.freeze(sub_graph,p_structure,partitioner)
