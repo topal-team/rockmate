@@ -5,10 +5,10 @@ import torch.nn as nn
 from copy import deepcopy
 import numpy as np
 # from models import *
-from LLM import get13Bllama, get3BPhi_2, get7Bllama, get7Bllama_lora
+from LLM import get13Bllama, get3BPhi_2, get7Bllama, get7Bllama_lora, get3BPhi_15
 from rockmate import Rockmate
 from rockmate.op_schedule import *
-from rockmate.solvers import HILP, CheapSolver
+from rockmate.solvers import HILP, CheapSolver, RK_rotor
 from rockmate.simulation import Simulator
 from datetime import datetime
 device = torch.device("cuda")
@@ -116,54 +116,6 @@ def check_correctness(model, sample, budget=1e9, optim=torch.optim.Adam):
     execution(model_r, sample_r, print_mem=False, print_loss=True)
 
 
-class LoraLinear(nn.Module):
-    def __init__(self, linear, num_adapters=10, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.linear = linear
-        self.linear.weight.requires_grad = False
-        if self.linear.bias is not None:
-            self.linear.bias.requires_grad = False
-        u = nn.Parameter(torch.randn(num_adapters, self.linear.weight.shape[0]), requires_grad=True)
-        v = nn.Parameter(torch.randn(self.linear.weight.shape[1], num_adapters), requires_grad=True)
-        self.register_parameter("u", u)
-        self.register_parameter("v", v)
-
-    def forward(self, x):
-        res1 = torch.matmul(x, self.v)
-        res2 = torch.matmul(res1, self.u)
-        y = self.linear(x)
-        out = y+res2
-        return out
-
-def manual_lora(model:nn.Module, target_modules, num_adapters=10, freeze_all=True):
-    if freeze_all:
-        for p in model.parameters():
-            p.requires_grad = False
-    for module_name in target_modules:
-        module = model.get_submodule(module_name)
-        if isinstance(module, nn.Linear):
-            new_module = LoraLinear(module, num_adapters=num_adapters)
-        else:
-            raise TypeError(f"manual lora does not work with {type(module)}")
-        # setattr(model, module_name, new_module)
-
-        atoms = module_name.split(".")
-        mod: torch.nn.Module = model
-
-        for item in atoms:
-            if not hasattr(mod, item):
-                raise AttributeError(mod._get_name() + " has no "
-                                        "attribute `" + item + "`")
-            if getattr(mod, item) == module:
-                # setattr(mod, item, new_module)
-                mod.add_module(item, new_module)
-                break
-
-            mod = getattr(mod, item)
-            if not isinstance(mod, torch.nn.Module):
-                raise AttributeError("`" + item + "` is not "
-                                        "an nn.Module")
-
 def get_sched_stats(rkmod):
     stats = {}
     stats[f"Original module fwd+bwd time"] = sum(kcn.time for kcn in rkmod.rkgb_res.hierarchical_cluster.list_cnodes if kcn.time)
@@ -173,9 +125,6 @@ def get_sched_stats(rkmod):
     stats[f"Schedule_total_offload_time"] = sum(step.ofl_ops.time for step in rkmod.op_sched.steps)
     stats[f"Schedule_total_prefetch_time"] = sum(step.prf_ops.time for step in rkmod.op_sched.steps)
     stats[f"Schedule_total_cpu_optimize_time"] = sum(step.opt_ops.time for step in rkmod.op_sched.steps)
-    # stats[f"Schedule_time_from_waiting_cpu optimize"] = sum((step.time - step.comp_ops.time) for step in rkmod.op_sched.steps if step.time == step.opt_ops.time)
-    # stats[f"Schedule_time_from_waiting_offload"] = sum((step.time - step.max2nd()) for step in rkmod.op_sched.steps if step.time == step.ofl_ops.time)
-    # stats[f"Schedule_time_from_waiting_prefetch"] = sum((step.time - step.max2nd()) for step in rkmod.op_sched.steps if step.time == step.prf_ops.time)
     return stats
 
 def Loss(y, labels=None):
@@ -317,45 +266,23 @@ def exp_pt(nlayers=1,
         pickle.dump(results, f)
 
 def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B",
-              activation_offload=True, cpu_optimization=True, get_model=get7Bllama):
-    # model, sample = get3Bllm_embed(3,512, nlayers=nlayers)
+              activation_offload=True, cpu_optimization=True, get_model=get7Bllama,
+              dynamic_batch_dim=None, rotor=False, id_batch=False):
     model, sample = get_model(batch_size, 512, nlayers=nlayers)
-    if num_adapters:
-        manual_lora(model, target_modules=[f"layers.{i}.self_attn.q_proj" for i in range(nlayers)]
-                +[f"layers.{i}.self_attn.k_proj" for i in range(nlayers)]
-                +[f"layers.{i}.self_attn.v_proj" for i in range(nlayers)]
-                # +[f"layers.{i}.self_attn.o_proj" for i in range(nlayers)]
-                # +[f"layers.{i}.mlp.gate_proj" for i in range(nlayers)]
-                # +[f"layers.{i}.mlp.up_proj" for i in range(nlayers)]
-                # +[f"layers.{i}.mlp.down_proj" for i in range(nlayers)]
-                ,
-                num_adapters=num_adapters,
-                freeze_all=True)
-
-    # budget = 8 * 1024**3
     budget = torch.cuda.get_device_properties(0).total_memory - 2*1024**3#to avoid fragmentation
     niters = 5
-    partitioners = [rkgb.partitioned.PartitionerRecognizeRepetitivePattern(
-        strict_max_number_of_top_level_nodes=nlayers+4,
-        max_number_of_patterns=nlayers+2,
-        min_percentage_covered_required=0.75)]
 
-    # rkmod = Rockmate(model, sample, 1e8, solve_sched=0, 
-    #                 ilp_solver="PULP_CBC_CMD", 
-    #                 #   ilp_solver="HiGHS_CMD", 
-    #                 # cpu_optim = DeepSpeedCPUAdam,
-    #                 partitioners=partitioners,
-    #                 optim_kwargs = {"lr":1e-4},
-    #                 ilp_time_limit=10*60,
-    #                 minor_param_size=4*1024**2,
-    #                 )
-
-    rkmod = solve_rkmod(model, 
+    if not rotor:
+        rkmod = solve_rkmod(model, 
                         sample, 
                         budget=budget, 
-                        partitioners=partitioners,
                         activation_offload=activation_offload,
-                        cpu_optimization=cpu_optimization)
+                        cpu_optimization=cpu_optimization,
+                        dynamic_batch_dim=dynamic_batch_dim)
+    else:
+        rkmod = solve_rockmate(model, 
+                        sample, 
+                        budget=budget)
     
     print(f"number of HCN: {len(rkmod.rkgb_res.hierarchical_cluster.partitionings[0].list_HCNs)}")
     print(f"number of HAN: {len(rkmod.rkgb_res.hierarchical_cluster.partitionings[0].list_HANs)}")
@@ -385,59 +312,68 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B",
     ### Solve schedule
     # rkmod.preprocess()
     # rkmod.solve_sched(budget, recursive=False)
-    md = rkmod.list_solvers[0].md
-    if md.feasible:
-    #     # analyze_mem(rkmod)
-    #     pass
-    # else:
-    #     raise ValueError
-        print(md.solving_time)
-        exp_stats["solving_time"] = str(md.solving_time)
-    # mem_ilp, mem_sched = analyze_mem(rkmod)
+    if not rotor:
+        md = rkmod.list_solvers[0].md
+        if md.feasible:
+            sample = dynamic_sample(sample, md)
+        #     # analyze_mem(rkmod)
+        #     pass
+        # else:
+        #     raise ValueError
+            print(md.solving_time)
+            exp_stats["solving_time"] = str(md.solving_time)
+            exp_stats["ilp_objective"] = str(md.md.objective.value())
+        # mem_ilp, mem_sched = analyze_mem(rkmod)
 
-        stats = get_sched_stats(rkmod)
-        exp_stats["sched_stats"] = stats
-        print(stats)
+            stats = get_sched_stats(rkmod)
+            exp_stats["sched_stats"] = stats
+            print(stats)
 
-        try:
-            time, mem = exec_rk(rkmod, sample, niters=niters)
-        except Exception as e:
-            exp_stats["exception"] = e
-            raise e
-        torch.cuda.synchronize()
-        exp_stats["time"] = time/niters
-        exp_stats["peak_mem"] = mem
-        exp_stats["date"] = datetime.now().strftime("%x_%H:%M")
+            try:
+                time, mem = exec_rk(rkmod, sample, niters=niters)
+            except Exception as e:
+                exp_stats["exception"] = e
+                raise e
+            torch.cuda.synchronize()
+            exp_stats["time"] = time/niters
+            exp_stats["peak_mem"] = mem
+            exp_stats["date"] = datetime.now().strftime("%x_%H:%M")
+    else:
+        if rkmod:
+            try:
+                time, mem = exec_pt(rkmod, sample, niters=niters)
+            except Exception as e:
+                exp_stats["exception"] = e
+                raise e
+            torch.cuda.synchronize()
+            exp_stats["time"] = time/niters
+            exp_stats["peak_mem"] = torch.cuda.max_memory_allocated()
+            exp_stats["date"] = datetime.now().strftime("%x_%H:%M")            
     exp_stats["RAM_1"] = psutil.virtual_memory()
     del rkmod
     gc.collect()
     print(exp_stats)
-    # rkmod.compiler.storage.ld[rkmod.output.name.split(" ")[0]].data = torch.empty(0)
-    # rkmod.compiler.storage.ld["_"+rkmod.output.name.split(" ")[0]].data = torch.empty(0)
     if os.path.exists(exp_id):
         with open(exp_id, "rb") as f:
             results = pickle.load(f)
     else:
         results = {}
-
-    results[nlayers] = exp_stats
+    eid = batch_size if id_batch else nlayers
+    results[eid] = exp_stats
     with open(exp_id, "wb") as f:
         pickle.dump(results, f)
-    # if exp_id:
-        # os.makedirs(os.path.dirname(f"exp_results/{exp_id}/"), exist_ok=True)
-
-        # print("dump result")
-        # with open(f"exp_results/{exp_id}", "wb") as f:
-            # pickle.dump(exp_stats, f)
-        # rkmod.save_to_local(f"exp_results/{exp_id}", id=id)
-    # return rkmod
             
 def solve_rkmod(model, 
                 sample, 
                 budget,
-                partitioners, 
                 activation_offload=True,
-                cpu_optimization=True):
+                cpu_optimization=True,
+                dynamic_batch_dim=None):
+    partitioners = [rkgb.partitioned.PartitionerRecognizeRepetitivePattern(
+        strict_max_number_of_top_level_nodes=nlayers+4,
+        max_number_of_patterns=nlayers+2,
+        min_percentage_covered_required=0.75)]
+
     solver = HILP(ilp_solver="PULP_CBC_CMD")
     solver.config.offload = True
     solver.config.solve_only_top_level = True
@@ -456,9 +392,54 @@ def solve_rkmod(model,
                         partitioners=partitioners,
                         ilp_time_limit=10*60,
                         minor_offload_size=10*1024**2,
+                        dynamic_batch_dim=dynamic_batch_dim
                         )
     return rkmod
 
+       
+def solve_rockmate(model, 
+                sample, 
+                budget):
+    partitioners = [rkgb.partitioned.PartitionerSequence(
+        sub_partitioner=rkgb.partitioned.Partitioner())]
+    model.to(device)
+    sample = [s.to(device) for s in sample]
+    solver = HILP(ilp_solver="PULP_CBC_CMD")
+    solver.config.offload = False
+    solver.config.solve_only_top_level = False
+    solver.config.nb_total_nodes_top_level = 0
+    rk_solver = RK_rotor()
+    list_solvers = [solver, rk_solver]
+
+    rkmod = Rockmate(model, sample, budget, 
+                    solve_sched=False, 
+                        ilp_solver="PULP_CBC_CMD", 
+                        list_solvers=list_solvers,
+                        partitioners=partitioners,
+                        ilp_time_limit=10*60,
+                        minor_offload_size=10*1024**2,
+                        )
+    cluster = rkmod.rkgb_res.hierarchical_cluster
+    param_mem = sum(pnode.mem for pnode in cluster.parameter_nodes)
+    param_grad_mem = sum(pnode.mem for pnode in cluster.parameter_nodes if pnode.info.requires_grad)
+    act_budget = budget - param_mem - (1+rkmod.optimize_metrics["optimizer_states_size"]) * param_grad_mem
+    if act_budget<0:
+        return False
+    print(act_budget)
+    rkmod.preprocess()
+    rkmod.solve_sched(act_budget)
+    rkmod.get_compiled_fct()
+    return rkmod
+
+
+
+def dynamic_sample(sample, md):
+    if not md.dynamic_batch_size:return sample
+    batch_size = int(1/md.req_w.value())
+    sample_new = []
+    for s in sample:
+        sample_new.append(s.repeat(batch_size, 1))
+    return sample_new
 
 if __name__=="__main__":
     # exp_id = datetime.now().strftime('llama-7b')
@@ -474,6 +455,7 @@ if __name__=="__main__":
     parser.add_argument("--dtype", nargs="?", default="float32", type=str)
     parser.add_argument("--model", nargs="?", type=str, default="llama7b")
     parser.add_argument("--method", nargs="?", type=str, default="offmate")
+    parser.add_argument("--id_batch", nargs="?", type=bool, default=False)
 
     dtypes = {"float32":torch.float32,
               "bfloat16": torch.bfloat16,
@@ -483,13 +465,15 @@ if __name__=="__main__":
         "llama7b": get7Bllama,
         "llama13b": get13Bllama,
         "phi2-3b": get3BPhi_2,
+        "phi2-2b": get3BPhi_15,
         "llama7b_lora":get7Bllama_lora,
     }
     kwargs = {
         "offmate":{},
         "offmate_no_act_offload":{"activation_offload":False},
         "offmate_no_cpu_optim":{"cpu_optimization":False},
-        "rockmate":{},
+        "offmate_dynamic_batch":{"dynamic_batch_dim":0},
+        "rockmate":{"rotor":True},
     }
 
     args = parser.parse_args()
@@ -509,6 +493,7 @@ if __name__=="__main__":
                   exp_id=exp_id, 
                   num_adapters=num_adapters,
                   get_model=models[args.model],
+                  id_batch=args.id_batch,
                   **kwargs[args.method])
     else:
         exp_pt(nlayers=nlayers, 
