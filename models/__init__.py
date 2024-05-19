@@ -11,7 +11,9 @@ __all__ = [
     "get_UNO",
     "get_Bert",
     "get_LLAMA",
-    "get_Bloom",
+    "get7BLlamaSequence",
+    "get3BPhi_2",
+    "get2Bbloom",
     "LossLayer",
     "get_iterator_over_all_examples",
     "sanity_check_forward_and_backward",
@@ -179,6 +181,7 @@ def get_LLAMA(device,config=None,num_hidden_layers=2):
 
 # =========================================================
 
+"""
 def get_Bloom(device,n_layer=2):
     from transformers import BloomConfig, BloomModel
     config = BloomConfig(hidden_size=2560, n_layer=n_layer)
@@ -186,10 +189,70 @@ def get_Bloom(device,n_layer=2):
     model.to(device)
     sample = [torch.randint(0, 600, [3, 64])]
     return model,sample
+"""
 
 # =========================================================
 
+def get7BLlamaSequence(batch=2, seq_len=512, nlayers=8, dtype=None, llama3=False, classification=False):
+    from transformers import LlamaModel, LlamaConfig, LlamaForSequenceClassification
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+    #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
+    sample = torch.randint(0, 600, [batch, seq_len])
+    # Initializing a LLaMA llama-7b style configuration
+    vocab_size = 128256 if llama3 else 32000
+    
 
+    configuration = LlamaConfig(num_hidden_layers=nlayers,
+                                hidden_size=4096,
+                                output_hidden_states=False,
+                                output_attentions=False,
+                                pad_token_id=0,
+                                use_cache=False
+                                )
+    # Initializing a model from the llama-7b style configuration
+    configuration._attn_implementation="eager"
+    configuration._attn_implementation_internal="eager"
+    model = LlamaForSequenceClassification(configuration).to(dtype)
+    return model, [sample]
+
+# =========================================================
+
+def get3BPhi_2(batch=2, seq_len=512, dtype=None, nlayers=8, classification=False):
+    from transformers import PhiModel, PhiConfig, PhiForSequenceClassification
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+    # 2.7B parameters
+    configuration = PhiConfig(intermediate_size= 10240,
+                            hidden_size=2560,
+                            num_hidden_layers=nlayers)
+    configuration._attn_implementation="eager"
+    configuration._attn_implementation_internal="eager"
+    sample = torch.randint(0, 600, [batch, seq_len])
+    model = PhiForSequenceClassification(configuration).to(dtype)
+    model.config.pad_token_id = 0
+    return model, [sample]
+from transformers import BloomForSequenceClassification, BloomConfig
+
+
+# =========================================================
+
+def get2Bbloom(batch=2, seq_len=512, dtype=None, nlayers=24, classification=False):
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+    configuration = BloomConfig(hidden_size=2048,
+                            num_hidden_layers=nlayers,
+                            output_hidden_states=False,
+                            output_attentions=False,
+                            pad_token_id=0,
+                            use_cache=False,
+                            )
+    configuration._attn_implementation="eager"
+    configuration._attn_implementation_internal="eager"
+    sample = torch.randint(0, 600, [batch, seq_len])
+    model = BloomForSequenceClassification(configuration).to(dtype)
+    model.config.pad_token_id = 0
+    return model, [sample]
 
 # =========================================================
 

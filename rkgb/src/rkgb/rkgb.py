@@ -51,7 +51,7 @@ class Result():
         if "F" in wanted_graphs: self.build_forward()
         if "S" in wanted_graphs: self.build_simplified()
         if "P" in wanted_graphs: self.build_partitioned()
-        if "FB" in wanted_graphs: self.build_forward_and_backward()
+        if "FB" in wanted_graphs: self.build_backward()
         if "H" in wanted_graphs: self.build_hierarchical()
 
     def start_time(self):
@@ -139,7 +139,7 @@ class Result():
             self.last_partitioners = partitioners
             self.show_time("Partitioning")
             
-    def build_forward_and_backward(self):
+    def build_backward(self):
         if self.forward_and_backward_graph is None:
             self.build_simplified()
             self.build_anonymization()
@@ -158,7 +158,7 @@ class Result():
     def build_hierarchical(self,partitioners = None):
         if self.hierarchical_structure is None or partitioners is not None:
             self.build_partitioned(partitioners)
-            self.build_forward_and_backward()
+            self.build_backward()
             self.start_time()
             self.hierarchical_structure = HierarchicalStructure(
                 self.partitioned_structure,

@@ -167,7 +167,7 @@ class RawGraph(base.Graph):
         dict_dynamo_name_to_raw_node = dict()
 
         # I) Process the "args" = which consists of all the inputs, 
-        # parameters and "buffers". Buffers are variables stored in
+        # parameters and buffers. Buffers are variables stored in
         # `self` that aren't parameters; e.g. BatchNorm's running_var
         dynamo_all_args = whole_code_ast.args.args
         dict_dynamo_name_to_correct_ast = dict()
@@ -237,8 +237,7 @@ class RawGraph(base.Graph):
         assignment_codes = [
             code for code in whole_code_ast.body
             if (isinstance(code,ast.Assign)
-            and (not ast_add_on.is_constant(code.value)
-            or code.value.value is not None))
+            and not(ast_add_on.is_constant(code.value) and code.value.value is None))
         ]
         dict_code_target_to_code = dict()
         for code in assignment_codes:
@@ -279,6 +278,7 @@ class RawGraph(base.Graph):
         for dynamo_input_name, dynamo_input_node in dynamo_input_nodes.items():
             raw_node = dict_dynamo_name_to_raw_node[dynamo_input_name]
             self.dynamic_shapes[raw_node.target] = dynamo_input_node.meta["val"].shape
+        set_dynamo_vars_that_are_constants = set() 
         for dynamo_node,node_code in zip(
                 dynamo_assignment_nodes,
                 assignment_codes):
@@ -291,6 +291,26 @@ class RawGraph(base.Graph):
             code_with_correct_device = ast_add_on.substitute_device_call(
                 node_code.value
             )
+            substitution_dict = dict()
+            for dep_id in dependency_dynamo_names:
+                if not dep_id in dict_dynamo_name_to_correct_ast:
+                    # To handle stuff like:
+                    # For instance (example in Bloom)
+                    # `lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_lifted_tensor_constant0)`
+                    # where `_lifted_tensor_constant0` is undefined
+                    for dynamo_key,cst_value in dynamo_result.tensor_constants.items():
+                        if dep_id in dynamo_key:
+                            cst_name = parser.get_constant_name(dep_id)
+                            self.dict_constants[cst_name] = cst_value
+                            dict_dynamo_name_to_correct_ast[dep_id] = ast.Name(cst_name)
+                            set_dynamo_vars_that_are_constants.add(dep_id)
+                            break
+                    if not dep_id in dict_dynamo_name_to_correct_ast:
+                        raise Exception(
+                            f"{dep_id} is called in the line:\n"\
+                            f"{ast_add_on.ast_to_str(node_code)}\n"\
+                            f"but we don't know where it's defined.")
+                substitution_dict[dep_id] = dict_dynamo_name_to_correct_ast[dep_id]
             code_with_correct_names = ast_add_on.substitute_with_dict(
                 code_with_correct_device,
                 {
@@ -318,7 +338,8 @@ class RawGraph(base.Graph):
                     dict_dynamo_name_to_correct_ast[param_id])
                 for param_id in dependency_dynamo_names
                 if (param_id not in dict_code_target_to_code
-                and param_id not in dict_dynamo_name_to_raw_node)
+                and param_id not in dict_dynamo_name_to_raw_node
+                and param_id not in set_dynamo_vars_that_are_constants)
             )
         self.nodes = parser.all_raw_nodes
 
