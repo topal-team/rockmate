@@ -26,7 +26,7 @@ class PartitionedNode(base.Node):
         sub_graph : PartitionedGraph
         super().__init__(parent_structure_with_id_generator=main_graph)
         self.main_graph  = main_graph
-        self.sub_cluster = sub_cluster
+        self.sub_cluster : PartitionedCluster = sub_cluster
         self.main_target = main_target
         self.sub_graph   = sub_graph
         self.simplified_node : SimplifiedNode = simplified_node
@@ -411,6 +411,8 @@ class PartitionedCluster():
     outputs_mt = None
     translator : anonymize.ClusterTranslator = None
     self_or_strictly_equal_cluster = None
+    cluster_hash = None
+    ano_hash = None
     ano_cluster_id = None
     name = None
     representee_cluster = None
@@ -424,7 +426,7 @@ class PartitionedCluster():
     dict_first_sn_to_required_inputs_sn = None
     dict_first_mt_to_required_inputs_mt = None
     dict_output_mt_to_targets_sent = None
-    # Latter :
+    # Later :
     h_cluster = None
 
     def __init__(self,
@@ -560,6 +562,7 @@ class PartitionedCluster():
     # =============================
     def make_ano_cluster_id(self):
         ano_hash = anonymize.AnonymousHash.hash(self)
+        self.ano_hash = ano_hash
         dict_ano_hash_to_ano_id = self.p_structure.dict_cluster_ano_hash_to_ano_cluster_id
         dict_ano_id_to_representee_cluster = self.p_structure.dict_cluster_ano_id_to_representee_cluster
         if ano_hash in dict_ano_hash_to_ano_id:
@@ -1494,10 +1497,25 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             )
             if self.config.split_patterns_in_two:
                 new_blocks = self.split_patterns_in_two_parts(
-                    blocks_indices,patterns_indices,pg)
+                    blocks_indices,pg)
                 if new_blocks == blocks_indices:
                     pass # keep pg
                 else:
+                    # We will rebuild the graph with the new blocks
+                    # so first we need to clean the global directory: 
+                    # ie remove mentions of the old clusters
+                    dict_cl_hash_to_cl = cluster.p_structure.dict_cluster_hash_to_cluster
+                    dict_cl_ano_hash_to_ano_id = cluster.p_structure.dict_cluster_ano_hash_to_ano_cluster_id
+                    dict_cl_ano_id_to_repr = cluster.p_structure.dict_cluster_ano_id_to_representee_cluster
+                    for pn in pg.nodes:
+                        pn : PartitionedNode
+                        if pn.sub_cluster is not None:
+                            pn_cl = pn.sub_cluster
+                            if pn_cl.self_or_strictly_equal_cluster is pn_cl:
+                                del dict_cl_hash_to_cl[pn_cl.cluster_hash]
+                                if pn_cl.representee_cluster is pn_cl:
+                                    del dict_cl_ano_hash_to_ano_id[pn_cl.ano_hash]
+                                    del dict_cl_ano_id_to_repr[pn_cl.ano_cluster_id]
                     pg = PartitionedGraph(
                         partitioned_cluster=cluster,
                         list_of_blocks_indices=new_blocks)
@@ -1514,9 +1532,6 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             return pg
                 
 
-
-
-                
         
 
     def build_blocks_based_on_patterns(self,patterns_indices,total_length):
@@ -1635,16 +1650,13 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
     def split_patterns_in_two_parts(
             self,
             blocks_indices,
-            patterns_indices,
             current_pg : PartitionedGraph):
-        pattern_starts = [start for (start,_) in patterns_indices]
-        pattern_ends = [end for (_,end) in patterns_indices]
         new_blocks = []
         for block,block_pn in zip(blocks_indices,current_pg.nodes):
             block_pn : PartitionedNode
             start,end = block
             # if not (start in pattern_starts or end in pattern_ends):
-            if end-start < 10:
+            if end-start < 14:
                 new_blocks.append(block)
                 # e.g. intermediate blocks / inputs / outputs
             else:

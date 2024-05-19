@@ -310,7 +310,7 @@ class Graph():
         self.dict_constants = dict()
         self.dict_info : dict[str,variable_info.VariableInfo] = dict()
         self.dict_rand = dict() # empty after S
-        self.nodes = []
+        self.nodes : list[self.node_class]= []
         self.output_nodes = []
         # == init node_unique_id_generator ==
         if other_object_with_id_generator is not None:

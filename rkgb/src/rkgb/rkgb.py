@@ -153,7 +153,7 @@ class Result():
                 self.inspection_device,
                 self.do_inspection,
                 self.dict_mt_to_sn_ano_material)
-            self.show_time("ForwardAndBackward")
+            self.show_time("Backward")
 
     def build_hierarchical(self,partitioners = None):
         if self.hierarchical_structure is None or partitioners is not None:
