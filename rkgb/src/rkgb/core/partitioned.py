@@ -1429,7 +1429,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
     class Config():
         def __init__(self,
                 sub_partitioner : Partitioner = None,
-                split_patterns_in_sequence = False,
+                split_patterns_in_two = False,
                 recognize_simply_by_main_fct_not_whole_ano_material = True,
                 strict_max_number_of_top_level_nodes = 12,
                 max_number_of_patterns = 8,
@@ -1441,7 +1441,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             if sub_partitioner is None:
                 sub_partitioner = default_partitioner
             self.sub_partitioner = sub_partitioner 
-            self.split_patterns_in_sequence = split_patterns_in_sequence
+            self.split_patterns_in_two = split_patterns_in_two
             self.recognize_simply_by_main_fct_not_whole_ano_material \
                 = recognize_simply_by_main_fct_not_whole_ano_material
             self.strict_max_number_of_top_level_nodes = strict_max_number_of_top_level_nodes 
@@ -1455,7 +1455,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
     config : Config = None
     def __init__(self,
             sub_partitioner : Partitioner = None,
-            split_patterns_in_sequence = False,
+            split_patterns_in_two = False,
             recognize_simply_by_main_fct_not_whole_ano_material = True,
             strict_max_number_of_top_level_nodes = 12,
             max_number_of_patterns = 8,
@@ -1466,7 +1466,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             put_outputs_with_last_block = False):
         self.config = self.__class__.Config(
             sub_partitioner,
-            split_patterns_in_sequence,
+            split_patterns_in_two,
             recognize_simply_by_main_fct_not_whole_ano_material,
             strict_max_number_of_top_level_nodes,
             max_number_of_patterns,
@@ -1492,44 +1492,15 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
                 partitioned_cluster=cluster,
                 list_of_blocks_indices=blocks_indices 
             )
-            if self.config.split_patterns_in_sequence:
-                # Special case, to recognize patterns consisting of several parts
-                # for instance transformer decoder layers consist of 2 parts
-                typical_block_pn = pg.nodes[1]
-                partitioner_seq = PartitionerSequence(sub_partitioner=Partitioner())
-                typical_sequentialized_block_pg = partitioner_seq(typical_block_pn.sub_cluster)
-                if typical_sequentialized_block_pg is None:
-                    # it means there is no sub sequence, ie PartitionerSequence
-                    # failed and fell on sub_partitioner=Partitioner()
-                    pass # => We will Sub partition as usual
+            if self.config.split_patterns_in_two:
+                new_blocks = self.split_patterns_in_two_parts(
+                    blocks_indices,patterns_indices,pg)
+                if new_blocks == blocks_indices:
+                    pass # keep pg
                 else:
-                    print("Try to split")
-                    pattern_starts = [start for (start,_) in patterns_indices]
-                    pattern_ends = [end for (_,end) in patterns_indices]
-                    new_blocks = []
-                    assert len(blocks_indices) == len(pg.nodes)
-                    for block_indices,block_pn in zip(blocks_indices,pg.nodes):
-                        start,end = block_indices
-                        is_a_pattern = start in pattern_starts or end in pattern_ends
-                        # otherwise could be an intermediate block, or inputs / outputs
-                        if not is_a_pattern:
-                            new_blocks.append(block_indices)
-                        else:
-                            block_sub_pg = partitioner_seq(block_pn.sub_cluster)
-                            if block_sub_pg is None:
-                                new_blocks.append(block_indices)
-                            else:
-                                print(block_sub_pg.list_of_blocks_indices)
-                                offset = start
-                                new_blocks.extend(
-                                    [(start+offset,end+offset)
-                                     for (start,end) in block_sub_pg.list_of_blocks_indices])
-
-                    print(new_blocks) 
                     pg = PartitionedGraph(
                         partitioned_cluster=cluster,
-                        list_of_blocks_indices=new_blocks
-                    )
+                        list_of_blocks_indices=new_blocks)
             
             # Sub partition:
             if hasattr(self.config.sub_partitioner,"main_graph_as_any_other"):
@@ -1659,3 +1630,107 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
                         current_best_solution = patterns_indices
                         current_best_nb_patterns = len(current_best_solution)
         return current_best_solution
+    
+
+    def split_patterns_in_two_parts(
+            self,
+            blocks_indices,
+            patterns_indices,
+            current_pg : PartitionedGraph):
+        pattern_starts = [start for (start,_) in patterns_indices]
+        pattern_ends = [end for (_,end) in patterns_indices]
+        new_blocks = []
+        for block,block_pn in zip(blocks_indices,current_pg.nodes):
+            block_pn : PartitionedNode
+            start,end = block
+            # if not (start in pattern_starts or end in pattern_ends):
+            if end-start < 10:
+                new_blocks.append(block)
+                # e.g. intermediate blocks / inputs / outputs
+            else:
+                # We look for the best cut
+                assert block_pn.sub_cluster is not None
+                block_cluster : PartitionedCluster = block_pn.sub_cluster
+                dict_sn_to_index = dict(
+                    (sn,i) for (i,sn) in enumerate(block_cluster.s_nodes)
+                )
+                # 1) in the second part we don't want dependencies to previous blocks
+                input_users_indices = [dict_sn_to_index[sn] for sn in block_cluster.first_snodes]
+                min_start_part2 = max(max(input_users_indices)+1,5)
+                # 2) none of the outputs should come from the first part
+                outputs_indices = [dict_sn_to_index[sn] for sn in block_cluster.output_snodes]
+                block_length = end-start
+                max_start_part2 = min(min(outputs_indices),block_length-5)
+                if min_start_part2>max_start_part2:
+                    new_blocks.append(block)
+                else:
+                    first_part_snodes = block_cluster.s_nodes[:min_start_part2]
+                    interface_edges_given_user = dict() # : v -> list[u]
+                    interface_edges_given_req = dict() # : u -> list[v]
+                    for sn in first_part_snodes:
+                        for user_sn in sn.users:
+                            user_sn_index = dict_sn_to_index[user_sn]
+                            if user_sn_index >= min_start_part2:
+                                if user_sn in interface_edges_given_user:
+                                    interface_edges_given_user[user_sn].append(sn)
+                                else:
+                                    interface_edges_given_user[user_sn] = [sn]
+                                if sn in interface_edges_given_req:
+                                    interface_edges_given_req[sn].append(user_sn)
+                                else:
+                                    interface_edges_given_req[sn] = [user_sn]
+                    # interface_mem = sum(sn.info.memsize for sn in interface_edges_given_req)
+                    interface_size = len(interface_edges_given_req)
+                    best_cut_index = min_start_part2
+                    # best_interface_mem = interface_mem
+                    best_interface_size = interface_size
+                    part1_length = best_cut_index
+                    part2_length = block_length-part1_length
+                    for cut_index in range(min_start_part2+1,max_start_part2+1):
+                        # move s_nodes[cut_index-1] to part 1
+                        # 1) remove the incoming edges
+                        cut_node = block_cluster.s_nodes[cut_index-1]
+                        if cut_node in interface_edges_given_user:
+                            for req_sn in interface_edges_given_user[cut_node]:
+                                req_sn_users = interface_edges_given_req[req_sn]
+                                req_sn_users.remove(cut_node)
+                                if req_sn_users == []:
+                                    # interface_mem -= req_sn.info.memsize
+                                    interface_size -= 1
+                                    del interface_edges_given_req[req_sn]
+                            del interface_edges_given_user[cut_node]
+                        # 2) add the outgoing edges
+                        out_edges = []
+                        for user_sn in cut_node.users:
+                            if user_sn in block_cluster.s_nodes:
+                                out_edges.append(user_sn)
+                                if user_sn in interface_edges_given_user:
+                                    interface_edges_given_user[user_sn].append(cut_node)
+                                else:
+                                    interface_edges_given_user[user_sn] = [cut_node]
+                        if out_edges != []:
+                            interface_edges_given_req[cut_node] = out_edges
+                            # interface_mem += cut_node.info.memsize
+                            interface_size += 1
+                        # 3) Check if it's the best cut
+                        new_part1_length = cut_index
+                        new_part2_length = block_length-new_part1_length
+                        if ((interface_size < best_interface_size)
+                        or (interface_size == best_interface_size
+                        and min(new_part1_length,new_part2_length) > min(part1_length,part2_length))):
+                            best_interface_size = interface_size
+                            best_cut_index = cut_index
+                            part1_length = new_part1_length
+                            part2_length = new_part2_length
+                            
+                    # Cut:
+                    cut_index = best_cut_index + start
+                    if best_cut_index == start or best_cut_index == end:
+                        new_blocks.append(block)
+                    else:
+                        new_blocks.append((start,cut_index))
+                        new_blocks.append((cut_index,end))
+        return new_blocks
+                
+                
+
