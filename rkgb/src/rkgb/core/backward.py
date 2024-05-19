@@ -181,9 +181,16 @@ class ForwardAndBackwardGraph(base.Graph):
             self.inherit_base_attributes(simplified_graph)
             self.init_code = simplified_graph.init_code
 
+            dict_old_param_node_to_new = dict(
+                (param_node,ParameterNode(node_to_clone=param_node))
+                for param_node in simplified_graph.parameter_nodes)
             self.parameter_nodes = [
-                ParameterNode(node_to_clone=param_node)
+                dict_old_param_node_to_new[param_node]
                 for param_node in simplified_graph.parameter_nodes]
+            self.parameter_nodes_required_for_init_code = [
+                dict_old_param_node_to_new[param_node]
+                for param_node in simplified_graph.init_node.required_parameter_nodes
+            ]
             # Note: these are backward.ParameterNodes not base.ParameterNodes
             dict_old_param_node_to_new_param_node = dict(
                 zip(simplified_graph.parameter_nodes,self.parameter_nodes))

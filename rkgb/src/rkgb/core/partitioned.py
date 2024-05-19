@@ -98,6 +98,7 @@ class PartitionedGraph(base.Graph):
     # otherwise, they are computed by @property self.first_nodes
     cluster = None # useful for debugging + printing
     without_artifacts = False
+    list_of_blocks_indices = None # Special case, that we want to keep track
     def __init__(self,
             partitioned_cluster = None,
             parent_objet = None,
@@ -126,6 +127,7 @@ class PartitionedGraph(base.Graph):
             # 2) FIRST CONSTRUCTOR:
             # - Based on a list of blocks:
             if list_of_blocks_indices:
+                self.list_of_blocks_indices = list_of_blocks_indices # useful to remember how it was built
                 nb_blocks = len(list_of_blocks_indices)
                 self.nodes = []
                 self._first_nodes = set()
@@ -174,7 +176,7 @@ class PartitionedGraph(base.Graph):
                         for sn in block_s_nodes:
                             # deps:
                             for req_sn in sn.deps:
-                                if req_sn not in block_s_nodes:
+                                if req_sn in s_nodes and req_sn not in block_s_nodes:
                                     req_pn : PartitionedNode = dict_sn_to_pn[req_sn]
                                     if req_pn not in block_pn.deps:
                                         block_pn.deps.add(req_pn)
@@ -1423,11 +1425,11 @@ class PartitionerSequence(Partitioner):
 
 
 
-
 class PartitionerRecognizeRepetitivePattern(Partitioner):
     class Config():
         def __init__(self,
                 sub_partitioner : Partitioner = None,
+                split_patterns_in_sequence = False,
                 recognize_simply_by_main_fct_not_whole_ano_material = True,
                 strict_max_number_of_top_level_nodes = 12,
                 max_number_of_patterns = 8,
@@ -1439,6 +1441,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             if sub_partitioner is None:
                 sub_partitioner = default_partitioner
             self.sub_partitioner = sub_partitioner 
+            self.split_patterns_in_sequence = split_patterns_in_sequence
             self.recognize_simply_by_main_fct_not_whole_ano_material \
                 = recognize_simply_by_main_fct_not_whole_ano_material
             self.strict_max_number_of_top_level_nodes = strict_max_number_of_top_level_nodes 
@@ -1452,6 +1455,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
     config : Config = None
     def __init__(self,
             sub_partitioner : Partitioner = None,
+            split_patterns_in_sequence = False,
             recognize_simply_by_main_fct_not_whole_ano_material = True,
             strict_max_number_of_top_level_nodes = 12,
             max_number_of_patterns = 8,
@@ -1462,6 +1466,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             put_outputs_with_last_block = False):
         self.config = self.__class__.Config(
             sub_partitioner,
+            split_patterns_in_sequence,
             recognize_simply_by_main_fct_not_whole_ano_material,
             strict_max_number_of_top_level_nodes,
             max_number_of_patterns,
@@ -1487,6 +1492,45 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
                 partitioned_cluster=cluster,
                 list_of_blocks_indices=blocks_indices 
             )
+            if self.config.split_patterns_in_sequence:
+                # Special case, to recognize patterns consisting of several parts
+                # for instance transformer decoder layers consist of 2 parts
+                typical_block_pn = pg.nodes[1]
+                partitioner_seq = PartitionerSequence(sub_partitioner=Partitioner())
+                typical_sequentialized_block_pg = partitioner_seq(typical_block_pn.sub_cluster)
+                if typical_sequentialized_block_pg is None:
+                    # it means there is no sub sequence, ie PartitionerSequence
+                    # failed and fell on sub_partitioner=Partitioner()
+                    pass # => We will Sub partition as usual
+                else:
+                    print("Try to split")
+                    pattern_starts = [start for (start,_) in patterns_indices]
+                    pattern_ends = [end for (_,end) in patterns_indices]
+                    new_blocks = []
+                    assert len(blocks_indices) == len(pg.nodes)
+                    for block_indices,block_pn in zip(blocks_indices,pg.nodes):
+                        start,end = block_indices
+                        is_a_pattern = start in pattern_starts or end in pattern_ends
+                        # otherwise could be an intermediate block, or inputs / outputs
+                        if not is_a_pattern:
+                            new_blocks.append(block_indices)
+                        else:
+                            block_sub_pg = partitioner_seq(block_pn.sub_cluster)
+                            if block_sub_pg is None:
+                                new_blocks.append(block_indices)
+                            else:
+                                print(block_sub_pg.list_of_blocks_indices)
+                                offset = start
+                                new_blocks.extend(
+                                    [(start+offset,end+offset)
+                                     for (start,end) in block_sub_pg.list_of_blocks_indices])
+
+                    print(new_blocks) 
+                    pg = PartitionedGraph(
+                        partitioned_cluster=cluster,
+                        list_of_blocks_indices=new_blocks
+                    )
+            
             # Sub partition:
             if hasattr(self.config.sub_partitioner,"main_graph_as_any_other"):
                 self.config.sub_partitioner.main_graph_as_any_other = True
@@ -1497,6 +1541,11 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             if hasattr(self.config.sub_partitioner,"main_graph_as_any_other"):
                 self.config.sub_partitioner.main_graph_as_any_other = False
             return pg
+                
+
+
+
+                
         
 
     def build_blocks_based_on_patterns(self,patterns_indices,total_length):
@@ -1559,7 +1608,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
         else:
             dict_mt_to_sn_ano_material = cluster.p_structure.dict_mt_to_sn_ano_material
             return [
-                dict_mt_to_sn_ano_material[sn.mt]
+                dict_mt_to_sn_ano_material[sn.mt].anonymous_id
                 for sn in cluster.s_nodes
             ]
 

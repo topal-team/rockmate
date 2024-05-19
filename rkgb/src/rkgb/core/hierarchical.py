@@ -754,6 +754,8 @@ class HierarchicalStructure():
         self.main_cluster = HierarchicalCluster(
             p_cluster = partitioned_structure.main_cluster,
             fb_graph = forward_and_backward_graph)
+        self.main_cluster.parameter_nodes.extend(
+            forward_and_backward_graph.parameter_nodes_required_for_init_code)
         # Secondary attributes
         self.make_all_targets_like_attributes(partitioned_structure)
         for cluster in self.all_unique_clusters: cluster.list_schedules = []
