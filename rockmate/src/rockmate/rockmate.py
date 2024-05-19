@@ -49,7 +49,7 @@ class Rockmate(torch.nn.Module):
         verbose=False,
         ilp_solver="PULP_CBC_CMD",
         ilp_time_limit=1 * 60,
-        ilp_time_limit_top=10 * 60,
+        ilp_time_limit_top=20 * 60,
         model_kwargs=None,
         partitioners=None,
         max_size_S_graph_for_no_partitioning=40,
@@ -670,10 +670,10 @@ def define_autograd_Function(RkMod: Rockmate):
                 grad_outs,
             ):
                 out = RkMod.compiler.get_val(out_node.main_target)
-                if out_grad.mean() != 0:
-                    out.grad = out_grad.data.as_strided_(
-                        out.shape, out.stride(), out.storage_offset()
-                    )
+                # if out_grad.mean() != 0:
+                out.grad = out_grad.data.as_strided_(
+                    out.shape, out.stride(), out.storage_offset()
+                )
                 # print(out_node.main_target, out.grad.mean)
                 out_grad.data = torch.empty(0)
 

@@ -541,7 +541,7 @@ class Fct_offload(RK_Fct):
 
     def offload_tensor(self):
         self.storage.get_val(f"cpu_{self.target_name}").data.copy_(
-            self.storage.get_val(self.target_name).data.view(
+            self.storage.get_val(self.target_name).data.reshape(
                 self.storage.get_val(f"cpu_{self.target_name}").shape
             ),
             non_blocking=True,

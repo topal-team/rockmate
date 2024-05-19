@@ -13,6 +13,7 @@ from ..main import (
 import pulp
 from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
 from rkgb.lowlevel.constants import init_target_string
+from ...op_schedule import OpSchedule
 from .ilp_model import ModelPULP
 from .ilp_offload import ModelPULPOffload
 from .ilp_schedule import schedule

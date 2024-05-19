@@ -83,26 +83,26 @@ class ModelPULP:
                 self.time.append([hcn.ff_time])
                 self.overhead.append([hcn.ff_overhead / self.gcd])
             else:
+                ff = True#not hcn.sub_cluster.is_bottom
                 if hcn.is_fwd:
                     self.list_list_sched.append(hcn.list_sched)
                     self.sub_clusters.append(hcn.sub_cluster)
                 j = self.sub_clusters.index(hcn.sub_cluster)
-                list_sched = self.list_list_sched[j]  # hcn bwd does not have list_sched
                 self.hcn2sub_c.append(j)
+                list_sched = self.list_list_sched[j]  # hcn bwd does not have list_sched
                 # self.hcn2sub_c.append(len(self.list_list_sched) - 1)
-                self.nComp.append(len(list_sched) + (1 if hcn.is_fwd else 0))
+                self.nComp.append(len(list_sched) + (1 if hcn.is_fwd and ff else 0))
                 self.nSched.append(len(list_sched))
 
                 if hcn.is_fwd:
                     # add fast forward to the options (final one)
                     self.time.append(
-                        [op_sched.fwd_time for op_sched in list_sched] + [hcn.ff_time]
-                        if hcn.is_fwd
-                        else []
+                        [op_sched.fwd_time for op_sched in list_sched] + 
+                        ([hcn.ff_time] if ff else [])
                     )
                     self.overhead.append(
                         [op_sched.fwd_overhead / self.gcd for op_sched in list_sched]
-                        + [hcn.ff_overhead / self.gcd]
+                        + ([hcn.ff_overhead / self.gcd] if ff else [])
                     )
                 else:
                     self.time.append([op_sched.bwd_time for op_sched in list_sched])
@@ -747,8 +747,8 @@ class ModelPULP:
 
     def solve(self, solver=""):
         # some solvers have no support of 'Time limit reached' status
-
-        # print(f"time limit {self.ilp_solver_params['TimeLimit']}")
+        print(f"Nb comp: {len(self.Comp)}, T:{self.T}")
+        print(f"time limit {self.ilp_solver_params['TimeLimit']}")
         try:
             solver = get_solver(
                 solver, msg=0, timeLimit=self.ilp_solver_params["TimeLimit"]
