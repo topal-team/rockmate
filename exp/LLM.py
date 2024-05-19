@@ -11,9 +11,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules import ModuleList
 from torch.nn.modules.normalization import LayerNorm
-from transformers.models.llama.modeling_llama import LlamaMLP, LlamaConfig
-from transformers.models.bloom.modeling_bloom import BloomMLP, BloomConfig
+# from transformers.models.llama.modeling_llama import LlamaMLP, LlamaConfig
+# from transformers.models.bloom.modeling_bloom import BloomMLP, BloomConfig
 from transformers import LlamaModel, LlamaConfig, LlamaForSequenceClassification
+from transformers import BloomConfig, BloomForSequenceClassification
 from peft import LoraModel, LoraConfig
 
 class MyDataset(torch.utils.data.Dataset):
@@ -121,7 +122,35 @@ def get3BPhi_2(batch, seq_len, dtype=None, nlayers=32, classification=False):
     # 2.7B parameters
     configuration = PhiConfig(intermediate_size= 10240,
                             hidden_size=2560,
-                            num_hidden_layers=nlayers)
+                            num_hidden_layers=nlayers,
+                            output_hidden_states=False,
+                            output_attentions=False,
+                            pad_token_id=0,
+                            use_cache=False)
+    configuration._attn_implementation="eager"
+    configuration._attn_implementation_internal="eager"
+    sample = torch.randint(0, 600, [batch, seq_len])
+    # if classification:
+    model = PhiForSequenceClassification(configuration).to(dtype)
+    model.config.pad_token_id = 0
+    # else:
+    #     model = PhiModel(configuration).to(dtype)
+    return model, [sample]
+
+
+
+def get3BPhi_15(batch, seq_len, dtype=None, nlayers=24, classification=False):
+    from transformers import PhiModel, PhiConfig, PhiForSequenceClassification
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+    # 2.7B parameters
+    configuration = PhiConfig(intermediate_size= 8192,
+                            hidden_size=2048,
+                            num_hidden_layers=nlayers,
+                            output_hidden_states=False,
+                            output_attentions=False,
+                            pad_token_id=0,
+                            use_cache=False)
     configuration._attn_implementation="eager"
     configuration._attn_implementation_internal="eager"
     sample = torch.randint(0, 600, [batch, seq_len])
