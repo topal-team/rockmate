@@ -192,6 +192,10 @@ class Step:
         t.remove(max(t))
         return max(t)
 
+    @property
+    def max_comp_time(self):
+        return self.op_time[self.comp_ops[-1].name]
+
 
 class AliveSimulator:
     """
@@ -351,15 +355,15 @@ class Simulator:
                             # located_ops.append(opt_op)
                             # opt_ops.remove(opt_op)
             for op, avail in steps_avail.items():
-                avail_step = max(avail, key=lambda x: x.time - x.opt_ops.time)
+                avail_step = max(avail, key=lambda x: x.max_comp_time - x.opt_ops.time)
                 # print(avail_step.time,avail_step.opt_ops.time)
                 # print(steps[j].time,steps[j].opt_ops.time)
                 if avail_step.time < avail_step.opt_ops.time:
                     continue
-                if steps[j].opt_ops.time < steps[j].time:
+                if steps[j].opt_ops.time < steps[j].max_comp_time:
                     continue
                 if (
-                    avail_step.opt_ops.time + op.time - avail_step.time
+                    avail_step.opt_ops.time + op.time - avail_step.max_comp_time
                     > steps[j].opt_ops.time - steps[j].max2nd()
                 ):
                     continue
