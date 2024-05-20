@@ -1,3 +1,5 @@
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import argparse
 import os
 import torch
@@ -29,7 +31,6 @@ timer = TimerCUDA(torch.device("cuda"))
 import tracemalloc
 tracemalloc.start()
 torch.random.manual_seed(0)
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:16"
 
 def dynamo_ram_trick():
     from rkgb.lowlevel.preprocess_samples import ExampleInputs
@@ -205,7 +206,7 @@ def exec_pt(model, sample, optim=torch.optim.Adam, niters=10, device="cuda", **k
     mem = torch.cuda.memory_allocated()
     print(f"Memory allocated before exec {mem}")
     time = execution(model, sample, niters, optimize_fct=optimize, zero_grad=True, **kwargs)
-    peak_mem = torch.cuda.max_memory_allocated() - mem
+    peak_mem = torch.cuda.max_memory_allocated()# - mem
     return time, peak_mem
 
 def exp_pt(nlayers=1, 
@@ -303,7 +304,7 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B",
     exp_stats["model_gradient_size"] = sum(p.numel()*p.element_size() for p in model.parameters()
                                            if p.requires_grad)
     exp_stats["act_size"] = sum(kdn.mem for kdn in rkmod.rkgb_res.hierarchical_cluster.list_anodes
-                                if "grad" not in kdn.name)
+                                if "grad" not in kdn.name and any(not kcn.is_fwd for kcn in kdn.users_real))
     exp_stats["optimize_stats"] = rkmod.optimize_metrics
     exp_stats["gpu_type"] = torch.cuda.get_device_name()
     exp_stats["budget"] = budget
@@ -323,6 +324,7 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B",
             print(md.solving_time)
             exp_stats["solving_time"] = str(md.solving_time)
             exp_stats["ilp_objective"] = str(md.md.objective.value())
+            exp_stats["req_w"] = md.req_w.value()
         # mem_ilp, mem_sched = analyze_mem(rkmod)
 
             stats = get_sched_stats(rkmod)
