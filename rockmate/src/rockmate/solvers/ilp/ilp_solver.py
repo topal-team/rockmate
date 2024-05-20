@@ -13,7 +13,7 @@ from ..main import (
 import pulp
 from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
 from rkgb.lowlevel.constants import init_target_string
-from ...op_schedule import OpSchedule
+from ...op_schedule import *
 from .ilp_model import ModelPULP
 from .ilp_offload import ModelPULPOffload
 from .ilp_schedule import schedule
@@ -209,6 +209,8 @@ class HILP(Solver):
                 if nb_sched >= len(list_sched):
                     # hcn.list_sched = list_sched
                     set_hcn_list_sched(hcn, list_sched)
+                    if self.solve_top and self.config.add_offload_sched:
+                        self.add_offload_sched_hcn(hcn)
                     continue
                 indices = np.array(
                     [(i, op_sched.mem) for i, op_sched in enumerate(list_sched)]
@@ -232,15 +234,12 @@ class HILP(Solver):
                     sel_sched.append(list_sched[argmax_diff])
                     indices[argmax_diff][1] = 0
                 hcn.list_sched = sel_sched
+                if self.solve_top and self.config.add_offload_sched:
+                    self.add_offload_sched_hcn(hcn)
                 # hcn.list_sched = list_sched[:nb_sched]
             else:
                 hcn.list_sched = []
-            if self.config.add_offload_sched and self.solve_top:
-                scheds = [sched for sched in hcn.list_sched 
-                          if sched.offload_mem == 0 
-                          and sched.offload_mem == 0 ]
-                for sched in scheds:
-                    hcn.list_sched.append(self.get_activation_offload(sched))
+            
 
 
     def solve(
@@ -401,6 +400,7 @@ class HILP(Solver):
         return list_op_sched
 
     def get_activation_offload(self, op_sched):
+        self.bandwidth = 1e7
         """
         With all the torch.cuda.Event and stream.wait_event() to synchornize
         between offload/prefetch, in the order of Main>Ofl>Del during fwd and Prf>Main during bwd
@@ -509,3 +509,10 @@ class HILP(Solver):
         new_op_sched.bwd_wait_time = bwd_wait_time
 
         return new_op_sched
+
+    def add_offload_sched_hcn(self, hcn):
+        scheds = [sched for sched in hcn.list_sched 
+                    if sched.offload_mem == 0 
+                    and sched.prefetch_mem == 0 ]
+        for sched in scheds:
+            hcn.list_sched.append(self.get_activation_offload(sched))

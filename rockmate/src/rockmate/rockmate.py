@@ -156,8 +156,9 @@ class Rockmate(torch.nn.Module):
                             partitioner.config.max_estimate_for_main_graph,
                         )
 
-    def preprocess(self):
-        solver = FastSolver()
+    def preprocess(self, solver = None):
+        if solver is None:
+            solver = FastSolver()
         for cluster in self.rkgb_res.hierarchical_structure.all_clusters:
             if not cluster.is_bottom:
                 solver.preprocess(
