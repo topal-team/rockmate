@@ -371,7 +371,10 @@ class Simulator:
                 # print(avail_step.time, avail_step.opt_ops.time)
                 avail_step.opt_ops.append(op)
                 steps[j].opt_ops.remove(op)
-
+        
+        for step in self.steps:
+            step.op_time = step.simulate_schedule()
+            
         self.refine()
         self.recreate_op_list()
 
