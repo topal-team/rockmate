@@ -269,12 +269,17 @@ def exp_pt(nlayers=1,
 
 def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B",
               activation_offload=True, cpu_optimization=True, get_model=get7Bllama,
-              dynamic_batch_dim=None, rotor=False, id_batch=False):
+              dynamic_batch_dim=None, rotor=False, id_batch=False,
+              remat=True,):
     model, sample = get_model(batch_size, 512, nlayers=nlayers)
     budget = torch.cuda.get_device_properties(0).total_memory - 2*1024**3#to avoid fragmentation
     niters = 5
 
-    if not rotor:
+    if not remat:
+        rkmod = solve_no_remat(model, 
+                        sample, 
+                        budget=budget,)
+    elif not rotor:
         rkmod = solve_rkmod(model, 
                         sample, 
                         budget=budget, 
@@ -441,8 +446,6 @@ def solve_no_remat(model,
         strict_max_number_of_top_level_nodes=nlayers+4,
         max_number_of_patterns=nlayers+2,
         min_percentage_covered_required=0.75)]
-    model.to(device)
-    sample = [s.to(device) for s in sample]
     solver = HILP(ilp_solver="PULP_CBC_CMD")
     solver.config.offload = True
     solver.config.activation_offload = False
@@ -460,15 +463,11 @@ def solve_no_remat(model,
                         minor_offload_size=10*1024**2,
                         )
     cluster = rkmod.rkgb_res.hierarchical_cluster
-    param_mem = sum(pnode.mem for pnode in cluster.parameter_nodes)
-    param_grad_mem = sum(pnode.mem for pnode in cluster.parameter_nodes if pnode.info.requires_grad)
-    act_budget = budget - param_mem - (1+rkmod.optimize_metrics["optimizer_states_size"]) * param_grad_mem
-    if act_budget<0:
-        return False
-    print(act_budget)
+    # param_mem = sum(pnode.mem for pnode in cluster.parameter_nodes)
+    # param_grad_mem = sum(pnode.mem for pnode in cluster.parameter_nodes if pnode.info.requires_grad)
     fast = FastSolver(recompute_sched=False)
     rkmod.preprocess(fast)
-    rkmod.solve_sched(act_budget)
+    rkmod.solve_sched(budget)
     rkmod.get_compiled_fct()
     return rkmod
 
@@ -514,6 +513,7 @@ if __name__=="__main__":
         "offmate_no_cpu_optim":{"cpu_optimization":False},
         "offmate_base":{"cpu_optimization":False, "activation_offload":False},
         "offmate_dynamic_batch":{"dynamic_batch_dim":0},
+        "offmate_no_remat":{"remat":False},
         "rockmate":{"rotor":True},
     }
 
