@@ -62,7 +62,10 @@ class RK_rotor(Solver):
     def is_sequential(self, hg: HierarchicalGraph):
         loss_idx = hg.list_HCNs.index(hg.loss_hcn)
         for i, hcn in enumerate(hg.list_HCNs[:loss_idx]):  # toposorted
-            if len(hcn.users) > 1 or len(hcn.deps) > 1:
+            users = set(hcn_user for han in hcn.users 
+                        for hcn_user in han.users
+                        if hcn_user.is_fwd)
+            if len(users)>1:
                 return False
         return True
 
@@ -163,8 +166,6 @@ class RK_rotor(Solver):
             setattr(op_sched, "overhead", op_sched.fwd_overhead)
 
         for i, hcn in enumerate(hg.list_HCNs[:loss_idx]):  # toposorted
-            if len(hcn.users) > 1:
-                return False
             if hcn.sub_cluster is None:
                 # WARNING: if hcn has no bwd, it has to be merged with the next one
                 no_grad_hcns.append(hcn)
@@ -181,13 +182,10 @@ class RK_rotor(Solver):
                 # assume single input
 
                 # .kdn can be replaced by .anode below?
-                input_anode_data = list(first_hcn.deps)[0].anode
-                output_anode_data = list(hcn.users)[0].anode
+                input_anode_data = list(han.anode for han in first_hcn.deps)
+                output_anode_data = list(han.anode for han in hcn.users)
                 for op in ff_op_list:
-                    # if op.kn.name == input_anode_data.name:
-                    #     print(op.kn.name)
-                    #     op.disabled = True
-                    if isinstance(op, DeleteOp) and op.target.anode.name == input_anode_data.name:
+                    if isinstance(op, DeleteOp) and op.target.anode in input_anode_data:
                         print(op.target.anode.name)
                         op.disabled = True
                 
@@ -226,9 +224,10 @@ class RK_rotor(Solver):
                     )  # start with loss op
                     for op in bwd_op_list:
                         # By default, bwd does not delete input data/grad
-                        #if op.kn.main_target == input_anode_data.main_target:
-                        #    op.disabled = True
-                        if isinstance(op, DeleteOp) and op.target.anode.main_target == input_anode_data.main_target:
+                        if (isinstance(op, DeleteOp) and 
+                            op.target.anode.main_target in 
+                            [anode.main_target for
+                            anode in input_anode_data]):
                            op.disabled = True
 
                     Fwd_sched = OpSchedule(
@@ -284,12 +283,12 @@ class RK_rotor(Solver):
                 setattr(block, "sols", sols)
                 setattr(block, "Fc_sched", Fc_sched)
                 setattr(block, "Fn_sched", Fn_sched)
-                setattr(block, "mem_inp", input_anode_data.mem)
+                setattr(block, "mem_inp", sum(anode.mem for anode in input_anode_data))
                 # since interfaces is empty, output is counted in memory
                 setattr(
                     block,
                     "overhead_fast_fwd",
-                    Fc_sched.fwd_overhead + output_anode_data.mem,
+                    Fc_sched.fwd_overhead + sum(anode.mem for anode in output_anode_data),
                 )
                 setattr(block, "time_fast_fwd", Fc_sched.fwd_time)
 

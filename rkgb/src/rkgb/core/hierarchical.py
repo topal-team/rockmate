@@ -356,8 +356,9 @@ class HierarchicalGraph(base.Graph):
 
     # **********************************
     # == OVERWRITE base.Graph METHODS ==
-    def __iter__(self):
-        return iter(self.list_HCNs)
+    @property
+    def _lists_of_nodes(self):
+        return [self.list_HCNs,self.list_HANs]
     
     def make_temporary_global_root_node_to_deps_relation(self):
         # OVERWRITE base.Graph METHOD
@@ -683,6 +684,7 @@ class HierarchicalCluster():
         try:
             ano_node = self.representee_cluster.translator.to_ano(re_node)
         except:
+            if re_node in self.list_anodes:return re_node
             raise TypeError(f"{re_node} cannot be translated to anonymized node")
         try:
             self_node = self.translator.from_ano(ano_node)
@@ -752,6 +754,8 @@ class HierarchicalStructure():
         self.main_cluster = HierarchicalCluster(
             p_cluster = partitioned_structure.main_cluster,
             fb_graph = forward_and_backward_graph)
+        self.main_cluster.parameter_nodes.extend(
+            forward_and_backward_graph.parameter_nodes_required_for_init_code)
         # Secondary attributes
         self.make_all_targets_like_attributes(partitioned_structure)
         for cluster in self.all_unique_clusters: cluster.list_schedules = []

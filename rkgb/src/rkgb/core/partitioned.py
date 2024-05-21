@@ -26,7 +26,7 @@ class PartitionedNode(base.Node):
         sub_graph : PartitionedGraph
         super().__init__(parent_structure_with_id_generator=main_graph)
         self.main_graph  = main_graph
-        self.sub_cluster = sub_cluster
+        self.sub_cluster : PartitionedCluster = sub_cluster
         self.main_target = main_target
         self.sub_graph   = sub_graph
         self.simplified_node : SimplifiedNode = simplified_node
@@ -98,6 +98,7 @@ class PartitionedGraph(base.Graph):
     # otherwise, they are computed by @property self.first_nodes
     cluster = None # useful for debugging + printing
     without_artifacts = False
+    list_of_blocks_indices = None # Special case, that we want to keep track
     def __init__(self,
             partitioned_cluster = None,
             parent_objet = None,
@@ -126,12 +127,14 @@ class PartitionedGraph(base.Graph):
             # 2) FIRST CONSTRUCTOR:
             # - Based on a list of blocks:
             if list_of_blocks_indices:
+                self.list_of_blocks_indices = list_of_blocks_indices # useful to remember how it was built
                 nb_blocks = len(list_of_blocks_indices)
                 self.nodes = []
                 self._first_nodes = set()
                 self.output_nodes = set()
                 s_nodes = partitioned_cluster.s_nodes
                 list_blocks_s_nodes = []
+                dict_sn_to_pn = dict()
                 for block_i in range(nb_blocks):
                     (start_i,end_i) = list_of_blocks_indices[block_i]
                     # 'start' is included in the block; 'end' isn't
@@ -166,24 +169,30 @@ class PartitionedGraph(base.Graph):
                             break
 
                     # 3) Edges with the previous block
+                    for sn in block_s_nodes:
+                        dict_sn_to_pn[sn] = block_pn
                     list_blocks_s_nodes.append(set(block_s_nodes))
                     if block_i > 0:
-                        prev_pn : PartitionedNode = self.nodes[-2]
-                        block_pn.deps.add(prev_pn)
-                        block_pn.deps_global.add(prev_pn)
-                        prev_pn.users.add(block_pn)
-                        prev_pn.users_global.add(block_pn)
-                        # global edges are useless since not dynamic
-                        preceding_block_s_nodes = list_blocks_s_nodes[-2]
                         for sn in block_s_nodes:
+                            # deps:
+                            for req_sn in sn.deps:
+                                if req_sn in s_nodes and req_sn not in block_s_nodes:
+                                    req_pn : PartitionedNode = dict_sn_to_pn[req_sn]
+                                    if req_pn not in block_pn.deps:
+                                        block_pn.deps.add(req_pn)
+                                        block_pn.deps_global.add(req_pn)
+                                        req_pn.users.add(block_pn)
+                                        req_pn.users_global.add(block_pn)
+                            # deps through artifacts:
                             for req_sn in sn.deps_through_artifacts:
-                                if req_sn in preceding_block_s_nodes:
-                                    block_pn.deps_through_artifacts.add(prev_pn)
-                                    block_pn.deps_through_artifacts_global.add(prev_pn)
-                                    prev_pn.users_through_artifacts.add(block_pn)
-                                    prev_pn.users_through_artifacts_global.add(block_pn)
+                                if req_sn not in block_s_nodes:
+                                    req_pn : PartitionedNode = dict_sn_to_pn[req_sn]
+                                    if req_pn not in block_pn.deps_through_artifacts:
+                                        block_pn.deps_through_artifacts.add(req_pn)
+                                        block_pn.deps_through_artifacts_global.add(req_pn)
+                                        req_pn.users_through_artifacts.add(block_pn)
+                                        req_pn.users_through_artifacts_global.add(block_pn)
                         # artifact edges are redundant with classic ones -> useless
-
 
             # 2) SECOND CONSTRUCTOR:
             # - Default constructor translating partitioner_cluster.s_nodes
@@ -389,10 +398,6 @@ class Partitioner():
         self.config : self.__class__.Config = None
     def __call__(self, cluster):
         return PartitionedGraph(cluster)
-        # raise Exception(
-            # "Base class of partitioners. __call__ method "\
-            # "must be overwritten by all subclasses")
-
 
 
 
@@ -406,6 +411,8 @@ class PartitionedCluster():
     outputs_mt = None
     translator : anonymize.ClusterTranslator = None
     self_or_strictly_equal_cluster = None
+    cluster_hash = None
+    ano_hash = None
     ano_cluster_id = None
     name = None
     representee_cluster = None
@@ -419,7 +426,7 @@ class PartitionedCluster():
     dict_first_sn_to_required_inputs_sn = None
     dict_first_mt_to_required_inputs_mt = None
     dict_output_mt_to_targets_sent = None
-    # Latter :
+    # Later :
     h_cluster = None
 
     def __init__(self,
@@ -555,6 +562,7 @@ class PartitionedCluster():
     # =============================
     def make_ano_cluster_id(self):
         ano_hash = anonymize.AnonymousHash.hash(self)
+        self.ano_hash = ano_hash
         dict_ano_hash_to_ano_id = self.p_structure.dict_cluster_ano_hash_to_ano_cluster_id
         dict_ano_id_to_representee_cluster = self.p_structure.dict_cluster_ano_id_to_representee_cluster
         if ano_hash in dict_ano_hash_to_ano_id:
@@ -700,23 +708,6 @@ class PartitionedStructure():
     def __str__(self):
         return "PartitionedStructure whose main cluster is:\n"+str(self.main_cluster)
     
-    # def render(self,
-            # name=None,
-            # view=True,
-            # only_function_name=False,
-            # include_artifact_edges=True,
-            # directory=base.Graph.default_render_directory,
-            # render_format=base.Graph.default_render_format,
-            # render=True,
-            # dot=None):
-        # self.main_cluster.render(
-            # name,view,only_function_name,
-            # include_artifact_edges,
-            # directory,render_format,
-            # render,dot
-        # )
-                
-
 
 
 class PartitionedDynamicManipulation(): # only contains staticmethod
@@ -942,6 +933,7 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
                 pn.name = f"PN({sub_cluster.name})"
                 pn.sub_graph = None # no longer dynamic
                 if sub_cluster.representee_cluster is sub_cluster:
+                    sub_graph.cluster = sub_cluster
                     sub_cluster.partitionings.append(sub_graph)
                     sub_cluster.partitioners_already_used.append(partitioner)
                     PartitionedDynamicManipulation.freeze(sub_graph,p_structure,partitioner)
@@ -1436,11 +1428,11 @@ class PartitionerSequence(Partitioner):
 
 
 
-
 class PartitionerRecognizeRepetitivePattern(Partitioner):
     class Config():
         def __init__(self,
                 sub_partitioner : Partitioner = None,
+                split_patterns_in_two = False,
                 recognize_simply_by_main_fct_not_whole_ano_material = True,
                 strict_max_number_of_top_level_nodes = 12,
                 max_number_of_patterns = 8,
@@ -1452,6 +1444,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             if sub_partitioner is None:
                 sub_partitioner = default_partitioner
             self.sub_partitioner = sub_partitioner 
+            self.split_patterns_in_two = split_patterns_in_two
             self.recognize_simply_by_main_fct_not_whole_ano_material \
                 = recognize_simply_by_main_fct_not_whole_ano_material
             self.strict_max_number_of_top_level_nodes = strict_max_number_of_top_level_nodes 
@@ -1465,6 +1458,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
     config : Config = None
     def __init__(self,
             sub_partitioner : Partitioner = None,
+            split_patterns_in_two = False,
             recognize_simply_by_main_fct_not_whole_ano_material = True,
             strict_max_number_of_top_level_nodes = 12,
             max_number_of_patterns = 8,
@@ -1475,6 +1469,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             put_outputs_with_last_block = False):
         self.config = self.__class__.Config(
             sub_partitioner,
+            split_patterns_in_two,
             recognize_simply_by_main_fct_not_whole_ano_material,
             strict_max_number_of_top_level_nodes,
             max_number_of_patterns,
@@ -1500,6 +1495,31 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
                 partitioned_cluster=cluster,
                 list_of_blocks_indices=blocks_indices 
             )
+            if self.config.split_patterns_in_two:
+                new_blocks = self.split_patterns_in_two_parts(
+                    blocks_indices,pg)
+                if new_blocks == blocks_indices:
+                    pass # keep pg
+                else:
+                    # We will rebuild the graph with the new blocks
+                    # so first we need to clean the global directory: 
+                    # ie remove mentions of the old clusters
+                    dict_cl_hash_to_cl = cluster.p_structure.dict_cluster_hash_to_cluster
+                    dict_cl_ano_hash_to_ano_id = cluster.p_structure.dict_cluster_ano_hash_to_ano_cluster_id
+                    dict_cl_ano_id_to_repr = cluster.p_structure.dict_cluster_ano_id_to_representee_cluster
+                    for pn in pg.nodes:
+                        pn : PartitionedNode
+                        if pn.sub_cluster is not None:
+                            pn_cl = pn.sub_cluster
+                            if pn_cl.self_or_strictly_equal_cluster is pn_cl:
+                                del dict_cl_hash_to_cl[pn_cl.cluster_hash]
+                                if pn_cl.representee_cluster is pn_cl:
+                                    del dict_cl_ano_hash_to_ano_id[pn_cl.ano_hash]
+                                    del dict_cl_ano_id_to_repr[pn_cl.ano_cluster_id]
+                    pg = PartitionedGraph(
+                        partitioned_cluster=cluster,
+                        list_of_blocks_indices=new_blocks)
+            
             # Sub partition:
             if hasattr(self.config.sub_partitioner,"main_graph_as_any_other"):
                 self.config.sub_partitioner.main_graph_as_any_other = True
@@ -1510,6 +1530,8 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
             if hasattr(self.config.sub_partitioner,"main_graph_as_any_other"):
                 self.config.sub_partitioner.main_graph_as_any_other = False
             return pg
+                
+
         
 
     def build_blocks_based_on_patterns(self,patterns_indices,total_length):
@@ -1572,7 +1594,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
         else:
             dict_mt_to_sn_ano_material = cluster.p_structure.dict_mt_to_sn_ano_material
             return [
-                dict_mt_to_sn_ano_material[sn.mt]
+                dict_mt_to_sn_ano_material[sn.mt].anonymous_id
                 for sn in cluster.s_nodes
             ]
 
@@ -1623,3 +1645,104 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
                         current_best_solution = patterns_indices
                         current_best_nb_patterns = len(current_best_solution)
         return current_best_solution
+    
+
+    def split_patterns_in_two_parts(
+            self,
+            blocks_indices,
+            current_pg : PartitionedGraph):
+        new_blocks = []
+        for block,block_pn in zip(blocks_indices,current_pg.nodes):
+            block_pn : PartitionedNode
+            start,end = block
+            # if not (start in pattern_starts or end in pattern_ends):
+            if end-start < 14:
+                new_blocks.append(block)
+                # e.g. intermediate blocks / inputs / outputs
+            else:
+                # We look for the best cut
+                assert block_pn.sub_cluster is not None
+                block_cluster : PartitionedCluster = block_pn.sub_cluster
+                dict_sn_to_index = dict(
+                    (sn,i) for (i,sn) in enumerate(block_cluster.s_nodes)
+                )
+                # 1) in the second part we don't want dependencies to previous blocks
+                input_users_indices = [dict_sn_to_index[sn] for sn in block_cluster.first_snodes]
+                min_start_part2 = max(max(input_users_indices)+1,5)
+                # 2) none of the outputs should come from the first part
+                outputs_indices = [dict_sn_to_index[sn] for sn in block_cluster.output_snodes]
+                block_length = end-start
+                max_start_part2 = min(min(outputs_indices),block_length-5)
+                if min_start_part2>max_start_part2:
+                    new_blocks.append(block)
+                else:
+                    first_part_snodes = block_cluster.s_nodes[:min_start_part2]
+                    interface_edges_given_user = dict() # : v -> list[u]
+                    interface_edges_given_req = dict() # : u -> list[v]
+                    for sn in first_part_snodes:
+                        for user_sn in sn.users:
+                            user_sn_index = dict_sn_to_index[user_sn]
+                            if user_sn_index >= min_start_part2:
+                                if user_sn in interface_edges_given_user:
+                                    interface_edges_given_user[user_sn].append(sn)
+                                else:
+                                    interface_edges_given_user[user_sn] = [sn]
+                                if sn in interface_edges_given_req:
+                                    interface_edges_given_req[sn].append(user_sn)
+                                else:
+                                    interface_edges_given_req[sn] = [user_sn]
+                    # interface_mem = sum(sn.info.memsize for sn in interface_edges_given_req)
+                    interface_size = len(interface_edges_given_req)
+                    best_cut_index = min_start_part2
+                    # best_interface_mem = interface_mem
+                    best_interface_size = interface_size
+                    part1_length = best_cut_index
+                    part2_length = block_length-part1_length
+                    for cut_index in range(min_start_part2+1,max_start_part2+1):
+                        # move s_nodes[cut_index-1] to part 1
+                        # 1) remove the incoming edges
+                        cut_node = block_cluster.s_nodes[cut_index-1]
+                        if cut_node in interface_edges_given_user:
+                            for req_sn in interface_edges_given_user[cut_node]:
+                                req_sn_users = interface_edges_given_req[req_sn]
+                                req_sn_users.remove(cut_node)
+                                if req_sn_users == []:
+                                    # interface_mem -= req_sn.info.memsize
+                                    interface_size -= 1
+                                    del interface_edges_given_req[req_sn]
+                            del interface_edges_given_user[cut_node]
+                        # 2) add the outgoing edges
+                        out_edges = []
+                        for user_sn in cut_node.users:
+                            if user_sn in block_cluster.s_nodes:
+                                out_edges.append(user_sn)
+                                if user_sn in interface_edges_given_user:
+                                    interface_edges_given_user[user_sn].append(cut_node)
+                                else:
+                                    interface_edges_given_user[user_sn] = [cut_node]
+                        if out_edges != []:
+                            interface_edges_given_req[cut_node] = out_edges
+                            # interface_mem += cut_node.info.memsize
+                            interface_size += 1
+                        # 3) Check if it's the best cut
+                        new_part1_length = cut_index
+                        new_part2_length = block_length-new_part1_length
+                        if ((interface_size < best_interface_size)
+                        or (interface_size == best_interface_size
+                        and min(new_part1_length,new_part2_length) > min(part1_length,part2_length))):
+                            best_interface_size = interface_size
+                            best_cut_index = cut_index
+                            part1_length = new_part1_length
+                            part2_length = new_part2_length
+                            
+                    # Cut:
+                    cut_index = best_cut_index + start
+                    if best_cut_index == start or best_cut_index == end:
+                        new_blocks.append(block)
+                    else:
+                        new_blocks.append((start,cut_index))
+                        new_blocks.append((cut_index,end))
+        return new_blocks
+                
+                
+

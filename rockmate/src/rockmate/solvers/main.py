@@ -9,7 +9,15 @@ from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
 from rkgb.core.backward import ComputationNode
 from rkgb.lowlevel.constants import init_target_string
 
-from ..op_schedule import OpSchedule, ComputeOp, DeleteOp, Activation
+from ..op_schedule import (
+    OpSchedule,
+    ComputeOp,
+    DeleteOp,
+    Activation,
+    OffloadOp,
+    PrefetchOp,
+    AllocateOp,
+)
 import time
 import psutil
 
@@ -29,9 +37,11 @@ class Solver:
         # -> RETURN list of Op_sched
         pass
 
+
 class FastSolver(Solver):
-    def __init__(self, config=None):
+    def __init__(self, config=None, recompute_sched=True):
         super().__init__(config)
+        self.recompute_sched=recompute_sched
 
     def solve_hcn(self, hcn, cluster, no_del_names):
         if hcn.sub_cluster is None:  # fwd with no grad
@@ -44,25 +54,29 @@ class FastSolver(Solver):
                 hcn.ff_time = 0
                 hcn.ff_overhead = 0
                 hcn.ff_op_list = []
-            return 
-        
+            return
+
         re_cluster = hcn.sub_cluster.representee_cluster
+        list_sched = self.solve(re_cluster)
 
         if re_cluster.list_schedules == []:
-            re_cluster.list_schedules += self.solve(re_cluster)
-        list_sched = re_cluster.list_schedules
+            # re_cluster.list_schedules += self.solve(re_cluster)
+            re_cluster.list_schedules.append(list_sched[0])
+            if self.recompute_sched:
+                re_cluster.list_schedules.append(list_sched[1])
+        autograd_sched = list_sched[1]
+        hcn.ff_time = autograd_sched.fwd_time
+        hcn.ff_overhead = autograd_sched.fwd_overhead
+        hcn.ff_op_list = translate(
+            hcn.sub_cluster, autograd_sched.op_list[: autograd_sched.loss_idx]
+        )
 
-        save_none_sched = list_sched[1]
-        
-        hcn.ff_time = save_none_sched.fwd_time
-        hcn.ff_overhead = save_none_sched.fwd_overhead
-        hcn.ff_op_list = translate(hcn.sub_cluster, save_none_sched.op_list[:save_none_sched.loss_idx])
-
-
-    def solve(self,
-              cluster: HierarchicalCluster,
-              no_del_names=[f"{init_target_string} data", 
-                            f"{init_target_string} grad"]):
+    def solve(
+        self,
+        cluster: HierarchicalCluster,
+        no_del_names=[f"{init_target_string} data", f"{init_target_string} grad"],
+        recompute_sched=False,
+    ):
         """
         Return basic schedules for the cluster:
         1. PyTorch autograd schedule.
@@ -70,7 +84,7 @@ class FastSolver(Solver):
                       backward runs autograd schedule (fwd+bwd).
         """
         assert cluster is cluster.representee_cluster
-        
+
         list_sched = []
         # if not cluster is cluster.representee_cluster:
         #     return list_sched
@@ -87,46 +101,52 @@ class FastSolver(Solver):
         #     loss_idx=len(ff_op_list)
         #     )
         # )  # not real sched, only for info
-        
+
         autograd_op_list = self.single_compute_op_list(
             cluster,
             no_del_names=no_del_names,
         )
-        list_sched.append(
-            OpSchedule(
-                autograd_op_list,
-                cluster=cluster,
-                loss_idx=autograd_op_list.index(ComputeOp(ComputationNode("loss"), disabled=True))
-            )
+        autograd_loss_idx = autograd_op_list.index(
+            ComputeOp(ComputationNode("loss"), disabled=True)
         )
+        autograd_sched = OpSchedule(
+            autograd_op_list, cluster=cluster, loss_idx=autograd_loss_idx
+        )
+        re_autograd_op_list = deepcopy(autograd_op_list)
+        loss_op = re_autograd_op_list.pop(autograd_loss_idx)
+        recompute_op_list = ff_op_list + [loss_op] + re_autograd_op_list
+        list_sched.append(autograd_sched)
+
         list_sched.append(
-            OpSchedule(
-                ff_op_list + [ComputeOp(ComputationNode("loss"))]+autograd_op_list,
-                cluster=cluster,
-                loss_idx=len(ff_op_list)
-            )
+            OpSchedule(recompute_op_list, cluster=cluster, loss_idx=len(ff_op_list))
         )
         return list_sched
-            
-        
-    def single_compute_op_list(self, 
-                               cluster: HierarchicalCluster,
-                               with_backward=True,
-                               no_del_names=[],
-                               fast_forward=False):
+
+    def single_compute_op_list(
+        self,
+        cluster: HierarchicalCluster,
+        with_backward=True,
+        no_del_names=[],
+        fast_forward=False,
+    ):
         list_cnode = cluster.list_cnodes.copy()
         if not with_backward:
             list_cnode = list_cnode[: cluster.loss_idx]
-        loss_i = list_cnode.index(cluster.loss_cnode) if cluster.loss_cnode in list_cnode else -1
+        loss_i = (
+            list_cnode.index(cluster.loss_cnode)
+            if cluster.loss_cnode in list_cnode
+            else -1
+        )
 
         def _can_del(i, anode):
             if anode.name in no_del_names:
                 return False
-            for cnode in anode.users_real:
+            for cnode in anode.users_real:  # .union(anode.users_fake):
                 if cnode in list_cnode[i + 1 :]:
                     return False
-            
-            if anode in cluster.loss_cnode.deps_real and i<= loss_i:
+
+            fwd = not with_backward or i <= loss_i
+            if anode in cluster.loss_cnode.deps_real and fwd:
                 return False
             # if anode in cluster.interfaces["input_data_anodes"]:
             #     return False
@@ -169,10 +189,9 @@ class FastSolver(Solver):
 
         return op_list
 
-    
     # def recursive_solve_hcn(self,
     #                         hcn,
-    #                         no_del_names=[f"{init_target_string} data", 
+    #                         no_del_names=[f"{init_target_string} data",
     #                         f"{init_target_string} grad"]):
     #     cluster = hcn.sub_cluster
     #     if not cluster is cluster.representee_cluster or cluster.is_bottom:
@@ -182,10 +201,11 @@ class FastSolver(Solver):
     #             self.recursive_solve_hcn(hcn, hcn, no_del_names)
     #             self.solve_hcn(hcn, no_del_names)
 
-    def preprocess(self,
-                   cluster: HierarchicalCluster,
-                   no_del_names=[f"{init_target_string} data", 
-                   f"{init_target_string} grad"]):
+    def preprocess(
+        self,
+        cluster: HierarchicalCluster,
+        no_del_names=[f"{init_target_string} data", f"{init_target_string} grad"],
+    ):
         if not cluster is cluster.representee_cluster or cluster.is_bottom:
             return
         for hg in cluster.partitionings:
@@ -193,10 +213,11 @@ class FastSolver(Solver):
                 self.solve_hcn(hcn, cluster, no_del_names)
 
 
-def add_sched(cluster:HierarchicalCluster, sched):
+def add_sched(cluster: HierarchicalCluster, sched):
     cluster.list_schedules.append(sched)
 
-def get_sched(cluster:HierarchicalCluster, pareto=False):
+
+def get_sched(cluster: HierarchicalCluster, pareto=False):
     representee = cluster.representee_cluster
     if not pareto:
         return representee.list_schedules
@@ -211,19 +232,29 @@ def get_sched(cluster:HierarchicalCluster, pareto=False):
 
     return [list_schedules[i] for i, p in enumerate(is_pareto) if p]
 
-def translate(cluster:HierarchicalCluster, op_list):
+
+def translate(cluster: HierarchicalCluster, op_list):
     if cluster is cluster.representee_cluster:
         return op_list
     translator_re = cluster.representee_cluster.translator
     translator = cluster.translator
     translated_op_list = deepcopy(op_list)
-    for op in translated_op_list:
-        if isinstance(op, DeleteOp):
+
+    def translate_op(op):
+        if isinstance(op, ComputeOp):
+            ana_kn = translator_re.to_ano(op.target)
+            op.target = translator.from_ano(ana_kn)
+        elif isinstance(op.target, Activation):
             ana_kn = translator_re.to_ano(op.target.anode)
             op.target = Activation(translator.from_ano(ana_kn))
         else:
-            ana_kn = translator_re.to_ano(op.target)
-            op.target = translator.from_ano(ana_kn)
+            raise ValueError
+
+    for op in translated_op_list:
+        translate_op(op)
+        for e in op.wait_events:
+            re_node = translator_re.to_ano(e[1])
+            e[1] = translator.from_ano(re_node)
     return translated_op_list
 
 
@@ -234,10 +265,12 @@ def get_hgraph_budget_lb(hgraph: HierarchicalGraph):
         if hcn.sub_cluster is not None:
             # list_schedules = hcn.sub_cluster.get_sched()
             list_schedules = get_sched(hcn.sub_cluster)
-            hcn_memory_budget.append(min(op_sched.peak_mem for op_sched in list_schedules))
+            hcn_memory_budget.append(
+                min(op_sched.peak_mem for op_sched in list_schedules)
+            )
         else:
             hcn_memory_budget.append(hcn.ff_overhead)
-    return max(hcn_memory_budget)
+    return max(hcn_memory_budget, default=0)
 
 
 def get_hgraph_budget_ub(hgraph: HierarchicalGraph):
@@ -267,9 +300,11 @@ def get_cluster_budget(
 ):
     # assuming solving budget does not based on lower level solution
     budgets = []
-    
+
     sizes = [anode.mem for anode in cluster.list_anodes]
-    overheads = [cnode.mem_overhead for cnode in cluster.list_cnodes if cnode.mem_overhead]
+    overheads = [
+        cnode.mem_overhead for cnode in cluster.list_cnodes if cnode.mem_overhead is not None
+    ]
 
     # overheads = [hcn.sub_cluster.ff_overhead for hcn in hg.list_HCNs] + [
     #     op_sched.bwd_overhead for op_sched in hg.list_schedules
@@ -335,7 +370,8 @@ def solve_recursive(h_cluster: HierarchicalCluster, list_solvers=[], skip_self=F
             if h_cluster is h_cluster.representee_cluster:
                 last_time = time.time()
                 h_cluster.list_schedules.extend(solver(h_cluster))
-                
+
+
 # Preprocessing Cluster: add fast_forward and autograd option
 def preprocess_rec(cluster: HierarchicalCluster):
     if cluster is cluster.representee_cluster:
@@ -348,10 +384,11 @@ def preprocess_rec(cluster: HierarchicalCluster):
             preprocess(cluster)
 
 
-def preprocess(cluster: HierarchicalCluster, 
-               no_del_names=[f"{init_target_string} data", 
-                              f"{init_target_string} grad"], 
-               add_no_save_sched=True):
+def preprocess(
+    cluster: HierarchicalCluster,
+    no_del_names=[f"{init_target_string} data", f"{init_target_string} grad"],
+    add_no_save_sched=True,
+):
     if cluster is cluster.representee_cluster:
         for hg in cluster.partitionings:
             for hcn in hg.list_HCNs:
@@ -375,7 +412,7 @@ def preprocess(cluster: HierarchicalCluster,
                     ff_op_sched = OpSchedule(
                         ff_op_list + [ComputeOp(ComputationNode("loss"))],
                         cluster=cluster,
-                        loss_idx=len(ff_op_list)
+                        loss_idx=len(ff_op_list),
                         # correct_overhead=False,
                     )  # not real sched, only for info
                     hcn.ff_time = ff_op_sched.fwd_time
@@ -393,15 +430,19 @@ def preprocess(cluster: HierarchicalCluster,
                             OpSchedule(
                                 autograd_op_list,
                                 cluster=hcn.sub_cluster,
-                                loss_idx=autograd_op_list.index(ComputeOp(ComputationNode("loss"), disabled=True))
+                                loss_idx=autograd_op_list.index(
+                                    ComputeOp(ComputationNode("loss"), disabled=True)
+                                ),
                             )
                         )
                         if add_no_save_sched:
                             hcn.sub_cluster.list_schedules.append(
                                 OpSchedule(
-                                    ff_op_list + [ComputeOp(ComputationNode("loss"))]+autograd_op_list,
+                                    ff_op_list
+                                    + [ComputeOp(ComputationNode("loss"))]
+                                    + autograd_op_list,
                                     cluster=hcn.sub_cluster,
-                                    loss_idx=len(ff_op_list)
+                                    loss_idx=len(ff_op_list),
                                 )
                             )
                 hcn.ff_op_list = ff_op_list
@@ -413,7 +454,9 @@ def get_single_compute_op_list(
     list_cnode = cluster.list_cnodes.copy()
     if not with_bwd:
         list_cnode = list_cnode[: cluster.loss_idx]
-    loss_i = list_cnode.index(cluster.loss_cnode) if cluster.loss_cnode in list_cnode else -1
+    loss_i = (
+        list_cnode.index(cluster.loss_cnode) if cluster.loss_cnode in list_cnode else -1
+    )
 
     def _can_del(i, anode):
         if anode.name in no_del_names:
@@ -424,8 +467,8 @@ def get_single_compute_op_list(
         for cnode in anode.users_real:
             if cnode in list_cnode[i + 1 :]:
                 return False
-        
-        if anode in cluster.loss_cnode.deps_real and i<= loss_i:
+
+        if anode in cluster.loss_cnode.deps_real and i <= loss_i:
             return False
         # if anode in cluster.interfaces["input_data_anodes"]:
         #     return False
@@ -469,28 +512,32 @@ def get_single_compute_op_list(
     return op_list  # , loss_idx
 
 
-def get_optimize_metrics(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10, minor_param_size=1024**2):
+def get_optimize_metrics(
+    _p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10, minor_offload_size=1024**2
+):
     # timer = irotor.make_timer(torch.device("cpu"))
     timer = TimerCPU()
-    a_c = torch.ones([10, 1024,1024], device="cpu", pin_memory=True)
-    a_g = torch.ones([10, 1024,1024], device="cuda")
-    b_c = torch.ones([10, 1024,1024], device="cpu", pin_memory=True)
-    b_g = torch.ones([10, 1024,1024], device="cuda")
+    a_c = torch.ones([10, 1024, 1024], device="cpu", pin_memory=True)
+    a_g = torch.ones([10, 1024, 1024], device="cuda")
+    b_c = torch.ones([10, 1024, 1024], device="cpu", pin_memory=True)
+    b_g = torch.ones([10, 1024, 1024], device="cuda")
 
     p = deepcopy(_p).to("cuda")
     # if not p.is_leaf:
-    p = torch.ones([10,1024,1024], dtype=_p.dtype).to("cuda")
+    p = torch.ones([10, 1024, 1024], dtype=_p.dtype).to("cuda")
     size = p.numel()
     p.grad = torch.ones_like(p)
     optimizer = gpu_optim([p], **optim_kwargs)
     torch.cuda.reset_peak_memory_stats()
     mem = torch.cuda.memory_allocated()
+    optimizer.step()
     timer.start()
     for i in range(niter):
         optimizer.step()
+    torch.cuda.synchronize()
     timer.end()
     mem_after = torch.cuda.memory_allocated()
-    gpu_optimize_speed = size*p.element_size()*niter/timer.elapsed()
+    gpu_optimize_speed = size * p.element_size() * niter / timer.elapsed()
     opt_size = mem_after - mem
     opt_overhead = torch.cuda.max_memory_allocated() - mem_after
 
@@ -508,7 +555,7 @@ def get_optimize_metrics(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10, mi
             b_g.copy_(b_c, non_blocking=True)
     torch.cuda.synchronize()
     timer.end()
-    bandwidth = niter*a_c.numel()*a_c.element_size()/timer.elapsed()
+    bandwidth = niter * a_c.numel() * a_c.element_size() / timer.elapsed()
     timer.start()
     for i in range(niter):
         with torch.cuda.stream(torch.cuda.Stream()):
@@ -524,15 +571,17 @@ def get_optimize_metrics(_p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10, mi
             b_g.copy_(b_c, non_blocking=True)
             b_g.copy_(b_c, non_blocking=True)
         optimizer.step()
+    torch.cuda.synchronize()
     timer.end()
-    optimize_metrics = {"optimizer_states_size": round(opt_size//size/p.element_size()),
-                          "optimizer_overhead":round(opt_overhead//size/p.element_size()),
-                          "cpu_optim": cpu_optim,
-                          "gpu_optim": gpu_optim,
-                          "cpu_optimize_speed": size*p.element_size()*niter/timer.elapsed(),
-                          "gpu_optimize_speed":gpu_optimize_speed,
-                          "bandwidth": bandwidth,
-                          "minor_param_size": minor_param_size,
-                          "optim_kwargs":optim_kwargs}
+    optimize_metrics = {
+        "optimizer_states_size": round(opt_size // size / p.element_size()),
+        "optimizer_overhead": round(opt_overhead // size / p.element_size()),
+        "cpu_optim": cpu_optim,
+        "gpu_optim": gpu_optim,
+        "cpu_optimize_speed": size * p.element_size() * niter / timer.elapsed(),
+        "gpu_optimize_speed": gpu_optimize_speed,
+        "bandwidth": bandwidth,
+        "minor_offload_size": minor_offload_size,
+        "optim_kwargs": optim_kwargs,
+    }
     return optimize_metrics
-

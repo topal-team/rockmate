@@ -331,7 +331,8 @@ class SimplifiedGraph(base.Graph):
     def __init__(self,
             forward_graph : ForwardGraph = None,
             original_mod=None,
-            device=None
+            device=None,
+            small_memsize_fine_to_simplify=1024**2,
     ):
         # 2 constructors: if given a forward_graph, then move from F to S
         # otherwise return an empty simplified_graph
@@ -408,6 +409,7 @@ class SimplifiedGraph(base.Graph):
             self.simplify_lists_and_tuples()
             # self.optional_simplify_cheap_operations()
             self.simplify_sizes()
+            self.optional_simplify_small_direct_nodes(small_memsize_fine_to_simplify)
             self.simplify_view()
 
             self.create_nodes_for_random_operations_from_dict_rand(original_mod,device)
@@ -675,13 +677,30 @@ class SimplifiedGraph(base.Graph):
                 sn.substitute_self_by_its_code_in_its_users(self)
         self.clear()
 
+
     def simplify_sizes_without_deps(self):
         # Special case: we simplify sizes nodes that don't have any req
         nodes = list(self.nodes)
         for sn in nodes:
-            if sn.deps == set() and sn.info.variable_type == torch.Size:
+            if ((sn.deps == set() or sn.deps == {self.init_node})
+            and sn.info.variable_type == torch.Size):
                 self.nodes.remove(sn)
                 self.init_node.insert(sn_to_insert=sn,strong=True,simplified_graph=self)
+
+
+    def optional_simplify_small_direct_nodes(self,small_memsize_fine_to_simplify):
+        # Nodes that 1) do not 'requires_grad'
+        # 2) have a small `memsize`
+        # 3) whose deps are only the init_node
+        nodes = list(self.nodes)
+        for sn in nodes:
+            if ((sn.deps == set() or sn.deps == {self.init_node})
+            and not sn.info.requires_grad
+            and sn.info.memsize <= small_memsize_fine_to_simplify):
+                self.nodes.remove(sn)
+                self.init_node.insert(sn_to_insert=sn,strong=True,simplified_graph=self)
+                
+
 
     def simplify_sizes(self):
         """
@@ -721,6 +740,8 @@ class SimplifiedGraph(base.Graph):
         self.init_node.is_artifact = True
         self.clear()
 
+
+
     def simplify_view(self):
         """
         Note: from root to leaves (init_node to output_nodes)
@@ -733,7 +754,7 @@ class SimplifiedGraph(base.Graph):
             if sn.main_fct == "getitem":
                 if not isinstance(sn.main_code[1].value, ast_add_on.ast.Call):
                     is_view = True
-                elif ast_add_on.ast_to_str(sn.main_code[1].value.func) in constants.list_view_functions:
+                elif sn.main_fct.split(".")[0] in constants.list_view_functions:
                     is_view = True
             if sn.deps == set() and is_view:
                 self.init_node.insert(sn,
@@ -812,6 +833,9 @@ class SimplifiedGraph(base.Graph):
                     sn.users = set()
         self.clear()
     # ===== END BLOCK 3 : SIMPLIFICATIONS =====
+
+
+
 
     def make_sequentialized_list_of_blocks_of_nodes(self,aggressive=None):
         """
@@ -921,7 +945,7 @@ class SimplifiedGraph(base.Graph):
 
         # 3) init node
         if only_function_name: label = "INPUT"
-        else: label = "INPUT\n"+self.init_code
+        else: label = f"INPUT\n{self.init_code}"
         dot.node(self.init_node.main_target,
             label,
             color=color_special,
