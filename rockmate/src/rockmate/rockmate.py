@@ -19,7 +19,7 @@ from rkgb.lowlevel.constants import init_target_string
 from .op_schedule import *
 from .simulation import Simulator
 from .solvers.main import preprocess, solve_recursive, get_optimize_metrics, FastSolver
-from .solvers import HILP
+from .solvers import HILP, RK_rotor
 from .solvers.ilp.ilp_solver import default_time_limit
 from .compiler import Compiler, RK_Storage, make_gd
 import psutil
@@ -187,7 +187,7 @@ class Rockmate(torch.nn.Module):
         if (
             True
             in [
-                isinstance(solver, HILP)# or isinstance(solver, RK_rotor)
+                isinstance(solver, HILP) or isinstance(solver, RK_rotor)
                 for solver in list_solvers
             ]
             and recursive
