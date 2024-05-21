@@ -11,6 +11,7 @@ from LLM import get13Bllama, get3BPhi_2, get7Bllama, get7Bllama_lora, get3BPhi_1
 from rockmate import Rockmate
 from rockmate.op_schedule import *
 from rockmate.solvers import HILP, CheapSolver, RK_rotor
+from rockmate.solvers.main import FastSolver
 from rockmate.simulation import Simulator
 from datetime import datetime
 device = torch.device("cuda")
@@ -293,7 +294,7 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B",
     # rkmod.save_to_local(".", "GPT2-12")
 
     exp_stats = {}
-    exp_stats["RAM_0"] = psutil.virtual_memory()
+    exp_stats["RAM_0"] = str(psutil.virtual_memory())
 
     exp_stats["nlayer"] = nlayers
     exp_stats["input_size"] = [s.shape for s in sample]
@@ -351,7 +352,7 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B",
             exp_stats["time"] = time/niters
             exp_stats["peak_mem"] = torch.cuda.max_memory_allocated()
             exp_stats["date"] = datetime.now().strftime("%x_%H:%M")            
-    exp_stats["RAM_1"] = psutil.virtual_memory()
+    exp_stats["RAM_1"] = str(psutil.virtual_memory())
     del rkmod
     gc.collect()
     print(exp_stats)
@@ -433,6 +434,43 @@ def solve_rockmate(model,
     rkmod.get_compiled_fct()
     return rkmod
 
+def solve_no_remat(model, 
+                sample, 
+                budget):
+    partitioners = [rkgb.partitioned.PartitionerRecognizeRepetitivePattern(
+        strict_max_number_of_top_level_nodes=nlayers+4,
+        max_number_of_patterns=nlayers+2,
+        min_percentage_covered_required=0.75)]
+    model.to(device)
+    sample = [s.to(device) for s in sample]
+    solver = HILP(ilp_solver="PULP_CBC_CMD")
+    solver.config.offload = True
+    solver.config.activation_offload = False
+    solver.config.solve_only_top_level = True
+    solver.config.add_offload_sched = True
+
+    list_solvers = [solver]
+
+    rkmod = Rockmate(model, sample, budget, 
+                    solve_sched=False, 
+                        ilp_solver="PULP_CBC_CMD", 
+                        list_solvers=list_solvers,
+                        partitioners=partitioners,
+                        ilp_time_limit=10*60,
+                        minor_offload_size=10*1024**2,
+                        )
+    cluster = rkmod.rkgb_res.hierarchical_cluster
+    param_mem = sum(pnode.mem for pnode in cluster.parameter_nodes)
+    param_grad_mem = sum(pnode.mem for pnode in cluster.parameter_nodes if pnode.info.requires_grad)
+    act_budget = budget - param_mem - (1+rkmod.optimize_metrics["optimizer_states_size"]) * param_grad_mem
+    if act_budget<0:
+        return False
+    print(act_budget)
+    fast = FastSolver(recompute_sched=False)
+    rkmod.preprocess(fast)
+    rkmod.solve_sched(act_budget)
+    rkmod.get_compiled_fct()
+    return rkmod
 
 
 def dynamic_sample(sample, md):
@@ -474,6 +512,7 @@ if __name__=="__main__":
         "offmate":{},
         "offmate_no_act_offload":{"activation_offload":False},
         "offmate_no_cpu_optim":{"cpu_optimization":False},
+        "offmate_base":{"cpu_optimization":False, "activation_offload":False},
         "offmate_dynamic_batch":{"dynamic_batch_dim":0},
         "rockmate":{"rotor":True},
     }
