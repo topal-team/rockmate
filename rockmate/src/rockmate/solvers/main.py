@@ -39,7 +39,7 @@ class Solver:
 
 
 class FastSolver(Solver):
-    def __init__(self, config=None, recompute_sched=False):
+    def __init__(self, config=None, recompute_sched=True):
         super().__init__(config)
         self.recompute_sched=recompute_sched
 
