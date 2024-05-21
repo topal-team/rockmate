@@ -7,7 +7,7 @@ import torch.nn as nn
 from copy import deepcopy
 import numpy as np
 # from models import *
-from LLM import get13Bllama, get3BPhi_2, get7Bllama, get7Bllama_lora, get3BPhi_15
+from LLM import get13Bllama, get3BPhi_2, get7Bllama, get7Bllama_lora, get3BPhi_15, get11Bfalcon, get3Bbloom, get8Bllama, get7Bmistral, get4Bphi3
 from rockmate import Rockmate
 from rockmate.op_schedule import *
 from rockmate.solvers import HILP, CheapSolver, RK_rotor
@@ -377,9 +377,13 @@ def solve_rkmod(model,
                 activation_offload=True,
                 cpu_optimization=True,
                 dynamic_batch_dim=None):
+    pat_layers = nlayers+2
+    if nlayers>45:
+        pat_layers = nlayers//2 +2
+
     partitioners = [rkgb.partitioned.PartitionerRecognizeRepetitivePattern(
         strict_max_number_of_top_level_nodes=nlayers+4,
-        max_number_of_patterns=nlayers+2,
+        max_number_of_patterns=pat_layers,
         min_percentage_covered_required=0.75)]
 
     solver = HILP(ilp_solver="PULP_CBC_CMD")
@@ -506,6 +510,11 @@ if __name__=="__main__":
         "phi2-3b": get3BPhi_2,
         "phi2-2b": get3BPhi_15,
         "llama7b_lora":get7Bllama_lora,
+        "bloom3b": get3Bbloom,
+        "falcon11b": get11Bfalcon,
+        "llama8b": get8Bllama,
+        "mistral7b": get7Bmistral,
+        "phi3-4b":get4Bphi3
     }
     kwargs = {
         "offmate":{},

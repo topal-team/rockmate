@@ -56,23 +56,6 @@ def get7Bllama(batch, seq_len, nlayers=32, dtype=None, llama3=False, classificat
     configuration._attn_implementation="eager"
     configuration._attn_implementation_internal="eager"
     model = LlamaForSequenceClassification(configuration).to(dtype)
-
-    # # Initializing a model from the llama-7b style configuration
-    # if classification:
-    # else:
-    #     configuration = LlamaConfig(
-    #                             vocab_size=vocab_size,
-    #                             num_hidden_layers=nlayers,
-    #                             hidden_size=4096,
-    #                             output_hidden_states=False,
-    #                             output_attentions=False,
-    #                             use_cache=False
-    #                             )
-    #     configuration._attn_implementation="eager"
-    #     configuration._attn_implementation_internal="eager"
-    #     model = LlamaModel(configuration).to(dtype)
-    #     model.enable_input_require_grads()
-
     return model, [sample]
 
 def get13Bllama(batch, seq_len, nlayers=40, dtype=None, llama3=False, classification=False):
@@ -233,3 +216,116 @@ def get7Bllama_lora(batch, seq_len, num_adapters=64, nlayers=32, dtype=None, lla
         model.enable_input_require_grads()
 
     return model, sample
+
+
+def get11Bfalcon(batch, seq_len, dtype=None, nlayers=24, classification=False):
+    from transformers import FalconForSequenceClassification, FalconConfig
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+        config = {
+                                    "ffn_hidden_size": 16384,
+                                    "hidden_dropout": 0.0,
+                                    "hidden_size": 4096,
+                                    "num_attention_heads": 32,
+                                    "num_hidden_layers":nlayers,
+                                    "torch_dtype": "bfloat16",
+                                    "use_cache": False,
+                                    "output_hidden_states":False,
+                                    "output_attentions":False,
+                                    "vocab_size": 65024
+        }
+        configuration = FalconConfig( **config
+                            )
+    configuration._attn_implementation="eager"
+    configuration._attn_implementation_internal="eager"
+    sample = torch.randint(0, 600, [batch, seq_len])
+    # if classification:
+    model = FalconForSequenceClassification(configuration).to(dtype)
+    model.config.pad_token_id = 0
+    return model, [sample]
+
+
+def get3Bbloom(batch, seq_len, dtype=None, nlayers=30, classification=False):
+    from transformers import BloomForSequenceClassification, BloomConfig
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+    configuration = BloomConfig(hidden_size=2560,
+                            num_hidden_layers=nlayers,
+                            output_hidden_states=False,
+                            output_attentions=False,
+                            pad_token_id=0,
+                            use_cache=False
+                            )
+    configuration._attn_implementation="eager"
+    configuration._attn_implementation_internal="eager"
+    sample = torch.randint(0, 600, [batch, seq_len])
+    # if classification:
+    model = BloomForSequenceClassification(configuration).to(dtype)
+    model.config.pad_token_id = 0
+    return model, [sample]
+
+def get8Bllama(batch, seq_len, nlayers=32, dtype=None, llama3=True):
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
+    #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
+    sample = torch.randint(0, 600, [batch, seq_len])
+    # Initializing a LLaMA llama-7b style configuration
+    vocab_size = 128256 if llama3 else 32000
+    
+
+    configuration = LlamaConfig(num_hidden_layers=nlayers,
+                                hidden_size=4096,
+                                output_hidden_states=False,
+                                output_attentions=False,
+                                pad_token_id=0,
+                                use_cache=False,
+                                vocab_size=vocab_size
+                                )
+    # Initializing a model from the llama-7b style configuration
+    configuration._attn_implementation="eager"
+    configuration._attn_implementation_internal="eager"
+    model = LlamaForSequenceClassification(configuration).to(dtype)
+    return model, [sample]
+
+def get7Bmistral(batch, seq_len, dtype=None, nlayers=32, classification=False):
+    from transformers import MistralConfig, MistralForSequenceClassification
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+    configuration = MistralConfig(hidden_size=4096,
+                            num_hidden_layers=nlayers,
+                            num_attention_heads=32,
+                            intermediate_size=14336,
+                            output_hidden_states=False,
+                            output_attentions=False,
+                            pad_token_id=0,
+                            use_cache=False
+                            )
+    configuration._attn_implementation="eager"
+    configuration._attn_implementation_internal="eager"
+    sample = torch.randint(0, 600, [batch, seq_len])
+    # if classification:
+    model = MistralForSequenceClassification(configuration).to(dtype)
+    model.config.pad_token_id = 0
+    return model, [sample]
+
+def get4Bphi3(batch, seq_len, dtype=None, nlayers=32, classification=False):
+    from transformers import PhiConfig, PhiForSequenceClassification
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+    configuration = PhiConfig(hidden_size=3072,
+                            num_hidden_layers=nlayers,
+                            num_attention_heads=32,
+                            intermediate_size=8192,
+                            output_hidden_states=False,
+                            output_attentions=False,
+                            pad_token_id=0,
+                            use_cache=False
+                            )
+    configuration._attn_implementation="eager"
+    configuration._attn_implementation_internal="eager"
+    sample = torch.randint(0, 600, [batch, seq_len])
+    # if classification:
+    model = PhiForSequenceClassification(configuration).to(dtype)
+    model.config.pad_token_id = 0
+    return model, [sample]
