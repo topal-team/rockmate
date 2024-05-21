@@ -22,6 +22,7 @@ from ..main import get_sched, add_sched, translate
 from .ilp_model import ModelPULP
 from .ilp_offload import ModelPULPOffload
 
+
 class knapsack:
     def __init__(self, parameter_sizes: list, pre_solve_size=10):
         size = [s[1] for s in parameter_sizes]
@@ -42,7 +43,7 @@ class knapsack:
         res1 = self.solve(frac, i + 1, sizes)
         res2 = self.solve(frac - sizes[i], i + 1, sizes)
         res2 = [i] + res2
-        if self.get_size(res1, sizes) <= self.get_size(res2, sizes) + sizes[i]:
+        if self.get_size(res1, sizes) <= self.get_size(res2, sizes):
             return res1
         else:
             return res2
@@ -51,9 +52,10 @@ class knapsack:
         sizes = self.sizes.copy()
         parameter_sizes = self.parameter_sizes.copy()
         selections = []
-        while len(sizes) > self.pre_solve_size and frac>0:
+        while len(sizes) > self.pre_solve_size and frac > 0:
             sel_i = self.presolve(frac, sizes)
-            if sel_i is None:break
+            if sel_i is None:
+                break
             selections.append(parameter_sizes.pop(sel_i)[0])
             frac -= sizes.pop(sel_i)
         indices = self.solve(frac, sizes=sizes)
@@ -61,13 +63,15 @@ class knapsack:
         return selections
 
     def select_size(self, size: int):
-        if not self.parameter_sizes:return []
+        if not self.parameter_sizes:
+            return []
         return self.select(size / sum(s[1] for s in self.parameter_sizes))
-    
+
     def presolve(self, frac, sizes):
         array = np.array(sizes)
-        sel_i = np.argmax(array*(array<frac))
-        if array[sel_i]>frac:return np.argmin(array)
+        sel_i = np.argmax(array * (array < frac))
+        if array[sel_i] > frac:
+            return np.argmin(array)
         return sel_i
 
 
@@ -92,16 +96,24 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
         ) = schedule_offload(md, hgraph)
         op_name_list = [op.name for op in op_list]
 
-        init_ops = {op.target.name:op for op in init_op_list}
+        init_ops = {op.target.name: op for op in init_op_list}
         for pnode in md.hgraph.cluster.parameter_nodes:
-            if pnode.mem< md.optimize_metrics["minor_param_size"]:
+            if pnode.mem < md.optimize_metrics["minor_offload_size"] or pnode.is_buffer:
                 device = "cuda"
             else:
                 device = "cpu"
             alloc = Parameter(pnode)
+            alloc_grad = Parameter(pnode, is_grad=True)
             if alloc.name not in init_ops:
-                init_op_list.append(PrepareOp(alloc, device=device, 
-                                            cpu_grad=OffloadOp(Parameter(pnode, is_grad=True)).name in op_name_list))
+                init_op_list.append(
+                    PrepareOp(
+                        alloc,
+                        device=device,
+                        cpu_optimize=OffloadOp(alloc_grad).name
+                        in op_name_list,
+                        pin_memory=OffloadOp(alloc).name in op_name_list,
+                    )
+                )
 
     else:
         op_list = []
@@ -111,13 +123,12 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
             for k in md.krange(t):
                 if t == md.loss_idx and k == md.loss_idx:
                     op_list.append(loss_op)
-                op_list += schedule_compute(md,t,k,hgraph)
-    
+                op_list += schedule_compute(md, t, k, hgraph)
+
     # print("finish scheduling")
     for anode in md.hgraph.cluster.interfaces["input_data_anodes"]:
         init_alive_status[anode.name] = True  # anode share the name as alloc
 
-    
     op_sched = OpSchedule(
         op_list,
         loss_idx=op_list.index(loss_op),
@@ -126,7 +137,11 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
         init_op_list=init_op_list,
         restore_op_list=restore_op_list,
         with_parameters=isinstance(md, ModelPULPOffload),
-        optim_states_multiplier = md.optimize_metrics["optimizer_states_size"] if isinstance(md, ModelPULPOffload) else None
+        optim_states_multiplier=(
+            md.optimize_metrics["optimizer_states_size"]
+            if isinstance(md, ModelPULPOffload)
+            else None
+        ),
     )
     # check_valid = True
     if check_valid:
@@ -139,10 +154,11 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
                     raise ValueError
     return op_sched
 
-def schedule_compute(md: ModelPULP, t,k,hgraph):
+
+def schedule_compute(md: ModelPULP, t, k, hgraph):
     op_list = []
     sol = md.sol
-    
+
     j = md.hcn2sub_c[k]
     # if md.sumComp[t, k].value() == 1:
     if sol(md.sumComp[t, k]):
@@ -179,10 +195,7 @@ def schedule_compute(md: ModelPULP, t,k,hgraph):
                 #         op.disabled = True
                 #         phantoms_to_keep.remove(op.kn)
             # translating sub_op_list
-            if (
-                hcn.sub_cluster
-                is not hcn.sub_cluster.representee_cluster
-            ):
+            if hcn.sub_cluster is not hcn.sub_cluster.representee_cluster:
                 sub_op_list = translate(hcn.sub_cluster, sub_op_list)
         else:
             h_obj = hcn
@@ -191,10 +204,8 @@ def schedule_compute(md: ModelPULP, t,k,hgraph):
         anode_to_protect = []
         if not hcn.sub_cluster is None:
             for anode in hcn.sub_cluster.all_interfaces:
-                i_ = [
-                        hdn.anode.name for hdn in md.hgraph.list_HANs
-                    ].index(anode.name)
-                if (k, i_) in md.delete_list:
+                i_ = [hdn.anode.name for hdn in md.hgraph.list_HANs].index(anode.name)
+                if (k, i_) in md.delete_list and k in md.han_users_real[i_]:
                     eidx = md.delete_list.index((k, i_))
                     if not sol(md.delete[t, eidx]):
                         anode_to_protect.append(anode.name)
@@ -221,150 +232,140 @@ def schedule_offload(md: ModelPULPOffload, hgraph=None):
     hgraph = hgraph if hgraph else md.hgraph
 
     ### Handle multiplier
-    md.params_vars = [md.AliveW, md.OflWProg, md.OflW, 
-                        md.PrfW, md.PrfWProg, md.OptC,
-                        md.AliveG, md.OflGProg, md.OflG,
-                        md.PrfG, md.PrfGProg, md.AliveO,
-                        md.OflO, md.OflOProg, md.PrfO, 
-                        md.PrfOProg
-                        ]
+    md.params_vars = [
+        md.AliveW,
+        md.OflWProg,
+        md.OflW,
+        md.PrfW,
+        md.PrfWProg,
+        md.OptC,
+        md.AliveG,
+        md.OflGProg,
+        md.OflG,
+        md.PrfG,
+        md.PrfGProg,
+        md.AliveO,
+        md.OflO,
+        md.OflOProg,
+        md.PrfO,
+        md.PrfOProg,
+    ]
     if isinstance(md.req_w, float):
-        multiplier = 1- md.req_w
+        multiplier = 1 - md.req_w
     else:
-        multiplier = 1- md.req_w.value()
+        multiplier = 1 - md.req_w.value()
     for p in md.params_vars:
-        for k,v in p.items():
-            p[k] = v*1/ (1-multiplier)
+        for k, v in p.items():
+            p[k] = v * 1 / (1 - multiplier)
             pass
 
-    md.ofl_ops = []
-    md.prf_ops = []
-    md.del_ops = []
-    md.opt_ops = []
+    if md.activation_offload:
+        md.selected_phantoms = {}
+
+    def add_op(op_dict, op_list):
+        for op in op_list:
+            op_dict[op[:2]].append(op[2])
+
+    md.ofl_ops = {step: [] for step in md.active_steps}
+    md.prf_ops = {step: [] for step in md.active_steps}
+    md.del_ops = {step: [] for step in md.active_steps}
+    md.opt_ops = {step: [] for step in md.active_steps}
     md.cpu_optimized_params = {}
-    md.cpu_optimized_steps = {step:[] for step in md.active_steps}
+    md.cpu_optimized_steps = {step: [] for step in md.active_steps}
     init_op_list = []
     restore_op_list = []
     init_alive_status = dict()
     if md.grouping:
         for w in range(md.W)[::-1]:
             o_l, p_l, d_l, t_l, i_l, r_l, init_alive = group(md, w)
-            md.ofl_ops.extend(o_l)
-            md.prf_ops.extend(p_l)
-            md.del_ops.extend(d_l)
-            md.opt_ops.extend(t_l)
+            add_op(md.ofl_ops, o_l)
+            add_op(md.prf_ops, p_l)
+            add_op(md.del_ops, d_l)
+            add_op(md.opt_ops, t_l)
             init_op_list.extend([ops[2] for ops in i_l])
             restore_op_list.extend([ops[2] for ops in r_l])
             for alloc in init_alive:
                 init_alive_status[alloc.name] = True
+
+        for j in range(md.J):
+            ofl_ops, prf_ops, del_ops = group_activation_offload(md, j)
+            add_op(md.ofl_ops, ofl_ops)
+            add_op(md.prf_ops, prf_ops)
+            add_op(md.del_ops, del_ops)
     # else:
     #     init_op_list = md.schedule_init_op_list()
 
     sol = md.sol
     # offload_buffers = {w:[] for w in range(W)}
     op_list = []
-    
+
     # for op in init_op_list:
     #     if isinstance(op, AllocateOp):
     #         init_alive_status[op.target] = True
-    
+
     for t in range(md.T):
         for k in md.krange(t):
-            op_list.append(SynchronizeOp(f"{(t,k)}"))
-            if t == md.loss_idx and k == md.loss_idx:
-                # loss_idx = len(op_list)
-                # loss_op = Op(K_C_node("loss"))
+            op_list.extend(schedule_step(md, t, k))
 
-                op_list.append(ComputeOp(md.hgraph.cluster.loss_cnode, disabled=True))
-            if not sol(md.sumComp[t, k]):
-                continue
-            j = md.hcn2sub_c[k]
-            # if md.sumComp[t, k].value() == 1:
-            prefetch_list = []
-            for w in range(md.W):
-                prefetch_ops = create_prefetch_ops(md,t, k, w)
-                op_list.extend(prefetch_ops[0])
-                prefetch_list.extend(prefetch_ops[1])
-            op_list += schedule_compute(md,t,k,hgraph)
-            wait_op_1 = []
-            wait_op_2 = []
-            wait_op_3 = []
-            for w in range(md.W):
-                if k in md.param2hcn[w]:
-                    wait_op_1.extend(create_optimize_ops(md,t, k, w))
-                    wait_op_2.extend(create_offload_ops(md,t, k, w))
-                    wait_op_3.extend(create_delete_ops(md,t, k, w))
-                    # op_list.extend(create_prefetch_ops(md,t,k,w))
-                else:
-                    op_list.extend(create_offload_ops(md,t, k, w))
-                    op_list.extend(create_delete_ops(md,t, k, w))
-                    op_list.extend(create_optimize_ops(md,t, k, w))
-            if wait_op_1:# for the current layer, need to synchronize first
-                op_list.extend([SynchronizeOp(str(k))]+wait_op_1)
-            if wait_op_2:# for the current layer, need to synchronize first
-                op_list.extend([SynchronizeOp(str(k))]+wait_op_2)
-            if wait_op_3:# for the current layer, need to synchronize first
-                op_list.extend([SynchronizeOp(str(k))]+wait_op_3)
-
-            op_list.extend(prefetch_list)
-
-    
     return op_list, init_alive_status, init_op_list, restore_op_list
 
-def create_optimize_ops(md, t, k, w, itemsize=4):
+def schedule_step(md: ModelPULP, t, k):
     op_list = []
-    # sub_cluster = md.hgraph.list_HCNs[min(md.param2hcn[w])].sub_cluster
-    if md.grouping:
-        for t_, k_, op in md.opt_ops:
-            if (
-                t_ == t
-                and k_ == k
-                and op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]
-            ):
-                op_list.append(op)
+    if not md.sol(md.sumComp[t, k]):
         return op_list
+    op_list.append(SynchronizeOp(f"{(t,k)}"))
+    if t == md.loss_idx and k == md.loss_idx:
+        op_list.append(ComputeOp(md.hgraph.cluster.loss_cnode, disabled=True))
+    
+    j = md.hcn2sub_c[k]
+    op_list += schedule_compute(md, t, k, md.hgraph)
+    last_op = op_list[-1]
+    last_op.record_event = True
+    self_ops = []
+    self_targets = [
+        p.param_name for w in md.hcn2param[k] for p in md.parameters[w]
+    ]
+    if md.hcn2sub_c[k] is not None and md.activation_offload:
+        self_targets += md.selected_phantoms[j]
+    for op in md.opt_ops[t, k]:
+        op_list.append(op)
+        if op.target.target_name in self_targets:
+            op.record_event = True
+    for op in md.ofl_ops[t, k]:
+        if op.target.target_name in self_targets:
+            self_ops.append(op)
+        else:
+            op_list.append(op)
+    for op in md.del_ops[t, k]:
+        if op.target.target_name in self_targets:
+            self_ops.append(op)
+        else:
+            op_list.append(op)
+    for op in md.prf_ops[t, k]:
+        op_list.append(op)
 
-def create_delete_ops(md, t, k, w, itemsize=4):
-    op_list = []
-    sub_cluster = md.hgraph.list_HCNs[min(md.param2hcn[w])].sub_cluster
-    if md.grouping:
-        for t_, k_, op in md.del_ops:
-            if (
-                t_ == t
-                and k_ == k
-                and op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]
-            ):
-                op_list.append(op)
-        return op_list
+    op_list.extend(self_ops)
 
-def create_prefetch_ops(md, t, k, w, itemsize=4):
-    pre_op_list = []
-    post_op_list = []
-    sub_cluster = md.hgraph.list_HCNs[min(md.param2hcn[w])].sub_cluster
+    occurrences = dict()
+    for i, op in enumerate(op_list):
+        if op.name not in occurrences:
+            occurrences[op.name] = []
+        occurrences[op.name].append(i)
+    for op in self_ops:
+        if isinstance(op, OffloadOp):
+            op.record_event = True
+            opt_op_name = OptimizeOp([op.target.pnode.param_name],
+                        alloc=op.target).name
+            if opt_op_name in occurrences:
+                opt_op = op_list[max(occurrences[opt_op_name])]
+                op.wait_events.append((opt_op.op_type, opt_op.target.name))
 
-    if md.grouping:
-        for t_, k_, op in md.prf_ops:
-            if (
-                t_ == t
-                and k_ == k
-                and op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]
-            ):
-                pre_op_list.append(op)
-
-        return pre_op_list, post_op_list
-
-def create_offload_ops(md, t, k, w, itemsize=4):
-    op_list = []
-    sub_cluster = md.hgraph.list_HCNs[min(md.param2hcn[w])].sub_cluster
-    if md.grouping:
-        for t_, k_, op in md.ofl_ops:
-            if (
-                t_ == t
-                and k_ == k
-                and op.target.pnode.param_name in [k.param_name for k in md.parameters[w]]
-            ):
-                op_list.append(op)
-        return op_list
+        if isinstance(op, DeleteOp):
+            ofl_op_name = OffloadOp(alloc=op.target).name
+            if ofl_op_name in occurrences:
+                ofl_op = op_list[max(occurrences[ofl_op_name])]
+                op.wait_events.append((ofl_op.op_type, ofl_op.target.name))
+    return op_list
 
 def group(md, w, tol=1):
     # Group the parameters of each block for the task
@@ -372,8 +373,8 @@ def group(md, w, tol=1):
     bwd_i = max(md.param2hcn[w])
     early_fwd = []
     for t in range(bwd_i, md.T):
-        if not md.single_fwd and md.sol(md.sumComp[t,fwd_i]):
-            early_fwd.append(t)#if recompute fwd after bwd
+        if not md.single_fwd and md.sol(md.sumComp[t, fwd_i]):
+            early_fwd.append(t)  # if recompute fwd after bwd
     hcn = md.hgraph.list_HCNs[fwd_i]
     parameters = {pnode.param_name: pnode for pnode in md.parameters[w]}
     parameter_size = sum(pnode.mem for pnode in parameters.values())
@@ -391,7 +392,7 @@ def group(md, w, tol=1):
     cpu_optimize_candidates = {p: 0 for p in parameters.keys()}
 
     def apply_cpu_optimize(p):
-        for (t,k,op) in ofl_ops:
+        for t, k, op in ofl_ops:
             if op.target.target_name == p:
                 op.target.is_grad = True
                 # op.grad = True
@@ -399,35 +400,50 @@ def group(md, w, tol=1):
         # for (t,k,op) in del_ops:
         #     if op.target.name == p:
         #         op.grad = True
-        del_ops.append((t,k,DeleteOp(Parameter(parameters[p], is_grad=True))))
-        i = md.active_steps.index((t,k))+1# TODO: distribute cpu optimization based on time
+        del_ops.append((t, k, DeleteOp(Parameter(parameters[p], is_grad=True))))
+        i = (
+            md.active_steps.index((t, k)) + 1
+        )  # TODO: distribute cpu optimization based on time
         p_alloc = Parameter(parameters[p])
-        op = OptimizeOp(list_params=[p], cpu=True, alloc=p_alloc,
-                        time=parameters[p].mem/md.cpu_optimize_speed/md.gcd,
-                        )
+        op = OptimizeOp(
+            list_params=[p],
+            cpu=True,
+            alloc=p_alloc,
+            time=parameters[p].mem / md.cpu_optimize_speed / md.gcd,
+        )
         opt_ops.append((*md.active_steps[i], op))
         md.cpu_optimized_steps[md.active_steps[i]].append(p)
         # del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p]))))
 
-        #if cpu optimize, do not keep w after bwd
+        # if cpu optimize, do not keep w after bwd
+
     def apply_gpu_optimize(p):
         p_alloc = Parameter(parameters[p])
-        op = OptimizeOp(list_params=[p], alloc=p_alloc,
-                        time = parameters[p].mem/md.gpu_optimize_speed/md.gcd,
-                        overhead=parameters[p].mem*md.optimizer_overhead_factor)
-        opt_ops.append((bwd_i, bwd_i, op))# optimize after bwd
+        op = OptimizeOp(
+            list_params=[p],
+            alloc=p_alloc,
+            time=parameters[p].mem / md.gpu_optimize_speed / md.gcd,
+            overhead=parameters[p].mem * md.optimizer_overhead_factor,
+        )
+        opt_ops.append((bwd_i, bwd_i, op))  # optimize after bwd
         del_ops.append((bwd_i, bwd_i, DeleteOp(Parameter(parameters[p], is_grad=True))))
-        
 
     assert (bwd_i, bwd_i) in md.active_steps
     idx = md.active_steps.index((bwd_i, bwd_i))
     for t, k in md.active_steps[idx:] + md.active_steps[:idx]:
         t_, k_ = md.next_idx(t, k)
         current_alive_size = sum(parameters[p].mem * a for p, a in Alive.items())
-        current_offloaded_size = sum(parameters[p].mem * a for p, a in Offloaded.items())
-        next_alive_size = round((md.AliveG[(t_, k_, w)]+md.AliveW[(t_, k_, w)]).value() * parameter_size)
-        next_offloaded_size = round((md.OflGProg[(t_, k_, w)]+md.OflWProg[(t_, k_, w)]).value() * parameter_size)
-        
+        current_offloaded_size = sum(
+            parameters[p].mem * a for p, a in Offloaded.items()
+        )
+        next_alive_size = round(
+            (md.AliveG[(t_, k_, w)] + md.AliveW[(t_, k_, w)]).value() * parameter_size
+        )
+        next_offloaded_size = round(
+            (md.OflGProg[(t_, k_, w)] + md.OflWProg[(t_, k_, w)]).value()
+            * parameter_size
+        )
+
         # assert current_alive_size <= round(md.AliveW[(t, k, w)].value() * parameter_size)
 
         if (t, k) == (0, 0):  # init
@@ -435,16 +451,19 @@ def group(md, w, tol=1):
                 if a:
                     p_alloc = Parameter(parameters[p])
                     # init_ops.append((t, k, AllocateOp(p_alloc)))
-                    init_ops.append((t, k, PrepareOp(p_alloc, device="cuda")))
+                    init_ops.append(
+                        (t, k, PrepareOp(p_alloc, device="cuda", cpu_optimize=True))
+                    )
                     init_alive.append(p_alloc)
                     # op = PrefetchOp(
-                    #     alloc=p_alloc, indices=(0, None), 
+                    #     alloc=p_alloc, indices=(0, None),
                     #     time=parameters[p].mem/md.bandwidthPrf/md.gcd
                     # )
                     # init_ops.append((t, k, op))
                     op = OffloadOp(
-                        alloc=p_alloc, indices=(0, None),
-                        time=parameters[p].mem/md.bandwidthOfl/md.gcd
+                        alloc=p_alloc,
+                        indices=(0, None),
+                        time=parameters[p].mem / md.bandwidthOfl / md.gcd,
                     )
                     restore_ops.append((t, k, op))
                     restore_ops.append((t, k, DeleteOp(p_alloc)))
@@ -453,12 +472,10 @@ def group(md, w, tol=1):
             # print(t,k, next_offloaded_size, current_offloaded_size)
             ofl_size = next_offloaded_size - current_offloaded_size
             candidates = {
-                p: parameters[p].mem * (1 - o)
-                for p, o in Offloaded.items()
-                if o < 1
+                p: parameters[p].mem * (1 - o) for p, o in Offloaded.items() if o < 1
             }
             if not candidates:
-                if ofl_size<1024:
+                if ofl_size < 1024:
                     ofl_size = 0
                 else:
                     raise ValueError
@@ -468,8 +485,11 @@ def group(md, w, tol=1):
             # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-ofl_size>tol:
             #     pass
             for p in select_paras:
-                op = OffloadOp(alloc=Parameter(parameters[p]), indices=(0, None),
-                                time=parameters[p].mem/md.bandwidthOfl/md.gcd)
+                op = OffloadOp(
+                    alloc=Parameter(parameters[p]),
+                    indices=(0, None),
+                    time=parameters[p].mem / md.bandwidthOfl / md.gcd,
+                )
                 ofl_ops.append((t, k, op))
                 Offloaded[p] = 1
 
@@ -477,10 +497,10 @@ def group(md, w, tol=1):
             del_size = current_alive_size - next_alive_size
             candidates = {}
             for p, o in Offloaded.items():
-                if Alive[p]>0 and o>0:
-                    candidates[p] = min(o, Alive[p])*parameters[p].mem
+                if Alive[p] > 0 and o > 0:
+                    candidates[p] = min(o, Alive[p]) * parameters[p].mem
             if not candidates:
-                if del_size<1024:
+                if del_size < 1024:
                     del_size = 0
                 else:
                     raise ValueError
@@ -499,8 +519,8 @@ def group(md, w, tol=1):
                 p: parameters[p].mem * (1 - a) for p, a in Alive.items() if a < 1
             }
             if not candidates:
-                if prf_size<1024:
-                    prf_size=0
+                if prf_size < 1024:
+                    prf_size = 0
                 else:
                     raise ValueError
             if md.sol(md.AliveW[(t_, k_, w)]):
@@ -508,18 +528,21 @@ def group(md, w, tol=1):
                 # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size>0.99
             else:
                 selector = knapsack(list(candidates.items()))
-                unselect_paras = selector.select_size(sum(candidates.values()) - prf_size)
-                
-                select_paras = [
-                    p for p in candidates.keys() if p not in unselect_paras
-                ]
+                unselect_paras = selector.select_size(
+                    sum(candidates.values()) - prf_size
+                )
+
+                select_paras = [p for p in candidates.keys() if p not in unselect_paras]
                 # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size<1.01
             # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-prf_size>tol:
             #     pass
             for p in select_paras:
                 prf_ops.append((t, k, AllocateOp(Parameter(parameters[p]))))
-                op = PrefetchOp(alloc=Parameter(parameters[p]), indices=(0, None),
-                                time=parameters[p].mem/md.bandwidthPrf/md.gcd)
+                op = PrefetchOp(
+                    alloc=Parameter(parameters[p]),
+                    indices=(0, None),
+                    time=parameters[p].mem / md.bandwidthPrf / md.gcd,
+                )
                 prf_ops.append((t, k, op))
                 Alive[p] = 1
                 if (t > bwd_i and t < min(early_fwd + [md.T + 1])) or t < fwd_i:
@@ -527,39 +550,41 @@ def group(md, w, tol=1):
                     if parameters[p].info.requires_grad:
                         # only trainable parameters will be optimize candidate
                         cpu_optimize_candidates[p] = 1
-    
+
     candidates = {
-                p: parameters[p].mem * a for p, a in cpu_optimize_candidates.items() if a >0
-            }
+        p: parameters[p].mem * a for p, a in cpu_optimize_candidates.items() if a > 0
+    }
     select_paras = []
     # assert sum(candidates.values())/parameter_size >= md.sumOptC[w].value()-0.01
-    
-        # cpu_optimize_size = md.sumOptC[w].value()*parameter_size# size by subgraph
+
+    # cpu_optimize_size = md.sumOptC[w].value()*parameter_size# size by subgraph
     if isinstance(md.req_w, float):
-        multiplier = 1-md.req_w
+        multiplier = 1 - md.req_w
     else:
-        multiplier = 1-md.req_w.value()
-    # cpu_optimize_size = (sum(md.sumOptC[w_].value() * 
+        multiplier = 1 - md.req_w.value()
+    # cpu_optimize_size = (sum(md.sumOptC[w_].value() *
     #                         md.parameter_gradient_size[w_] *md.gcd
     #                         for w_ in range(w, md.W)) / (1-multiplier)
     #                     - sum(md.cpu_optimized_params.values()))# size by all graphs
-    cpu_optimize_size = min(sum(candidates.values()),
-                            (md.sumOptC[w].value() * 
-                            md.parameter_gradient_size[w] *md.gcd
-                            ) / (1-multiplier))
-    
-    if candidates and cpu_optimize_size>0:
+    cpu_optimize_size = min(
+        sum(candidates.values()),
+        (md.sumOptC[w].value() * md.parameter_gradient_size[w] * md.gcd)
+        / (1 - multiplier),
+    )
+
+    if candidates and cpu_optimize_size > 0:
         # print(candidates, cpu_optimize_size)
         selector = knapsack(list(candidates.items()))
         select_paras = selector.select_size(cpu_optimize_size)
-        if cpu_optimize_size>sum(candidates[p] for p in select_paras):
+        if cpu_optimize_size > sum(candidates[p] for p in select_paras):
             raise ValueError
         # print(select_paras)
-        
+
     # Optimize parameters which requires grad
     gpu_optimze_param = []
     for p, pnode in parameters.items():
-        if not pnode.info.requires_grad:continue
+        if not pnode.info.requires_grad:
+            continue
         if p in select_paras:
             md.cpu_optimized_params[p] = parameters[p].mem
             apply_cpu_optimize(p)
@@ -567,12 +592,15 @@ def group(md, w, tol=1):
             apply_gpu_optimize(p)
             gpu_optimze_param.append(pnode)
     if md.with_optimizer_states and gpu_optimze_param:
-        ofl_ops_os, prf_ops_os, del_ops_os, init_alive_os = group_optimizer_states(md, w, gpu_optimze_param)
+        ofl_ops_os, prf_ops_os, del_ops_os, init_alive_os = group_optimizer_states(
+            md, w, gpu_optimze_param
+        )
         ofl_ops += ofl_ops_os
         prf_ops += prf_ops_os
         del_ops += del_ops_os
         init_alive += init_alive_os
     return ofl_ops, prf_ops, del_ops, opt_ops, init_ops, restore_ops, init_alive
+
 
 def group_optimizer_states(md, w, gpu_optimize_param):
     # To offload and prefetch optimizer states witin the gpu_optimize_param
@@ -583,7 +611,9 @@ def group_optimizer_states(md, w, gpu_optimize_param):
     fwd_i = min(md.param2hcn[w])
     bwd_i = max(md.param2hcn[w])
     hcn = md.hgraph.list_HCNs[fwd_i]
-    parameters = {pnode.param_name: pnode for pnode in md.parameters[w] if pnode.requires_grad}
+    parameters = {
+        pnode.param_name: pnode for pnode in md.parameters[w] if pnode.requires_grad
+    }
     parameter_size = sum(pnode.mem for pnode in parameters.values())
     gpu_optimize_size = sum(pnode.mem for pnode in gpu_optimize_param)
 
@@ -595,29 +625,34 @@ def group_optimizer_states(md, w, gpu_optimize_param):
         if (t, k) == (0, 0):  # init
             for p, a in Alive.items():
                 if a:
-                    init_alive.append(Parameter(parameters[p],is_optim_states=True))
+                    init_alive.append(Parameter(parameters[p], is_optim_states=True))
 
         t_, k_ = md.next_idx(t, k)
         current_alive_size = sum(parameters[p].mem * a for p, a in Alive.items())
-        current_offloaded_size = sum(parameters[p].mem * a for p, a in Offloaded.items())
-        next_alive_size = min(gpu_optimize_size,
-                                round((md.AliveO[(t_, k_, w)]).value() * parameter_size))
-        next_offloaded_size = min(gpu_optimize_size,
-            round((md.OflOProg[(t_, k_, w)]).value() * parameter_size))
-        if parameter_size * (1-md.sumOptC[w]).value()<gpu_optimize_size:
-            next_offloaded_size += gpu_optimize_size - parameter_size * (1-md.sumOptC[w]).value()
+        current_offloaded_size = sum(
+            parameters[p].mem * a for p, a in Offloaded.items()
+        )
+        next_alive_size = min(
+            gpu_optimize_size, round((md.AliveO[(t_, k_, w)]).value() * parameter_size)
+        )
+        next_offloaded_size = min(
+            gpu_optimize_size,
+            round((md.OflOProg[(t_, k_, w)]).value() * parameter_size),
+        )
+        if parameter_size * (1 - md.sumOptC[w]).value() < gpu_optimize_size:
+            next_offloaded_size += (
+                gpu_optimize_size - parameter_size * (1 - md.sumOptC[w]).value()
+            )
 
         # assert current_alive_size <= round(md.AliveW[(t, k, w)].value() * parameter_size)
         if next_offloaded_size > current_offloaded_size:
             # print(t,k, next_offloaded_size, current_offloaded_size)
             ofl_size = next_offloaded_size - current_offloaded_size
             candidates = {
-                p: parameters[p].mem * (1 - o)
-                for p, o in Offloaded.items()
-                if o < 1
+                p: parameters[p].mem * (1 - o) for p, o in Offloaded.items() if o < 1
             }
             if not candidates:
-                if ofl_size<1024:
+                if ofl_size < 1024:
                     ofl_size = 0
                 else:
                     raise ValueError
@@ -627,21 +662,27 @@ def group_optimizer_states(md, w, gpu_optimize_param):
             # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-ofl_size>tol:
             #     pass
             for p in select_paras:
-                op = OffloadOp(alloc=Parameter(parameters[p],
-                                                is_optim_states=True), indices=(0, None),
-                                time=parameters[p].mem/md.bandwidthOfl/md.gcd*md.optimizer_states_factor)
+                op = OffloadOp(
+                    alloc=Parameter(parameters[p], is_optim_states=True),
+                    indices=(0, None),
+                    time=parameters[p].mem
+                    / md.bandwidthOfl
+                    / md.gcd
+                    * md.optimizer_states_factor,
+                )
                 ofl_ops.append((t, k, op))
                 Offloaded[p] = 1
 
         if current_alive_size > next_alive_size:
-            if k_ ==bwd_i:continue
+            if k_ == bwd_i:
+                continue
             del_size = current_alive_size - next_alive_size
             candidates = {}
             for p, o in Offloaded.items():
-                if Alive[p]>0 and o>0:
-                    candidates[p] = min(o, Alive[p])*parameters[p].mem
+                if Alive[p] > 0 and o > 0:
+                    candidates[p] = min(o, Alive[p]) * parameters[p].mem
             if not candidates:
-                if del_size<1024:
+                if del_size < 1024:
                     del_size = 0
                 else:
                     raise ValueError
@@ -651,11 +692,11 @@ def group_optimizer_states(md, w, gpu_optimize_param):
             # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-del_size>tol:
             #     pass
             for p in select_paras:
-                del_ops.append((t, k, DeleteOp(Parameter(parameters[p],
-                                                            is_optim_states=True)
-                                                )))
+                del_ops.append(
+                    (t, k, DeleteOp(Parameter(parameters[p], is_optim_states=True)))
+                )
                 Alive[p] = 0
-        if current_alive_size < next_alive_size or k_==bwd_i:
+        if current_alive_size < next_alive_size or k_ == bwd_i:
             # if w == 15:print(md.active_steps[k_]==bwd_i)
             # prefetch should be smaller than solution
             prf_size = next_alive_size - current_alive_size
@@ -663,32 +704,181 @@ def group_optimizer_states(md, w, gpu_optimize_param):
                 p: parameters[p].mem * (1 - a) for p, a in Alive.items() if a < 1
             }
             if not candidates:
-                if prf_size<1024:
-                    prf_size=0
+                if prf_size < 1024:
+                    prf_size = 0
                 else:
                     raise ValueError
-            if md.sol(md.AliveO[(t_, k_, w)]+md.sumOptC[w]-md.req_w+1) or k_==bwd_i:
-                
+            if (
+                md.sol(md.AliveO[(t_, k_, w)] + md.sumOptC[w] - md.req_w)
+                or k_ == bwd_i
+            ):
+
                 select_paras = list(candidates.keys())
                 # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size>0.99
             else:
                 selector = knapsack(list(candidates.items()))
-                unselect_paras = selector.select_size(sum(candidates.values()) - prf_size)
-                
-                select_paras = [
-                    p for p in candidates.keys() if p not in unselect_paras
-                ]
+                unselect_paras = selector.select_size(
+                    sum(candidates.values()) - prf_size
+                )
+
+                select_paras = [p for p in candidates.keys() if p not in unselect_paras]
                 # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size<1.01
             # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-prf_size>tol:
             #     pass
             for p in select_paras:
-                prf_ops.append((t, k, AllocateOp(Parameter(parameters[p],
-                                                            is_optim_states=True))))
-                op = PrefetchOp(alloc=Parameter(parameters[p],is_optim_states=True), indices=(0, None),
-                                time=parameters[p].mem/md.bandwidthPrf/md.gcd*md.optimizer_states_factor)
+                prf_ops.append(
+                    (t, k, AllocateOp(Parameter(parameters[p], is_optim_states=True)))
+                )
+                op = PrefetchOp(
+                    alloc=Parameter(parameters[p], is_optim_states=True),
+                    indices=(0, None),
+                    time=parameters[p].mem
+                    / md.bandwidthPrf
+                    / md.gcd
+                    * md.optimizer_states_factor,
+                )
                 prf_ops.append((t, k, op))
                 Alive[p] = 1
-        if k_==bwd_i:assert 0 not in Alive.values()
+        if k_ == bwd_i:
+            assert 0 not in Alive.values()
 
     return ofl_ops, prf_ops, del_ops, init_alive
 
+
+def group_activation_offload(md: ModelPULPOffload, j):
+    ofl_ops = []
+    prf_ops = []
+    del_ops = []
+
+    if (
+        not md.activation_offload or not md.single_fwd
+    ):  # we assume activation is based on single fwd
+        return ofl_ops, prf_ops, del_ops
+
+    fwd_i = min(md.sub_c2hcn[j])
+    bwd_i = max(md.sub_c2hcn[j])
+    hcn = md.hgraph.list_HCNs[fwd_i]
+    sub_cluster = hcn.sub_cluster
+
+    if md.sol(md.sumComp[fwd_i, fwd_i]):
+        opt = -1
+        for o in range(md.nSched[fwd_i]):
+            if md.sol(md.Comp[fwd_i, fwd_i, o]):
+                opt = o
+                break
+
+    assert opt > -1
+
+    # phantoms = {}
+    # for re_anode in md.list_list_sched[j][opt].phantoms:
+    #     anode = sub_cluster.translate_representee_node(re_anode)
+    #     phantoms[anode.name] = anode
+    phantoms = {anode.name: anode for anode in md.phantoms[j, opt]}
+    md.selected_phantoms[j] = [anode.main_target for anode in phantoms.values()]
+    phantom_size = sum(anode.mem for anode in phantoms.values())
+
+    Alive = {anode.name: 1 for anode in phantoms.values()}
+    # Offloaded = {anode.name: False for anode in phantoms.values()}
+    assert (bwd_i, bwd_i) in md.active_steps
+
+    idx_f = md.active_steps.index((fwd_i, fwd_i))
+    idx_b = md.active_steps.index((bwd_i, bwd_i))
+    for t, k in md.active_steps[idx_f:] + md.active_steps[:idx_b]:
+        t_, k_ = md.next_idx(t, k)
+
+        # current_alive_size = sum(phantoms[n].mem * a for n, a in Alive.items())
+        current_alive_size = sum(phantoms[n].mem * a for n, a in Alive.items() if a > 0)
+
+        next_alive_size = phantom_size - md.OflPProg[t, k, j].value() * md.gcd
+
+        # next_offloaded_size = min(gpu_optimize_size,
+        #     round((md.OflOProg[(t_, k_, w)]).value() * parameter_size))
+        # if parameter_size * (1-md.sumOptC[w]).value()<gpu_optimize_size:
+        #     next_offloaded_size += gpu_optimize_size - parameter_size * (1-md.sumOptC[w]).value()
+
+        # assert current_alive_size <= round(md.AliveW[(t, k, w)].value() * parameter_size)
+        if current_alive_size > next_alive_size:
+            # print(t,k, next_offloaded_size, current_offloaded_size)
+            ofl_size = current_alive_size - next_alive_size
+            candidates = {n: phantoms[n].mem * a for n, a in Alive.items() if a > 0}
+            if not candidates:
+                if ofl_size < 1024:
+                    ofl_size = 0
+                else:
+                    raise ValueError
+            selector = knapsack(list(candidates.items()))
+            select_paras = selector.select_size(ofl_size)
+            # assert ofl_size==0 or sum(candidates[p] for p in select_paras)/ofl_size>0.99
+            # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-ofl_size>tol:
+            #     pass
+            for n in select_paras:
+                op = OffloadOp(
+                    alloc=Activation(phantoms[n]),
+                    indices=(0, None),
+                    time=phantoms[n].mem / md.bandwidthOfl / md.gcd,
+                )
+                ofl_ops.append((t, k, op))
+                del_ops.append((t, k, DeleteOp(Activation(phantoms[n]))))
+                Alive[n] = 0
+
+        # if current_alive_size > next_alive_size:
+        #     if k_ ==bwd_i:continue
+        #     del_size = current_alive_size - next_alive_size
+        #     candidates = {}
+        #     for p, o in Offloaded.items():
+        #         if Alive[p]>0 and o>0:
+        #             candidates[p] = min(o, Alive[p])*parameters[p].mem
+        #     if not candidates:
+        #         if del_size<1024:
+        #             del_size = 0
+        #         else:
+        #             raise ValueError
+        #     selector = knapsack(list(candidates.items()))
+        #     select_paras = selector.select_size(del_size)
+        #     # assert del_size==0 or sum(candidates[p] for p in select_paras)/del_size>0.99
+        #     # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-del_size>tol:
+        #     #     pass
+        #     for p in select_paras:
+        #         del_ops.append((t, k, DeleteOp(Parameter(parameters[p],
+        #                                                     is_optim_states=True)
+        #                                         )))
+        #         Alive[p] = 0
+        if current_alive_size < next_alive_size or k_ == bwd_i:
+            # if w == 15:print(md.active_steps[k_]==bwd_i)
+            # prefetch should be smaller than solution
+            prf_size = next_alive_size - current_alive_size
+            candidates = {
+                n: phantoms[n].mem * (1 - a) for n, a in Alive.items() if a < 1
+            }
+            if not candidates:
+                if prf_size < 1024:
+                    prf_size = 0
+                else:
+                    raise ValueError
+            if k_ == bwd_i:
+                select_paras = list(candidates.keys())
+                # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size>0.99
+            else:
+                selector = knapsack(list(candidates.items()))
+                unselect_paras = selector.select_size(
+                    sum(candidates.values()) - prf_size
+                )
+
+                select_paras = [p for p in candidates.keys() if p not in unselect_paras]
+                # assert prf_size==0 or sum(candidates[p] for p in select_paras)/prf_size<1.01
+            # if sum(candidates[p] for p in select_paras)/sum(candidates.values())-prf_size>tol:
+            #     pass
+            for n in select_paras:
+                alloc = Activation(phantoms[n])
+                prf_ops.append((t, k, AllocateOp(alloc)))
+                op = PrefetchOp(
+                    alloc=alloc,
+                    indices=(0, None),
+                    time=alloc.mem / md.bandwidthPrf / md.gcd,
+                )
+                prf_ops.append((t, k, op))
+                Alive[n] = 1
+        if k_ == bwd_i:
+            assert 0 not in Alive.values()
+
+    return ofl_ops, prf_ops, del_ops

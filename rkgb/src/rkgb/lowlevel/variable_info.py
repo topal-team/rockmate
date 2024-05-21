@@ -49,6 +49,7 @@ class VariableInfo():
                 self.tensor_size = (
                     value if isinstance(value,int) else value.clone())
                 self.requires_grad = False
+                self.memsize = 1
             elif isinstance(value,torch.Tensor):
                 self.variable_type = torch.Tensor
                 self.tensor_size = value.shape
@@ -60,6 +61,7 @@ class VariableInfo():
                 self.requires_grad = any([
                     sub_var.requires_grad 
                     for sub_var in self.sub_info])
+                self.memsize = sum(sub_info.memsize for sub_info in self.sub_info)
             else:
                 raise Exception(
                     f"The type `{self.variable_type}` "\

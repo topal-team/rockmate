@@ -181,9 +181,16 @@ class ForwardAndBackwardGraph(base.Graph):
             self.inherit_base_attributes(simplified_graph)
             self.init_code = simplified_graph.init_code
 
+            dict_old_param_node_to_new = dict(
+                (param_node,ParameterNode(node_to_clone=param_node))
+                for param_node in simplified_graph.parameter_nodes)
             self.parameter_nodes = [
-                ParameterNode(node_to_clone=param_node)
+                dict_old_param_node_to_new[param_node]
                 for param_node in simplified_graph.parameter_nodes]
+            self.parameter_nodes_required_for_init_code = [
+                dict_old_param_node_to_new[param_node]
+                for param_node in simplified_graph.init_node.required_parameter_nodes
+            ]
             # Note: these are backward.ParameterNodes not base.ParameterNodes
             dict_old_param_node_to_new_param_node = dict(
                 zip(simplified_graph.parameter_nodes,self.parameter_nodes))
@@ -312,6 +319,9 @@ class ForwardAndBackwardGraph(base.Graph):
                 self.dict_data_anodes[req_target]
                 for req_target in bwd_real_dependencies
             )
+            for anode in fwd_cnode_deps:
+                if anode.mem < 1024**2 and anode not in bwd_cnode_deps_real:
+                    bwd_cnode_deps_real.add(anode)
             # - fake deps
             bwd_cnode_deps_fake = fwd_cnode_deps - bwd_cnode_deps_real
             # - phantoms
@@ -462,6 +472,7 @@ class ForwardAndBackwardGraph(base.Graph):
         self.list_output_grad_anodes = [
             self.dict_grad_anodes[output_sn.main_target]
             for output_sn in simplified_graph.output_nodes
+            if output_sn.info.requires_grad
         ]
         # Loss:
         loss_cnode = ComputationNode(
@@ -544,8 +555,9 @@ class ForwardAndBackwardGraph(base.Graph):
 
     # **********************************
     # == OVERWRITE base.Graph METHODS ==
-    def __iter__(self):
-        return iter(self.computation_nodes)
+    @property
+    def _lists_of_nodes(self):
+        return [self.computation_nodes,self.allocation_nodes]
 
     def make_temporary_global_root_node_to_deps_relation(self):
         # OVERWRITE base.Graph METHOD

@@ -10,7 +10,7 @@ from rkgb.core.simplified import SimplifiedGraph
 from rkgb.core.backward import ForwardAndBackwardGraph
 from rkgb.core import partitioned
 from rkgb.core.hierarchical import HierarchicalStructure
-
+from torch.export import Dim
 
 class Result():
     raw_graph = None
@@ -31,6 +31,8 @@ class Result():
             partitioners = None,
             print_time_in_each_stage = False,
             do_inspection = True,
+            dynamic_batch_dim = None,
+            small_memsize_fine_to_simplify = 1024**2,
             ):
         self.original_mod = model
         self.inspection_device = inspection_device
@@ -41,19 +43,15 @@ class Result():
         self.print_time_in_each_stage = print_time_in_each_stage
         self.do_inspection = do_inspection
         self.last_time = 0
-        # self.dynamo_all_dynamic_shapes = dynamo_all_dynamic_shapes
-        # self.dynamo_constraints = dynamo_constraints
+        self.dynamic_batch_dim = dynamic_batch_dim
+        self.small_memsize_fine_to_simplify = small_memsize_fine_to_simplify
 
-        # 1) device and inputs
-        self.example_inputs = preprocess_samples.ExampleInputs(model,model_args,model_kwargs)
-        self.current_device = preprocess_device.get_device_and_check_all_same_device(model,self.example_inputs)
-
-        # 2) Build everything
+        self.process_model_args(model_args,model_kwargs)
         if "R" in wanted_graphs: self.build_raw()
         if "F" in wanted_graphs: self.build_forward()
         if "S" in wanted_graphs: self.build_simplified()
         if "P" in wanted_graphs: self.build_partitioned()
-        if "FB" in wanted_graphs: self.build_forward_and_backward()
+        if "FB" in wanted_graphs: self.build_backward()
         if "H" in wanted_graphs: self.build_hierarchical()
 
     def start_time(self):
@@ -64,6 +62,19 @@ class Result():
             clean_time_taken = time.strftime("%H:%M:%S", time.gmtime(time_taken))
             print(f"Stage {stage} took {clean_time_taken}")
 
+    def process_model_args(self,model_args,model_kwargs):
+        self.example_inputs = preprocess_samples.ExampleInputs(
+            self.original_mod,model_args,model_kwargs)
+        self.current_device = preprocess_device.get_device_and_check_all_same_device(
+            self.original_mod,self.example_inputs)
+
+        batch = Dim("batch") # from torch.export
+        self.dynamo_kwargs = dynamo_kwargs = {}
+        if self.dynamic_batch_dim is not None:
+            dynamo_kwargs["dynamic_shapes"] \
+                =   {k:{self.dynamic_batch_dim : batch} 
+                    for k in self.example_inputs.dict.keys()}
+
     def build_raw(self):
         if self.raw_graph is None:
             self.start_time()
@@ -73,7 +84,8 @@ class Result():
                 # dynamo_all_dynamic_shapes=self.dynamo_all_dynamic_shapes,
                 # dynamo_constraints=self.dynamo_constraints,
                 use_jit_instead_of_dynamo=self.use_jit_instead_of_dynamo,
-                jit_impose_device=self.jit_impose_device)
+                jit_impose_device=self.jit_impose_device,
+                dynamo_kwargs=self.dynamo_kwargs)
             self.show_time("Raw")
             
     def build_forward(self):
@@ -97,7 +109,8 @@ class Result():
             self.simplified_graph = SimplifiedGraph(
                 self.forward_graph,
                 self.original_mod,
-                self.current_device)
+                self.current_device,
+                self.small_memsize_fine_to_simplify)
             self.show_time("Simplifications")
 
     def build_anonymization(self):
@@ -126,7 +139,7 @@ class Result():
             self.last_partitioners = partitioners
             self.show_time("Partitioning")
             
-    def build_forward_and_backward(self):
+    def build_backward(self):
         if self.forward_and_backward_graph is None:
             self.build_simplified()
             self.build_anonymization()
@@ -140,12 +153,12 @@ class Result():
                 self.inspection_device,
                 self.do_inspection,
                 self.dict_mt_to_sn_ano_material)
-            self.show_time("ForwardAndBackward")
+            self.show_time("Backward")
 
     def build_hierarchical(self,partitioners = None):
         if self.hierarchical_structure is None or partitioners is not None:
             self.build_partitioned(partitioners)
-            self.build_forward_and_backward()
+            self.build_backward()
             self.start_time()
             self.hierarchical_structure = HierarchicalStructure(
                 self.partitioned_structure,

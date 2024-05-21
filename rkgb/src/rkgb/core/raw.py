@@ -71,7 +71,6 @@ class RawNode(base.Node):
         if raw_parser is not None: raw_parser.all_raw_nodes.append(self)
 
 
-
 class RawGraph(base.Graph):
     """ Raw graph 
     => very few attributes = just what we get from jit or Dynamo"""
@@ -79,10 +78,9 @@ class RawGraph(base.Graph):
     def __init__(self,
             original_mod : torch.nn.Module,
             example_inputs : preprocess_samples.ExampleInputs,
-            # dynamo_all_dynamic_shapes = True,
-            # dynamo_constraints = None,
             use_jit_instead_of_dynamo = False,
             jit_impose_device=True,
+            dynamo_kwargs={}
         ):
         super().__init__()
         if use_jit_instead_of_dynamo:
@@ -95,12 +93,11 @@ class RawGraph(base.Graph):
             self._init_using_dynamo(
                 original_mod,
                 example_inputs,
-                # dynamo_all_dynamic_shapes,
-                # dynamo_constraints
+                dynamo_kwargs=dynamo_kwargs
             )
         self.toposort_and_keep_only_useful_nodes()
         self.clear_redundancies_in_self_nodes()
-            
+        
 
     def _init_using_jit(self,
             original_mod : torch.nn.Module,
@@ -145,30 +142,16 @@ class RawGraph(base.Graph):
     
     def _init_using_dynamo(self,
             original_mod : torch.nn.Module,
-            example_inputs : preprocess_samples.ExampleInputs):
-            # dynamo_all_dynamic_shapes = True,
-            # dynamo_constraints = None):
+            example_inputs : preprocess_samples.ExampleInputs,
+            dynamo_kwargs = {}):
         self.tracer_used = "dynamo"
-        # -- Prepare Call to Dynamo --
-        # ordered_example_inputs = example_inputs.to_list_args(original_mod) # UNUSED
-        # TO INCLUDE WHEN DYNAMO WILL BE FIXED: 
-        # Currently dynamic shapes are broken with HF models
-        # https://github.com/pytorch/pytorch/issues/117477
-        # if dynamo_constraints is None:
-            # dynamo_constraints = []
-            # if dynamo_all_dynamic_shapes:
-                # for inp in ordered_example_inputs:
-                    # if isinstance(inp,torch.Tensor):
-                        # for i in range(inp.dim()):
-                            # dynamo_constraints.append(torch.export.dynamic_dim(inp,i))
         # Call Dynamo's export :
         dynamo_result : torch.export.ExportedProgram = torch.export.export(
             original_mod,
-            # args=ordered_example_inputs, # UNUSED
             args = tuple(),
-            kwargs=example_inputs.dict
+            kwargs=example_inputs.dict,
+            **dynamo_kwargs
             )
-            # constraints=dynamo_constraints)
         dynamo_graph = dynamo_result.graph
         dynamo_signature = dynamo_result.graph_signature
         whole_code_str = dynamo_graph.python_code("self").src
@@ -184,7 +167,7 @@ class RawGraph(base.Graph):
         dict_dynamo_name_to_raw_node = dict()
 
         # I) Process the "args" = which consists of all the inputs, 
-        # parameters and "buffers". Buffers are variables stored in
+        # parameters and buffers. Buffers are variables stored in
         # `self` that aren't parameters; e.g. BatchNorm's running_var
         dynamo_all_args = whole_code_ast.args.args
         dict_dynamo_name_to_correct_ast = dict()
@@ -199,6 +182,12 @@ class RawGraph(base.Graph):
             (value,name) for (name,value)
             in original_mod.named_buffers())
 
+        state_dict = {}
+        for n,p in dynamo_result.named_parameters():
+            state_dict[n] = p
+        for n,b in dynamo_result.named_buffers():
+            state_dict[n] = b
+
         for arg in dynamo_all_args:
             dynamo_arg_name = arg.arg # e.g. "arg15_1"
             # 1) Parameters:
@@ -207,7 +196,7 @@ class RawGraph(base.Graph):
                 # e.g. L__self___embeddings_word_embeddings.weight
                 # It's not as simple as changing the "_" by ".",
                 # here we look for "self.embeddings.word_embeddings.weight"
-                param_value = dynamo_result.state_dict[dynamo_param_name]
+                param_value = state_dict[dynamo_param_name]
                 param_real_name = dict_param_value_to_name[param_value]
                 dict_dynamo_name_to_correct_ast[dynamo_arg_name] \
                     = ast_add_on.make_ast_attribute_from_list(
@@ -216,7 +205,7 @@ class RawGraph(base.Graph):
             # 2) Buffers
             elif dynamo_arg_name in dynamo_signature.inputs_to_buffers:
                 dynamo_buffer_name = dynamo_signature.inputs_to_buffers[dynamo_arg_name]
-                buffer_value = dynamo_result.state_dict[dynamo_buffer_name]
+                buffer_value = state_dict[dynamo_buffer_name]
                 buffer_real_name = dict_buffer_value_to_name[buffer_value]
                 dict_dynamo_name_to_correct_ast[dynamo_arg_name] \
                     = ast_add_on.make_ast_attribute_from_list(
@@ -248,8 +237,7 @@ class RawGraph(base.Graph):
         assignment_codes = [
             code for code in whole_code_ast.body
             if (isinstance(code,ast.Assign)
-            and (not ast_add_on.is_constant(code.value)
-            or code.value.value is not None))
+            and not(ast_add_on.is_constant(code.value) and code.value.value is None))
         ]
         dict_code_target_to_code = dict()
         for code in assignment_codes:
@@ -260,7 +248,10 @@ class RawGraph(base.Graph):
 
         dynamo_all_nodes = dynamo_graph.nodes
         dynamo_assignment_nodes = []
+        dynamo_input_nodes = {}
         for dynamo_node in dynamo_all_nodes:
+            if dynamo_node.target in dynamo_signature.user_inputs:
+                dynamo_input_nodes[dynamo_node.target] = dynamo_node
             if dynamo_node.op == "call_function":
                 dynamo_assignment_nodes.append(dynamo_node)
             elif dynamo_node.op == "get_attr":
@@ -283,6 +274,11 @@ class RawGraph(base.Graph):
                 raise Exception(f"Unknown Dynamo Node's operation type {dynamo_node.op}")
             
         assert(len(dynamo_assignment_nodes)==len(assignment_codes))
+        self.dynamic_shapes = {}
+        for dynamo_input_name, dynamo_input_node in dynamo_input_nodes.items():
+            raw_node = dict_dynamo_name_to_raw_node[dynamo_input_name]
+            self.dynamic_shapes[raw_node.target] = dynamo_input_node.meta["val"].shape
+        set_dynamo_vars_that_are_constants = set() 
         for dynamo_node,node_code in zip(
                 dynamo_assignment_nodes,
                 assignment_codes):
@@ -295,6 +291,26 @@ class RawGraph(base.Graph):
             code_with_correct_device = ast_add_on.substitute_device_call(
                 node_code.value
             )
+            substitution_dict = dict()
+            for dep_id in dependency_dynamo_names:
+                if not dep_id in dict_dynamo_name_to_correct_ast:
+                    # To handle stuff like:
+                    # For instance (example in Bloom)
+                    # `lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_lifted_tensor_constant0)`
+                    # where `_lifted_tensor_constant0` is undefined
+                    for dynamo_key,cst_value in dynamo_result.tensor_constants.items():
+                        if dep_id in dynamo_key:
+                            cst_name = parser.get_constant_name(dep_id)
+                            self.dict_constants[cst_name] = cst_value
+                            dict_dynamo_name_to_correct_ast[dep_id] = ast.Name(cst_name)
+                            set_dynamo_vars_that_are_constants.add(dep_id)
+                            break
+                    if not dep_id in dict_dynamo_name_to_correct_ast:
+                        raise Exception(
+                            f"{dep_id} is called in the line:\n"\
+                            f"{ast_add_on.ast_to_str(node_code)}\n"\
+                            f"but we don't know where it's defined.")
+                substitution_dict[dep_id] = dict_dynamo_name_to_correct_ast[dep_id]
             code_with_correct_names = ast_add_on.substitute_with_dict(
                 code_with_correct_device,
                 {
@@ -308,6 +324,8 @@ class RawGraph(base.Graph):
                 fct=dynamo_node.target.__name__,
                 raw_parser=parser)
             dict_dynamo_name_to_raw_node[dynamo_node.name] = raw_node
+            val = dynamo_node.meta["val"]
+            self.dynamic_shapes[raw_node.target] = val.shape if hasattr(val, "shape") else None
             # Deps :
             raw_node.deps = set(
                 dict_dynamo_name_to_raw_node[dep_id]
@@ -320,7 +338,8 @@ class RawGraph(base.Graph):
                     dict_dynamo_name_to_correct_ast[param_id])
                 for param_id in dependency_dynamo_names
                 if (param_id not in dict_code_target_to_code
-                and param_id not in dict_dynamo_name_to_raw_node)
+                and param_id not in dict_dynamo_name_to_raw_node
+                and param_id not in set_dynamo_vars_that_are_constants)
             )
         self.nodes = parser.all_raw_nodes
 
@@ -330,8 +349,6 @@ class RawGraph(base.Graph):
             self.output_nodes.append(output_raw_node)
             self.output_targets.append(output_raw_node.target)
         self.original_mod_output_targets = list(self.output_targets)
-            
-
         
         
 
