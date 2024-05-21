@@ -98,7 +98,7 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
 
         init_ops = {op.target.name: op for op in init_op_list}
         for pnode in md.hgraph.cluster.parameter_nodes:
-            if pnode.mem < md.optimize_metrics["minor_offload_size"]:
+            if pnode.mem < md.optimize_metrics["minor_offload_size"] or pnode.is_buffer:
                 device = "cuda"
             else:
                 device = "cpu"
