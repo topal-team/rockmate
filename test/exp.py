@@ -8,6 +8,7 @@ import numpy as np
 from models.LLM import *
 from rockmate import Rockmate
 from rockmate.op_schedule import *
+from rockmate.solvers import HILP, CheapSolver
 from rockmate.simulation import Simulator
 from datetime import datetime
 device = torch.device("cuda")
@@ -30,6 +31,11 @@ tracemalloc.start()
 torch.random.manual_seed(0)
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:16"
 
+def dynamo_ram_trick():
+    from rkgb.lowlevel.preprocess_samples import ExampleInputs
+    m = torch.nn.Linear(100,100)
+    x = ExampleInputs(m, torch.ones(100))
+    dynamo_result = torch.export.export(m,  args = tuple(), kwargs=x.dict)
 
 def analyze_mem(rkmod, print_status=False, with_param=True, with_grad=True, details=False):
     md = rkmod.list_solvers[0].md
@@ -88,14 +94,14 @@ def check_correctness(model, sample, budget=1e9, optim=torch.optim.Adam):
         optimizer.step()
     print("gpu model")
     # print(model_g(*sample_g).mean())
-    exec(model_g, sample_g, print_mem=False, print_loss=True, optimize_fct=optimize)
+    execution(model_g, sample_g, print_mem=False, print_loss=True, optimize_fct=optimize)
 
     optimizer = optim(model_c.parameters())
     def optimize():
         optimizer.step()
     print("cpu model")
     # print(model_c(*sample_c).mean())
-    exec(model_c, sample_c, print_mem=False, print_loss=True, optimize_fct=optimize)
+    execution(model_c, sample_c, print_mem=False, print_loss=True, optimize_fct=optimize)
 
     model_r = Rockmate(model, sample, budget, 
                         solve_sched=False,
@@ -107,7 +113,7 @@ def check_correctness(model, sample, budget=1e9, optim=torch.optim.Adam):
     model_r.zero_grad()
     sample_r = [s.to("cuda") for s in sample]
     print("rockmate model")    
-    exec(model_r, sample_r, print_mem=False, print_loss=True)
+    execution(model_r, sample_r, print_mem=False, print_loss=True)
 
 
 class LoraLinear(nn.Module):
@@ -167,16 +173,16 @@ def get_sched_stats(rkmod):
     stats[f"Schedule_total_offload_time"] = sum(step.ofl_ops.time for step in rkmod.op_sched.steps)
     stats[f"Schedule_total_prefetch_time"] = sum(step.prf_ops.time for step in rkmod.op_sched.steps)
     stats[f"Schedule_total_cpu_optimize_time"] = sum(step.opt_ops.time for step in rkmod.op_sched.steps)
-    stats[f"Schedule_time_from_waiting_cpu optimize"] = sum((step.time - step.comp_ops.time) for step in rkmod.op_sched.steps if step.time == step.opt_ops.time)
-    stats[f"Schedule_time_from_waiting_offload"] = sum((step.time - step.max2nd()) for step in rkmod.op_sched.steps if step.time == step.ofl_ops.time)
-    stats[f"Schedule_time_from_waiting_prefetch"] = sum((step.time - step.max2nd()) for step in rkmod.op_sched.steps if step.time == step.prf_ops.time)
+    # stats[f"Schedule_time_from_waiting_cpu optimize"] = sum((step.time - step.comp_ops.time) for step in rkmod.op_sched.steps if step.time == step.opt_ops.time)
+    # stats[f"Schedule_time_from_waiting_offload"] = sum((step.time - step.max2nd()) for step in rkmod.op_sched.steps if step.time == step.ofl_ops.time)
+    # stats[f"Schedule_time_from_waiting_prefetch"] = sum((step.time - step.max2nd()) for step in rkmod.op_sched.steps if step.time == step.prf_ops.time)
     return stats
 
 def Loss(y, labels=None):
     return y.mean()
     return torch.nn.CrossEntropyLoss()(y, labels)
 
-def exec(model, 
+def execution(model, 
          sample, 
          niters=10, 
          optimize_fct=None,
@@ -216,12 +222,12 @@ def exec(model,
         if optimize_fct:optimize_fct()
         # for s in sample:
         #     s.grad = None
-        # for _y in ys:
-        #     if not isinstance(_y, torch.Tensor):
-        #         continue
-        #     _y.data = torch.empty(0)
-        #     _y.grad = None
-        #     del _y
+        for _y in ys:
+            if not isinstance(_y, torch.Tensor):
+                continue
+            _y.data = torch.empty(0)
+            _y.grad = None
+            del _y
         # torch.cuda.empty_cache()
     timer.end()
     return timer.elapsed()
@@ -235,7 +241,7 @@ def exec_rk(model, sample, niters=10, device="cuda", **kwargs):
     sample = [s.to(device) for s in sample]
     mem = torch.cuda.memory_allocated()
     print(f"Memory allocated before exec {mem}")
-    time = exec(model, sample, niters, optimize_fct=None, **kwargs)
+    time = execution(model, sample, niters, optimize_fct=None, **kwargs)
     peak_mem = torch.cuda.max_memory_allocated() - mem
     return time, peak_mem
 
@@ -248,12 +254,18 @@ def exec_pt(model, sample, optim=torch.optim.Adam, niters=10, device="cuda", **k
         optimizer.step()
     mem = torch.cuda.memory_allocated()
     print(f"Memory allocated before exec {mem}")
-    time = exec(model, sample, niters, optimize_fct=optimize, zero_grad=True, **kwargs)
+    time = execution(model, sample, niters, optimize_fct=optimize, zero_grad=True, **kwargs)
     peak_mem = torch.cuda.max_memory_allocated() - mem
     return time, peak_mem
 
-def exp_pt(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B", optim=torch.optim.Adam):
-    model, sample = get7Bllama(batch_size, 512, nlayers=nlayers)
+def exp_pt(nlayers=1, 
+           batch_size=4, 
+           exp_id=None, 
+           num_adapters=None, 
+           id="7B", 
+           optim=torch.optim.Adam, 
+           get_model=get7Bllama):
+    model, sample = get_model(batch_size, 512, nlayers=nlayers)
     if num_adapters:
         manual_lora(model, target_modules=[f"layers.{i}.self_attn.q_proj" for i in range(nlayers)]
                 +[f"layers.{i}.self_attn.k_proj" for i in range(nlayers)]
@@ -293,9 +305,10 @@ def exp_pt(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B", opt
         with open(f"exp_results/{exp_id}/res_{id}_pt.pkl", "wb") as f:
             pickle.dump(exp_stats, f)
 
-def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B"):
+def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B",
+              activation_offload=True, cpu_optimization=True, get_model=get7Bllama):
     # model, sample = get3Bllm_embed(3,512, nlayers=nlayers)
-    model, sample = get7Bllama(batch_size, 512, nlayers=nlayers)
+    model, sample = get_model(batch_size, 512, nlayers=nlayers)
     if num_adapters:
         manual_lora(model, target_modules=[f"layers.{i}.self_attn.q_proj" for i in range(nlayers)]
                 +[f"layers.{i}.self_attn.k_proj" for i in range(nlayers)]
@@ -316,15 +329,22 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B"):
         max_number_of_patterns=nlayers+2,
         min_percentage_covered_required=0.75)]
 
-    rkmod = Rockmate(model, sample, 1e8, solve_sched=0, 
-                    ilp_solver="PULP_CBC_CMD", 
-                    #   ilp_solver="HiGHS_CMD", 
-                    # cpu_optim = DeepSpeedCPUAdam,
-                    partitioners=partitioners,
-                    optim_kwargs = {"lr":1e-4},
-                    ilp_time_limit=10*60,
-                    minor_param_size=4*1024**2,
-                    )
+    # rkmod = Rockmate(model, sample, 1e8, solve_sched=0, 
+    #                 ilp_solver="PULP_CBC_CMD", 
+    #                 #   ilp_solver="HiGHS_CMD", 
+    #                 # cpu_optim = DeepSpeedCPUAdam,
+    #                 partitioners=partitioners,
+    #                 optim_kwargs = {"lr":1e-4},
+    #                 ilp_time_limit=10*60,
+    #                 minor_param_size=4*1024**2,
+    #                 )
+
+    rkmod = solve_rkmod(model, 
+                        sample, 
+                        budget=budget, 
+                        partitioners=partitioners,
+                        activation_offload=activation_offload,
+                        cpu_optimization=cpu_optimization)
     
     print(f"number of HCN: {len(rkmod.rkgb_res.hierarchical_cluster.partitionings[0].list_HCNs)}")
     print(f"number of HAN: {len(rkmod.rkgb_res.hierarchical_cluster.partitionings[0].list_HANs)}")
@@ -349,63 +369,83 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B"):
     exp_stats["budget"] = budget
 
     ### Solve schedule
-    rkmod.preprocess()
-    rkmod.solve_sched(budget, recursive=False)
+    # rkmod.preprocess()
+    # rkmod.solve_sched(budget, recursive=False)
     md = rkmod.list_solvers[0].md
     if md.feasible:
-        # analyze_mem(rkmod)
-        pass
-    else:
-        raise ValueError
-    print(md.solving_time)
-    exp_stats["solving_time"] = str(md.solving_time)
+    #     # analyze_mem(rkmod)
+    #     pass
+    # else:
+    #     raise ValueError
+        print(md.solving_time)
+        exp_stats["solving_time"] = str(md.solving_time)
     # mem_ilp, mem_sched = analyze_mem(rkmod)
-    # exp_stats["Mem_ILP"] = mem_ilp
-    # exp_stats["Mem_sched"] = mem_sched
 
-    # exp_stats["Before_refine"] = {}
-    # add_sched_stats(exp_stats["Before_refine"], rkmod)
+        stats = get_sched_stats(rkmod)
+        exp_stats["sched_stats"] = stats
+        print(stats)
 
-    # time, mem = exec_rk(rkmod, sample, niters=niters)
-    # exp_stats["Before_refine_time"] = time/niters
-    # exp_stats["Before_refine_peak_mem"] = mem
+        try:
+            time, mem = exec_rk(rkmod, sample, niters=niters)
+        except Exception as e:
+            exp_stats["exception"] = e
+        torch.cuda.synchronize()
+        print(time, mem)
 
-    ### Refine schedule
-    # rkmod.op_sched.refine_optimize()
-    rkmod.op_sched.simulate_update(Simulator)
+        exp_stats["time"] = time/niters
+        exp_stats["peak_mem"] = mem
+        exp_stats["date"] = datetime.now().strftime("%x_%H:%M")
 
-    # exp_stats["After_refine"] = {}
-    # add_sched_stats(exp_stats["After_refine"], rkmod)
-    # print(exp_stats["After_refine"])
-    # rkmod.op_sched.alive_list = rkmod.op_sched.create_alive_list()
-    # rkmod.op_sched.refine()
-    rkmod.get_compiled_fct()
-
-    # sleep(5)
-    time, mem = exec_rk(rkmod, sample, niters=niters)
-    torch.cuda.synchronize()
-    print(time, mem)
-
-    exp_stats["time"] = time/niters
-    exp_stats["peak_mem"] = mem
-    # opts = list(rkmod.compiler.storage.ld["optimizers"].keys())
-    # for s in sample:
-    #     s.data = torch.empty(0)
-    # for opt in opts:
-    #     del rkmod.compiler.storage.ld["optimizers"][opt]
-    # rkmod.restore_exec()
     del rkmod
     gc.collect()
     print(exp_stats)
     # rkmod.compiler.storage.ld[rkmod.output.name.split(" ")[0]].data = torch.empty(0)
     # rkmod.compiler.storage.ld["_"+rkmod.output.name.split(" ")[0]].data = torch.empty(0)
-    if exp_id:
-        os.makedirs(os.path.dirname(f"exp_results/{exp_id}/"), exist_ok=True)
-        print("dump result")
-        with open(f"exp_results/{exp_id}/res_{id}.pkl", "wb") as f:
-            pickle.dump(exp_stats, f)
+    if os.path.exists(exp_id):
+        with open(exp_id, "rb") as f:
+            results = pickle.load(f)
+    else:
+        results = {}
+
+    results[nlayers] = exp_stats
+    with open(exp_id, "wb") as f:
+        pickle.dump(results, f)
+    # if exp_id:
+        # os.makedirs(os.path.dirname(f"exp_results/{exp_id}/"), exist_ok=True)
+
+        # print("dump result")
+        # with open(f"exp_results/{exp_id}", "wb") as f:
+            # pickle.dump(exp_stats, f)
         # rkmod.save_to_local(f"exp_results/{exp_id}", id=id)
     # return rkmod
+            
+def solve_rkmod(model, 
+                sample, 
+                budget,
+                partitioners, 
+                activation_offload=True,
+                cpu_optimization=True):
+    solver = HILP(ilp_solver="PULP_CBC_CMD")
+    solver.config.offload = True
+    solver.config.solve_only_top_level = True
+    list_solvers = [solver]
+
+    if activation_offload:
+        # solver.config.activation_offload = False
+        list_solvers.append(CheapSolver())
+    if not cpu_optimization:
+        solver.config.top_solve_kwargs["cpu_optimize"] = False
+
+    rkmod = Rockmate(model, sample, budget, 
+                    solve_sched=True, 
+                        ilp_solver="PULP_CBC_CMD", 
+                        list_solvers=list_solvers,
+                        partitioners=partitioners,
+                        ilp_time_limit=10*60,
+                        minor_offload_size=10*1024**2,
+                        )
+    return rkmod
+
 
 if __name__=="__main__":
     # exp_id = datetime.now().strftime('llama-7b')
@@ -413,23 +453,48 @@ if __name__=="__main__":
     # a = torch.empty(2560,1024,1024,device="cuda")
     # a.data = torch.empty(0)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--exp_id", nargs="?",  type=str)
-    parser.add_argument("--nlayers", nargs="?",  const=32, type=int)
-    parser.add_argument("--num_adapters", nargs="?",  const=256, type=int)
-    parser.add_argument("--id", nargs="?",  const=None, type=str)
-    parser.add_argument("--rk", nargs="?",  const=1, type=int)
-    parser.add_argument("--batch_size", nargs="?",  const=3, type=int)
+    parser.add_argument("--exp_id", nargs="?",  type=str, default="0")
+    parser.add_argument("--nlayers", nargs="?",  default=32, type=int)
+    parser.add_argument("--num_adapters", nargs="?",  default=0, type=int)
+    parser.add_argument("--rk", nargs="?",  default=1, type=int)
+    parser.add_argument("--batch_size", nargs="?",  default=4, type=int)
+    parser.add_argument("--dtype", nargs="?", default="float32", type=str)
+    parser.add_argument("--model", nargs="?", type=str, default="llama7b")
+    parser.add_argument("--method", nargs="?", type=str, default="offmate")
+
+    dtypes = {"float32":torch.float32,
+              "bfloat16": torch.bfloat16,
+              "float16": torch.float16,
+              }
+    models = {
+        "llama7b": get7Bllama,
+        "phi2-3b": get3BPhi_2,
+    }
+    kwargs = {
+        "offmate":{},
+        "offmate_no_act_offload":{"activation_offload":False},
+        "offmate_no_cpu_optim":{"cpu_optimization":False},
+        "rockmate":{},
+    }
 
     args = parser.parse_args()
-    exp_id = args.exp_id
+    torch.set_default_dtype(dtypes[args.dtype])
+    # exp_id = args.exp_id
+    exp_id = f"exp_results/{args.method}-{args.model}-{args.dtype}-{args.exp_id}.pkl"
     nlayers = args.nlayers
     num_adapters = args.num_adapters
-    id = args.id if args.id is not None else f"{nlayers}_{num_adapters}"
+    # id = args.id if args.id is not None else f"{nlayers}_{num_adapters}"
     rk = args.rk
     batch_size = args.batch_size
     if rk:
         # print("exp on rockmate")
-        exp_rkmod(nlayers=nlayers, batch_size=batch_size, exp_id=exp_id, num_adapters=num_adapters, id=id)
+        dynamo_ram_trick()
+        exp_rkmod(nlayers=nlayers, 
+                  batch_size=batch_size, 
+                  exp_id=exp_id, 
+                  num_adapters=num_adapters,
+                  get_model=models[args.model],
+                  **kwargs[args.method])
     else:
         exp_pt(nlayers=nlayers, batch_size=batch_size, exp_id=exp_id, num_adapters=num_adapters, id=id)
     

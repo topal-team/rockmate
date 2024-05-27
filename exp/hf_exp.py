@@ -1,4 +1,5 @@
 import pickle
+import psutil
 # import deepspeed
 import argparse
 import os
@@ -18,27 +19,28 @@ from exp import LlamaConfig
 
 from transformers import AutoTokenizer, LlamaTokenizerFast
 from transformers import Trainer
-from LLM import get7Bllama, get3BPhi_2, get13Bllama, get7Bllama_lora
+from LLM import *
 from datetime import datetime
 import torch
+from exp import TimerCUDA
+timer = TimerCUDA(torch.device("cuda"))
 
 class MyDataset(torch.utils.data.Dataset):
     def __init__(self, encodings):
         # self.encodings = {"input_ids":[torch.randint(0, 600, [batch, seq_len])
         #                                for _ in range(30)]}
-        self.labels = [1 for _ in encodings]
+        self.labels = [1 for _ in encodings["input_ids"]]
         self.encodings = encodings
 
     def __getitem__(self, idx):
         item = {key: torch.tensor(val[idx]) 
                 for key, val in self.encodings.items()
-                # if "input_ids" in key
                 }
         item['labels'] = torch.tensor(self.labels[idx])
         return item
 
     def __len__(self):
-        return len(self.encodings)
+        return len(self.encodings["input_ids"])
     
 
 # from transformers import LlamaForSequenceClassification
@@ -62,12 +64,12 @@ class MyDataset(torch.utils.data.Dataset):
 
 def train_po(nlayers=4, batch =4, seq_len=512, get_model=get7Bllama):
     tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
-    encoding = tokenizer.batch_encode_plus(["a "*510]*20)#Fake data
+    encoding = tokenizer.batch_encode_plus(["a "*510]*128)#Fake data
     train_set = MyDataset(encoding)
 
     torch.cuda.reset_peak_memory_stats()
     mem = torch.cuda.memory_allocated()
-    model,_ = get_model(4, seq_len=seq_len, nlayers=nlayers, classification=True)
+    model,_ = get_model(4, seq_len=seq_len, nlayers=nlayers)
     training_arguments = TrainingArguments(
     output_dir="/",
     num_train_epochs=1,
@@ -102,7 +104,7 @@ def train_ds(nlayers=4, batch =4, seq_len=512,
              get_model=get7Bllama):
     import deepspeed
     tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
-    encoding = tokenizer.batch_encode_plus(["a "*510]*20)#Fake data
+    encoding = tokenizer.batch_encode_plus(["a "*10]*1024, max_length=512, padding=True)#Fake data
     train_set = MyDataset(encoding)
 
     # tokenizer = LlamaTokenizerFast.from_pretrained("hf-internal-testing/llama-tokenizer")
@@ -111,44 +113,62 @@ def train_ds(nlayers=4, batch =4, seq_len=512,
     # train_set = MyDataset(encoding)
     
     torch.cuda.reset_peak_memory_stats()
+    print(torch.cuda.memory_allocated())
     mem = torch.cuda.memory_allocated()
-    # with deepspeed.zero.Init():
-    model,_ = get_model(batch=batch, seq_len=seq_len, nlayers=nlayers, classification=True)
-    training_arguments = TrainingArguments(
-    output_dir="/",
-    num_train_epochs=1,
-    per_device_train_batch_size=4,
-    gradient_accumulation_steps=1,
-    # optim='adamw_torch',
-    deepspeed=ds_config,
-    # save_steps=1,
-    # logging_steps=1,
-    learning_rate=1e-4,
-    weight_decay=0,
+    with deepspeed.zero.Init(config_dict_or_path=ds_config):
+        model,sample = get_model(batch=batch, seq_len=seq_len, nlayers=nlayers)
+
+    print(psutil.virtual_memory())
+    model, optimizer, _, lr_scheduler = deepspeed.initialize(
+        model=model,
+        model_parameters=model.parameters(),
+        config=ds_config,
     )
     model.gradient_checkpointing_enable()
-    # def make_inputs_require_grad(module, input, output):
-    #      output.requires_grad_(True)
 
-    # model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
-    trainer = Trainer(model, 
-                        args=training_arguments, 
-                        train_dataset=train_set,
-                        #   compute_metrics=compute_metrics,
-                        )
-    train_result = trainer.train()
+#     training_arguments = TrainingArguments(
+#     output_dir="/",
+#     num_train_epochs=1,
+#     per_device_train_batch_size=4,
+#     gradient_accumulation_steps=1,
+#     # optim='adamw_torch',
+#     deepspeed=ds_config,
+#     # save_steps=1,
+#     # logging_steps=1,
+#     learning_rate=1e-4,
+#     weight_decay=0,
+#     )
+# # def make_inputs_require_grad(module, input, output):
+# #      output.requires_grad_(True)
 
-    print(nlayers, train_result.metrics["train_samples_per_second"])
-    results = {}
-    results["nlayers"] = nlayers
-    results["input_size"] = (4, seq_len)
-    results["peak_mem"] = torch.cuda.max_memory_allocated() - mem
-    results["time"] = train_result.metrics['train_runtime'] *1000
-    results["time_per_sample"] = train_result.metrics["train_samples_per_second"]*1000
-    results["metrics"] = train_result.metrics
-    results["gpu_type"] = torch.cuda.get_device_name()
-    results["date"] = datetime.now().strftime("%x_%H:%M")
-    return results
+# # model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+#     trainer = Trainer(model, 
+#                         args=training_arguments, 
+#                         train_dataset=train_set,
+#                         #   compute_metrics=compute_metrics,
+#                         )
+#     train_result = trainer.train()
+    print(psutil.virtual_memory())
+    timer.start()
+    for _ in range(2):
+        y =model(*[s.to("cuda") for s in sample])
+        y[0].mean().backward()
+        optimizer.step()
+    torch.cuda.synchronize()
+    timer.end()
+    print(timer.elapsed())
+    print(torch.cuda.max_memory_allocated())
+    # print(nlayers, train_result.metrics["train_samples_per_second"])
+    # results = {}
+    # results["nlayers"] = nlayers
+    # results["input_size"] = (4, seq_len)
+    # results["peak_mem"] = torch.cuda.max_memory_allocated() - mem
+    # results["time"] = train_result.metrics['train_runtime'] *1000
+    # results["time_per_sample"] = train_result.metrics["train_samples_per_second"]*1000
+    # results["metrics"] = train_result.metrics
+    # results["gpu_type"] = torch.cuda.get_device_name()
+    # results["date"] = datetime.now().strftime("%x_%H:%M")
+    # return results
 
 
 if __name__ == "__main__":
@@ -174,7 +194,13 @@ if __name__ == "__main__":
         "llama7b": get7Bllama,
         "llama13b": get13Bllama,
         "phi2-3b": get3BPhi_2,
-        "llama7b_lora": get7Bllama_lora,
+        "phi2-2b": get3BPhi_15,
+        "llama7b_lora":get7Bllama_lora,
+        "bloom3b": get3Bbloom,
+        "falcon11b": get11Bfalcon,
+        "llama8b": get8Bllama,
+        "mistral7b": get7Bmistral,
+        "phi3-4b":get4Bphi3
     }
 
     args = parser.parse_args()
@@ -197,9 +223,9 @@ if __name__ == "__main__":
         results = {}
     try:
         results[nlayers] = methods[args.method](nlayers, 
-                                                     batch=4, 
-                                                     get_model=models[args.model],
-                                                     **kwargs)
+                                                batch=args.batch_size, 
+                                                get_model=models[args.model],
+                                                **kwargs)
     except Exception as e:
         results[nlayers] = str(e)
     with open(exp_id, "wb") as f:

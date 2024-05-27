@@ -201,17 +201,17 @@ def get7Bllama_lora(batch, seq_len, num_adapters=64, nlayers=32, dtype=None, lla
         target_modules=["q_proj", "k_proj"],
         lora_dropout=0.01,
     )
-    # model = LoraModel(model, config, "default")
+    model = LoraModel(model, config, "default")
 
-    target_modules = [f"layers.{i}.self_attn.q_proj" for i in range(nlayers)]
-    target_modules += [f"layers.{i}.self_attn.k_proj" for i in range(nlayers)]
-    target_modules += [f"layers.{i}.self_attn.v_proj" for i in range(nlayers)]
-    # if classification:
-    target_modules = ["model."+s for s in target_modules]
-    manual_lora(model, 
-                target_modules=target_modules,
-                num_adapters=num_adapters,
-                freeze_all=True)
+    # target_modules = [f"layers.{i}.self_attn.q_proj" for i in range(nlayers)]
+    # target_modules += [f"layers.{i}.self_attn.k_proj" for i in range(nlayers)]
+    # target_modules += [f"layers.{i}.self_attn.v_proj" for i in range(nlayers)]
+    # # if classification:
+    # target_modules = ["model."+s for s in target_modules]
+    # manual_lora(model, 
+    #             target_modules=target_modules,
+    #             num_adapters=num_adapters,
+    #             freeze_all=True)
     if classification:
         model.enable_input_require_grads()
 
@@ -299,7 +299,8 @@ def get7Bmistral(batch, seq_len, dtype=None, nlayers=32, classification=False):
                             output_hidden_states=False,
                             output_attentions=False,
                             pad_token_id=0,
-                            use_cache=False
+                            use_cache=False,
+                            vocab_size= 32000
                             )
     configuration._attn_implementation="eager"
     configuration._attn_implementation_internal="eager"

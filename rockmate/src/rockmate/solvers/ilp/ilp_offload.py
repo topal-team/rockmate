@@ -48,7 +48,7 @@ class ModelPULPOffload(ModelPULP):
         self.activation_offload = activation_offload
         self.optimize_metrics = optimize_metrics
         self.use_correction_term = True
-        self.cpu_constant_cost = 50
+        self.cpu_constant_cost = 100
         self.dynamic_batch_size = dynamic_batch_size
         self.ram_budget = ram_budget or virtual_memory().available * 0.9/self.gcd
         self.cpu_optimize = cpu_optimize
