@@ -236,10 +236,11 @@ def pseq_builder(chain, memory_limit, opt_table):
 from . import csequence as cs
 
 try:
-    import rockmate.solvers.csolver as rs
+    import rockmate.solvers.rk_rotor.csolver as rs
 
     csolver_present = True
-except:
+except Exception as e:
+    print("ROTOR Warning: could not import C version of Rotor solver:", e)
     csolver_present = False
 
 
@@ -282,8 +283,10 @@ def cseq_builder(chain, mmax, opt_table):
 
 def solve_dp_functional(chain, mmax, opt_table=None, force_python=False):
     if force_python or not csolver_present:
+        print("Warning, rotor solving with Python. Might be slow")
         return psolve_dp_functional(chain, mmax, opt_table)
     else:
+        print("rotor solving with C.")
         return csolve_dp_functional(chain, int(mmax), opt_table)
 
 

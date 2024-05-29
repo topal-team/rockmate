@@ -137,7 +137,7 @@ class RK_rotor(Solver):
         start = time.time()
         mmax = budget // self.mem_unit - chain.cw[0] - chain.cw[chain.ln]
         self.opt_table = solve_dp_functional(
-            chain, mmax, self.opt_table, force_python=True
+            chain, mmax, self.opt_table, force_python=False
         )
         self.seq = seq_builder(
             chain,
