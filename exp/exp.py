@@ -266,6 +266,7 @@ def exp_pt(nlayers=1,
     results[nlayers] = exp_stats
     with open(exp_id, "wb") as f:
         pickle.dump(results, f)
+    return exp_stats
 
 def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B",
               activation_offload=True, cpu_optimization=True, get_model=get7Bllama,
@@ -370,6 +371,7 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B",
     results[eid] = exp_stats
     with open(exp_id, "wb") as f:
         pickle.dump(results, f)
+    return exp_stats
             
 def solve_rkmod(model, 
                 sample, 
