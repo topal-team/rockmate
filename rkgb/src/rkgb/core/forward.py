@@ -103,7 +103,7 @@ class ForwardGraph(base.Graph):
                     param_node.info = param_info = VariableInfo(param_value)
                     param_node.requires_grad = param_info.requires_grad
                     param_node.mem = param_info.memsize
-        self.parameter_nodes = dict_param_str_to_node.values()
+        self.parameter_nodes = list(dict_param_str_to_node.values())
         # -> to recognize views over parameters
 
         # === PART 1: Translate each node one by one following the topo-order ===
