@@ -1,7 +1,7 @@
 import torch
 from rkgb.lowlevel import ast_add_on
 from rkgb.core import base
-
+from math import inf
 
 class FakeMod():
     def __init__(self):
