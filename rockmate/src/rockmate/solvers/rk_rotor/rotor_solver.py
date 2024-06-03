@@ -272,7 +272,7 @@ def csolve_dp_functional(chain, mmax, opt_table=None):
 
 
 def cseq_builder(chain, mmax, opt_table):
-    result = opt_table.build_sequence(mmax)
+    result = opt_table.build_sequence(mmax - chain.cw[0])
     return convert_sequence_from_C(chain, result)
 
 
