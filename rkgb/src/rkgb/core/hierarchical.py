@@ -527,8 +527,8 @@ class HierarchicalCluster():
             bwd_cnode = fb_graph.dict_bwd_cnodes[target_to_proceed]
 
             # 2) Loss Computation Node
-            # self.loss_cnode = ComputationNode("loss")
-            self.loss_cnode = fb_graph.dict_nodes["FWD[loss]"]
+            self.loss_cnode = ComputationNode("loss")
+            # self.loss_cnode = fb_graph.dict_nodes["FWD[loss]"]
             self.loss_cnode.deps_real = {data_anode}
             self.loss_cnode.users = {grad_anode}
             self.list_cnodes = [fwd_cnode,self.loss_cnode,bwd_cnode]
@@ -579,7 +579,8 @@ class HierarchicalCluster():
             # Reminder we are talking about backward.py's nodes
             # not HierarchicalComputationNodes
             self.list_cnodes = []
-            self.loss_cnode = fb_graph.dict_nodes["FWD[loss]"]
+            self.loss_cnode = ComputationNode("loss")
+            # self.loss_cnode = fb_graph.dict_nodes["FWD[loss]"]
             # Note: we collect them in the topological order
             for cnode in fb_graph.computation_nodes:
                 if cnode.main_target in all_main_targets_contained:
