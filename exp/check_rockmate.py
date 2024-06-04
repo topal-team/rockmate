@@ -73,7 +73,8 @@ if __name__ == "__main__":
         solver.config.solve_only_top_level = False
         solver.config.nb_total_nodes_top_level = 0
         rk_solver = rockmate.solvers.RK_rotor()
-        list_solvers = [solver, rk_solver]
+        ## list_solvers = [solver, rk_solver]
+        list_solvers = [rk_solver]
 
         try :
             print("Reading")
