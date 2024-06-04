@@ -223,7 +223,7 @@ def pseq_builder(chain, memory_limit, opt_table):
 
     #  ~~~~~~~~~~~~~~~~~~
 
-    seq = seq_builder_rec(0, chain.ln, mmax)
+    seq = seq_builder_rec(0, chain.ln, memory_limit)
     return seq
 
 
