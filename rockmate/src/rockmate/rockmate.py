@@ -22,7 +22,7 @@ from rkgb.lowlevel.constants import init_target_string
 
 from .op_schedule import *
 from .simulation import Simulator
-from .solvers.main import preprocess, solve_recursive, get_optimize_metrics, FastSolver
+from .solvers.main import preprocess, solve_recursive, get_optimize_metrics, FastSolver, add_sched
 from .solvers import HILP, CheapSolver
 from .solvers.ilp.ilp_solver import default_time_limit
 from .compiler import Compiler, RK_Storage, make_gd, Fct_record_event
@@ -169,6 +169,20 @@ class Rockmate(torch.nn.Module):
                     ]
                     + self.output_names,
                 )
+
+    def fast_solve(self):
+        solver = FastSolver()
+        cluster = self.rkgb_res.hierarchical_cluster
+
+        op_scheds = solver.solve(
+                    cluster,
+                    no_del_names=[
+                        f"{init_target_string} data",
+                        f"{init_target_string} grad",
+                    ]
+                    + self.output_names,
+                )
+        self.op_sched = op_scheds[0]
 
     def solver_recursive(self, list_solvers=None, only_preprocess=False):
         list_solvers = list_solvers or self.list_solvers
