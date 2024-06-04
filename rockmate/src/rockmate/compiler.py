@@ -357,11 +357,11 @@ class Fct_run_fwd(RK_Fct):
         self.stream = stream
 
     def fwd_with_grad(self):
-        with torch.enable_grad():
-            with torch.autograd.graph.saved_tensors_hooks(
-                self.fct_get_pack(self.no_save_list), self.fct_get_unpack()
+        # with torch.enable_grad():
+        with torch.autograd.graph.saved_tensors_hooks(
+            self.fct_get_pack(self.no_save_list), self.fct_get_unpack()
             ):
-                exec(self.code, self.storage.gd, self.storage.ld)
+            exec(self.code, self.storage.gd, self.storage.ld)
 
     def fwd_no_grad(self):
         with torch.no_grad():
@@ -1003,26 +1003,29 @@ class Compiler:
         )
         cnode: ComputationNode = op.target
         for pnode in cnode.required_parameter_nodes_real:
-            op.add_fct(
-                Fct_run_fwd(
-                    cnode.main_target,
-                    storage=self.storage,
-                    code=pnode.get_code(),
+            view_code = pnode.get_code()
+            if view_code:
+                op.add_fct(
+                    Fct_run_fwd(
+                        cnode.main_target,
+                        storage=self.storage,
+                        code=view_code,
+                    )
                 )
-            )
 
         for anode in cnode.deps_real:
             for dep_cnode in anode.deps:
                 code = dep_cnode.make_body_code_ast()
                 ast_view_code = make_ast_list_assign(code)
-                op.add_fct(
-                    Fct_run_fwd(
-                        op.target,
-                        storage=self.storage,
-                        code=ast_to_str(ast_view_code),
-                        stream="main_stream",
+                if ast_view_code:
+                    op.add_fct(
+                        Fct_run_fwd(
+                            op.target,
+                            storage=self.storage,
+                            code=ast_to_str(ast_view_code),
+                            stream="main_stream",
+                        )
                     )
-                )
 
         if not cnode.info.requires_grad:
             op.add_fct(
@@ -1084,9 +1087,10 @@ class Compiler:
                     fwd_mode="with_grad",
                 )
             )
-        op.add_fct(
-            Fct_run_fwd(cnode.main_target, storage=self.storage, code=inplace_code)
-        )
+        if inplace_code:
+            op.add_fct(
+                Fct_run_fwd(cnode.main_target, storage=self.storage, code=inplace_code)
+            )
         for inplace_target in cnode.inplace_targets:
             if inplace_target != cnode.main_target:
                 op.add_fct(
@@ -1094,7 +1098,8 @@ class Compiler:
                 )
         if True:  # TODO:fake detach
             op.add_fct(Fct_detach(cnode.main_target, storage=self.storage))
-        op.add_fct(Fct_run_fwd(cnode.main_target, storage=self.storage, code=body_code))
+        if body_code:
+            op.add_fct(Fct_run_fwd(cnode.main_target, storage=self.storage, code=body_code))
         if op.pos_info["first_occurrence"]:
             for target_name in cnode.tensor_targets:
                 op.add_fct(Fct_get_shape(target_name, storage=self.storage))
@@ -1109,13 +1114,15 @@ class Compiler:
         )
 
         for pnode in cnode.required_parameter_nodes_real:
-            op.add_fct(
-                Fct_run_fwd(
-                    cnode.main_target,
-                    storage=self.storage,
-                    code=pnode.get_code(),
+            view_code = pnode.get_code()
+            if view_code:
+                op.add_fct(
+                    Fct_run_fwd(
+                        cnode.main_target,
+                        storage=self.storage,
+                        code=view_code,
+                    )
                 )
-            )
 
         for target_name in op.pos_info["temporary_tensor_names"]:
             op.add_fct(
@@ -1345,13 +1352,13 @@ class Compiler:
         if not on_cpu:
             prep_op.add_fct(Fct_mem_alloc(pnode.param_name, storage=self.storage, dtype=self.storage.dtype))
             prep_op.add_fct(Fct_prefetch(op.target, storage=self.storage))
-            prep_op.add_fct(
-                Fct_run_fwd(
-                    pnode.param_name, storage=self.storage, code=pnode.get_code()
+            view_code = pnode.get_code()
+            if view_code:
+                prep_op.add_fct(
+                    Fct_run_fwd(
+                        pnode.param_name, storage=self.storage, code=view_code
+                    )
                 )
-            )
-
-        
 
     def ExecCode(self, op: ExecCodeOp):
         op.add_fct(Fct_run_fwd(op.name, storage=self.storage, code=op.code))
