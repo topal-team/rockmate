@@ -65,7 +65,9 @@ class RK_Block_Solution:
         self.bwd_sched.time = full_sched.bwd_time
         self.bwd_sched.overhead = full_sched.bwd_overhead
         self.bwd_sched.save = full_sched.save_mem[full_sched.loss_idx :]
-        self.size_a_bar = full_sched.mem
+        # Include in abar size the size of output Tensors which are alive when computing loss
+        self.size_a_bar = full_sched.mem + sum(anode.mem for anode in full_sched.interfaces["output_data_anodes"]
+                                               if full_sched.alive_list[full_sched.loss_idx][anode.name])
         self.time_fwd = full_sched.fwd_time
         self.time_bwd = full_sched.bwd_time
         self.overhead_fwd = full_sched.fwd_overhead
