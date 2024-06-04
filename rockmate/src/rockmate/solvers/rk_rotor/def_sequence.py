@@ -119,5 +119,8 @@ class RK_Sequence:
                 )
         raise Exception("Can't cut a Sequence which doesn't have SeqLoss")
 
-
+    def get_op_list(self):
+        return [ op for rk_op in self.seq
+                    for op in rk_op.op_sched.op_list ]
+        
 # ==========================

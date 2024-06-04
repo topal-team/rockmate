@@ -169,7 +169,6 @@ def psolve_dp_functional(chain, mmax, opt_table=None):
 def pseq_builder(chain, memory_limit, opt_table):
     # returns :
     # - the optimal sequence of computation using mem-persistent algo
-    mmax = memory_limit - chain.cw[0]
     # opt, what = solve_dp_functional(chain, mmax, *opt_table)
     opt, what = opt_table
     #  ~~~~~~~~~~~~~~~~~~
