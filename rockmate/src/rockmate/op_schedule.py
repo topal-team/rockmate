@@ -446,6 +446,7 @@ class OpSchedule:
         L = len(self.op_list)
         self.time = np.zeros(L)
         self.save_mem = np.zeros(L)
+        self.save_mem_with_interfaces = np.zeros(L)
         self.overhead = np.zeros(L)
 
         if exclude_interfaces:
@@ -454,6 +455,7 @@ class OpSchedule:
             exclude_names = []
         for i, (op, alive_status) in enumerate(zip(self.op_list, alive_list)):
             self.save_mem[i] = self._sum_mem(alive_status, exclude_names)
+            self.save_mem_with_interfaces[i] = self._sum_mem(alive_status, ignore_list=[])
             if op.disabled:
                 continue
             self.time[i] = (
