@@ -212,5 +212,6 @@ class RK_Chain:
         self.fwd_tmp = [discretize_(x) for x in self.fwd_tmp]
         self.bwd_tmp = [discretize_(x) for x in self.bwd_tmp]
         self.ff_fwd_tmp = discretize_(self.ff_fwd_tmp)
-        
 
+    def simulate(self, sequence, display=True, stopAtLoss=False):
+        return sequence.simulate(self, display, stopAtLoss)

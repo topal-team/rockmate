@@ -205,7 +205,7 @@ def pseq_builder(chain, memory_limit, opt_table):
         if w[0]:
             k = w[1]
             sol = chain.body[lmin].sols[k]
-            seq.insert(SeqBlockFe(lmin, sol.fwd_sched))
+            seq.insert(SeqBlockFe(lmin, k, sol.fwd_sched))
             seq.insert_seq(
                 seq_builder_rec(lmin + 1, lmax, cmem - chain.cbw[lmin + 1][k])
             )
@@ -253,7 +253,7 @@ def convert_sequence_from_C(chain, original_sequence):
         if isinstance(op, cs.SeqBlockFc):
             return SeqBlockFc(op.index, body.Fc_sched)
         if isinstance(op, cs.SeqBlockFe):
-            return SeqBlockFe(op.index, body.sols[op.option].fwd_sched)
+            return SeqBlockFe(op.index, op.option, body.sols[op.option].fwd_sched)
         if isinstance(op, cs.SeqBlockBwd):
             return SeqBlockBwd(op.index, body.sols[op.option].bwd_sched)
 
