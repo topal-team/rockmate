@@ -93,6 +93,9 @@ class RK_rotor(Solver):
                         raise e
                     else:
                         continue
+
+                mem_usage = seq.simulate(chain)
+                print("RKROTOR: mem usage should be ", mem_usage * self.mem_unit)
                 
                 fwd_seq, bwd_seq = seq.cut_fwd_bwd()
                 

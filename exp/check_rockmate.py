@@ -26,6 +26,12 @@ def getresnet(batch_size, _, nlayers):
 
 exp.Loss = lambda y: y.mean()
 
+def get_schedule_time(op_sched):
+    return sum(op.time for op in op_sched.op_list if isinstance(op, rockmate.op_schedule.ComputeOp))
+
+def get_schedule_peak_mem(op_sched):
+    return max(op_sched.save_mem_with_interfaces + op_sched.overhead)
+
 if __name__ == "__main__":
     
     if False:
@@ -43,7 +49,7 @@ if __name__ == "__main__":
                   rotor=True, remat=True)
     else:
         nlayers = 10
-        batch_size = 64
+        batch_size = 128
         get_model=getresnet
         filename_id = "resnet50"
 
@@ -58,8 +64,9 @@ if __name__ == "__main__":
         model.to(device)
         sample = [s.to(device) for s in sample]
 
-        ## budget = stats_pt["peak_mem"] - 1024*1024*1024
-        budget = stats_pt["peak_mem"]
+        budget = stats_pt["peak_mem"] - 1.5 * 1024*1024*1024
+        ## budget = 9428213760.0
+        ## budget = stats_pt["peak_mem"]
         print("Using budget:", budget)
 
         previous_result = None
@@ -72,7 +79,7 @@ if __name__ == "__main__":
         solver.config.offload = False
         solver.config.solve_only_top_level = False
         solver.config.nb_total_nodes_top_level = 0
-        rk_solver = rockmate.solvers.RK_rotor()
+        rk_solver = rockmate.solvers.RK_rotor(force_python=False)
         ## list_solvers = [solver, rk_solver]
         list_solvers = [rk_solver]
 
@@ -122,10 +129,17 @@ if __name__ == "__main__":
                 rkmod.save_to_local(".", filename_id)
             rkmod.get_compiled_fct()
 
+
+        # print("XXX  Schedule XXX  ")
+        # for op in rkmod.op_sched.op_list[:80]:
+        #     print(op)
+        #     for f in op.fct_list:
+        #         print("     ", f, "code=", f.code if hasattr(f, "code") else "")
+
         niters = 5
         stats_rotor = {}
         try:
-            time, mem = exec_pt(rkmod, sample, niters=niters)
+            time, mem = exec_pt(rkmod, sample, niters=niters)#, profile="rotor")
         except Exception as e:
             stats_rotor["exception"] = e
             raise e
@@ -133,11 +147,18 @@ if __name__ == "__main__":
         stats_rotor["time"] = time/niters
         stats_rotor["peak_mem"] = mem
 
-        stats_rotor["theo_time"] = sum(op.time for op in rkmod.op_sched.op_list if isinstance(op, rockmate.op_schedule.ComputeOp))
+        stats_rotor["theo_time"] = get_schedule_time(rkmod.op_sched)
         stats_pt["theo_time"] = sum(kcn.time for kcn in rkmod.rkgb_res.hierarchical_cluster.list_cnodes if kcn.time)
-        
-        print("alg", "theo_time", "theo_ratio", "time", "Tratio", "mem", "Mratio")
-        print("PT ", stats_pt["theo_time"], 1, stats_pt["time"], 1, stats_pt["peak_mem"], 1)
-        print("RK ", stats_rotor["theo_time"], stats_rotor["theo_time"]/stats_pt["theo_time"], stats_rotor["time"],  stats_rotor["time"]/stats_pt["time"],
-              stats_rotor["peak_mem"], stats_rotor["peak_mem"]/stats_pt["peak_mem"])
+        stats_rotor["theo_mem"] = get_schedule_peak_mem(rkmod.op_sched)
+        # Apparently we need to add output size to the peak mem.
 
+        print("alg", "theo_time", "theo_ratio", "time", "Tratio")
+        print("PT ", stats_pt["theo_time"], 1, stats_pt["time"], 1)
+        print("RK ", stats_rotor["theo_time"], stats_rotor["theo_time"]/stats_pt["theo_time"], stats_rotor["time"],  stats_rotor["time"]/stats_pt["time"])
+
+        print("budget:", budget, "act budget:", act_budget)
+        print("alg", "theo_mem", "mem", "Mratio")
+        print("PT ", "???", stats_pt["peak_mem"], 1)
+        print("RK ", stats_rotor["theo_mem"], stats_rotor["peak_mem"], stats_rotor["peak_mem"]/stats_pt["peak_mem"])
+
+        print("RK: saved memory at end of FWD=", rkmod.op_sched.mem)
