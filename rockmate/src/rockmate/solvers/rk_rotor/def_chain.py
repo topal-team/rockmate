@@ -20,9 +20,14 @@ class RK_Schedule(OpSchedule):
     def __init__(self, op_list, cluster):
         super().__init__(op_list, loss_idx=len(op_list) - 1, cluster=cluster, correct_overhead=False)
         ## TODO: maybe accessor functions?
-        self.time = self.fwd_time
-        self.save = self.save_mem
-        self.overhead = self.fwd_overhead
+        # self.time = self.fwd_time
+        # self.save = self.save_mem
+
+def get_sched_peak_with_interfaces(sched, only_start=False, only_end=False):
+    assert not (only_start and only_end)
+    start_idx = sched.loss_idx if only_end else None
+    end_idx = 1+sched.loss_idx if only_start else None
+    return max(sched.save_mem_with_interfaces[start_idx:end_idx] + sched.overhead[start_idx:end_idx])
 
 
 class RK_Block_Solution:
@@ -32,48 +37,51 @@ class RK_Block_Solution:
     # prologue_op_list is added to the forward part of op_sched. Can be []
     # pred_disable_from_bwd is a predicate for ops that should be disabled from the backward schedule.
     #                       Used to disable delete operations about the input data
-    def __init__(self, h_compute_node, op_sched, prologue_op_list, pred_disable_from_bwd):
+    def __init__(self, block, sub_cluster, op_sched, prologue_op_list, pred_disable_from_bwd):
         # fwd_op_list = h_compute_node.sub_cluster.translate_op_list(
-        fwd_op_list = translate(h_compute_node.sub_cluster,
+        fwd_op_list = translate(sub_cluster,
                                 prologue_op_list + op_sched.op_list[: op_sched.loss_idx]
                                 )  # + [Op(K_C_node("loss"))]
-        bwd_op_list = translate(h_compute_node.sub_cluster,
+        bwd_op_list = translate(sub_cluster,
                                 op_sched.op_list[op_sched.loss_idx + 1 :]
                                 )  # start with loss op
         for op in bwd_op_list:
             if pred_disable_from_bwd(op):
                 op.disabled = True
 
-        self.fwd_sched = RK_Schedule(fwd_op_list, h_compute_node.sub_cluster)
+        self.fwd_sched = RK_Schedule(fwd_op_list, sub_cluster)
       
         self.bwd_sched = OpSchedule(
             bwd_op_list,
             loss_idx=0,
-            cluster=h_compute_node.sub_cluster,
+            cluster=sub_cluster,
             correct_overhead=False,
         ) 
 
         full_sched = OpSchedule(
             fwd_op_list
-            + [ComputeOp(h_compute_node.sub_cluster.loss_cnode)]
+            + [ComputeOp(sub_cluster.loss_cnode)]
             + bwd_op_list,
             loss_idx=len(fwd_op_list) - 1,
-            cluster=h_compute_node.sub_cluster,
+            cluster=sub_cluster,
             correct_overhead=False,
         )  # different from op_sched because it contains the prologue if there is one
         ## TODO: why do I need full_sched? To compute save_mem and overhead?
-        self.bwd_sched.time = full_sched.bwd_time
-        self.bwd_sched.overhead = full_sched.bwd_overhead
-        self.bwd_sched.save = full_sched.save_mem[full_sched.loss_idx :]
+        # self.bwd_sched.time = full_sched.bwd_time
+        # self.bwd_sched.overhead = full_sched.bwd_overhead
+        # self.bwd_sched.save = full_sched.save_mem[full_sched.loss_idx :]
         # Include in abar size the size of output Tensors which are alive when computing loss
         self.size_a_bar = full_sched.mem + sum(anode.mem for anode in full_sched.interfaces["output_data_anodes"]
                                                if full_sched.alive_list[full_sched.loss_idx][anode.name])
+        assert (block.mem_output == sum(anode.mem for anode in full_sched.interfaces["output_data_anodes"]
+                                        if full_sched.alive_list[full_sched.loss_idx][anode.name]))
         self.time_fwd = full_sched.fwd_time
         self.time_bwd = full_sched.bwd_time
         self.overhead_fwd = full_sched.fwd_overhead
-        ## TODO: I do not understand this formula below
-        self.overhead_bwd = max(full_sched.save_mem + full_sched.overhead) - full_sched.mem
-
+        # for rotor, overhead needs to be equal to peak - size of input and output.
+        #     for backward, input is [input + grad of output + output with phantoms] and output is [grad of input]
+        self.overhead_fwd = get_sched_peak_with_interfaces(full_sched, only_start=True) - block.mem_input - self.size_a_bar
+        self.overhead_bwd = get_sched_peak_with_interfaces(full_sched, only_end=True) - 2 * block.mem_input - self.size_a_bar - block.mem_output
 
 class RK_Block:
     ## Build a block from a Compute node, or several compute nodes merged
@@ -94,6 +102,9 @@ class RK_Block:
         first_hcn = h_compute_nodes[0]
         input_anode_data = list(han.anode for han in first_hcn.deps)
         output_anode_data = list(han.anode for han in final_node.users)
+        self.mem_input = sum(anode.mem for anode in input_anode_data)
+        self.mem_output = sum(anode.mem for anode in output_anode_data)
+
         for op in prologue_op_list:
             if isinstance(op, DeleteOp) and op.target.anode in input_anode_data:
                 print("Rotor, making Forward Check schedule: disabling deletion of input data",
@@ -107,20 +118,18 @@ class RK_Block:
         self.Fc_sched = RK_Schedule(prologue_op_list.copy() + final_node.ff_op_list, final_node.sub_cluster)
 
         def is_delete_of_input_data(op):
-            # By default, bwd does not delete input data/grad
+            # By default, force bwd not to delete input data/grad
             return (isinstance(op, DeleteOp) and 
                     any(op.target.anode.main_target == anode.main_target for anode in input_anode_data))
-            ## TODO: difference between test on previous line and op.target.anode in input_anode_data that is used above?
+            ## TODO: is there a difference between test on previous line and op.target.anode in input_anode_data that is used above?
+            ##       Yes, main_target means also consider gradients
 
         self.sols = []
         for op_sched in get_sched(final_node.sub_cluster):
-            solution = RK_Block_Solution(final_node, op_sched, prologue_op_list, pred_disable_from_bwd=is_delete_of_input_data)
+            solution = RK_Block_Solution(self, final_node.sub_cluster, op_sched, prologue_op_list, pred_disable_from_bwd=is_delete_of_input_data)
             self.sols.append(solution)
             
-        self.mem_inp = sum(anode.mem for anode in input_anode_data)
-
-        # since interfaces is empty, output is counted in memory
-        self.overhead_fast_fwd = self.Fc_sched.fwd_overhead + sum(anode.mem for anode in output_anode_data)
+        self.overhead_fast_fwd = get_sched_peak_with_interfaces(self.Fc_sched) - self.mem_input - self.mem_output
         self.time_fast_fwd = self.Fc_sched.fwd_time
 
 # ==========================
@@ -171,11 +180,11 @@ class RK_Chain:
                 self.cbw[i + 1].append(sol.size_a_bar)
                 self.fwd_tmp[i].append(sol.overhead_fwd)
                 self.bwd_tmp[i].append(sol.overhead_bwd)
-            self.cw[i] = b.mem_inp
+            self.cw[i] = b.mem_input
             self.ff_fwd_tmp[i] = b.overhead_fast_fwd
             self.ff_fw[i] = b.time_fast_fwd
-        ## TODO: I feel like there might be several outputs, no?
-        self.cw[self.ln] = list(hg.output_data_HANs)[0].mem  # the final output
+
+        self.cw[self.ln] = sum(value.mem for value in hg.output_data_HANs)  # the final output(s)
 
         self.cbw[-2] = [(c - self.cw[self.ln]) for c in self.cbw[-2]]
 
