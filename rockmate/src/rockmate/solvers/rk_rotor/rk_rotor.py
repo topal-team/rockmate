@@ -54,15 +54,8 @@ class RK_rotor(Solver):
     ):
         if budgets is None:
             budgets = get_cluster_budget(cluster.representee_cluster)
-        # self.budget = budgets
-        # if isinstance(cluster, RK_Chain) or isinstance(cluster, RK_Chain_):
-        #     list_seq = []
-        #     for budget in budgets:
-        #         list_seq.append(self.solve_rk_chain(cluster, budget))
-        #     return list_seq
         if isinstance(cluster, HierarchicalCluster):
             list_seq = []
-            # for hg in cluster.possible_hg:
             for hg in cluster.partitionings:
                 list_seq.extend(self.solve_hg(hg, budgets))
             return list_seq
@@ -80,15 +73,12 @@ class RK_rotor(Solver):
             for budget in budgets:
 
                 try:
-                    ## TODO: understand which value this should have precisely
-                    ##       make sure that value passed to solve_dp()
-                    ##          is not smaller than value passed to seq_builder
                     seq = seq_builder(
                         chain,
                         self.discretize_budget(chain, budget),
                         opt_table
                     )
-                except Exception as e:
+                except ValueError as e:
                     if not "budget" in str(e):  # not enough budget
                         raise e
                     else:
@@ -106,20 +96,19 @@ class RK_rotor(Solver):
                     loss_idx = len(fwd_op_list),
                     cluster=hg.cluster,
                 )
-                # op_sched.solver = "rk-rotor"
                 list_op_sched.append(op_sched)
             return list_op_sched
 
     def discretize_budget(self, chain, budget):
-        ## TODO: check the correct value
+        ## Both input and output stay in memory all along
+        ##   (this is a Rotor assumption, because Rotor can not remove them from memory)
+        ##   (and even Rockmate can not assume too much, because the user has access to them)
         return budget // self.mem_unit - chain.cw[0] - chain.cw[chain.ln]
 
     # Returns the opt_table
     def solve_rk_chain(self, chain, budget):
         start = time.time()
 
-        ## TODO: understand which value this should have precisely
-        ##       make sure that value passed to solve_dp() is not smaller than value passed to seq_builder
         mmax = self.discretize_budget(chain, budget)
         opt_table = solve_dp_functional(chain, mmax, force_python=self.force_python)
 
