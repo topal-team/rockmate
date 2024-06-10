@@ -346,6 +346,7 @@ class Fct_run_fwd(RK_Fct):
     ):
         super().__init__(target_name=target_name, storage=storage, **kwargs)
         self.target_name = target_name
+        self.str_code = code
         self.code = compile(code, '<string>', "exec")
         self.no_save_list = no_save_list
         self.fwd_fct = {"with_grad": self.fwd_with_grad, "no_grad": self.fwd_no_grad}
@@ -354,7 +355,6 @@ class Fct_run_fwd(RK_Fct):
 
     def fwd_with_grad(self):
         if self.no_save_list:
-        # with torch.enable_grad():
             with torch.autograd.graph.saved_tensors_hooks(
                 self.fct_get_pack(self.no_save_list), self.fct_get_unpack()
                 ):
@@ -1015,7 +1015,7 @@ class Compiler:
             for dep_cnode in anode.deps:
                 code = dep_cnode.make_body_code_ast()
                 ast_view_code = make_ast_list_assign(code)
-                if ast_view_code:
+                if ast_to_str(ast_view_code):
                     op.add_fct(
                         Fct_run_fwd(
                             op.target,
