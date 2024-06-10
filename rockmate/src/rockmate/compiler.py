@@ -236,8 +236,7 @@ class Fct_del(RK_Fct):
         self.del_mode = del_mode
 
     def __call__(self):
-        with torch.cuda.stream(self.storage.gd["main_stream"]):
-            self.del_fcts[self.del_mode]()
+        self.del_fcts[self.del_mode]()
 
     def del_data(self):
         self.storage.get_val(self.target_name).data = torch.empty(0, dtype=self.storage.dtype)
@@ -271,21 +270,20 @@ class Fct_gen_fake_data(RK_Fct):
         self.with_proxy = with_proxy
 
     def __call__(self):
-        with torch.cuda.stream(self.storage.gd["main_stream"]):
-            m = (
-                self.storage.gd["cmeta"]
-                if self.storage.dtypes[self.target_name].is_complex
-                else self.storage.gd["meta"]
-            )
-            s = self.storage.get_shape(self.target_name)
-            if s == torch.Size([]):
-                x = m.sum()  # easy way to obtain a Tensor of shape []
-            else:
-                # x = m.expand(np.prod(s)).view(s)
-                x = m.expand(*s)
-            self.storage.get_val(self.target_name).data = x
-            if self.with_proxy:
-                self.storage.get_val(f"_{self.target_name}").data = x
+        m = (
+            self.storage.gd["cmeta"]
+            if self.storage.dtypes[self.target_name].is_complex
+            else self.storage.gd["meta"]
+        )
+        s = self.storage.get_shape(self.target_name)
+        if s == torch.Size([]):
+            x = m.sum()  # easy way to obtain a Tensor of shape []
+        else:
+            # x = m.expand(np.prod(s)).view(s)
+            x = m.expand(*s)
+        self.storage.get_val(self.target_name).data = x
+        if self.with_proxy:
+            self.storage.get_val(f"_{self.target_name}").data = x
 
 
 class Fct_detach(RK_Fct):
@@ -305,10 +303,9 @@ class Fct_detach(RK_Fct):
         self.storage.add_val(f"_{self.target_name}", torch.empty(0, dtype=self.storage.dtype))
 
     def __call__(self):
-        with torch.cuda.stream(self.storage.gd["main_stream"]):
-            self.storage.get_val(self.target_name).data = self.storage.ld[
-                f"_{self.target_name}"
-            ].data
+        self.storage.get_val(self.target_name).data = self.storage.ld[
+            f"_{self.target_name}"
+        ].data
 
 
 class Fct_run_bwd(RK_Fct):
@@ -326,15 +323,14 @@ class Fct_run_bwd(RK_Fct):
         self.input_names = input_names
 
     def __call__(self):
-        with torch.cuda.stream(self.storage.gd["main_stream"]):
-            inputs = [self.storage.get_val(name) for name in self.input_names]
-            if not inputs:
-                inputs = None
-            self.storage.get_val(f"_{self.target_name}").backward(
-                self.storage.get_val(self.target_name).grad,
-                inputs=inputs,
-                retain_graph=self.retain_graph,
-            )
+        inputs = [self.storage.get_val(name) for name in self.input_names]
+        if not inputs:
+            inputs = None
+        self.storage.get_val(f"_{self.target_name}").backward(
+            self.storage.get_val(self.target_name).grad,
+            inputs=inputs,
+            retain_graph=self.retain_graph,
+        )
 
 
 class Fct_run_fwd(RK_Fct):
@@ -368,8 +364,8 @@ class Fct_run_fwd(RK_Fct):
             exec(self.code, self.storage.gd, self.storage.ld)
 
     def __call__(self):
-        with torch.cuda.stream(self.storage.gd[self.stream]):
-            self.fwd_fct[self.fwd_mode]()
+        # with torch.cuda.stream(self.storage.gd[self.stream]):
+        self.fwd_fct[self.fwd_mode]()
 
     def fct_get_pack(self, no_save_list, sanity_check=False):
         # no_save_list contains a list of names
@@ -417,11 +413,10 @@ class Fct_get_shape(RK_Fct):
         else:
             target = self.storage.get_val(self.target_name)
 
-        with torch.cuda.stream(self.storage.gd["main_stream"]):
-            self.storage.measured_shapes[self.target_name] = target.shape
-            self.storage.measured_shapes[f"cpu_{self.target_name}"] = target.shape
-            self.storage.dtypes[self.target_name] = target.dtype
-            self.storage.dtypes[f"cpu_{self.target_name}"] = target.dtype
+        self.storage.measured_shapes[self.target_name] = target.shape
+        self.storage.measured_shapes[f"cpu_{self.target_name}"] = target.shape
+        self.storage.dtypes[self.target_name] = target.dtype
+        self.storage.dtypes[f"cpu_{self.target_name}"] = target.dtype
 
 
 class Fct_optimize(RK_Fct):
@@ -516,8 +511,7 @@ class Fct_mem_alloc(RK_Fct):
         )
 
     def __call__(self):
-        with torch.cuda.stream(self.storage.gd["main_stream"]):
-            self.alloc_fct[self.alloc_mode]()
+        self.alloc_fct[self.alloc_mode]()
 
 
 class Fct_offload(RK_Fct):
