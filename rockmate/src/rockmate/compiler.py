@@ -346,7 +346,7 @@ class Fct_run_fwd(RK_Fct):
     ):
         super().__init__(target_name=target_name, storage=storage, **kwargs)
         self.target_name = target_name
-        self.code = code
+        self.code = compile(code, '<string>', "exec")
         self.no_save_list = no_save_list
         self.fwd_fct = {"with_grad": self.fwd_with_grad, "no_grad": self.fwd_no_grad}
         self.fwd_mode = fwd_mode
