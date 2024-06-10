@@ -353,10 +353,13 @@ class Fct_run_fwd(RK_Fct):
         self.stream = stream
 
     def fwd_with_grad(self):
+        if self.no_save_list:
         # with torch.enable_grad():
-        with torch.autograd.graph.saved_tensors_hooks(
-            self.fct_get_pack(self.no_save_list), self.fct_get_unpack()
-            ):
+            with torch.autograd.graph.saved_tensors_hooks(
+                self.fct_get_pack(self.no_save_list), self.fct_get_unpack()
+                ):
+                exec(self.code, self.storage.gd, self.storage.ld)
+        else:
             exec(self.code, self.storage.gd, self.storage.ld)
 
     def fwd_no_grad(self):
@@ -368,25 +371,26 @@ class Fct_run_fwd(RK_Fct):
         self.fwd_fct[self.fwd_mode]()
 
     def fct_get_pack(self, no_save_list, sanity_check=False):
+        no_save_dict = {self.storage.get_val(c).data_ptr() : c
+                        for c in no_save_list}
         # no_save_list contains a list of names
         def pack(x):
-            for i, c in enumerate(no_save_list):
-                if self.storage.get_val(c).data_ptr() == x.data_ptr():
-                    # print(c)
-                    if sanity_check:
-                        assert torch.equal(
-                            self.storage.get_val(c).data.as_strided_(
-                                x.shape, x.stride(), x.storage_offset()
-                            ),
-                            x,
-                        )
-                    return (
-                        c,
-                        x.shape,
-                        x.stride(),
-                        x.storage_offset(),
-                        # x.clone(),
+            c = no_save_dict.get(x.data_ptr(), None)
+            if c is not None:
+                if sanity_check:
+                    assert torch.equal(
+                        self.storage.get_val(c).data.as_strided_(
+                            x.shape, x.stride(), x.storage_offset()
+                        ),
+                        x,
                     )
+                return (
+                    c,
+                    x.shape,
+                    x.stride(),
+                    x.storage_offset(),
+                    # x.clone(),
+                )
             return x
 
         return pack
