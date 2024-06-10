@@ -705,31 +705,30 @@ def define_autograd_Function(RkMod: Rockmate):
             #     )
             #     # TODO: record output grad if needed
 
-            stop = RkMod.backward_stop
-            if stop:
-                for i, op in enumerate(
-                    RkMod.op_list[loss_idx + 1 : loss_idx + stop + 1]
-                ):
-                    with torch.enable_grad():
-                        RkMod._exec(op)
-            else:
-
-                if RkMod.exec_with_record_time:
-                    for step in RkMod.op_sched.steps[RkMod.op_sched.loss_step :]:
-                        RkMod.exec_step(step)
+            with torch.enable_grad():
+                stop = RkMod.backward_stop
+                if stop:
+                    for i, op in enumerate(
+                        RkMod.op_list[loss_idx + 1 : loss_idx + stop + 1]
+                    ):
+                            RkMod._exec(op)
                 else:
-                    for op in RkMod.op_list[loss_idx + 1 :]:
-                        RkMod._exec(op)
-                # if RkMod.exec_with_record_mem and RkMod.backward_add_output_grad:
-                #     RkMod.allo_mem[loss_idx] += RkMod.output_size
-                #  -> return grad of dummy input + inputs' which req grad (Rem 1)
-                grad_inputs = tuple(
-                    RkMod.compiler.get_val(inp).grad
-                    for inp in ctx.name_of_inputs_which_req_grad
-                )
-                grads = (torch.ones(1),) + grad_inputs
+                    if RkMod.exec_with_record_time:
+                        for step in RkMod.op_sched.steps[RkMod.op_sched.loss_step :]:
+                            RkMod.exec_step(step)
+                    else:
+                        for op in RkMod.op_list[loss_idx + 1 :]:
+                            RkMod._exec(op)
+                    # if RkMod.exec_with_record_mem and RkMod.backward_add_output_grad:
+                    #     RkMod.allo_mem[loss_idx] += RkMod.output_size
+                    #  -> return grad of dummy input + inputs' which req grad (Rem 1)
+                    grad_inputs = tuple(
+                        RkMod.compiler.get_val(inp).grad
+                        for inp in ctx.name_of_inputs_which_req_grad
+                    )
+                    grads = (torch.ones(1),) + grad_inputs
 
-                return grads
+                    return grads
 
         # === END OF BACKWARD FUNCTION ===
 
