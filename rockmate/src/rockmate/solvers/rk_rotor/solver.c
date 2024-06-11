@@ -69,7 +69,7 @@ double** PySequenceToDoubleArray2D(PyObject* pylist) {
   if (!(pylist && PySequence_Check(pylist)))
     return NULL;
   Py_ssize_t len = PySequence_Size(pylist);
-  double** result = calloc(len, sizeof(long*));
+  double** result = calloc(len, sizeof(double*));
   if (!result) return NULL;
   for(Py_ssize_t i = 0; i < len; ++i) {
     PyObject* item = PySequence_GetItem(pylist, i);
@@ -181,6 +181,7 @@ typedef struct rk_chain {
 
 static void
 rk_chain_free(rk_chain* chain) {
+  // TODO: also free the inner pointers for the 2D lists
   if (chain->fw) free(chain->fw);
   if (chain->bw) free(chain->bw);
   if (chain->cw) free(chain->cw);
@@ -611,7 +612,7 @@ RkTable_get_opt(RkTable* self, PyObject* args) {
   if (!PyArg_ParseTuple(args, "i", & memory_limit))
     return NULL;
   if (memory_limit < 0 || memory_limit > self->mmax) {
-    return PyErr_Format(PyExc_ValueError, "Can not solve with limit %d, this table has mmax=%d", memory_limit, self->mmax);
+    return PyErr_Format(PyExc_ValueError, "Can not solve with budget %d, this table has mmax=%d", memory_limit, self->mmax);
   }
 
   compute_table_v2(&self->chain, self, memory_limit);
@@ -628,7 +629,7 @@ RkTable_build_sequence(RkTable* self, PyObject* args) {
     return NULL;
 
   if (memory_limit < 0 || memory_limit > self->mmax) {
-    return PyErr_Format(PyExc_ValueError, "Can not solve with limit %d, this table has mmax=%d", memory_limit, self->mmax);
+    return PyErr_Format(PyExc_ValueError, "Can not solve with budget %d, this table has mmax=%d", memory_limit, self->mmax);
   }
 
   compute_table_v2(&self->chain, self, memory_limit);
