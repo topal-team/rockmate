@@ -266,7 +266,7 @@ def exp_pt(nlayers=1,
     exp_stats["gpu_optim"] = str(optim)
     exp_stats["gpu_type"] = torch.cuda.get_device_name()
 
-    time, mem = exec_pt(model.to("cuda"), sample, niters=niters, optim=optim, profile="pytorch")
+    time, mem = exec_pt(model.to("cuda"), sample, niters=niters, optim=optim)#, profile="pytorch")
     torch.cuda.synchronize()
     print(time, mem)
 
