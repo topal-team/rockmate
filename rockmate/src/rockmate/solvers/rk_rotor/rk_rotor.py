@@ -45,6 +45,12 @@ class RK_rotor(Solver):
                         if hcn_user.is_fwd)
             if len(users)>1:
                 return False
+        input_data = hg.input_data_HANs
+        users_of_input = set(hcn_user for han in hg.input_data_HANs
+                             for hcn_user in han.users
+                             if hcn_user.is_fwd)
+        if len(users_of_input) > 1:
+            return False
         return True
 
     def solve(
@@ -84,9 +90,6 @@ class RK_rotor(Solver):
                     else:
                         continue
 
-                mem_usage = seq.simulate(chain)
-                print("RKROTOR: mem usage should be ", mem_usage * self.mem_unit)
-                
                 fwd_seq, bwd_seq = seq.cut_fwd_bwd()
                 
                 fwd_op_list = fwd_seq.get_op_list()
