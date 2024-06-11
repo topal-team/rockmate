@@ -132,7 +132,7 @@ def psolve_dp_functional(chain, mmax, opt_table=None):
                 for k in range(nb_sol[a]):
                     mem_f = cw[a + 1] + cbw[a + 1][k] + fwd_tmp[a][k]
                     mem_b = cw[a] + cbw[a + 1][k] + bwd_tmp[a][k]
-                    limit = max(mem_f, mem_b)
+                    limit = max(mem_f, mem_b, cbw[a+1][k])
                     if m >= limit:
                         time = fw[a][k] + bw[a][k]
                         time += solve_aux(m - cbw[a + 1][k], a + 1, b)
@@ -169,7 +169,6 @@ def psolve_dp_functional(chain, mmax, opt_table=None):
 def pseq_builder(chain, memory_limit, opt_table):
     # returns :
     # - the optimal sequence of computation using mem-persistent algo
-    mmax = memory_limit - chain.cw[0]
     # opt, what = solve_dp_functional(chain, mmax, *opt_table)
     opt, what = opt_table
     #  ~~~~~~~~~~~~~~~~~~
@@ -206,7 +205,7 @@ def pseq_builder(chain, memory_limit, opt_table):
         if w[0]:
             k = w[1]
             sol = chain.body[lmin].sols[k]
-            seq.insert(SeqBlockFe(lmin, sol.fwd_sched))
+            seq.insert(SeqBlockFe(lmin, k, sol.fwd_sched))
             seq.insert_seq(
                 seq_builder_rec(lmin + 1, lmax, cmem - chain.cbw[lmin + 1][k])
             )
@@ -224,7 +223,7 @@ def pseq_builder(chain, memory_limit, opt_table):
 
     #  ~~~~~~~~~~~~~~~~~~
 
-    seq = seq_builder_rec(0, chain.ln, mmax)
+    seq = seq_builder_rec(0, chain.ln, memory_limit)
     return seq
 
 
@@ -254,7 +253,7 @@ def convert_sequence_from_C(chain, original_sequence):
         if isinstance(op, cs.SeqBlockFc):
             return SeqBlockFc(op.index, body.Fc_sched)
         if isinstance(op, cs.SeqBlockFe):
-            return SeqBlockFe(op.index, body.sols[op.option].fwd_sched)
+            return SeqBlockFe(op.index, op.option, body.sols[op.option].fwd_sched)
         if isinstance(op, cs.SeqBlockBwd):
             return SeqBlockBwd(op.index, body.sols[op.option].bwd_sched)
 
