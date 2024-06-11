@@ -391,6 +391,12 @@ compute_table_base(rk_chain* chain, RkTable* tbl,
 	best_limit = limit;
       }
   }
+  if (m > mmax ||m < 0 || i > chain->ln || i < 0
+      || tbl_index(m, i, i, chain->ln) > (1+mmax) * (chain->ln+1) * (chain->ln+1)) {
+    printf("RKR Base case: %d, %d, %d, %ld -- %d/%ld\n", mmax, m, i, chain->ln,
+	   tbl_index(m, i, i, chain->ln), (1+mmax) * (chain->ln+1) * (chain->ln+1));
+  }
+
   // Also correct if best_k == -1 and best_k_value == INFINITY
   tbl->opt[tbl_index(m, i, i, chain->ln)] = best_k_value;
   tbl->what[tbl_index(m, i, i, chain->ln)] = 1 + best_k;
@@ -465,8 +471,9 @@ do_compute_table_rec(rk_chain* chain, RkTable* tbl, int* mmin_values,
   double best_now_value = INFINITY;
   int best_now_k = -1;
   for (int k = 0; k < chain->nb_sol[a]; ++k) {
-    int limit = imax(chain->cw[a+1] + chain->cbw[a+1][k] + chain->fwd_tmp[a][k],
-		    chain->cw[a] + chain->cbw[a+1][k] + chain->bwd_tmp[a][k]);
+    int limit = imax(chain->cbw[a+1][k],
+		     imax(chain->cw[a+1] + chain->cbw[a+1][k] + chain->fwd_tmp[a][k],
+			  chain->cw[a] + chain->cbw[a+1][k] + chain->bwd_tmp[a][k]));
     if (m >= limit) {
       compute_table_rec(chain, tbl, mmin_values,
 			partial_sums_ff_fw,

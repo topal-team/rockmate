@@ -132,7 +132,7 @@ def psolve_dp_functional(chain, mmax, opt_table=None):
                 for k in range(nb_sol[a]):
                     mem_f = cw[a + 1] + cbw[a + 1][k] + fwd_tmp[a][k]
                     mem_b = cw[a] + cbw[a + 1][k] + bwd_tmp[a][k]
-                    limit = max(mem_f, mem_b)
+                    limit = max(mem_f, mem_b, cbw[a+1][k])
                     if m >= limit:
                         time = fw[a][k] + bw[a][k]
                         time += solve_aux(m - cbw[a + 1][k], a + 1, b)
