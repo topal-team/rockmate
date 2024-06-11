@@ -100,7 +100,7 @@ class RK_Sequence:
             self.seq = []
 
     def __str__(self):
-        return "\n".join([str(o) for o in self.seq])
+        return ", ".join([str(o) for o in self.seq])
 
     def insert(self, op: SeqOp):
         self.seq.append(op)

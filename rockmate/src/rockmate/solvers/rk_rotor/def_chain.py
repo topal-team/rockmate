@@ -196,3 +196,13 @@ class RK_Chain:
 
     def simulate(self, sequence, display=True, stopAtLoss=False):
         return sequence.simulate(self, display, stopAtLoss)
+
+    def __str__(self):
+        result = f"Chain of length {self.ln}\n"
+        for i in range(self.ln):
+            result += f"Block {i}: {self.cw[i]} {self.ff_fwd_tmp[i]} {self.ff_fw[i]:.2f} {self.nb_sol[i]}\n"
+            for j in range(self.nb_sol[i]):
+                peak_fw = self.cw[i] + self.cw[i+1] + self.fwd_tmp[i][j]
+                peak_bw = self.cw[i] + self.cbw[i+1][j] + self.cw[i] + self.cw[i+1] + self.bwd_tmp[i][j]
+                result += f"   Option {j}: {self.cbw[i+1][j]} {self.fwd_tmp[i][j]}:{peak_fw} {self.bwd_tmp[i][j]}:{peak_bw} {self.fw[i][j]:.2f} {self.bw[i][j]:.2f}\n"
+        return result
