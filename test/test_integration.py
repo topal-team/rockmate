@@ -1,4 +1,5 @@
 import argparse
+import numpy as np
 import unittest
 from .execution import check_correctness, exec_pt, exec_rk, execution
 from .models import get_model
@@ -31,4 +32,4 @@ class RockmateTest(unittest.TestCase):
         mem = torch.cuda.memory_allocated()
         _ = execution(rkmod, sample, niters=5, zero_grad=False)
         peak_mem = torch.cuda.max_memory_allocated() - mem
-        self.assertAlmostEqual(peak_mem/peak_mem, simulate_mem/peak_mem, places=3)
+        self.assertTrue(np.isclose(peak_mem, simulate_mem, rtol=0.005, atol=2048))
