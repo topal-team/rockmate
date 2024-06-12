@@ -23,10 +23,16 @@ def backward_schedule(op_list, cluster):
 
 def get_sched_peak_with_interfaces(sched, only_start=False, only_end=False):
     assert not (only_start and only_end)
-    start_idx = sched.loss_idx if only_end else None
-    end_idx = 1+sched.loss_idx if only_start else None
+    start_idx = sched.loss_idx+1 if only_end else None
+    end_idx = sched.loss_idx if only_start else None
     return max(sched.save_mem_with_interfaces[start_idx:end_idx] + sched.overhead[start_idx:end_idx])
 
+def get_oplist_peak(op_list, cluster):
+    sched = OpSchedule(op_list, loss_idx=len(op_list) - 1, cluster=cluster, correct_overhead=False)
+    return max(sched.save_mem_with_interfaces + sched.overhead)
+
+def get_oplist_time(op_list):
+    return sum(op.time for op in op_list if not op.disabled)
 
 class RK_Block_Solution:
     # A solution contains a fwd_sched and a bwd_sched
@@ -41,17 +47,15 @@ class RK_Block_Solution:
             translated = translate(sub_cluster, op_list)
             return [ op for op in translated if not pred_disable(op) ]
 
-        fwd_op_list = translate_and_filter(prologue_op_list + op_sched.op_list[: op_sched.loss_idx])
-        bwd_op_list = translate_and_filter(op_sched.op_list[op_sched.loss_idx + 1 :])
+        self.fwd_op_list = translate_and_filter(prologue_op_list + op_sched.op_list[: op_sched.loss_idx])
+        self.bwd_op_list = translate_and_filter(op_sched.op_list[op_sched.loss_idx + 1 :])
 
-        self.fwd_sched = forward_schedule(fwd_op_list, sub_cluster)
-        self.bwd_sched = backward_schedule(bwd_op_list, sub_cluster)
 
         full_sched = OpSchedule(
-            fwd_op_list
+            self.fwd_op_list
             + [ComputeOp(sub_cluster.loss_cnode)]
-            + bwd_op_list,
-            loss_idx=len(fwd_op_list) - 1,
+            + self.bwd_op_list,
+            loss_idx=len(self.fwd_op_list),
             cluster=sub_cluster,
             correct_overhead=False,
         )
@@ -63,7 +67,6 @@ class RK_Block_Solution:
 
         self.time_fwd = full_sched.fwd_time
         self.time_bwd = full_sched.bwd_time
-        self.overhead_fwd = full_sched.fwd_overhead
         # for rotor, overhead needs to be equal to peak - size of input and output.
         #     for backward, input is [input + grad of output + output with phantoms] and output is [grad of input]
         self.overhead_fwd = get_sched_peak_with_interfaces(full_sched, only_start=True) - block.mem_input - self.size_a_bar
@@ -87,8 +90,7 @@ class RK_Block:
         for f_hcn in previous_nodes:
             prologue_op_list += f_hcn.ff_op_list
 
-        complete_op_list = prologue_op_list + final_node.ff_op_list
-        self.Fn_sched = forward_schedule(complete_op_list, final_node.sub_cluster)
+        self.Fn_op_list = prologue_op_list + final_node.ff_op_list
 
         # Rotor assumes that input data is deleted only with Fn, so we remove delete operations from Fc 
         # and Fe (for Fe, we also prevent deletion of gradients of the input)
@@ -99,8 +101,7 @@ class RK_Block:
             return (isinstance(op, DeleteOp) and 
                     any(op.target.anode.main_target == anode.main_target for anode in input_anode_data))
 
-        complete_op_list_keeps_input = list(op for op in complete_op_list if not is_delete_of_input_data(op))
-        self.Fc_sched = forward_schedule(complete_op_list_keeps_input, final_node.sub_cluster)
+        self.Fc_op_list = list(op for op in self.Fn_op_list if not is_delete_of_input_data(op))
 
         # One block solution for each FWD/BWD schedule
         self.sols = list(
@@ -108,8 +109,9 @@ class RK_Block:
             for op_sched in get_sched(final_node.sub_cluster)
         )
 
-        self.overhead_fast_fwd = get_sched_peak_with_interfaces(self.Fc_sched) - self.mem_input - self.mem_output
-        self.time_fast_fwd = self.Fc_sched.fwd_time
+        # TODO: measure both Fc and Fn peaks, they might be different
+        self.overhead_fast_fwd = get_oplist_peak(self.Fc_op_list, final_node.sub_cluster) - self.mem_input - self.mem_output
+        self.time_fast_fwd = get_oplist_time(self.Fc_op_list)
 
 # ==========================
 # ======== RK CHAIN ========

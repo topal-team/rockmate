@@ -205,18 +205,18 @@ def pseq_builder(chain, memory_limit, opt_table):
         if w[0]:
             k = w[1]
             sol = chain.body[lmin].sols[k]
-            seq.insert(SeqBlockFe(lmin, k, sol.fwd_sched))
+            seq.insert(SeqBlockFe(lmin, k, sol.fwd_op_list))
             seq.insert_seq(
                 seq_builder_rec(lmin + 1, lmax, cmem - chain.cbw[lmin + 1][k])
             )
-            seq.insert(SeqBlockBwd(lmin, sol.bwd_sched))
+            seq.insert(SeqBlockBwd(lmin, sol.bwd_op_list))
 
         #  -- Solution 1 --
         else:
             j = w[1]
-            seq.insert(SeqBlockFc(lmin, chain.body[lmin].Fc_sched))
+            seq.insert(SeqBlockFc(lmin, chain.body[lmin].Fc_op_list))
             for k in range(lmin + 1, j):
-                seq.insert(SeqBlockFn(k, chain.body[k].Fn_sched))
+                seq.insert(SeqBlockFn(k, chain.body[k].Fn_op_list))
             seq.insert_seq(seq_builder_rec(j, lmax, cmem - chain.cw[j]))
             seq.insert_seq(seq_builder_rec(lmin, j - 1, cmem))
         return seq
@@ -249,13 +249,13 @@ def convert_sequence_from_C(chain, original_sequence):
             return SeqLoss()
         body = chain.body[op.index]
         if isinstance(op, cs.SeqBlockFn):
-            return SeqBlockFn(op.index, body.Fn_sched)
+            return SeqBlockFn(op.index, body.Fn_op_list)
         if isinstance(op, cs.SeqBlockFc):
-            return SeqBlockFc(op.index, body.Fc_sched)
+            return SeqBlockFc(op.index, body.Fc_op_list)
         if isinstance(op, cs.SeqBlockFe):
-            return SeqBlockFe(op.index, op.option, body.sols[op.option].fwd_sched)
+            return SeqBlockFe(op.index, op.option, body.sols[op.option].fwd_op_list)
         if isinstance(op, cs.SeqBlockBwd):
-            return SeqBlockBwd(op.index, body.sols[op.option].bwd_sched)
+            return SeqBlockBwd(op.index, body.sols[op.option].bwd_op_list)
 
     result = RK_Sequence([convert_op(op) for op in original_sequence])
     return result

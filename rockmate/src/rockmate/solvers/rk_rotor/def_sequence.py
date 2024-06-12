@@ -4,7 +4,8 @@
 # ==========================
 
 # from .def_op import OpSchedule
-from ...op_schedule import OpSchedule
+from ...op_schedule import Op
+from typing import List
 
 ref_print_atoms = [True]
 
@@ -44,13 +45,13 @@ class SeqLoss(SeqOp):
 # ** Seq Block Op **
 # -> Subclasses : Fn,Fc,Fe,Bwd
 class SeqBlockOp(SeqOp):
-    def __init__(self, name, index, op_sched: OpSchedule):
+    def __init__(self, name, index, op_list: List[Op]):
         self.name = name
         self.index = index
-        self.op_sched = op_sched
-        self.time = self.op_sched.time  # sum(o.time for o in body)
-        self.mem = self.op_sched.save_mem[-1]  # sum(o.mem  for o in body)
-        self.overhead = self.op_sched.overhead
+        self.op_list = op_list
+        # self.time = self.op_sched.time  # sum(o.time for o in body)
+        # self.mem = self.op_sched.save_mem[-1]  # sum(o.mem  for o in body)
+        # self.overhead = self.op_sched.overhead
 
     def __str__(self):
         return f"{self.name}_{self.index}"
@@ -73,8 +74,8 @@ class SeqBlockFc(SeqBlockOp):
 
 
 class SeqBlockFe(SeqBlockOp):
-    def __init__(self, index, option, op_sched):
-        super().__init__("Fe", index, op_sched)
+    def __init__(self, index, option, op_list):
+        super().__init__("Fe", index, op_list)
         self.option = option
     def __str__(self):
         return f"{self.name}_{self.index}_{self.option}"
@@ -100,7 +101,7 @@ class RK_Sequence:
             self.seq = []
 
     def __str__(self):
-        return ", ".join([str(o) for o in self.seq])
+        return "\n".join([str(o) for o in self.seq])
 
     def insert(self, op: SeqOp):
         self.seq.append(op)
@@ -123,7 +124,7 @@ class RK_Sequence:
 
     def get_op_list(self):
         return [ op for rk_op in self.seq
-                    for op in rk_op.op_sched.op_list ]
+                    for op in rk_op.op_list ]
 
     def simulate(self, chain, display=True, stopAtLoss=False):
         return simulate(chain, self, display, stopAtLoss)
