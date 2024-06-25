@@ -53,6 +53,7 @@ class VariableInfo():
             elif isinstance(value,torch.Tensor):
                 self.variable_type = torch.Tensor
                 self.tensor_size = value.shape
+                self.storage_size = value.untyped_storage().size()//value.element_size()
                 self.dtype = value.dtype
                 self.requires_grad = value.requires_grad
                 self.memsize = int(measure.tensor_memory_size(value))
@@ -77,17 +78,17 @@ class VariableInfo():
             return self.tensor_size
         elif self.variable_type==torch.Tensor:
             if self.dtype in constants.int_dtype:
-                return torch.as_strided(torch.randint(2,self.tensor_size,
+                return torch.as_strided(torch.randint(2,(self.storage_size,),
                     dtype=self.dtype,
                     requires_grad=self.requires_grad,
                     device=device), *self.stride)
             elif self.dtype in constants.bool_dtype:
-                return torch.as_strided(torch.randint(2,self.tensor_size,
+                return torch.as_strided(torch.randint(2,(self.storage_size,),
                     dtype=self.dtype,
                     requires_grad=self.requires_grad,
                     device=device), *self.stride)
             else: # float or complex
-                return torch.as_strided(torch.randn(self.tensor_size,
+                return torch.as_strided(torch.randn((self.storage_size,),
                     dtype=self.dtype,
                     requires_grad=self.requires_grad,
                     device=device), *self.stride)
