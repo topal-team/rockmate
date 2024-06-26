@@ -49,7 +49,7 @@ if __name__ == "__main__":
                   rotor=True, remat=True)
     else:
         nlayers = 10
-        batch_size = 128
+        batch_size = 32
         get_model=getresnet
         filename_id = "resnet50"
 
@@ -64,7 +64,7 @@ if __name__ == "__main__":
         model.to(device)
         sample = [s.to(device) for s in sample]
 
-        budget = stats_pt["peak_mem"] - 1.5 * 1024*1024*1024
+        budget = stats_pt["peak_mem"] - .75 * 1024*1024*1024
         ## budget = 9428213760.0
         ## budget = stats_pt["peak_mem"]
         print("Using budget:", budget)
@@ -89,23 +89,26 @@ if __name__ == "__main__":
                 previous_result = pickle.load(f)
             print("Done reading")
             file_is_present = True
-            rkmod = Rockmate(model, sample, budget, rkgb_res=previous_result, solve_sched=False,
-                             ilp_solver="PULP_CBC_CMD",
-                             list_solvers=list_solvers,
-                             partitioners=partitioners,
-                             ilp_time_limit=1*60,
-                             minor_offload_size=10*1024**2,
-            )
+            # rkmod = Rockmate(model, sample, budget, rkgb_res=previous_result, solve_sched=False,
+            #                  ilp_solver="PULP_CBC_CMD",
+            #                  list_solvers=list_solvers,
+            #                  partitioners=partitioners,
+            #                  ilp_time_limit=1*60,
+            #                  minor_offload_size=10*1024**2,
+            # )
+            rkmod = rockmate.PureRockmate(model, sample, budget, rkgb_res=previous_result,
+                                          solve_sched=False)
         except Exception as e:
             print("Did not find", e)
             
-            rkmod = Rockmate(model, sample, budget, solve_sched=False,
-                             ilp_solver="PULP_CBC_CMD",
-                             list_solvers=list_solvers,
-                             partitioners=partitioners,
-                             ilp_time_limit=10*60,
-                             minor_offload_size=10*1024**2,
-            )
+            rkmod = rockmate.PureRockmate(model, sample, budget, solve_sched=False)
+            # rkmod = Rockmate(model, sample, budget, solve_sched=False,
+            #                  ilp_solver="PULP_CBC_CMD",
+            #                  list_solvers=list_solvers,
+            #                  partitioners=partitioners,
+            #                  ilp_time_limit=10*60,
+            #                  minor_offload_size=10*1024**2,
+            # )
         finally:
 
             if False: ##Set to True for rendering
