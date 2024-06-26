@@ -250,12 +250,14 @@ class Rockmate(torch.nn.Module):
         self.rkgb_res.hierarchical_cluster.list_schedules.extend(list_solutions)
         if not list_solutions:
             warnings.warn("no feasible schedule is found")
+            return False
         else:
+            self.list_solutions.extend(list_solutions)
             self.op_sched = list_solutions[
                 np.argmin([sum(op_sched.time) for op_sched in list_solutions])
             ]
+            return True
             # self.op_list = self.op_sched.op_list
-        self.list_solutions.extend(list_solutions)
 
     def get_compiled_fct(self, new_compiler=True, simulate=True):
         if self.op_sched is None:
