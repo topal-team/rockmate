@@ -73,7 +73,6 @@ class RK_rotor(Solver):
             return []
         else:
             chain = RK_Chain(hg, self.mem_unit)
-            print("RK Chain:", chain)
             opt_table = self.solve_rk_chain(chain, max(budgets))
 
             list_op_sched = []
@@ -91,7 +90,6 @@ class RK_rotor(Solver):
                     else:
                         continue
 
-                print(f"Rotor sequence: {seq}")
                 fwd_seq, bwd_seq = seq.cut_fwd_bwd()
                 
                 fwd_op_list = fwd_seq.get_op_list()
