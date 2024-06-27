@@ -145,6 +145,7 @@ class RawGraph(base.Graph):
             example_inputs : preprocess_samples.ExampleInputs,
             dynamo_kwargs = {}):
         self.tracer_used = "dynamo"
+        print(f'Example inputs : {example_inputs.dict.keys()}')
         # Call Dynamo's export :
         dynamo_result : torch.export.ExportedProgram = torch.export.export(
             original_mod,
