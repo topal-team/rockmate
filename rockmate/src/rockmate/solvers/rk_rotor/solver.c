@@ -248,6 +248,7 @@ get_rk_chain(PyObject* chain_param, rk_chain* result) {
 static inline int
 tbl_index(int m, int a, int b, int ln) {
   assert ((a <= ln) && (b <= ln));
+  assert ((m >= 0) && (a >= 0) && (b>= 0));
   return (m)*(ln+1)*(ln+1) + (a) * (ln+1) + (b);
 }
 

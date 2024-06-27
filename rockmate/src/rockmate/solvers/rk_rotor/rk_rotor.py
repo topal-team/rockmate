@@ -106,7 +106,7 @@ class RK_rotor(Solver):
         ## Both input and output stay in memory all along
         ##   (this is a Rotor assumption, because Rotor can not remove them from memory)
         ##   (and even Rockmate can not assume too much, because the user has access to them)
-        return budget // self.mem_unit - chain.cw[0] - chain.cw[chain.ln]
+        return int(budget // self.mem_unit) - chain.cw[0] - chain.cw[chain.ln]
 
     # Returns the opt_table
     def solve_rk_chain(self, chain, budget):

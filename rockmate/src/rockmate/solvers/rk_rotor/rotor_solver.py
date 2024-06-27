@@ -21,7 +21,7 @@ import math
 # ==========================
 
 
-def psolve_dp_functional(chain, mmax, opt_table=None):
+def psolve_dp_functional(chain, mmax: int, opt_table=None):
     """Returns the optimal table:
     Opt[m][lmin][lmax] : int matrix
         with lmin = 0...chain.length
@@ -49,14 +49,14 @@ def psolve_dp_functional(chain, mmax, opt_table=None):
     # opt = dict()
     # what = dict()
 
-    def opt_add(m, a, b, time):
+    def opt_add(m: int, a:int, b:int, time):
         if not m in opt:
             opt[m] = dict()
         if not a in opt[m]:
             opt[m][a] = dict()
         opt[m][a][b] = time
 
-    def what_add(m, a, b, time):
+    def what_add(m:int, a:int, b:int, time):
         if not m in what:
             what[m] = dict()
         if not a in what[m]:
@@ -166,7 +166,7 @@ def psolve_dp_functional(chain, mmax, opt_table=None):
 # ==========================
 
 
-def pseq_builder(chain, memory_limit, opt_table):
+def pseq_builder(chain, memory_limit: int, opt_table):
     # returns :
     # - the optimal sequence of computation using mem-persistent algo
     # opt, what = solve_dp_functional(chain, mmax, *opt_table)
@@ -180,21 +180,32 @@ def pseq_builder(chain, memory_limit, opt_table):
             raise ValueError(
                 "Can't find a feasible sequence with the given budget"
             )
-        if opt[cmem][lmin][lmax] == float("inf"):
-            """
-            print('a')
-            print(chain.cw)
-            print('abar')
-            for i in range(chain.ln):
-                print(chain.cbw[i])
-                print(chain.fwd_tmp[i])
-                print(chain.bwd_tmp[i])
-            """
-            raise ValueError(
-                "Can't find a feasible sequence with the given budget"
-                # f"Can't process this chain from index "
-                # f"{lmin} to {lmax} with memory {memory_limit}"
-            )
+        try:
+            if opt[cmem][lmin][lmax] == float("inf"):
+                """
+                print('a')
+                print(chain.cw)
+                print('abar')
+                for i in range(chain.ln):
+                    print(chain.cbw[i])
+                    print(chain.fwd_tmp[i])
+                    print(chain.bwd_tmp[i])
+                """
+                raise ValueError(
+                    "Can't find a feasible sequence with the given budget"
+                    # f"Can't process this chain from index "
+                    # f"{lmin} to {lmax} with memory {memory_limit}"
+                )
+        except KeyError as e:
+            print("Seq Builder failure for ", cmem, lmin, lmax, "memory_limit=", memory_limit, "chain ln=", chain.ln)
+            if cmem not in opt:
+                print(f"Memory value {cmem} not in opt table")
+            else:
+                if lmin not in opt[cmem]:
+                    print(f"lmin value {lmin} not in opt[{cmem}]")
+                else:
+                    print(f"lmax value {lmax} not in opt[{cmem}][{lmin}]")
+            raise e
 
         if lmin == chain.ln:
             seq.insert(SeqLoss())
@@ -283,7 +294,7 @@ def cseq_builder(chain, mmax, opt_table):
 def solve_dp_functional(chain, mmax, opt_table=None, force_python=False):
     if force_python or not csolver_present:
         print("Warning, rotor solving with Python. Might be slow")
-        return psolve_dp_functional(chain, mmax, opt_table)
+        return psolve_dp_functional(chain, int(mmax), opt_table)
     else:
         print("rotor solving with C.")
         return csolve_dp_functional(chain, int(mmax), opt_table)
@@ -293,5 +304,5 @@ def seq_builder(chain, mmax, opt_table):
     if csolver_present and isinstance(opt_table, rs.RkTable):
         return cseq_builder(chain, int(mmax), opt_table)
     else:
-        return pseq_builder(chain, mmax, opt_table)
+        return pseq_builder(chain, int(mmax), opt_table)
 

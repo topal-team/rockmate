@@ -182,13 +182,12 @@ class RK_Chain:
         self.ff_fwd_tmp[-1] = 0
         self.ff_fw[-1] = 0
 
-        if mem_unit != 1:
-            self.discretize()
+        self.discretize()
 
 
     def discretize(self):
         def discretize_(values):
-            return [math.ceil(value / self.mem_unit) for value in values]
+            return [int(math.ceil(value / self.mem_unit)) for value in values]
 
         self.cw = discretize_(self.cw)
         self.cbw = [discretize_(x) for x in self.cbw]
