@@ -1,5 +1,76 @@
+2024-06-27 23:11:13,302 - INFO - Device: cpu
+2024-06-27 23:11:13,303 - INFO - Models to test: ['UNO', 'UFNO', 'FNO1d', 'RegNet32', 'UNet', 'nn_Transformer', 'ResNet101', 'GPT']
+2024-06-27 23:11:13,303 - INFO - ------------------------------------------------------------
+2024-06-27 23:11:14,081 - DEBUG - == Model UNO has been built == 
+
 ROTOR Warning: could not import C version of Rotor solver: No module named 'rockmate.solvers.rk_rotor.csolver'
 Successfully loaded UNO
+2024-06-27 23:11:23,931 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-27 23:11:24,171 - DEBUG - == TorchDynamo graph for UNO has been built == 
+
+2024-06-27 23:11:32,295 - DEBUG - Graph builder problems! 
+ Sorry, we fail to execute the code we got from the tracer (dynamo):
+__82_slice_scatter = torch.ops.aten.slice_scatter.default(__75_slice_9, __77_copy, 4, 0, 4).
+2024-06-27 23:11:32,296 - INFO - ------------------------------------------------------------
+2024-06-27 23:11:33,064 - DEBUG - == Model UFNO has been built == 
+
+2024-06-27 23:11:41,261 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-27 23:11:41,445 - DEBUG - == TorchDynamo graph for UFNO has been built == 
+
+2024-06-27 23:11:46,743 - DEBUG - Graph builder problems! 
+ Sorry, we fail to execute the code we got from the tracer (dynamo):
+__38_slice_scatter = torch.ops.aten.slice_scatter.default(__31_slice_9, __33_copy, 4, 0, 10).
+2024-06-27 23:11:46,744 - INFO - ------------------------------------------------------------
+2024-06-27 23:11:46,890 - DEBUG - == Model FNO1d has been built == 
+
+2024-06-27 23:11:48,858 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-27 23:11:48,865 - DEBUG - == TorchDynamo graph for FNO1d has been built == 
+
+2024-06-27 23:11:51,452 - DEBUG - == RKGB graph for FNO1d has been built == 
+
+2024-06-27 23:11:51,452 - INFO - ------------------------------------------------------------
+2024-06-27 23:11:53,628 - DEBUG - == Model RegNet32 has been built == 
+
+2024-06-27 23:11:58,725 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-27 23:11:58,758 - DEBUG - == TorchDynamo graph for RegNet32 has been built == 
+
+2024-06-27 23:12:04,098 - DEBUG - Graph builder problems! 
+ invalid decimal literal (<string>, line 1)
+2024-06-27 23:12:04,099 - INFO - ------------------------------------------------------------
+2024-06-27 23:12:04,424 - DEBUG - == Model UNet has been built == 
+
+2024-06-27 23:12:05,709 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-27 23:12:05,719 - DEBUG - == TorchDynamo graph for UNet has been built == 
+
+2024-06-27 23:12:10,031 - DEBUG - == RKGB graph for UNet has been built == 
+
+2024-06-27 23:12:10,032 - INFO - ------------------------------------------------------------
+2024-06-27 23:12:10,699 - DEBUG - == Model nn_Transformer has been built == 
+
+2024-06-27 23:12:14,979 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-27 23:12:15,039 - DEBUG - == TorchDynamo graph for nn_Transformer has been built == 
+
+2024-06-27 23:12:26,625 - DEBUG - == RKGB graph for nn_Transformer has been built == 
+
+2024-06-27 23:12:26,625 - INFO - ------------------------------------------------------------
+2024-06-27 23:12:27,760 - DEBUG - == Model ResNet101 has been built == 
+
+2024-06-27 23:12:34,790 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-27 23:12:34,837 - DEBUG - == TorchDynamo graph for ResNet101 has been built == 
+
+2024-06-27 23:12:50,562 - DEBUG - == RKGB graph for ResNet101 has been built == 
+
+2024-06-27 23:12:50,563 - INFO - ------------------------------------------------------------
+2024-06-27 23:12:52,362 - DEBUG - == Model GPT has been built == 
+
+2024-06-27 23:12:53,217 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-27 23:12:53,225 - DEBUG - == TorchDynamo graph for GPT has been built == 
+
+2024-06-27 23:12:55,384 - DEBUG - == RKGB graph for GPT has been built == 
+
+2024-06-27 23:12:55,384 - INFO - ------------------------------------------------------------
+2024-06-27 23:12:55,388 - DEBUG - 
+2024-06-27 23:12:55,388 - DEBUG - === End ===
 Example inputs : dict_keys(['x'])
 Successfully loaded UFNO
 Example inputs : dict_keys(['x'])
