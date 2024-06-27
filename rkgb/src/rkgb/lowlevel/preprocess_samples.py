@@ -2,8 +2,13 @@ import inspect
 
 class ExampleInputs():
     def __init__(self,original_mod,original_mod_args,original_mod_kwargs=None):
+        self.args = tuple()
+        self.kwargs = dict()
+        self.dict = dict()
         if original_mod_args is ExampleInputs:
             self.dict = original_mod_args.dict
+            self.args = original_mod_args.args
+            self.kwargs = original_mod_args.kwargs
         # -- load params list --
         sign = inspect.signature(original_mod.forward)
         params = list(sign.parameters.items())
@@ -20,6 +25,11 @@ class ExampleInputs():
             if (p[1].default is inspect._empty
             and "*" not in repr(p[1])
             and p[0] not in original_mod_kwargs)]
+        
+        # -- kwargs --
+        self.kwargs = original_mod_kwargs
+        self.dict.update(original_mod_kwargs)
+
         # -- build positional inputs --
         if isinstance(original_mod_args,dict):
             dict_example_inputs = original_mod_args.copy()
@@ -46,9 +56,8 @@ class ExampleInputs():
                 f"To much values given for the original_mod inputs "\
                 f"({nb_given - nb_asked_tot} too many, including kwargs).")
             dict_example_inputs = dict(zip(not_kw_params,inputs))
-
-        dict_example_inputs.update(original_mod_kwargs)
-        self.dict = dict_example_inputs
+            self.args = tuple(inputs)
+            self.dict.update(dict_example_inputs)
 
     def to_list_args(self,original_mod):
         """

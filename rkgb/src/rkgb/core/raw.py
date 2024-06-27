@@ -148,8 +148,8 @@ class RawGraph(base.Graph):
         # Call Dynamo's export :
         dynamo_result : torch.export.ExportedProgram = torch.export.export(
             original_mod,
-            args = tuple(),
-            kwargs=example_inputs.dict,
+            args = example_inputs.args,
+            kwargs=example_inputs.kwargs,
             **dynamo_kwargs
             )
         dynamo_graph = dynamo_result.graph
