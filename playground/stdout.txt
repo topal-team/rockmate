@@ -1,0 +1,100 @@
+ROTOR Warning: could not import C version of Rotor solver: No module named 'rockmate.solvers.rk_rotor.csolver'
+cpu
+['GPT', 'ResNet101', 'nn_Transformer', 'UNet', 'RegNet32', 'FNO1d', 'UFNO', 'UNO']
+------------------------------------------------------------
+Successfully loaded GPT
+== Model GPT has been built == 
+
+Dynamo with args=tuple(sample), kwargs=None  works
+Key x does not work
+Dynamo with args=tuple(), kwargs keys = dict_keys(['src']) works 
+
+== TorchDynamo graph for GPT has been built == 
+
+Example inputs : dict_keys(['src'])
+== RKGB graph for GPT has been built == 
+
+------------------------------------------------------------
+Successfully loaded ResNet101
+== Model ResNet101 has been built == 
+
+Dynamo with args=tuple(sample), kwargs=None  works
+Dynamo with args=tuple(), kwargs keys = dict_keys(['x']) works 
+
+== TorchDynamo graph for ResNet101 has been built == 
+
+Example inputs : dict_keys(['x'])
+== RKGB graph for ResNet101 has been built == 
+
+------------------------------------------------------------
+Successfully loaded nn_Transformer
+== Model nn_Transformer has been built == 
+
+Dynamo with args=tuple(sample), kwargs=None  works
+Key x does not work
+Key src does not work
+Key input does not work
+== TorchDynamo graph for nn_Transformer has been built == 
+
+Example inputs : dict_keys(['src', 'tgt'])
+== RKGB graph for nn_Transformer has been built == 
+
+------------------------------------------------------------
+Successfully loaded UNet
+== Model UNet has been built == 
+
+Dynamo with args=tuple(sample), kwargs=None  works
+Dynamo with args=tuple(), kwargs keys = dict_keys(['x']) works 
+
+== TorchDynamo graph for UNet has been built == 
+
+Example inputs : dict_keys(['x'])
+== RKGB graph for UNet has been built == 
+
+------------------------------------------------------------
+Successfully loaded RegNet32
+== Model RegNet32 has been built == 
+
+Dynamo with args=tuple(sample), kwargs=None  works
+Dynamo with args=tuple(), kwargs keys = dict_keys(['x']) works 
+
+== TorchDynamo graph for RegNet32 has been built == 
+
+Example inputs : dict_keys(['x'])
+Graph builder problems! 
+
+------------------------------------------------------------
+Successfully loaded FNO1d
+== Model FNO1d has been built == 
+
+Dynamo with args=tuple(sample), kwargs=None  works
+Dynamo with args=tuple(), kwargs keys = dict_keys(['x']) works 
+
+== TorchDynamo graph for FNO1d has been built == 
+
+Example inputs : dict_keys(['x'])
+== RKGB graph for FNO1d has been built == 
+
+------------------------------------------------------------
+Successfully loaded UFNO
+== Model UFNO has been built == 
+
+Dynamo with args=tuple(sample), kwargs=None  works
+Dynamo with args=tuple(), kwargs keys = dict_keys(['x']) works 
+
+== TorchDynamo graph for UFNO has been built == 
+
+Example inputs : dict_keys(['x'])
+Graph builder problems! 
+
+------------------------------------------------------------
+Successfully loaded UNO
+== Model UNO has been built == 
+
+Torch Dynamo problems!
+
+Example inputs : dict_keys(['x'])
+Graph builder problems! 
+
+------------------------------------------------------------
+=== End ===

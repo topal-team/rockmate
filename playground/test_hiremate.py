@@ -29,7 +29,7 @@ def test_dynamo_graph_builder(model, sample, **dynamo_kwargs):
                         kwargs=None,
                         **dynamo_kwargs
                         )
-        print('YOOOO/n')
+        print('Dynamo with args=tuple(sample), kwargs=None  works')
     if True:
         for input_key in ['x', 'src', 'input'][:]:
             try:
@@ -40,8 +40,7 @@ def test_dynamo_graph_builder(model, sample, **dynamo_kwargs):
                         kwargs=input_dict,
                         **dynamo_kwargs
                         )
-                print('YHHHHH/n')
-                print(f'Key {input_key} does work!')
+                print(f'Dynamo with args=tuple(), kwargs keys = {input_dict.keys()} works \n')
                 break
             except:
                 print(f'Key {input_key} does not work')
@@ -52,7 +51,7 @@ def test_dynamo_graph_builder(model, sample, **dynamo_kwargs):
     whole_code_str = dynamo_graph.python_code("self").src
     whole_code_ast : ast.FunctionDef = ast.parse(whole_code_str).body[0]
 
-    print(whole_code_ast)
+    # print(whole_code_ast)
 
 def test_rkgb_graph_builder(*args, **kwargs):
     rkgb_res = rkgb.rkgb.Result(*args, **kwargs)
@@ -70,16 +69,16 @@ if __name__=="__main__":
     device="cpu"
     print(device)
     examples=[
-             #"GPT",
-             #"ResNet101",
+             "GPT",
+             "ResNet101",
              "nn_Transformer", #RKGB problems when initially put model on GPU (LSE not correctly alligned)
-             #"UNet",
+             "UNet",
              "RegNet32", #RKGB problems at "F" building step (invalid decimal literal)
              "FNO1d", #TorchDynamo and RKGB problem has been fixed after setting FNO1d to nn.Module (as nn.Sequential had problem with forwarding correct argument name through the sequence of blocks)
-             "FNO3d", #RKGB problems: during build_forward graph on code lines with 'slice'
+             #"FNO3d", #RKGB problems: during build_forward graph on code lines with 'slice'
              "UFNO", #RKGB problems: during build_forward graph on code lines with 'slice'
              "UNO", #TorchDynnamo & RKGB problems: with padding
-            ] # Fix MLP-mixer
+            ][:] # Fix MLP-mixer
     print(examples)
 
     iterator_over_all_examples = get_iterator_over_all_examples(device, examples=examples)
@@ -87,6 +86,7 @@ if __name__=="__main__":
 
     while True:
         model, sample = None, [] # To do not accumulate memory
+        print(f'{"".join(["-"]*60)}')
         try:
             name, model, sample, get_param_fct = next(iterator_over_all_examples)
             print(f"== Model {name} has been built == \n")
@@ -153,5 +153,5 @@ if __name__=="__main__":
                 
         except StopIteration:
             print("=== End ===")
-            break
+            break 
 
