@@ -29,7 +29,7 @@ import torch
 
 # =========================================================
 
-def get_GPT(device,nlayers=12,dropout=0.1,batchsize=12000):
+def get_GPT(device,nlayers=2,dropout=0.1,batchsize=128): #nlayers=12, batchsize=12000
     from .GPT import GPT2
     model = GPT2(nlayers=nlayers,dropout=dropout)
     model.to(device)

@@ -129,7 +129,8 @@ class projection_block(nn.Module):
         
         return x
 
-class FNO1d(nn.Sequential):
+#class FNO1d(nn.Sequential):
+class FNO1d(nn.Module):
     def __init__(self, modes, width,block_number=4):
         super(FNO1d, self).__init__()
 
@@ -156,3 +157,8 @@ class FNO1d(nn.Sequential):
         self.add_module('kernel_layer_'+str(block_number-1),integral_kernel_block(self.width,self.modes1,is_gelu=False))
 
         self.add_module('projection', projection_block(self.width))
+
+    def forward(self, x):
+        for m in self.children():
+            x = m(x)
+        return x

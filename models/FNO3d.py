@@ -157,7 +157,7 @@ class projection_block(nn.Module):
 
         return x
 
-class FNO3d(nn.Sequential):
+class FNO3d(nn.Module):
     def __init__(self, modes1,modes2,modes3, width,block_number=4):
         super(FNO3d, self).__init__()
 
@@ -189,4 +189,7 @@ class FNO3d(nn.Sequential):
         self.add_module('projection', projection_block(self.width,self.padding))
     
 
-    
+    def forward(self, x):
+        for m in self.children():
+            x = m(x)
+        return x
