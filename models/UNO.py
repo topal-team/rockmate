@@ -79,12 +79,12 @@ class Uno3D_T40(nn.Module):
         x_fc0 = F.gelu(x_fc0)
         
         x_fc0 = x_fc0.permute(0, 4, 1, 2, 3)
-        self.padding = int(self.padding*0.1*x_fc0.shape[-1])
+        padding = int(self.padding*0.1*x_fc0.shape[-1])
         if self.pad_both:
-            x_fc0 = F.pad(x_fc0, [self.padding,self.padding,0,0,0,0],mode ='constant')
+            x_fc0 = F.pad(x_fc0, [padding,padding,0,0,0,0],mode ='constant')
         else:
             
-            x_fc0 = F.pad(x_fc0, [0,self.padding,0,0,0,0],mode ='constant')
+            x_fc0 = F.pad(x_fc0, [0,padding,0,0,0,0],mode ='constant')
         
         D1,D2,D3 = x_fc0.shape[-3],x_fc0.shape[-2],x_fc0.shape[-1]
         
@@ -109,11 +109,11 @@ class Uno3D_T40(nn.Module):
         x_c8 = torch.cat([x_c8,torch.nn.functional.interpolate(x_fc0, size = (x_c8.shape[2], x_c8.shape[3],x_c8.shape[4]),mode = 'trilinear',align_corners=True)], dim=1)
 
         
-        if self.padding!=0:
+        if padding!=0:
             if self.pad_both:
-                x_c8 = x_c8[...,4*self.padding:-4*self.padding]
+                x_c8 = x_c8[...,4*padding:-4*padding]
             else:
-                x_c8 = x_c8[...,:-4*self.padding]
+                x_c8 = x_c8[...,:-4*padding]
 
         x_c8 = x_c8.permute(0, 2, 3, 4, 1)
 
@@ -201,11 +201,11 @@ class Uno3D_T20(nn.Module):
         
         x_fc0 = x_fc0.permute(0, 4, 1, 2, 3)
         
-        self.padding = int(self.padding*0.1*x_fc0.shape[-1])
+        padding = int(self.padding*0.1*x_fc0.shape[-1])
         if self.pad_both:
-            x_fc0 = F.pad(x_fc0, [self.padding,self.padding,0,0,0,0],mode ='constant')
+            x_fc0 = F.pad(x_fc0, [padding,padding,0,0,0,0],mode ='constant')
         else:
-            x_fc0 = F.pad(x_fc0, [0,self.padding,0,0,0,0],mode ='constant')
+            x_fc0 = F.pad(x_fc0, [0,padding,0,0,0,0],mode ='constant')
         
         D1,D2,D3 = x_fc0.shape[-3],x_fc0.shape[-2],x_fc0.shape[-1]
 
@@ -230,11 +230,11 @@ class Uno3D_T20(nn.Module):
         x_c8 = torch.cat([x_c8,torch.nn.functional.interpolate(x_fc0, size = (x_c8.shape[2], x_c8.shape[3],x_c8.shape[4]),mode = 'trilinear',align_corners=True)], dim=1)
 
         
-        if self.padding!=0:
+        if padding!=0:
             if self.pad_both:
-                x_c8 = x_c8[...,2*self.padding:-2*self.padding]
+                x_c8 = x_c8[...,2*padding:-2*padding]
             else:
-                x_c8 = x_c8[...,:-2*self.padding]
+                x_c8 = x_c8[...,:-2*padding]
 
         x_c8 = x_c8.permute(0, 2, 3, 4, 1)
 
@@ -320,11 +320,11 @@ class Uno3D_T10(nn.Module):
         x_fc0 = F.gelu(x_fc0)
         
         x_fc0 = x_fc0.permute(0, 4, 1, 2, 3)
-        self.padding = int(self.padding*0.1*x_fc0.shape[-1])
+        padding = int(self.padding*0.1*x_fc0.shape[-1])
         if self.pad_both:
-            x_fc0 = F.pad(x_fc0, [self.padding,self.padding,0,0,0,0],mode ='constant')
+            x_fc0 = F.pad(x_fc0, [padding,padding,0,0,0,0],mode ='constant')
         else:
-            x_fc0 = F.pad(x_fc0, [0,self.padding,0,0,0,0],mode ='constant')
+            x_fc0 = F.pad(x_fc0, [0,padding,0,0,0,0],mode ='constant')
         
         D1,D2,D3 = x_fc0.shape[-3],x_fc0.shape[-2],x_fc0.shape[-1]
 
@@ -348,11 +348,11 @@ class Uno3D_T10(nn.Module):
         x_c8 = torch.cat([x_c8,torch.nn.functional.interpolate(x_fc0, size = (x_c8.shape[2], x_c8.shape[3],x_c8.shape[4]),mode = 'trilinear',align_corners=True)], dim=1)
 
         
-        if self.padding!=0:
+        if padding!=0:
             if self.pad_both:
-                x_c8 = x_c8[...,self.padding:-self.padding]
+                x_c8 = x_c8[...,padding:-padding]
             else:
-                x_c8 = x_c8[...,:-self.padding]
+                x_c8 = x_c8[...,:-padding]
 
         x_c8 = x_c8.permute(0, 2, 3, 4, 1)
 
@@ -438,11 +438,11 @@ class Uno3D_T9(nn.Module):
         x_fc0 = F.gelu(x_fc0)
         
         x_fc0 = x_fc0.permute(0, 4, 1, 2, 3)
-        self.padding = int(self.padding*0.1*x_fc0.shape[-1])
+        padding = int(self.padding*0.1*x_fc0.shape[-1])
         if self.pad_both:
-            x_fc0 = F.pad(x_fc0, [self.padding,self.padding,0,0,0,0],mode ='constant')
+            x_fc0 = F.pad(x_fc0, [padding,padding,0,0,0,0],mode ='constant')
         else:
-            x_fc0 = F.pad(x_fc0, [0,self.padding,0,0,0,0],mode ='constant')
+            x_fc0 = F.pad(x_fc0, [0,padding,0,0,0,0],mode ='constant')
         
         
         D1,D2,D3 = x_fc0.shape[-3],x_fc0.shape[-2],x_fc0.shape[-1]
@@ -467,11 +467,11 @@ class Uno3D_T9(nn.Module):
         x_c8 = torch.cat([x_c8,torch.nn.functional.interpolate(x_fc0, size = (x_c8.shape[2], x_c8.shape[3],x_c8.shape[4]),mode = 'trilinear',align_corners=True)], dim=1)
 
         
-        if self.padding!=0:
+        if padding!=0:
             if self.pad_both:
-                x_c8 = x_c8[...,int(9*self.padding/6):-int(9*self.padding/6)]
+                x_c8 = x_c8[...,int(9*padding/6):-int(9*padding/6)]
             else:
-                x_c8 = x_c8[...,:-int(9*self.padding/6)]
+                x_c8 = x_c8[...,:-int(9*padding/6)]
 
         x_c8 = x_c8.permute(0, 2, 3, 4, 1)
 
