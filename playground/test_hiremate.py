@@ -43,6 +43,7 @@ def test_dynamo_graph_builder(model, sample, **dynamo_kwargs):
         logging.debug('Dynamo with args=tuple(sample), kwargs=None  works')
       except Exception as e:
           logging.debug(f'Dynamo with args=tuple(sample), kwargs=None does not  work: {e}')
+          raise RuntimeError
     if False:
         for input_key in ['x', 'src', 'input'][:]:
             try:
@@ -66,6 +67,7 @@ def test_dynamo_graph_builder(model, sample, **dynamo_kwargs):
       whole_code_ast : ast.FunctionDef = ast.parse(whole_code_str).body[0]
     except Exception as e:
       logging.debug(f'Dynamo export failed: {e}')
+      raise RuntimeError
 
     # print(whole_code_ast)
 
@@ -75,7 +77,8 @@ def test_rkgb_graph_builder(*args, **kwargs):
 
 
 if __name__=="__main__":
-    
+    test_remat = False
+
     if torch.cuda.is_available():
         torch.cuda.init()
         device = 'cuda'
@@ -94,7 +97,8 @@ if __name__=="__main__":
              #"FNO3d", #RKGB problems: during build_forward graph on code lines with 'slice'
              "UFNO", #RKGB problems: during build_forward graph on code lines with 'slice'
              "UNO", #TorchDynnamo & RKGB problems: with padding
-            ][::-1] # Fix MLP-mixer
+             "TFNO2d",
+             ][::-1] # Fix MLP-mixer
     logging.info(f'Models to test: {examples}')
 
     iterator_over_all_examples = get_iterator_over_all_examples(device, examples=examples)
@@ -107,35 +111,6 @@ if __name__=="__main__":
             name, model, sample, get_param_fct = next(iterator_over_all_examples)
             logging.debug(f"== Model {name} has been built == \n")
             
-            '''
-            #solver = HILP(ilp_solver="PULP_CBC_CMD")
-            #solver.config.offload = False
-            #list_solvers = [solver]
-            #budget =10**16
-            #breakpoint()
-            #rkmod = Rockmate(
-            #    model,
-            #    sample,
-            #    budget=budget,
-            #    list_solvers=list_solvers,
-            #    rkgb_res=None,
-            #    solve_sched=True,
-                # verbose=False,
-                # ilp_solver="PULP_CBC_CMD",
-                # ilp_time_limit=1 * 60 // 360,
-                # ilp_time_limit_top=10 * 60,
-                # model_kwargs=None,
-                # partitioners=partitioners,
-                # max_size_S_graph_for_no_partitioning=40,
-                # cpu_optim = torch.optim.Adam,
-                # gpu_optim = torch.optim.Adam,
-                # optim_kwargs = {},
-                # minor_param_size = 10*1024**2,
-    	    )
-
-            #print("Success!!!")
-            #continue
-            '''
 
             try:
                 #Build graphs based on the partitioner
@@ -155,11 +130,42 @@ if __name__=="__main__":
                                 # partitioners=[partitioner],
                                 inspection_device=torch.device("cuda"),
                                 # print_time_in_each_stage=True
-                            )
-                # solver = HILP(ilp_solver="PULP_CBC_CMD")
-                # solver.config.offload = False
-                # rematMod = Rockmate(model, sample , budget=2e10, list_solvers=[solver])
+                                )
                 logging.debug(f"== RKGB graph for {name} has been built == \n")
+                
+                if test_remat:
+                    try:
+                        solver = HILP(ilp_solver="PULP_CBC_CMD")
+                        solver.config.offload = False
+                        rematMod = Rockmate(
+                                model,
+                                sample, 
+                                budget=2e10, 
+                                list_solvers=[solver])
+
+                        #breakpoint()
+                        #rkmod = Rockmate(
+                        #    model,
+                        #    sample,
+                        #    budget=budget,
+                        #    list_solvers=list_solvers,
+                        #    rkgb_res=None,
+                        #    solve_sched=True,
+                            # verbose=False,
+                            # ilp_solver="PULP_CBC_CMD",
+                            # ilp_time_limit=1 * 60 // 360,
+                            # ilp_time_limit_top=10 * 60,
+                            # model_kwargs=None,
+                            # partitioners=partitioners,
+                            # max_size_S_graph_for_no_partitioning=40,
+                            # cpu_optim = torch.optim.Adam,
+                            # gpu_optim = torch.optim.Adam,
+                            # optim_kwargs = {},
+                            # minor_param_size = 10*1024**2,
+                        #)
+                    except Exception as e:
+                        logging.debug(f'Remat has failed: {e}')
+
             except Exception as e:
                 logging.debug(f"Graph builder problems! \n {e}")
                 #extype, value, tb = sys.exc_info()

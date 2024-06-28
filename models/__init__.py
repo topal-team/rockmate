@@ -9,6 +9,7 @@ __all__ = [
     "get_FNO3d",
     "get_UFNO",
     "get_UNO",
+    "get_TFNO2d",
     "get_Bert",
     "get_LLAMA",
     "get7BLlamaSequence",
@@ -108,6 +109,24 @@ def get_fst_param_nn_Transformer(model):
     return model.encoder.layers[0].linear1.weight
     
 # =========================================================
+
+def get_TFNO2d(device, batchsize=10, in_channels=3):
+    from neuralop.models import TFNO
+    model = TFNO(n_modes=(16, 16), hidden_channels=64,
+                in_channels=in_channels,
+                out_channels=1,
+                factorization='tucker',
+                implementation='factorized',
+                rank=0.05)
+    model.to(device)
+    sample = torch.randn((batchsize, in_channels, 16, 16), device=device)
+
+    return model, sample
+
+def get_fst_param_TFNO2d(model):
+    return fmodel.projection.fcs[0].weight
+# =========================================================
+
 
 def get_FNO1d(device,batchsize=4400,block_number=4,image_size=256):
     from models.FNO1d import FNO1d
@@ -277,6 +296,7 @@ dict_all_examples = dict(
     nn_Transformer=(get_nn_Transformer,get_fst_param_nn_Transformer),
     FNO1d=(get_FNO1d,get_fst_param_FNO1d),
     FNO3d=(get_FNO3d,get_fst_param_FNO3d),
+    TFNO2d=(get_TFNO2d,get_fst_param_TFNO2d),
     UFNO=(get_UFNO,get_fst_param_UFNO),
     UNO=(get_UNO,get_fst_param_UNO)    
 )
@@ -286,7 +306,7 @@ import gc
 def get_iterator_over_all_examples(device,skip_error=True,
         examples=[
             "GPT","UNet","MLP","RegNet32","ResNet101",
-            "nn_Transformer","FNO1d","FNO3d","UFNO","UNO"]):
+            "nn_Transformer","FNO1d","FNO3d","TFNO2d","UFNO","UNO"]):
     for name in examples:
         get_fct,get_param_fct = dict_all_examples[name]
         model,sample = None,[] # To do not accumulate memory
