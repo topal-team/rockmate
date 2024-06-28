@@ -1,5 +1,105 @@
+2024-06-28 13:23:42,338 - INFO - Device: cpu
+2024-06-28 13:23:42,338 - INFO - Models to test: ['TFNO2d', 'UNO', 'UFNO', 'FNO1d', 'RegNet32', 'UNet', 'nn_Transformer', 'ResNet101', 'GPT']
+2024-06-28 13:23:42,338 - INFO - ------------------------------------------------------------
+2024-06-28 13:23:42,567 - DEBUG - Popen(['git', 'version'], cwd=/gpfsdswork/projects/rech/hyb/uak69sb/rockmate-private-jg/playground, stdin=None, shell=False, universal_newlines=False)
+2024-06-28 13:23:42,593 - DEBUG - Popen(['git', 'version'], cwd=/gpfsdswork/projects/rech/hyb/uak69sb/rockmate-private-jg/playground, stdin=None, shell=False, universal_newlines=False)
+2024-06-28 13:23:42,610 - DEBUG - Trying paths: ['/linkhome/rech/genluq01/uak69sb/.docker/config.json', '/linkhome/rech/genluq01/uak69sb/.dockercfg']
+2024-06-28 13:23:42,610 - DEBUG - No config file found
+2024-06-28 13:23:43,286 - DEBUG - == Model TFNO2d has been built == 
+
+2024-06-28 13:23:44,288 - DEBUG - Dynamo with args=tuple(sample), kwargs=None does not  work: FNO.forward() takes from 2 to 3 positional arguments but 11 were given
+2024-06-28 13:23:44,289 - DEBUG - Torch Dynamo problems!
+ 
 Successfully loaded TFNO2d
 Example inputs : dict_keys(['x'])
+2024-06-28 13:23:44,894 - DEBUG - Graph builder problems! 
+ ListVariable()
+
+from user code:
+   File "/gpfsdswork/projects/rech/hyb/uak69sb/neuraloperator/neuralop/models/fno.py", line 256, in forward
+    x = self.fno_blocks(x, layer_idx, output_shape=output_shape[layer_idx])
+  File "/gpfswork/rech/hyb/uak69sb/venv/py310_neuralop/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/gpfsdswork/projects/rech/hyb/uak69sb/neuraloperator/neuralop/layers/fno_block.py", line 264, in forward
+    return self.forward_with_postactivation(x, index, output_shape)
+  File "/gpfsdswork/projects/rech/hyb/uak69sb/neuraloperator/neuralop/layers/fno_block.py", line 277, in forward_with_postactivation
+    x_fno = self.convs(x, index, output_shape=output_shape)
+  File "/gpfswork/rech/hyb/uak69sb/venv/py310_neuralop/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/gpfsdswork/projects/rech/hyb/uak69sb/neuraloperator/neuralop/layers/spectral_convolution.py", line 453, in forward
+    weight = self._get_weight(indices)[slices_w]
+
+Set TORCH_LOGS="+dynamo" and TORCHDYNAMO_VERBOSE=1 for more information
+
+2024-06-28 13:23:44,894 - INFO - ------------------------------------------------------------
+2024-06-28 13:23:45,692 - DEBUG - == Model UNO has been built == 
+
+2024-06-28 13:23:54,300 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-28 13:23:54,420 - DEBUG - == TorchDynamo graph for UNO has been built == 
+
+2024-06-28 13:24:02,569 - DEBUG - Graph builder problems! 
+ Sorry, we fail to execute the code we got from the tracer (dynamo):
+__82_slice_scatter = torch.ops.aten.slice_scatter.default(__75_slice_9, __77_copy, 4, 0, 4).
+2024-06-28 13:24:02,571 - INFO - ------------------------------------------------------------
+2024-06-28 13:24:03,358 - DEBUG - == Model UFNO has been built == 
+
+2024-06-28 13:24:11,553 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-28 13:24:11,610 - DEBUG - == TorchDynamo graph for UFNO has been built == 
+
+2024-06-28 13:24:16,939 - DEBUG - Graph builder problems! 
+ Sorry, we fail to execute the code we got from the tracer (dynamo):
+__38_slice_scatter = torch.ops.aten.slice_scatter.default(__31_slice_9, __33_copy, 4, 0, 10).
+2024-06-28 13:24:16,940 - INFO - ------------------------------------------------------------
+2024-06-28 13:24:17,127 - DEBUG - == Model FNO1d has been built == 
+
+2024-06-28 13:24:19,094 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-28 13:24:19,102 - DEBUG - == TorchDynamo graph for FNO1d has been built == 
+
+2024-06-28 13:24:21,703 - DEBUG - == RKGB graph for FNO1d has been built == 
+
+2024-06-28 13:24:21,708 - INFO - ------------------------------------------------------------
+2024-06-28 13:24:23,873 - DEBUG - == Model RegNet32 has been built == 
+
+2024-06-28 13:24:29,047 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-28 13:24:29,082 - DEBUG - == TorchDynamo graph for RegNet32 has been built == 
+
+2024-06-28 13:24:34,497 - DEBUG - Graph builder problems! 
+ invalid decimal literal (<string>, line 1)
+2024-06-28 13:24:34,497 - INFO - ------------------------------------------------------------
+2024-06-28 13:24:34,828 - DEBUG - == Model UNet has been built == 
+
+2024-06-28 13:24:36,124 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-28 13:24:36,134 - DEBUG - == TorchDynamo graph for UNet has been built == 
+
+2024-06-28 13:24:40,497 - DEBUG - == RKGB graph for UNet has been built == 
+
+2024-06-28 13:24:40,497 - INFO - ------------------------------------------------------------
+2024-06-28 13:24:41,181 - DEBUG - == Model nn_Transformer has been built == 
+
+2024-06-28 13:24:45,494 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-28 13:24:45,555 - DEBUG - == TorchDynamo graph for nn_Transformer has been built == 
+
+2024-06-28 13:24:57,271 - DEBUG - == RKGB graph for nn_Transformer has been built == 
+
+2024-06-28 13:24:57,271 - INFO - ------------------------------------------------------------
+2024-06-28 13:24:58,394 - DEBUG - == Model ResNet101 has been built == 
+
+2024-06-28 13:25:05,480 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-28 13:25:05,528 - DEBUG - == TorchDynamo graph for ResNet101 has been built == 
+
+2024-06-28 13:25:21,706 - DEBUG - == RKGB graph for ResNet101 has been built == 
+
+2024-06-28 13:25:21,706 - INFO - ------------------------------------------------------------
+2024-06-28 13:25:23,524 - DEBUG - == Model GPT has been built == 
+
+2024-06-28 13:25:24,381 - DEBUG - Dynamo with args=tuple(sample), kwargs=None  works
+2024-06-28 13:25:24,388 - DEBUG - == TorchDynamo graph for GPT has been built == 
+
+2024-06-28 13:25:26,554 - DEBUG - == RKGB graph for GPT has been built == 
+
+2024-06-28 13:25:26,554 - INFO - ------------------------------------------------------------
+2024-06-28 13:25:26,554 - DEBUG - 
+2024-06-28 13:25:26,554 - DEBUG - === End ===
 Successfully loaded UNO
 Example inputs : dict_keys(['x'])
 Successfully loaded UFNO
