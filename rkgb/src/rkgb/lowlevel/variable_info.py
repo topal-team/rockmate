@@ -88,10 +88,15 @@ class VariableInfo():
                     requires_grad=self.requires_grad,
                     device=device), *self.stride)
             else: # float or complex
-                return torch.as_strided(torch.randn((self.storage_size,),
+                _tensor = torch.randn((self.storage_size,),
                     dtype=self.dtype,
                     requires_grad=self.requires_grad,
-                    device=device), *self.stride)
+                    device=device)
+                tensor = torch.as_strided(_tensor, *self.stride).detach()
+                if self.requires_grad:
+                    tensor.requires_grad_()
+                return tensor
+
         elif (self.variable_type==tuple or self.variable_type==list):
             value = [sub_var.generate_value(device) for sub_var in self.sub_info]
             return self.variable_type(value)
