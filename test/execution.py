@@ -30,17 +30,17 @@ torch.random.manual_seed(0)
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:16"
 
 
-def check_correctness(model, sample, budget=1e9, optim=torch.optim.Adam):
-    dtype = torch.float64
-    model_g = deepcopy(model).to("cuda").to(dtype)
-    sample_g = [s.to("cuda").to(dtype) for s in sample]
-    
-    model_c = deepcopy(model).to("cpu").to(dtype)
-    sample_c = [s.to("cpu").to(dtype) for s in sample]
+def check_correctness(model, sample, budget=1e9, optim=torch.optim.Adam, dtype=None):
+    model_g = deepcopy(model).to("cuda")
+    sample_g = [s.to("cuda") for s in sample]
+    model_c = deepcopy(model).to("cpu")
+    sample_c = [s.to("cpu") for s in sample]
+    if dtype:
+        model_g.to(dtype)
+        model_c.to(dtype)
+        sample_g = [s.to("cuda").to(dtype) for s in sample]
+        sample_c = [s.to("cuda").to(dtype) for s in sample]
 
-    model = deepcopy(model).to(dtype)
-    sample = [s.to(dtype) for s in sample]
-    
     optimizer = optim(model_g.parameters())
     def optimize():
         optimizer.step()

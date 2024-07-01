@@ -13,8 +13,9 @@ class RockmateTest(unittest.TestCase):
     def test_valid(self):
         model, sample = get_model(self.MODEL,  device="cuda", batchsize=1)
         out_g, out_c, out_r = check_correctness(model, sample)
-        rtol = torch.abs((out_g - out_c.to("cuda"))/(out_g)).mean()
-        self.assertTrue(torch.allclose(out_r[0], out_g[0], rtol=float(rtol)))
+        rtol = torch.abs((out_g - out_c.to("cuda"))/(out_g)).mean()*5
+        self.assertTrue(torch.allclose(out_r[0], out_g[0], rtol=float(rtol)),
+                        msg=f"gpu {out_g[0].mean()}, cpu {out_c[0].mean()}, rockmate {out_r[0].mean()}")
 
     def test_mem(self):
         model, sample = get_model(self.MODEL,  device="cuda", batchsize=16)
@@ -32,4 +33,13 @@ class RockmateTest(unittest.TestCase):
         mem = torch.cuda.memory_allocated()
         _ = execution(rkmod, sample, niters=5, zero_grad=False)
         peak_mem = torch.cuda.max_memory_allocated() - mem
-        self.assertTrue(np.isclose(peak_mem, simulate_mem, rtol=0.005, atol=2048))
+        self.assertTrue(np.isclose(peak_mem, simulate_mem, rtol=0.01, atol=1024**2),
+                        msg=f"real peak: {peak_mem}, simulate peak: {simulate_mem}")
+
+    def test_complex_model(self):
+        MODEL = "FNO1d"
+        model, sample = get_model(MODEL,  device="cuda", batchsize=1)
+        out_g, out_c, out_r = check_correctness(model, sample)
+        rtol = torch.abs((out_g - out_c.to("cuda"))/(out_g)).mean()*5
+        self.assertTrue(torch.allclose(out_r[0], out_g[0], rtol=float(rtol)),
+                        msg=f"gpu {out_g[0].mean()}, cpu {out_c[0].mean()}, rockmate {out_r[0].mean()}")

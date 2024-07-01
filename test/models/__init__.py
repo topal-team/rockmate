@@ -29,6 +29,7 @@ def get_model(model, **kwargs):
     models = {
         "resnet101": get_ResNet101,
         "resnet18": get_ResNet18,
+        'FNO1d': get_FNO1d,
     }
     return models[model](**kwargs)
 
