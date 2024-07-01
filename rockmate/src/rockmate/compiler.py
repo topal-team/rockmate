@@ -4,6 +4,7 @@ from rkgb.lowlevel.ast_add_on import (
     ast_to_str,
     make_ast_list_assign,
 )
+from rkgb.lowlevel.constants import float_dtype
 from rkgb.core.backward import ComputationNode, AllocationNode
 import torch
 import math
@@ -67,8 +68,7 @@ def make_gd(
         "self": nn_mod,
         "device": device,
         "torch": torch,
-        "meta": torch.ones(1).to(device),
-        # "cmeta": torch.view_as_complex(torch.ones(2)).to(device),
+        "meta": {dtype: torch.ones(1, dtype=dtype, device=device, requires_grad=True) for dtype in float_dtype},
         "cpu_optim": optimize_metrics["cpu_optim"],
         "gpu_optim": optimize_metrics["gpu_optim"],
         "opt_kwargs": optimize_metrics["optim_kwargs"],
@@ -113,7 +113,6 @@ class RK_Storage:
         else:
             self.dtype = dtype
         self.gd = gd
-        self.gd["meta"] = self.gd["meta"].to(self.dtype)
         self.manager = AllocationManager(self, dtype=dtype)
 
     def add_val(self, target, x):
@@ -270,16 +269,11 @@ class Fct_gen_fake_data(RK_Fct):
         self.with_proxy = with_proxy
 
     def __call__(self):
-        m = (
-            self.storage.gd["cmeta"]
-            if self.storage.dtypes[self.target_name].is_complex
-            else self.storage.gd["meta"]
-        )
+        m = self.storage.gd["meta"][self.storage.dtypes[self.target_name]]
         s = self.storage.get_shape(self.target_name)
         if s == torch.Size([]):
             x = m.sum()  # easy way to obtain a Tensor of shape []
         else:
-            # x = m.expand(np.prod(s)).view(s)
             x = m.expand(*s)
         self.storage.get_val(self.target_name).data = x
         if self.with_proxy:
