@@ -20,7 +20,8 @@ import rkgb
 import ast
 import os
 import sys
-sys.path.append(f'{os.environ["WORK"]}/rockmate-private-jg/')
+# sys.path.append(f'{os.environ["WORK"]}/rockmate-private-jg/')
+sys.path.append(f'/home/ygusak/rockmate-private/')
 from models import get_iterator_over_all_examples
 
 warnings.filterwarnings("ignore")
@@ -30,6 +31,27 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
+def test_dynamo_graph_execution(model, sample, **dynamo_kwargs):
+    try:
+        dynamo_result = torch.export.export(
+                            model,
+                            args = tuple(sample),
+                            kwargs=None,
+                            **dynamo_kwargs
+                            )
+        logging.debug('Dynamo graph builed with args=tuple(sample), kwargs=None  works')
+        
+        dynamo_module = dynamo_result.module()
+        y = dynamo_module(*sample)
+        logging.debug('Forward pass through Dynamo module works')
+
+        loss = y.mean()
+        loss.backward()
+        logging.debug('Backward pass through Dynamo module works')
+
+    except Exception as e:
+        logging.debug(f"Propagation through Dynamo module doesn't work: {e}")
+        raise RuntimeError
 
 def test_dynamo_graph_builder(model, sample, **dynamo_kwargs):
     if True:
@@ -40,9 +62,9 @@ def test_dynamo_graph_builder(model, sample, **dynamo_kwargs):
                         kwargs=None,
                         **dynamo_kwargs
                         )
-        logging.debug('Dynamo with args=tuple(sample), kwargs=None  works')
+        logging.debug('Dynamo graph builed with args=tuple(sample), kwargs=None  works')
       except Exception as e:
-          logging.debug(f'Dynamo with args=tuple(sample), kwargs=None does not  work: {e}')
+          logging.debug(f'Dynamo graph builder with args=tuple(sample), kwargs=None does not  work: {e}')
           raise RuntimeError
     if False:
         for input_key in ['x', 'src', 'input'][:]:
@@ -117,8 +139,15 @@ if __name__=="__main__":
                 test_dynamo_graph_builder(model, sample)
                 logging.debug(f"== TorchDynamo graph for {name} has been built == \n")
             except Exception as e:
-                logging.debug(f"Torch Dynamo problems!\n {e}")
+                logging.debug(f"Torch Dynamo failed to build a graph!\n {e}")
                 
+            try:
+                test_dynamo_graph_execution(model, sample)
+                logging.debug(f"== TorchDynamo module can be trained == \n")
+            except Exception as e:
+                logging.debug(f"Torch Dynamo module can't be trained!\n {e}")
+
+
             try:
                 # Why an error arise when model and sample are on 'cuda'
                 rkgb_res = test_rkgb_graph_builder(
