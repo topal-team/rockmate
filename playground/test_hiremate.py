@@ -13,6 +13,7 @@ import traceback
 import logging
 import warnings
 import torch
+torch.autograd.set_detect_anomaly(True)
 import rockmate
 from rockmate import Rockmate
 from rockmate.solvers import HILP, RK_rotor
@@ -31,8 +32,47 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
+
+gd = globals()
+def forward_with_code(model, sample):
+    dynamo_result = torch.export.export(model, args = tuple(sample))
+    dynamo_signature = dynamo_result.graph_signature
+
+    tmp_local = {}
+    tmp_local["self"] = model
+
+    for inp, param in dynamo_signature.inputs_to_parameters.items():
+        tmp_local[inp] = model.get_parameter(param)
+
+    for inp, param in dynamo_signature.inputs_to_buffers.items():
+        tmp_local[inp] = model.get_buffer(param)
+
+    assert(len(dynamo_signature.user_inputs)==len(sample))
+    for d, s in zip(dynamo_signature.user_inputs, sample):
+        tmp_local[d] = s
+
+    for code in dynamo_result.graph.python_code("self").src.split("\n"):
+        if not code:continue
+        if "def forward" in code: continue
+        if "return" in code: continue
+
+        exec(code.strip(), gd, tmp_local)
+    return tmp_local, [tmp_local[o] for o in dynamo_signature.user_outputs]
+
+def test_dynamo_graph_execution_with_code(model, sample):
+    try:
+        tmp_local, outputs = forward_with_code(model, sample)
+        logging.debug(f'Forward with code works')
+        
+        outputs[0].mean().backward()
+        logging.debug(f'Backward after forward with code works')
+    except Exception as e:
+        logging.debug(f"Model based on TorchDynamo signature can't be trained: {e}") 
+        raise RuntimeError
+
 def test_dynamo_graph_execution(model, sample, **dynamo_kwargs):
     try:
+        # model.eval()
         dynamo_result = torch.export.export(
                             model,
                             args = tuple(sample),
@@ -107,7 +147,7 @@ if __name__=="__main__":
     else:
         device = 'cpu'
 
-    device="cpu"
+    # device="cpu"
     logging.info(f'Device: {device}')
     examples=[
              "GPT",
@@ -128,26 +168,35 @@ if __name__=="__main__":
 
     while True:
         model, sample = None, [] # To do not accumulate memory
-        logging.info(f'{"".join(["-"]*60)}')
+        logging.info(f'{"".join(["="]*60)}\n')
         try:
             name, model, sample, get_param_fct = next(iterator_over_all_examples)
-            logging.debug(f"== Model {name} has been built == \n")
+            logging.debug(f"Model {name} has been built \n")
             
 
-            try:
-                #Build graphs based on the partitioner
-                test_dynamo_graph_builder(model, sample)
-                logging.debug(f"== TorchDynamo graph for {name} has been built == \n")
-            except Exception as e:
-                logging.debug(f"Torch Dynamo failed to build a graph!\n {e}")
+            # try:
+            #     #Build graphs based on the partitioner
+            #     test_dynamo_graph_builder(model, sample)
+            #     logging.debug(f"== TorchDynamo graph for {name} has been built == \n")
+            # except Exception as e:
+            #     logging.debug(f"Torch Dynamo failed to build a graph!\n {e}")
                 
+            logging.info(f'{"".join(["-"]*10)} Test execution of TorchDynamo module for {name} model\n ')
             try:
                 test_dynamo_graph_execution(model, sample)
-                logging.debug(f"== TorchDynamo module can be trained == \n")
+                logging.debug(f"TorchDynamo module can be trained\n")
             except Exception as e:
                 logging.debug(f"Torch Dynamo module can't be trained!\n {e}")
 
+            
+            logging.info(f'{"".join(["-"]*10)} Test execution with forward from TorchDynamo signature for {name} model\n ')
+            try:
+                test_dynamo_graph_execution_with_code(model, sample)
+                logging.debug(f"Model based on TorchDynamo signature can be trained\n")
+            except Exception as e:
+                logging.debug(f"Model based on TorchDynamo signature can't be trained!\n {e}")
 
+            logging.info(f'{"".join(["-"]*10)} Test RKGB for {name} model\n ')
             try:
                 # Why an error arise when model and sample are on 'cuda'
                 rkgb_res = test_rkgb_graph_builder(
