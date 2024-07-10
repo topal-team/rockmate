@@ -24,7 +24,6 @@ from .op_schedule import *
 from .simulation import Simulator
 from .solvers.main import preprocess, solve_recursive, get_optimize_metrics, FastSolver, add_sched
 from .solvers import HILP, CheapSolver, RK_rotor
-from .solvers.ilp.ilp_solver import default_time_limit
 from .compiler import Compiler, RK_Storage, make_gd, Fct_record_event
 import psutil
 
@@ -43,16 +42,13 @@ class Rockmate(torch.nn.Module):
         original_mod,
         model_inputs,
         budget=None,
-        list_solvers=[],
+        top_solvers=None,
+        bottom_solvers=None,
+        partitioners=None,
         rkgb_res=None,
         solve_sched=True,
         verbose=False,
-        ilp_solver="PULP_CBC_CMD",
-        ilp_time_limit=1 * 60,
-        ilp_time_limit_top=20 * 60,
         model_kwargs=None,
-        partitioners=None,
-        max_size_S_graph_for_no_partitioning=40,
         cpu_optim=torch.optim.Adam,
         gpu_optim=torch.optim.Adam,
         optim_kwargs={},
@@ -63,12 +59,14 @@ class Rockmate(torch.nn.Module):
     ):
         super().__init__()
         ref_verbose[0] = verbose
-        default_time_limit[0] = ilp_time_limit
-        self.ilp_time_limit_top = ilp_time_limit_top
-        list_solvers = list_solvers or [HILP(ilp_solver=ilp_solver)]
-
+        self.top_solvers = top_solvers
+        self.bottom_solvers = bottom_solvers
+        if self.top_solvers is None and self.bottom_solvers is None:
+            self.top_solvers = [HILP()]
+            self.bottom_solvers = [HILP()]
         self.partitioners = partitioners
-        self.list_solvers = list_solvers
+        if self.partitioners is None:
+            self.partitioners = [PartitionerBottomToTop(can_use_rotor=False)]
         self.device = torch.device("cuda")  # Not obtaining from model
         self.exec_with_record_mem = False
         self.exec_with_record_time = False
@@ -140,21 +138,21 @@ class Rockmate(torch.nn.Module):
                 self.minor_param_nodes.append(pnode)
 
     def config_partitioner(self):
-        if self.partitioners is None:
-            self.partitioners = [PartitionerBottomToTop(can_use_rotor=False)]
         # ensure HILP config match partitioner config
         for partitioner in self.partitioners:
             if isinstance(partitioner, PartitionerBottomToTop):
-                for solver in self.list_solvers:
+                for solver in self.bottom_solvers:
                     if isinstance(solver, HILP):
-                        solver.config.nb_total_nodes = max(
-                            solver.config.nb_total_nodes,
-                            partitioner.config.max_estimate_per_sub_graph,
-                        )
-                        solver.config.nb_total_nodes_top_level = max(
-                            solver.config.nb_total_nodes_top_level,
-                            partitioner.config.max_estimate_for_main_graph,
-                        )
+                        if solver.config.nb_total_nodes < partitioner.config.max_estimate_per_sub_graph:
+                            print(f"Warning, bottom solver HILP has nb_total_nodes f{solver.config.nb_total_nodes}, "
+                                  "smaller than partitioner max_estimate_per_sub_graph f{partitioner.config.max_estimate_per_sub_graph}."
+                                  " This may result in failure to find schedules")
+                for solver in self.top_solvers:
+                    if isinstance(solver, HILP):
+                        if solver.config.nb_total_nodes < partitioner.config.max_estimate_for_main_graph:
+                            print(f"Warning, top solver HILP has nb_total_nodes f{solver.config.nb_total_nodes}, "
+                                  "smaller than partitioner max_estimate_for_main_graph "
+                                  "f{partitioner.config.max_estimate_for_main_graph}. This may result in failure to find schedules")
 
     def preprocess(self, solver = None):
         if solver is None:
@@ -185,7 +183,7 @@ class Rockmate(torch.nn.Module):
         self.op_sched = op_scheds[0]
 
     def solver_recursive(self, list_solvers=None, only_preprocess=False):
-        list_solvers = list_solvers or self.list_solvers
+        list_solvers = list_solvers or self.bottom_solvers
 
         solve_recursive(
             self.rkgb_res.hierarchical_cluster,
@@ -198,7 +196,7 @@ class Rockmate(torch.nn.Module):
         # will choose the one with minimum time
         budget = budget or self.budget
         budget -= self.minor_size
-        list_solvers = list_solvers or self.list_solvers
+        list_solvers = list_solvers or self.top_solvers
         rotor_solver = False
         hilp_solver = False
         checkmate_solver = False
@@ -206,14 +204,17 @@ class Rockmate(torch.nn.Module):
             if isinstance(solver, HILP):
                 # TODO: if no partitioning is allowed, update solver max nodes
                 hilp_solver = True
-                solver.config.top_solve_kwargs["optimize_metrics"] = self.global_dict["optimize_metrics"]
+                solver.config.model_kwargs["optimize_metrics"] = self.global_dict["optimize_metrics"]
         for solver in list_solvers:
             if isinstance(solver, HILP):
+                solver.config.protected_names.extend([f"{init_target_string} data", f"{init_target_string} grad"])
                 if self.keep_outputs:
-                    solver.config.protected_names += self.output_names
-                if rotor_solver:
+                    solver.config.protected_names.extend(self.output_names)
+                if rotor_solver: ##TODO: check in what case this is useful
                     solver.config.nb_bdg_save = 10
                     solver.config.nb_bdg_peak = 10
+                if self.dynamic_batch_dim is not None:
+                    solver.config.model_kwargs["dynamic_batch_size"] = True
 
         if (
             any([
@@ -227,25 +228,9 @@ class Rockmate(torch.nn.Module):
 
         list_solutions = []
         for solver in list_solvers:
-            if isinstance(solver, CheapSolver):
-                continue
-            if isinstance(solver, HILP):
-                solver.solve_top = True
-                solver.config.top_solve_kwargs["time_limit"] = self.ilp_time_limit_top
-                if self.dynamic_batch_dim is not None:
-                    solver.config.top_solve_kwargs["dynamic_batch_size"] = True
-                # print("temporarily changing total_nodes for top level hilp")
-                list_solutions.extend(
-                    solver(
-                        self.rkgb_res.hierarchical_cluster, [budget], accurate_mem=True
-                    )
-                )
-                solver.solve_top = False  # in case further usage
-
-            else:
-                list_solutions.extend(
-                    solver(self.rkgb_res.hierarchical_cluster, [budget])
-                )
+            list_solutions.extend(
+                solver(self.rkgb_res.hierarchical_cluster, [budget])
+            )
 
         self.rkgb_res.hierarchical_cluster.list_schedules.extend(list_solutions)
         if not list_solutions:

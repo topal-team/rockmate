@@ -6,6 +6,7 @@ import warnings
 import inspect
 import math
 import torch
+from dataclasses import dataclass
 
 from rkgb.utils.utils import Counter
 from rkgb.lowlevel import anonymize
@@ -948,6 +949,16 @@ class PartitionedDynamicManipulation(): # only contains staticmethod
                     )
 
 
+def make_partitioner(description):
+    if description == "bottom_to_top":
+        return PartitionerBottomToTop(main_graph_as_any_other=True)
+    elif description == "repetitive":
+        return PartitionerRecognizeRepetitivePattern()
+    else:
+        print("[Warning] make_partitioner: unknown sub_partitioner", self.config.sub_partitioner,
+              "possible values:", "bottom_to_top", "repetitive")
+        return PartitionerBottomToTop(main_graph_as_any_other=True)
+
 
 class PartitionerBottomToTop(Partitioner):
     class Option():
@@ -982,46 +993,32 @@ class PartitionerBottomToTop(Partitioner):
             return (self.set_group == opt2.set_group)
         def __hash__(self):
             return id(self)
-    
-    class Config():
-        def __init__(self,
-                max_len_seq = 99,
-                max_estimate_for_main_graph = 30,
-                max_estimate_per_sub_graph = 20,
-                min_size_per_sub_graph = 3,
-                main_graph_as_any_other = False,
-                can_use_rotor = True,
-                estimate_coeff_size = 1,
-                estimate_coeff_sub_graph = 1,
-                value_coeff_input_interfaces = 1,
-                value_coeff_output_interfaces = 1,
-                value_power_total_size = 0.5,
-                old_value_fct = False,
-                old_value_fct_value_power_not_last = 1.1,
-        ):
-            self.max_len_seq = max_len_seq
-            self.can_use_rotor = can_use_rotor
-            self.min_size_per_sub_graph = min_size_per_sub_graph
-            self.max_estimate_per_sub_graph \
-                = max_sub \
-                = max_estimate_per_sub_graph
-            self.max_estimate_for_main_graph \
-                = max_sub if main_graph_as_any_other \
-                else max_estimate_for_main_graph
-            # -- estimate_fct --
-            self.estimate_coeff_size = estimate_coeff_size
-            self.estimate_coeff_sub_graph = estimate_coeff_sub_graph
-            self.option_estimate_fct = self.default_estimate_fct
-            # -- value_fct --
-            self.old_value_fct_value_power_not_last = old_value_fct_value_power_not_last
-            self.value_coeff_input_interfaces = value_coeff_input_interfaces
-            self.value_coeff_output_interfaces = value_coeff_output_interfaces
-            self.value_power_total_size = value_power_total_size
-            if old_value_fct:
+
+    @dataclass
+    class Config:
+        max_len_seq: int = 99
+        max_estimate_for_main_graph: int = 30
+        max_estimate_per_sub_graph: int = 20
+        min_size_per_sub_graph: int = 3
+        main_graph_as_any_other: bool = False
+        can_use_rotor: bool = True
+        estimate_coeff_size: int = 1
+        estimate_coeff_sub_graph: int = 1
+        value_coeff_input_interfaces: int = 1
+        value_coeff_output_interfaces: int = 1
+        value_power_total_size: float = 0.5
+        old_value_fct: bool = False
+        old_value_fct_value_power_not_last: float = 1.1
+
+        def __post_init__(self):
+            if self.main_graph_as_any_other:
+                self.max_estimate_for_main_graph = self.max_estimate_per_sub_graph
+            if self.old_value_fct:
                 self.option_value_fct = self.old_default_option_value_fct
             else:
                 self.option_value_fct = self.default_option_value_fct
             self.option_stop_fct = self.default_option_stop_fct
+            self.option_estimate_fct = self.default_estimate_fct
             self.is_top_graph_ok = self.default_is_top_graph_ok
 
         def default_estimate_fct(self,option):
@@ -1095,7 +1092,6 @@ class PartitionerBottomToTop(Partitioner):
                 return estimate <= self.max_estimate_for_main_graph
             
 
-    config : Config = None
     def __init__(self, **kwargs):
         self.config = self.__class__.Config(**kwargs)
 
@@ -1360,19 +1356,15 @@ class PartitionerBottomToTop(Partitioner):
 
 
 
-default_partitioner = PartitionerBottomToTop()
-
 
 class PartitionerSequence(Partitioner):
-    class Config():
-        def __init__(self,sub_partitioner : Partitioner = None):
-            if sub_partitioner is None:
-                sub_partitioner = default_partitioner
-            self.sub_partitioner = sub_partitioner 
+    @dataclass
+    class Config:
+        sub_partitioner: str = "bottom_to_top"
 
-    config : Config = None
-    def __init__(self, sub_partitioner : Partitioner = None):
-        self.config = self.__class__.Config(sub_partitioner)
+    def __init__(self, *args, **kwargs):
+        self.config = self.__class__.Config(*args, **kwargs)
+        self.sub_partitioner = make_partitioner(self.config.sub_partitioner)
 
     def __call__(self, cluster : PartitionedCluster):
         # cluster only contains the list of concerned s_nodes, 
@@ -1411,73 +1403,35 @@ class PartitionerSequence(Partitioner):
         if len(blocks)==1:
             # We didn't find any structure
             # => directly use the sub_partitioner instead
-            cluster.partition(self.config.sub_partitioner)
+            cluster.partition(self.sub_partitioner)
             return None
         else:
             pg = PartitionedGraph(cluster,list_of_blocks_indices=blocks)
             # sub partition:
-            if hasattr(self.config.sub_partitioner,"main_graph_as_any_other"):
-                self.config.sub_partitioner.main_graph_as_any_other = True
             for block_pn in pg.nodes:
                 if block_pn.sub_cluster is not None:
                     sub_cluster : PartitionedCluster = block_pn.sub_cluster
-                    sub_cluster.partition(self.config.sub_partitioner)
-            if hasattr(self.config.sub_partitioner,"main_graph_as_any_other"):
-                self.config.sub_partitioner.main_graph_as_any_other = False
+                    sub_cluster.partition(self.sub_partitioner)
             return pg
 
 
 
 class PartitionerRecognizeRepetitivePattern(Partitioner):
-    class Config():
-        def __init__(self,
-                sub_partitioner : Partitioner = None,
-                split_patterns_in_two = False,
-                recognize_simply_by_main_fct_not_whole_ano_material = True,
-                strict_max_number_of_top_level_nodes = 12,
-                max_number_of_patterns = 8,
-                min_number_of_patterns = 2,
-                min_percentage_covered_required = 0.75,
-                put_intermediates_with_preceding_block = True,
-                put_inputs_with_first_block = False,
-                put_outputs_with_last_block = False):
-            if sub_partitioner is None:
-                sub_partitioner = default_partitioner
-            self.sub_partitioner = sub_partitioner 
-            self.split_patterns_in_two = split_patterns_in_two
-            self.recognize_simply_by_main_fct_not_whole_ano_material \
-                = recognize_simply_by_main_fct_not_whole_ano_material
-            self.strict_max_number_of_top_level_nodes = strict_max_number_of_top_level_nodes 
-            self.max_number_of_patterns = max_number_of_patterns
-            self.min_number_of_patterns = min_number_of_patterns
-            self.min_percentage_covered_required = min_percentage_covered_required
-            self.put_intermediates_with_preceding_block = put_intermediates_with_preceding_block 
-            self.put_inputs_with_first_block = put_inputs_with_first_block
-            self.put_outputs_with_last_block = put_outputs_with_last_block 
-
-    config : Config = None
-    def __init__(self,
-            sub_partitioner : Partitioner = None,
-            split_patterns_in_two = False,
-            recognize_simply_by_main_fct_not_whole_ano_material = True,
-            strict_max_number_of_top_level_nodes = 12,
-            max_number_of_patterns = 8,
-            min_number_of_patterns = 2,
-            min_percentage_covered_required = 0.75,
-            put_intermediates_with_preceding_block = True,
-            put_inputs_with_first_block = False,
-            put_outputs_with_last_block = False):
-        self.config = self.__class__.Config(
-            sub_partitioner,
-            split_patterns_in_two,
-            recognize_simply_by_main_fct_not_whole_ano_material,
-            strict_max_number_of_top_level_nodes,
-            max_number_of_patterns,
-            min_number_of_patterns,
-            min_percentage_covered_required,
-            put_intermediates_with_preceding_block,
-            put_inputs_with_first_block,
-            put_outputs_with_last_block)
+    @dataclass
+    class Config:
+        sub_partitioner: str = "bottom_to_top"
+        split_patterns_in_two: bool = False
+        recognize_simply_by_main_fct_not_whole_ano_material: bool = True
+        strict_max_number_of_top_level_nodes: int = 12
+        max_number_of_patterns: int = 8
+        min_number_of_patterns: int = 2
+        min_percentage_covered_required: float = 0.75
+        put_intermediates_with_preceding_block: bool = True
+        put_inputs_with_first_block: bool = False
+        put_outputs_with_last_block: bool = False
+    def __init__(self, *args, **kwargs):
+        self.config = self.__class__.Config(*args, **kwargs)
+        self.sub_partitioner = make_partitioner(self.config.sub_partitioner)
 
     def __call__(self, cluster : PartitionedCluster):
         list_nodes_hash = self.hash_cluster_nodes(cluster)
@@ -1485,7 +1439,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
         if patterns_indices is None or len(patterns_indices)==0:
             # We didn't find any structure 
             # => directly use the sub_partitioner instead
-            cluster.partition(self.config.sub_partitioner)
+            cluster.partition(self.sub_partitioner)
             return None
 
         else:
@@ -1521,14 +1475,10 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
                         list_of_blocks_indices=new_blocks)
             
             # Sub partition:
-            if hasattr(self.config.sub_partitioner,"main_graph_as_any_other"):
-                self.config.sub_partitioner.main_graph_as_any_other = True
             for block_pn in pg.nodes:
                 if block_pn.sub_cluster is not None:
                     sub_cluster : PartitionedCluster = block_pn.sub_cluster
-                    sub_cluster.partition(self.config.sub_partitioner)
-            if hasattr(self.config.sub_partitioner,"main_graph_as_any_other"):
-                self.config.sub_partitioner.main_graph_as_any_other = False
+                    sub_cluster.partition(self.sub_partitioner)
             return pg
                 
 

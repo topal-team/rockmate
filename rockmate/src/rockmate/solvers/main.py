@@ -27,8 +27,8 @@ class Solver:
         def __init__(self):
             pass
 
-    def __init__(self, config=None):
-        self.config = config if config is not None else type(self).Config()
+    def __init__(self, config=None, **kwargs):
+        self.config = config if config is not None else type(self).Config(**kwargs)
 
     def __call__(self, cluster: HierarchicalCluster, budgets=None, *args, **kargs):
         return self.solve(cluster, budgets, *args, **kargs)
