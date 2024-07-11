@@ -235,11 +235,17 @@ class Node():
 # ============================
 class ParameterNode():
     """
-    self.param_str : 'self.wpe[0].weight' as it appears in the code
+    original name : 'self.wpe[0].weight' as it appears in the original code
+    self.param_str : 'self.get_parameter('wpe.0.weight')' as it appears in the rkgb code
     self.param_name : 'wpe.0.weight' as it appears in model.named_parameters
+
+    buffers (e.g. running mean for batch norm) are obtained from self.get_buffer()
+    and parameters are obtained from self.get_parameter(), 
+    where "self" is the original module in the execution environment.
     """
     def __init__(self,
-            param_str = None,
+            param_name = None,
+            param_type = None,
             node_to_clone = None,
             parent_structure_with_id_generator = None, # to get unique_id from it
             unique_id_generator : Node_unique_id_generator = None):
@@ -251,9 +257,13 @@ class ParameterNode():
                     "unique_id","info","mem"]:
                 setattr(self,attr,getattr(node_to_clone,attr))
         else:
-            assert param_str[:4] == "self"
-            self.param_str = param_str
-            self.param_name = param_str[5:].replace('[','.').replace(']','')
+            self.param_name = param_name
+            if param_type == "param":
+                self.param_str = f"self.get_parameter('{self.param_name}')"
+            elif param_type == "buffer":
+                self.param_str = f"self.get_buffer('{self.param_name}')"
+            else:
+                raise TypeError(f"Unkown param type {param_type}")
             self.view_targets = []
             self.view_code = []
             self.info = None
