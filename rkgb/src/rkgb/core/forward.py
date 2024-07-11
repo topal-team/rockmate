@@ -86,13 +86,14 @@ class ForwardGraph(base.Graph):
             self,current_device,inspection_device,original_mod)
 
         # Parameter nodes
-        dict_param_str_to_node = dict()
+        dict_param_id_to_node = dict()
         for rn in raw_graph.nodes:
-            for param_str in rn.required_parameters: # e.g. self.layer[0].weight
-                if param_str not in dict_param_str_to_node:
-                    param_node = base.ParameterNode(param_str,
+            for (param_name, param_type) in rn.required_parameters: # e.g. ("layer.0.weight", "param")
+                if (param_name, param_type) not in dict_param_id_to_node:
+                    param_node = base.ParameterNode(param_name,
+                                                    param_type,
                         parent_structure_with_id_generator=self)
-                    dict_param_str_to_node[param_str] = param_node
+                    dict_param_id_to_node[(param_name, param_type)] = param_node
                     param_name = param_node.param_name # e.g. layer.0.weight
                     try: 
                         param_value = original_mod.get_parameter(param_name)
@@ -103,7 +104,7 @@ class ForwardGraph(base.Graph):
                     param_node.info = param_info = VariableInfo(param_value)
                     param_node.requires_grad = param_info.requires_grad
                     param_node.mem = param_info.memsize
-        self.parameter_nodes = dict_param_str_to_node.values()
+        self.parameter_nodes = list(dict_param_id_to_node.values())
         # -> to recognize views over parameters
 
         # === PART 1: Translate each node one by one following the topo-order ===
@@ -136,8 +137,8 @@ class ForwardGraph(base.Graph):
             dict_forward_nodes[rn.target] = fn
             # required parameters:
             fn.required_parameter_nodes = set(
-                dict_param_str_to_node[param_str]
-                for param_str in rn.required_parameters
+                dict_param_id_to_node[(param_name, param_type)]
+                for (param_name, param_type) in rn.required_parameters
             )
             for required_param_node in fn.required_parameter_nodes:
                 required_param_node.users.add(fn)

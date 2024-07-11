@@ -22,8 +22,8 @@ from rkgb.lowlevel.constants import init_target_string
 
 from .op_schedule import *
 from .simulation import Simulator
-from .solvers.main import preprocess, solve_recursive, get_optimize_metrics, FastSolver
-from .solvers import HILP, CheapSolver
+from .solvers.main import preprocess, solve_recursive, get_optimize_metrics, FastSolver, add_sched
+from .solvers import HILP, CheapSolver, RK_rotor
 from .solvers.ilp.ilp_solver import default_time_limit
 from .compiler import Compiler, RK_Storage, make_gd, Fct_record_event
 import psutil
@@ -170,6 +170,20 @@ class Rockmate(torch.nn.Module):
                     + self.output_names,
                 )
 
+    def fast_solve(self):
+        solver = FastSolver()
+        cluster = self.rkgb_res.hierarchical_cluster
+
+        op_scheds = solver.solve(
+                    cluster,
+                    no_del_names=[
+                        f"{init_target_string} data",
+                        f"{init_target_string} grad",
+                    ]
+                    + self.output_names,
+                )
+        self.op_sched = op_scheds[0]
+
     def solver_recursive(self, list_solvers=None, only_preprocess=False):
         list_solvers = list_solvers or self.list_solvers
 
@@ -203,7 +217,7 @@ class Rockmate(torch.nn.Module):
 
         if (
             any([
-                isinstance(solver, HILP)  # or isinstance(solver, RK_rotor)
+                isinstance(solver, HILP)  or isinstance(solver, RK_rotor)
                 for solver in list_solvers
             ])
         ):
@@ -236,12 +250,14 @@ class Rockmate(torch.nn.Module):
         self.rkgb_res.hierarchical_cluster.list_schedules.extend(list_solutions)
         if not list_solutions:
             warnings.warn("no feasible schedule is found")
+            return False
         else:
+            self.list_solutions.extend(list_solutions)
             self.op_sched = list_solutions[
                 np.argmin([sum(op_sched.time) for op_sched in list_solutions])
             ]
+            return True
             # self.op_list = self.op_sched.op_list
-        self.list_solutions.extend(list_solutions)
 
     def get_compiled_fct(self, new_compiler=True, simulate=True):
         if self.op_sched is None:
@@ -691,31 +707,30 @@ def define_autograd_Function(RkMod: Rockmate):
             #     )
             #     # TODO: record output grad if needed
 
-            stop = RkMod.backward_stop
-            if stop:
-                for i, op in enumerate(
-                    RkMod.op_list[loss_idx + 1 : loss_idx + stop + 1]
-                ):
-                    with torch.enable_grad():
-                        RkMod._exec(op)
-            else:
-
-                if RkMod.exec_with_record_time:
-                    for step in RkMod.op_sched.steps[RkMod.op_sched.loss_step :]:
-                        RkMod.exec_step(step)
+            with torch.enable_grad():
+                stop = RkMod.backward_stop
+                if stop:
+                    for i, op in enumerate(
+                        RkMod.op_list[loss_idx + 1 : loss_idx + stop + 1]
+                    ):
+                            RkMod._exec(op)
                 else:
-                    for op in RkMod.op_list[loss_idx + 1 :]:
-                        RkMod._exec(op)
-                # if RkMod.exec_with_record_mem and RkMod.backward_add_output_grad:
-                #     RkMod.allo_mem[loss_idx] += RkMod.output_size
-                #  -> return grad of dummy input + inputs' which req grad (Rem 1)
-                grad_inputs = tuple(
-                    RkMod.compiler.get_val(inp).grad
-                    for inp in ctx.name_of_inputs_which_req_grad
-                )
-                grads = (torch.ones(1),) + grad_inputs
+                    if RkMod.exec_with_record_time:
+                        for step in RkMod.op_sched.steps[RkMod.op_sched.loss_step :]:
+                            RkMod.exec_step(step)
+                    else:
+                        for op in RkMod.op_list[loss_idx + 1 :]:
+                            RkMod._exec(op)
+                    # if RkMod.exec_with_record_mem and RkMod.backward_add_output_grad:
+                    #     RkMod.allo_mem[loss_idx] += RkMod.output_size
+                    #  -> return grad of dummy input + inputs' which req grad (Rem 1)
+                    grad_inputs = tuple(
+                        RkMod.compiler.get_val(inp).grad
+                        for inp in ctx.name_of_inputs_which_req_grad
+                    )
+                    grads = (torch.ones(1),) + grad_inputs
 
-                return grads
+                    return grads
 
         # === END OF BACKWARD FUNCTION ===
 

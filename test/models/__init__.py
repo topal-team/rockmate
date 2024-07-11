@@ -1,4 +1,5 @@
 __all__ = [
+    "get_model",
     "get_GPT",
     "get_UNet",
     "get_MLP",
@@ -9,12 +10,6 @@ __all__ = [
     "get_FNO3d",
     "get_UFNO",
     "get_UNO",
-    "get_TFNO2d",
-    "get_Bert",
-    "get_LLAMA",
-    "get7BLlamaSequence",
-    "get3BPhi_2",
-    "get2Bbloom",
     "LossLayer",
     "get_iterator_over_all_examples",
     "sanity_check_forward_and_backward",
@@ -30,7 +25,22 @@ import torch
 
 # =========================================================
 
-def get_GPT(device,nlayers=2,dropout=0.1,batchsize=128): #nlayers=12, batchsize=12000
+def get_model(model, **kwargs):
+    models = {
+        "resnet101": get_ResNet101,
+        "resnet18": get_ResNet18,
+        'FNO1d': get_FNO1d,
+    }
+    return models[model](**kwargs)
+
+def get_ResNet18(device,batchsize=64,image_size=256):
+    from torchvision.models import resnet18
+    model = resnet18()
+    model.to(device)
+    sample = [torch.randn(batchsize, 3, image_size, image_size,device=device)]
+    return model,sample
+
+def get_GPT(device,nlayers=12,dropout=0.1,batchsize=12000):
     from .GPT import GPT2
     model = GPT2(nlayers=nlayers,dropout=dropout)
     model.to(device)
@@ -110,24 +120,6 @@ def get_fst_param_nn_Transformer(model):
     
 # =========================================================
 
-def get_TFNO2d(device, batchsize=10, in_channels=3):
-    from neuralop.models import TFNO
-    model = TFNO(n_modes=(16, 16), hidden_channels=64,
-                in_channels=in_channels,
-                out_channels=1,
-                factorization='tucker',
-                implementation='factorized',
-                rank=0.05)
-    model.to(device)
-    sample = torch.randn((batchsize, in_channels, 16, 16), device=device)
-
-    return model, sample
-
-def get_fst_param_TFNO2d(model):
-    return fmodel.projection.fcs[0].weight
-# =========================================================
-
-
 def get_FNO1d(device,batchsize=4400,block_number=4,image_size=256):
     from models.FNO1d import FNO1d
     model = FNO1d(16, 64 ,block_number=block_number)
@@ -176,102 +168,7 @@ def get_fst_param_UNO(model):
 
 # =========================================================
 
-def get_Bert(device):
-    from transformers import BertTokenizer, BertModel
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    model = BertModel.from_pretrained("bert-base-uncased")
-    model.to(device)
-    text = "Replace "*20
-    encoded_input = tokenizer(text, return_tensors='pt').to(device)
-    return model,dict(encoded_input)
 
-# =========================================================
-
-def get_LLAMA(device,config=None,num_hidden_layers=2):
-    from transformers import LlamaModel, LlamaConfig
-    # Initializing a LLaMA llama-7b style configuration
-    if config is None:
-        config = LlamaConfig(num_hidden_layers=num_hidden_layers)
-    # Initializing a model from the llama-7b style configuration
-    model = LlamaModel(config)
-    model.to(device)
-    sample = [torch.randint(0, 600, [3, 64])]
-    return model,sample
-
-# =========================================================
-
-"""
-def get_Bloom(device,n_layer=2):
-    from transformers import BloomConfig, BloomModel
-    config = BloomConfig(hidden_size=2560, n_layer=n_layer)
-    model = BloomModel(config)
-    model.to(device)
-    sample = [torch.randint(0, 600, [3, 64])]
-    return model,sample
-"""
-
-# =========================================================
-
-def get7BLlamaSequence(batch=2, seq_len=512, nlayers=8, dtype=None, llama3=False, classification=False):
-    from transformers import LlamaModel, LlamaConfig, LlamaForSequenceClassification
-    if dtype is None:
-        dtype = torch.get_default_dtype()
-    #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
-    sample = torch.randint(0, 600, [batch, seq_len])
-    # Initializing a LLaMA llama-7b style configuration
-    vocab_size = 128256 if llama3 else 32000
-    
-
-    configuration = LlamaConfig(num_hidden_layers=nlayers,
-                                hidden_size=4096,
-                                output_hidden_states=False,
-                                output_attentions=False,
-                                pad_token_id=0,
-                                use_cache=False
-                                )
-    # Initializing a model from the llama-7b style configuration
-    configuration._attn_implementation="eager"
-    configuration._attn_implementation_internal="eager"
-    model = LlamaForSequenceClassification(configuration).to(dtype)
-    return model, [sample]
-
-# =========================================================
-
-def get3BPhi_2(batch=2, seq_len=512, dtype=None, nlayers=8, classification=False):
-    from transformers import PhiModel, PhiConfig, PhiForSequenceClassification
-    if dtype is None:
-        dtype = torch.get_default_dtype()
-    # 2.7B parameters
-    configuration = PhiConfig(intermediate_size= 10240,
-                            hidden_size=2560,
-                            num_hidden_layers=nlayers)
-    configuration._attn_implementation="eager"
-    configuration._attn_implementation_internal="eager"
-    sample = torch.randint(0, 600, [batch, seq_len])
-    model = PhiForSequenceClassification(configuration).to(dtype)
-    model.config.pad_token_id = 0
-    return model, [sample]
-from transformers import BloomForSequenceClassification, BloomConfig
-
-
-# =========================================================
-
-def get2Bbloom(batch=2, seq_len=512, dtype=None, nlayers=24, classification=False):
-    if dtype is None:
-        dtype = torch.get_default_dtype()
-    configuration = BloomConfig(hidden_size=2048,
-                            num_hidden_layers=nlayers,
-                            output_hidden_states=False,
-                            output_attentions=False,
-                            pad_token_id=0,
-                            use_cache=False,
-                            )
-    configuration._attn_implementation="eager"
-    configuration._attn_implementation_internal="eager"
-    sample = torch.randint(0, 600, [batch, seq_len])
-    model = BloomForSequenceClassification(configuration).to(dtype)
-    model.config.pad_token_id = 0
-    return model, [sample]
 
 # =========================================================
 
@@ -296,7 +193,6 @@ dict_all_examples = dict(
     nn_Transformer=(get_nn_Transformer,get_fst_param_nn_Transformer),
     FNO1d=(get_FNO1d,get_fst_param_FNO1d),
     FNO3d=(get_FNO3d,get_fst_param_FNO3d),
-    TFNO2d=(get_TFNO2d,get_fst_param_TFNO2d),
     UFNO=(get_UFNO,get_fst_param_UFNO),
     UNO=(get_UNO,get_fst_param_UNO)    
 )
@@ -306,7 +202,7 @@ import gc
 def get_iterator_over_all_examples(device,skip_error=True,
         examples=[
             "GPT","UNet","MLP","RegNet32","ResNet101",
-            "nn_Transformer","FNO1d","FNO3d","TFNO2d","UFNO","UNO"]):
+            "nn_Transformer","FNO1d","FNO3d","UFNO","UNO"]):
     for name in examples:
         get_fct,get_param_fct = dict_all_examples[name]
         model,sample = None,[] # To do not accumulate memory

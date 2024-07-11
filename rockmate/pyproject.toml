@@ -12,6 +12,7 @@ description = "Efficient and Automatic Rematerialization for Pytorch training"
 dependencies = [
     "torch >= 1.7",
     "rkgb >= 2.0.0",
+    "pulp == 2.7.0"
 ]
 keywords = ["rematerialization", "training", "pytorch", "memory"]
 authors = [

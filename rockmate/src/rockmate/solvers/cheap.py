@@ -34,9 +34,10 @@ class CheapSolver(Solver):
         def __init__(self):
             pass
 
-    def __init__(self, config=None, bandwidth=1e7):
+    def __init__(self, config=None, bandwidth=1e7, add_offload=True):
         super().__init__(config)
         self.bandwidth = bandwidth
+        self.add_offload = add_offload
 
     def solve(self, cluster: HierarchicalCluster, budget=None):
         avg_time = np.mean(
@@ -127,7 +128,9 @@ class CheapSolver(Solver):
         op_sched = OpSchedule(
             fwd_op_list + bwd_op_list, loss_idx=len(fwd_op_list) - 1, cluster=cluster
         )
-        return [self.add_activation_offload(op_sched)]
+        if self.add_offload:
+            op_sched = self.add_activation_offload(op_sched)
+        return [op_sched]
 
 
     def add_activation_offload(self, op_sched: OpSchedule) -> OpSchedule:

@@ -145,11 +145,12 @@ class RawGraph(base.Graph):
             example_inputs : preprocess_samples.ExampleInputs,
             dynamo_kwargs = {}):
         self.tracer_used = "dynamo"
+        print(f'Example inputs : {example_inputs.dict.keys()}')
         # Call Dynamo's export :
         dynamo_result : torch.export.ExportedProgram = torch.export.export(
             original_mod,
-            args = tuple(),
-            kwargs=example_inputs.dict,
+            args = example_inputs.args,
+            kwargs=example_inputs.kwargs,
             **dynamo_kwargs
             )
         dynamo_graph = dynamo_result.graph
@@ -172,7 +173,9 @@ class RawGraph(base.Graph):
         dynamo_all_args = whole_code_ast.args.args
         dict_dynamo_name_to_correct_ast = dict()
         # e.g: "arg15_1" to AST("input_ids"), 
-        # or "arg10_1" to AST("self.h[0]").
+        # or "arg10_1" to AST("self.get_parameter('h.0')).
+        dict_dynamo_name_to_correct_name = dict()
+        # e.g. "arg10_1" to AST('h.0').
 
         # Useful dict to find back the parameters and buffers:
         dict_param_value_to_name = dict(
@@ -195,22 +198,20 @@ class RawGraph(base.Graph):
                 dynamo_param_name = dynamo_signature.inputs_to_parameters[dynamo_arg_name]
                 # e.g. L__self___embeddings_word_embeddings.weight
                 # It's not as simple as changing the "_" by ".",
-                # here we look for "self.embeddings.word_embeddings.weight"
+                # here we look for "embeddings.word_embeddings.weight"
                 param_value = state_dict[dynamo_param_name]
                 param_real_name = dict_param_value_to_name[param_value]
                 dict_dynamo_name_to_correct_ast[dynamo_arg_name] \
-                    = ast_add_on.make_ast_attribute_from_list(
-                        ast.Name("self"),param_real_name.split(".")
-                    )
+                    = ast.parse(f"self.get_parameter('{param_real_name}')")
+                dict_dynamo_name_to_correct_name[dynamo_arg_name] = (param_real_name, "param")
             # 2) Buffers
             elif dynamo_arg_name in dynamo_signature.inputs_to_buffers:
                 dynamo_buffer_name = dynamo_signature.inputs_to_buffers[dynamo_arg_name]
                 buffer_value = state_dict[dynamo_buffer_name]
                 buffer_real_name = dict_buffer_value_to_name[buffer_value]
                 dict_dynamo_name_to_correct_ast[dynamo_arg_name] \
-                    = ast_add_on.make_ast_attribute_from_list(
-                        ast.Name("self"),buffer_real_name.split(".")
-                    )
+                    = ast.parse(f"self.get_buffer('{buffer_real_name}')")
+                dict_dynamo_name_to_correct_name[dynamo_arg_name] = (buffer_real_name, "buffer")
         # 3) Inputs
         dict_inputs = example_inputs.dict
         self.original_mod_input_targets = self.input_targets = list(
@@ -334,8 +335,7 @@ class RawGraph(base.Graph):
             )
             # Required parameters :
             raw_node.required_parameters = set(
-                ast_add_on.ast_to_str(
-                    dict_dynamo_name_to_correct_ast[param_id])
+                dict_dynamo_name_to_correct_name[param_id]
                 for param_id in dependency_dynamo_names
                 if (param_id not in dict_code_target_to_code
                 and param_id not in dict_dynamo_name_to_raw_node

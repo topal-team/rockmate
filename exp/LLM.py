@@ -35,7 +35,7 @@ class MyDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.encodings)
 
-def get7Bllama(batch, seq_len, nlayers=32, dtype=None, llama3=False, classification=False):
+def get7Bllama(batch, seq_len, nlayers=32, dtype=None, llama3=False, eager=True):
     if dtype is None:
         dtype = torch.get_default_dtype()
 
@@ -53,8 +53,9 @@ def get7Bllama(batch, seq_len, nlayers=32, dtype=None, llama3=False, classificat
                                 use_cache=False
                                 )
     # Initializing a model from the llama-7b style configuration
-    configuration._attn_implementation="eager"
-    configuration._attn_implementation_internal="eager"
+    if eager:
+        configuration._attn_implementation="eager"
+        configuration._attn_implementation_internal="eager"
     model = LlamaForSequenceClassification(configuration).to(dtype)
     return model, [sample]
 

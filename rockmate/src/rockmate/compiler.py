@@ -4,6 +4,7 @@ from rkgb.lowlevel.ast_add_on import (
     ast_to_str,
     make_ast_list_assign,
 )
+from rkgb.lowlevel.constants import float_dtype
 from rkgb.core.backward import ComputationNode, AllocationNode
 import torch
 import math
@@ -67,8 +68,7 @@ def make_gd(
         "self": nn_mod,
         "device": device,
         "torch": torch,
-        "meta": torch.ones(1).to(device),
-        # "cmeta": torch.view_as_complex(torch.ones(2)).to(device),
+        "meta": {dtype: torch.ones(1, dtype=dtype, device=device, requires_grad=True) for dtype in float_dtype},
         "cpu_optim": optimize_metrics["cpu_optim"],
         "gpu_optim": optimize_metrics["gpu_optim"],
         "opt_kwargs": optimize_metrics["optim_kwargs"],
@@ -113,7 +113,6 @@ class RK_Storage:
         else:
             self.dtype = dtype
         self.gd = gd
-        self.gd["meta"] = self.gd["meta"].to(self.dtype)
         self.manager = AllocationManager(self, dtype=dtype)
 
     def add_val(self, target, x):
@@ -236,8 +235,7 @@ class Fct_del(RK_Fct):
         self.del_mode = del_mode
 
     def __call__(self):
-        with torch.cuda.stream(self.storage.gd["main_stream"]):
-            self.del_fcts[self.del_mode]()
+        self.del_fcts[self.del_mode]()
 
     def del_data(self):
         self.storage.get_val(self.target_name).data = torch.empty(0, dtype=self.storage.dtype)
@@ -271,21 +269,15 @@ class Fct_gen_fake_data(RK_Fct):
         self.with_proxy = with_proxy
 
     def __call__(self):
-        with torch.cuda.stream(self.storage.gd["main_stream"]):
-            m = (
-                self.storage.gd["cmeta"]
-                if self.storage.dtypes[self.target_name].is_complex
-                else self.storage.gd["meta"]
-            )
-            s = self.storage.get_shape(self.target_name)
-            if s == torch.Size([]):
-                x = m.sum()  # easy way to obtain a Tensor of shape []
-            else:
-                # x = m.expand(np.prod(s)).view(s)
-                x = m.expand(*s)
-            self.storage.get_val(self.target_name).data = x
-            if self.with_proxy:
-                self.storage.get_val(f"_{self.target_name}").data = x
+        m = self.storage.gd["meta"][self.storage.dtypes[self.target_name]]
+        s = self.storage.get_shape(self.target_name)
+        if s == torch.Size([]):
+            x = m.sum()  # easy way to obtain a Tensor of shape []
+        else:
+            x = m.expand(*s)
+        self.storage.get_val(self.target_name).data = x
+        if self.with_proxy:
+            self.storage.get_val(f"_{self.target_name}").data = x
 
 
 class Fct_detach(RK_Fct):
@@ -305,10 +297,9 @@ class Fct_detach(RK_Fct):
         self.storage.add_val(f"_{self.target_name}", torch.empty(0, dtype=self.storage.dtype))
 
     def __call__(self):
-        with torch.cuda.stream(self.storage.gd["main_stream"]):
-            self.storage.get_val(self.target_name).data = self.storage.ld[
-                f"_{self.target_name}"
-            ].data
+        self.storage.get_val(self.target_name).data = self.storage.ld[
+            f"_{self.target_name}"
+        ].data
 
 
 class Fct_run_bwd(RK_Fct):
@@ -326,15 +317,14 @@ class Fct_run_bwd(RK_Fct):
         self.input_names = input_names
 
     def __call__(self):
-        with torch.cuda.stream(self.storage.gd["main_stream"]):
-            inputs = [self.storage.get_val(name) for name in self.input_names]
-            if not inputs:
-                inputs = None
-            self.storage.get_val(f"_{self.target_name}").backward(
-                self.storage.get_val(self.target_name).grad,
-                inputs=inputs,
-                retain_graph=self.retain_graph,
-            )
+        inputs = [self.storage.get_val(name) for name in self.input_names]
+        if not inputs:
+            inputs = None
+        self.storage.get_val(f"_{self.target_name}").backward(
+            self.storage.get_val(self.target_name).grad,
+            inputs=inputs,
+            retain_graph=self.retain_graph,
+        )
 
 
 class Fct_run_fwd(RK_Fct):
@@ -350,47 +340,51 @@ class Fct_run_fwd(RK_Fct):
     ):
         super().__init__(target_name=target_name, storage=storage, **kwargs)
         self.target_name = target_name
-        self.code = code
+        self.str_code = code
+        self.code = compile(code, '<string>', "exec")
         self.no_save_list = no_save_list
         self.fwd_fct = {"with_grad": self.fwd_with_grad, "no_grad": self.fwd_no_grad}
         self.fwd_mode = fwd_mode
         self.stream = stream
 
     def fwd_with_grad(self):
-        with torch.enable_grad():
+        if self.no_save_list:
             with torch.autograd.graph.saved_tensors_hooks(
                 self.fct_get_pack(self.no_save_list), self.fct_get_unpack()
-            ):
+                ):
                 exec(self.code, self.storage.gd, self.storage.ld)
+        else:
+            exec(self.code, self.storage.gd, self.storage.ld)
 
     def fwd_no_grad(self):
         with torch.no_grad():
             exec(self.code, self.storage.gd, self.storage.ld)
 
     def __call__(self):
-        with torch.cuda.stream(self.storage.gd[self.stream]):
-            self.fwd_fct[self.fwd_mode]()
+        # with torch.cuda.stream(self.storage.gd[self.stream]):
+        self.fwd_fct[self.fwd_mode]()
 
     def fct_get_pack(self, no_save_list, sanity_check=False):
+        no_save_dict = {self.storage.get_val(c).data_ptr() : c
+                        for c in no_save_list}
         # no_save_list contains a list of names
         def pack(x):
-            for i, c in enumerate(no_save_list):
-                if self.storage.get_val(c).data_ptr() == x.data_ptr():
-                    # print(c)
-                    if sanity_check:
-                        assert torch.equal(
-                            self.storage.get_val(c).data.as_strided_(
-                                x.shape, x.stride(), x.storage_offset()
-                            ),
-                            x,
-                        )
-                    return (
-                        c,
-                        x.shape,
-                        x.stride(),
-                        x.storage_offset(),
-                        # x.clone(),
+            c = no_save_dict.get(x.data_ptr(), None)
+            if c is not None:
+                if sanity_check:
+                    assert torch.equal(
+                        self.storage.get_val(c).data.as_strided_(
+                            x.shape, x.stride(), x.storage_offset()
+                        ),
+                        x,
                     )
+                return (
+                    c,
+                    x.shape,
+                    x.stride(),
+                    x.storage_offset(),
+                    # x.clone(),
+                )
             return x
 
         return pack
@@ -417,11 +411,10 @@ class Fct_get_shape(RK_Fct):
         else:
             target = self.storage.get_val(self.target_name)
 
-        with torch.cuda.stream(self.storage.gd["main_stream"]):
-            self.storage.measured_shapes[self.target_name] = target.shape
-            self.storage.measured_shapes[f"cpu_{self.target_name}"] = target.shape
-            self.storage.dtypes[self.target_name] = target.dtype
-            self.storage.dtypes[f"cpu_{self.target_name}"] = target.dtype
+        self.storage.measured_shapes[self.target_name] = target.shape
+        self.storage.measured_shapes[f"cpu_{self.target_name}"] = target.shape
+        self.storage.dtypes[self.target_name] = target.dtype
+        self.storage.dtypes[f"cpu_{self.target_name}"] = target.dtype
 
 
 class Fct_optimize(RK_Fct):
@@ -516,8 +509,7 @@ class Fct_mem_alloc(RK_Fct):
         )
 
     def __call__(self):
-        with torch.cuda.stream(self.storage.gd["main_stream"]):
-            self.alloc_fct[self.alloc_mode]()
+        self.alloc_fct[self.alloc_mode]()
 
 
 class Fct_offload(RK_Fct):
@@ -1003,26 +995,29 @@ class Compiler:
         )
         cnode: ComputationNode = op.target
         for pnode in cnode.required_parameter_nodes_real:
-            op.add_fct(
-                Fct_run_fwd(
-                    cnode.main_target,
-                    storage=self.storage,
-                    code=pnode.get_code(),
+            view_code = pnode.get_code()
+            if view_code:
+                op.add_fct(
+                    Fct_run_fwd(
+                        cnode.main_target,
+                        storage=self.storage,
+                        code=view_code,
+                    )
                 )
-            )
 
         for anode in cnode.deps_real:
             for dep_cnode in anode.deps:
                 code = dep_cnode.make_body_code_ast()
                 ast_view_code = make_ast_list_assign(code)
-                op.add_fct(
-                    Fct_run_fwd(
-                        op.target,
-                        storage=self.storage,
-                        code=ast_to_str(ast_view_code),
-                        stream="main_stream",
+                if ast_to_str(ast_view_code):
+                    op.add_fct(
+                        Fct_run_fwd(
+                            op.target,
+                            storage=self.storage,
+                            code=ast_to_str(ast_view_code),
+                            stream="main_stream",
+                        )
                     )
-                )
 
         if not cnode.info.requires_grad:
             op.add_fct(
@@ -1084,9 +1079,10 @@ class Compiler:
                     fwd_mode="with_grad",
                 )
             )
-        op.add_fct(
-            Fct_run_fwd(cnode.main_target, storage=self.storage, code=inplace_code)
-        )
+        if inplace_code:
+            op.add_fct(
+                Fct_run_fwd(cnode.main_target, storage=self.storage, code=inplace_code)
+            )
         for inplace_target in cnode.inplace_targets:
             if inplace_target != cnode.main_target:
                 op.add_fct(
@@ -1094,7 +1090,8 @@ class Compiler:
                 )
         if True:  # TODO:fake detach
             op.add_fct(Fct_detach(cnode.main_target, storage=self.storage))
-        op.add_fct(Fct_run_fwd(cnode.main_target, storage=self.storage, code=body_code))
+        if body_code:
+            op.add_fct(Fct_run_fwd(cnode.main_target, storage=self.storage, code=body_code))
         if op.pos_info["first_occurrence"]:
             for target_name in cnode.tensor_targets:
                 op.add_fct(Fct_get_shape(target_name, storage=self.storage))
@@ -1109,13 +1106,15 @@ class Compiler:
         )
 
         for pnode in cnode.required_parameter_nodes_real:
-            op.add_fct(
-                Fct_run_fwd(
-                    cnode.main_target,
-                    storage=self.storage,
-                    code=pnode.get_code(),
+            view_code = pnode.get_code()
+            if view_code:
+                op.add_fct(
+                    Fct_run_fwd(
+                        cnode.main_target,
+                        storage=self.storage,
+                        code=view_code,
+                    )
                 )
-            )
 
         for target_name in op.pos_info["temporary_tensor_names"]:
             op.add_fct(
@@ -1345,13 +1344,13 @@ class Compiler:
         if not on_cpu:
             prep_op.add_fct(Fct_mem_alloc(pnode.param_name, storage=self.storage, dtype=self.storage.dtype))
             prep_op.add_fct(Fct_prefetch(op.target, storage=self.storage))
-            prep_op.add_fct(
-                Fct_run_fwd(
-                    pnode.param_name, storage=self.storage, code=pnode.get_code()
+            view_code = pnode.get_code()
+            if view_code:
+                prep_op.add_fct(
+                    Fct_run_fwd(
+                        pnode.param_name, storage=self.storage, code=view_code
+                    )
                 )
-            )
-
-        
 
     def ExecCode(self, op: ExecCodeOp):
         op.add_fct(Fct_run_fwd(op.name, storage=self.storage, code=op.code))

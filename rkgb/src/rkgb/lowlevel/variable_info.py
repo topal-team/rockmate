@@ -53,15 +53,20 @@ class VariableInfo():
             elif isinstance(value,torch.Tensor):
                 self.variable_type = torch.Tensor
                 self.tensor_size = value.shape
+                self.storage_size = value.untyped_storage().size()//value.element_size()
                 self.dtype = value.dtype
                 self.requires_grad = value.requires_grad
                 self.memsize = int(measure.tensor_memory_size(value))
+                self.stride = (value.shape, value.stride(), value.storage_offset())
             elif self.variable_type==tuple or self.variable_type==list:
                 self.sub_info = [VariableInfo(y) for y in value]
                 self.requires_grad = any([
                     sub_var.requires_grad 
-                    for sub_var in self.sub_info])
-                self.memsize = sum(sub_info.memsize for sub_info in self.sub_info)
+                    for sub_var in self.sub_info
+                    if hasattr(sub_var, "requires_grad")])
+                self.memsize = sum(sub_info.memsize 
+                                   for sub_info in self.sub_info
+                                   if hasattr(sub_info, "memsize"))
             else:
                 raise Exception(
                     f"The type `{self.variable_type}` "\
@@ -73,24 +78,30 @@ class VariableInfo():
             return self.tensor_size
         elif self.variable_type==torch.Tensor:
             if self.dtype in constants.int_dtype:
-                return torch.randint(2,self.tensor_size,
+                return torch.as_strided(torch.randint(2,(self.storage_size,),
                     dtype=self.dtype,
                     requires_grad=self.requires_grad,
-                    device=device)
+                    device=device), *self.stride)
             elif self.dtype in constants.bool_dtype:
-                return torch.randint(2,self.tensor_size,
+                return torch.as_strided(torch.randint(2,(self.storage_size,),
                     dtype=self.dtype,
                     requires_grad=self.requires_grad,
-                    device=device)
+                    device=device), *self.stride)
             else: # float or complex
-                return torch.randn(self.tensor_size,
+                _tensor = torch.randn((self.storage_size,),
                     dtype=self.dtype,
                     requires_grad=self.requires_grad,
                     device=device)
-        else:
-            assert(self.variable_type==tuple or self.variable_type==list)
+                tensor = torch.as_strided(_tensor, *self.stride).detach()
+                if self.requires_grad:
+                    tensor.requires_grad_()
+                return tensor
+
+        elif (self.variable_type==tuple or self.variable_type==list):
             value = [sub_var.generate_value(device) for sub_var in self.sub_info]
             return self.variable_type(value)
+        elif self.variable_type is None:
+            return None
 
 
     @staticmethod

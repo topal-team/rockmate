@@ -44,18 +44,19 @@ class SpectralConv1d_Uno(nn.Module):
         input shape = (batch, in_codim, input_dim1)
         output shape = (batch, out_codim, dim1)
         """
-        if dim1 is not None:
-            self.dim1 = dim1
+        if dim1 is None:
+            dim1 = self.dim1
+
         batchsize = x.shape[0]
 
         x_ft = torch.fft.rfft(x, norm = 'forward')
 
         # Multiply relevant Fourier modes
-        out_ft = torch.zeros(batchsize, self.out_channels,  self.dim1//2 + 1 , dtype=torch.cfloat, device=x.device)
+        out_ft = torch.zeros(batchsize, self.out_channels,  dim1//2 + 1 , dtype=torch.cfloat, device=x.device)
         out_ft[:, :, :self.modes1] = self.compl_mul1d(x_ft[:, :, :self.modes1], self.weights1)
 
         #Return to physical space
-        x = torch.fft.irfft(out_ft, n=self.dim1, norm = 'forward')
+        x = torch.fft.irfft(out_ft, n=dim1, norm = 'forward')
         return x
 
 class pointwise_op_1D(nn.Module):
@@ -148,22 +149,22 @@ class SpectralConv2d_Uno(nn.Module):
         return torch.einsum("bixy,ioxy->boxy", input, weights)
 
     def forward(self, x, dim1 = None,dim2 = None):
-        if dim1 is not None:
-            self.dim1 = dim1
-            self.dim2 = dim2
+        if dim1 is None:
+            dim1 = self.dim1
+            dim2 = self.dim2
         batchsize = x.shape[0]
         #Compute Fourier coeffcients up to factor of e^(- something constant)
         x_ft = torch.fft.rfft2(x, norm = 'forward')
 
         # Multiply relevant Fourier modes
-        out_ft = torch.zeros(batchsize, self.out_channels,  self.dim1, self.dim2//2 + 1 , dtype=torch.cfloat, device=x.device)
+        out_ft = torch.zeros(batchsize, self.out_channels,  dim1, dim2//2 + 1 , dtype=torch.cfloat, device=x.device)
         out_ft[:, :, :self.modes1, :self.modes2] = \
             self.compl_mul2d(x_ft[:, :, :self.modes1, :self.modes2], self.weights1)
         out_ft[:, :, -self.modes1:, :self.modes2] = \
             self.compl_mul2d(x_ft[:, :, -self.modes1:, :self.modes2], self.weights2)
 
         #Return to physical space
-        x = torch.fft.irfft2(out_ft, s=(self.dim1, self.dim2),norm = 'forward')
+        x = torch.fft.irfft2(out_ft, s=(dim1, dim2),norm = 'forward')
         return x
 
 class pointwise_op_2D(nn.Module):
@@ -283,16 +284,16 @@ class SpectralConv3d_Uno(nn.Module):
         input shape = (batch, in_codim, input_dim1, input_dim2, input_dim3)
         output shape = (batch, out_codim, dim1,dim2,dim3)
         """
-        if dim1 is not None:
-            self.dim1 = dim1
-            self.dim2 = dim2
-            self.dim3 = dim3   
+        if dim1 is None:
+            dim1 = self.dim1
+            dim2 = self.sim2
+            dim3 = self.dim3
 
         batchsize = x.shape[0]
 
         x_ft = torch.fft.rfftn(x, dim=[-3,-2,-1], norm = 'forward')
 
-        out_ft = torch.zeros(batchsize, self.out_channels, self.dim1, self.dim2, self.dim3//2 + 1, dtype=torch.cfloat, device=x.device)
+        out_ft = torch.zeros(batchsize, self.out_channels, dim1, dim2, dim3//2 + 1, dtype=torch.cfloat, device=x.device)
 
         out_ft[:, :, :self.modes1, :self.modes2, :self.modes3] = \
             self.compl_mul3d(x_ft[:, :, :self.modes1, :self.modes2, :self.modes3], self.weights1)
@@ -304,7 +305,7 @@ class SpectralConv3d_Uno(nn.Module):
             self.compl_mul3d(x_ft[:, :, -self.modes1:, -self.modes2:, :self.modes3], self.weights4)
 
         #Return to physical space
-        x = torch.fft.irfftn(out_ft, s=(self.dim1, self.dim2, self.dim3), norm = 'forward')
+        x = torch.fft.irfftn(out_ft, s=(dim1, dim2, dim3), norm = 'forward')
         return x
 
 class pointwise_op_3D(nn.Module):

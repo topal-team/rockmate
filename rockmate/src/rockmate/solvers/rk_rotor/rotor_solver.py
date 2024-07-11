@@ -21,7 +21,7 @@ import math
 # ==========================
 
 
-def psolve_dp_functional(chain, mmax, opt_table=None):
+def psolve_dp_functional(chain, mmax: int, opt_table=None):
     """Returns the optimal table:
     Opt[m][lmin][lmax] : int matrix
         with lmin = 0...chain.length
@@ -49,14 +49,14 @@ def psolve_dp_functional(chain, mmax, opt_table=None):
     # opt = dict()
     # what = dict()
 
-    def opt_add(m, a, b, time):
+    def opt_add(m: int, a:int, b:int, time):
         if not m in opt:
             opt[m] = dict()
         if not a in opt[m]:
             opt[m][a] = dict()
         opt[m][a][b] = time
 
-    def what_add(m, a, b, time):
+    def what_add(m:int, a:int, b:int, time):
         if not m in what:
             what[m] = dict()
         if not a in what[m]:
@@ -132,7 +132,7 @@ def psolve_dp_functional(chain, mmax, opt_table=None):
                 for k in range(nb_sol[a]):
                     mem_f = cw[a + 1] + cbw[a + 1][k] + fwd_tmp[a][k]
                     mem_b = cw[a] + cbw[a + 1][k] + bwd_tmp[a][k]
-                    limit = max(mem_f, mem_b)
+                    limit = max(mem_f, mem_b, cbw[a+1][k])
                     if m >= limit:
                         time = fw[a][k] + bw[a][k]
                         time += solve_aux(m - cbw[a + 1][k], a + 1, b)
@@ -166,10 +166,9 @@ def psolve_dp_functional(chain, mmax, opt_table=None):
 # ==========================
 
 
-def pseq_builder(chain, memory_limit, opt_table):
+def pseq_builder(chain, memory_limit: int, opt_table):
     # returns :
     # - the optimal sequence of computation using mem-persistent algo
-    mmax = memory_limit - chain.cw[0]
     # opt, what = solve_dp_functional(chain, mmax, *opt_table)
     opt, what = opt_table
     #  ~~~~~~~~~~~~~~~~~~
@@ -181,21 +180,32 @@ def pseq_builder(chain, memory_limit, opt_table):
             raise ValueError(
                 "Can't find a feasible sequence with the given budget"
             )
-        if opt[cmem][lmin][lmax] == float("inf"):
-            """
-            print('a')
-            print(chain.cw)
-            print('abar')
-            for i in range(chain.ln):
-                print(chain.cbw[i])
-                print(chain.fwd_tmp[i])
-                print(chain.bwd_tmp[i])
-            """
-            raise ValueError(
-                "Can't find a feasible sequence with the given budget"
-                # f"Can't process this chain from index "
-                # f"{lmin} to {lmax} with memory {memory_limit}"
-            )
+        try:
+            if opt[cmem][lmin][lmax] == float("inf"):
+                """
+                print('a')
+                print(chain.cw)
+                print('abar')
+                for i in range(chain.ln):
+                    print(chain.cbw[i])
+                    print(chain.fwd_tmp[i])
+                    print(chain.bwd_tmp[i])
+                """
+                raise ValueError(
+                    "Can't find a feasible sequence with the given budget"
+                    # f"Can't process this chain from index "
+                    # f"{lmin} to {lmax} with memory {memory_limit}"
+                )
+        except KeyError as e:
+            print("Seq Builder failure for ", cmem, lmin, lmax, "memory_limit=", memory_limit, "chain ln=", chain.ln)
+            if cmem not in opt:
+                print(f"Memory value {cmem} not in opt table")
+            else:
+                if lmin not in opt[cmem]:
+                    print(f"lmin value {lmin} not in opt[{cmem}]")
+                else:
+                    print(f"lmax value {lmax} not in opt[{cmem}][{lmin}]")
+            raise e
 
         if lmin == chain.ln:
             seq.insert(SeqLoss())
@@ -206,25 +216,26 @@ def pseq_builder(chain, memory_limit, opt_table):
         if w[0]:
             k = w[1]
             sol = chain.body[lmin].sols[k]
-            seq.insert(SeqBlockFe(lmin, sol.fwd_sched))
+            seq.insert(SeqBlockFe(lmin, k, sol.fwd_op_list))
             seq.insert_seq(
                 seq_builder_rec(lmin + 1, lmax, cmem - chain.cbw[lmin + 1][k])
             )
-            seq.insert(SeqBlockBwd(lmin, sol.bwd_sched))
+            seq.insert(SeqBlockBwd(lmin, sol.bwd_op_list))
 
         #  -- Solution 1 --
         else:
             j = w[1]
-            seq.insert(SeqBlockFc(lmin, chain.body[lmin].Fc_sched))
+            seq.insert(SeqBlockFc(lmin, chain.body[lmin].Fc_op_list))
             for k in range(lmin + 1, j):
-                seq.insert(SeqBlockFn(k, chain.body[k].Fn_sched))
+                seq.insert(SeqBlockFn(k, chain.body[k].Fn_op_list))
             seq.insert_seq(seq_builder_rec(j, lmax, cmem - chain.cw[j]))
             seq.insert_seq(seq_builder_rec(lmin, j - 1, cmem))
         return seq
 
     #  ~~~~~~~~~~~~~~~~~~
 
-    seq = seq_builder_rec(0, chain.ln, mmax)
+    psolve_dp_functional(chain, memory_limit, opt_table=opt_table)
+    seq = seq_builder_rec(0, chain.ln, memory_limit)
     return seq
 
 
@@ -236,10 +247,11 @@ def pseq_builder(chain, memory_limit, opt_table):
 from . import csequence as cs
 
 try:
-    import rockmate.solvers.csolver as rs
+    import rockmate.solvers.rk_rotor.csolver as rs
 
     csolver_present = True
-except:
+except Exception as e:
+    print("ROTOR Warning: could not import C version of Rotor solver:", e)
     csolver_present = False
 
 
@@ -249,13 +261,13 @@ def convert_sequence_from_C(chain, original_sequence):
             return SeqLoss()
         body = chain.body[op.index]
         if isinstance(op, cs.SeqBlockFn):
-            return SeqBlockFn(op.index, body.Fn_sched)
+            return SeqBlockFn(op.index, body.Fn_op_list)
         if isinstance(op, cs.SeqBlockFc):
-            return SeqBlockFc(op.index, body.Fc_sched)
+            return SeqBlockFc(op.index, body.Fc_op_list)
         if isinstance(op, cs.SeqBlockFe):
-            return SeqBlockFe(op.index, body.sols[op.option].fwd_sched)
+            return SeqBlockFe(op.index, op.option, body.sols[op.option].fwd_op_list)
         if isinstance(op, cs.SeqBlockBwd):
-            return SeqBlockBwd(op.index, body.sols[op.option].bwd_sched)
+            return SeqBlockBwd(op.index, body.sols[op.option].bwd_op_list)
 
     result = RK_Sequence([convert_op(op) for op in original_sequence])
     return result
@@ -271,7 +283,7 @@ def csolve_dp_functional(chain, mmax, opt_table=None):
 
 
 def cseq_builder(chain, mmax, opt_table):
-    result = opt_table.build_sequence(mmax)
+    result = opt_table.build_sequence(mmax - chain.cw[0])
     return convert_sequence_from_C(chain, result)
 
 
@@ -282,8 +294,10 @@ def cseq_builder(chain, mmax, opt_table):
 
 def solve_dp_functional(chain, mmax, opt_table=None, force_python=False):
     if force_python or not csolver_present:
-        return psolve_dp_functional(chain, mmax, opt_table)
+        print("Warning, rotor solving with Python. Might be slow")
+        return psolve_dp_functional(chain, int(mmax), opt_table)
     else:
+        print("rotor solving with C.")
         return csolve_dp_functional(chain, int(mmax), opt_table)
 
 
@@ -291,5 +305,5 @@ def seq_builder(chain, mmax, opt_table):
     if csolver_present and isinstance(opt_table, rs.RkTable):
         return cseq_builder(chain, int(mmax), opt_table)
     else:
-        return pseq_builder(chain, mmax, opt_table)
+        return pseq_builder(chain, int(mmax), opt_table)
 

@@ -435,25 +435,20 @@ class OpSchedule:
         self.get_sched_info()
 
     def _sum_mem(self, alive_status_, ignore_list=[]):
-        mem = 0
-        for k, v in alive_status_.items():
-            if k not in ignore_list and v:
-                d = self.dict_alloc[k]
-                mem += d.mem
-        return mem
+        return sum(self.dict_alloc[k].mem
+                   for k, v in alive_status_.items()
+                   if k not in ignore_list and v)
 
-    def get_memory(self, alive_list, exclude_interfaces=True):
+    def get_memory(self, alive_list):
         L = len(self.op_list)
         self.time = np.zeros(L)
         self.save_mem = np.zeros(L)
+        self.save_mem_with_interfaces = np.zeros(L)
         self.overhead = np.zeros(L)
 
-        if exclude_interfaces:
-            exclude_names = self.interface_names
-        else:
-            exclude_names = []
         for i, (op, alive_status) in enumerate(zip(self.op_list, alive_list)):
-            self.save_mem[i] = self._sum_mem(alive_status, exclude_names)
+            self.save_mem[i] = self._sum_mem(alive_status, ignore_list=self.interface_names)
+            self.save_mem_with_interfaces[i] = self._sum_mem(alive_status)
             if op.disabled:
                 continue
             self.time[i] = (

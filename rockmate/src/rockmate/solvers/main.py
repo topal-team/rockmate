@@ -1,7 +1,7 @@
 import rkgb
 import torch
 import numpy as np
-from copy import deepcopy
+from copy import deepcopy, copy
 
 from rkgb.lowlevel.ast_add_on import ast_to_str
 from rkgb.lowlevel.measure import TimerCPU
@@ -112,7 +112,7 @@ class FastSolver(Solver):
         autograd_sched = OpSchedule(
             autograd_op_list, cluster=cluster, loss_idx=autograd_loss_idx
         )
-        re_autograd_op_list = deepcopy(autograd_op_list)
+        re_autograd_op_list = copy(autograd_op_list) ##LED was deepcopy()
         loss_op = re_autograd_op_list.pop(autograd_loss_idx)
         recompute_op_list = ff_op_list + [loss_op] + re_autograd_op_list
         list_sched.append(autograd_sched)
@@ -238,7 +238,7 @@ def translate(cluster: HierarchicalCluster, op_list):
         return op_list
     translator_re = cluster.representee_cluster.translator
     translator = cluster.translator
-    translated_op_list = deepcopy(op_list)
+    translated_op_list = [ copy(op) for op in op_list]
 
     def translate_op(op):
         if isinstance(op, ComputeOp):

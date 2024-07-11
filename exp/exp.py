@@ -197,18 +197,41 @@ def exec_rk(model, sample, niters=10, device="cuda", **kwargs):
     peak_mem = torch.cuda.max_memory_allocated() - mem
     return time, peak_mem
 
-def exec_pt(model, sample, optim=torch.optim.Adam, niters=10, device="cuda", optimizer=None, **kwargs):
+def exec_pt(model, sample, optim=torch.optim.Adam, niters=10, device="cuda", profile=None, **kwargs):
     torch.random.manual_seed(0)
     torch.cuda.reset_peak_memory_stats()
     sample = [s.to(device) for s in sample]
-    if optimizer is None:
-        optimizer = optim(model.parameters(), lr=1e-3)
+
+    try: 
+        m = model.original_mod
+    except AttributeError:
+        m = model
+    for p in m.parameters():
+        if p.requires_grad:
+            p.grad = torch.zeros_like(p)
+
+    optimizer = optim(model.parameters(), lr=1e-3)
     def optimize():
         optimizer.step()
+
+    optimize() ##To create the optimizer states
     mem = torch.cuda.memory_allocated()
     print(f"Memory allocated before exec {mem}")
-    time = execution(model, sample, niters, optimize_fct=optimize, **kwargs)
-    peak_mem = torch.cuda.max_memory_allocated()# - mem
+
+    if profile: 
+        with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
+                profile_memory=True,
+            ) as p:
+            time = execution(model, sample, niters, optimize_fct=optimize, zero_grad=True, **kwargs)
+        p.export_chrome_trace(f"profiles/{profile}.json")
+    else:
+        time = execution(model, sample, niters, optimize_fct=optimize, zero_grad=True, **kwargs)
+
+    peak_mem = torch.cuda.max_memory_allocated() - mem
     return time, peak_mem
 
 def exp_pt(nlayers=1, 
@@ -243,7 +266,7 @@ def exp_pt(nlayers=1,
     exp_stats["gpu_optim"] = str(optim)
     exp_stats["gpu_type"] = torch.cuda.get_device_name()
 
-    time, mem = exec_pt(model.to("cuda"), sample, niters=niters, optim=optim)
+    time, mem = exec_pt(model.to("cuda"), sample, niters=niters, optim=optim)#, profile="pytorch")
     torch.cuda.synchronize()
     print(time, mem)
 
@@ -260,6 +283,7 @@ def exp_pt(nlayers=1,
     results[nlayers] = exp_stats
     with open(exp_id, "wb") as f:
         pickle.dump(results, f)
+    return exp_stats
 
 def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B",
               activation_offload=True, cpu_optimization=True, get_model=get7Bllama,
@@ -364,6 +388,7 @@ def exp_rkmod(nlayers=1, batch_size=3, exp_id=None, num_adapters=None, id="7B",
     results[eid] = exp_stats
     with open(exp_id, "wb") as f:
         pickle.dump(results, f)
+    return exp_stats
             
 def solve_rkmod(model, 
                 sample, 
