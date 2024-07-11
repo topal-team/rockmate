@@ -24,64 +24,44 @@ from .ilp_utils import (
     clean_hg_parameter_groups,
 )
 import psutil
+from dataclasses import dataclass, field
 
 
-default_time_limit = [60 * 60]
+## default_time_limit = [60 * 60]
 
 
 class HILP(Solver):
+    @dataclass
     class Config:
-        def __init__(
-            self,
-            mem_unit=1024**2,
-            ilp_solver_params={
-                "LogToConsole": 0,
-                "IntegralityFocus": 1,
-                "NodeFileStart": 0.5,
-            },
-            protected_names=[
-                f"{init_target_string} data",
-                f"{init_target_string} grad",
-            ],
-            nb_total_sched=100,
-            nb_total_nodes_top_level=100,
-            nb_total_nodes=20,
-            nb_bdg_save=6,
-            nb_bdg_peak=4,
-            time_limit=15*60,
-            offload=False,
-            activation_offload=False,
-        ):
-            self.mem_unit = mem_unit
-            self.ilp_solver_params = ilp_solver_params
-            self.protected_names = protected_names
-            self.nb_total_sched = nb_total_sched
-            self.nb_total_nodes_top_level = nb_total_nodes_top_level
-            self.nb_total_nodes = nb_total_nodes
-            self.nb_bdg_save = nb_bdg_save
-            self.nb_bdg_peak = nb_bdg_peak
-            self.solve_only_top_level = False
-            self.solve_kwargs = {"time_limit":time_limit}
-            self.top_solve_kwargs = {"time_limit":time_limit}
-            self.offload = offload
-            self.add_offload_sched = False
+        mem_unit: int = 1024**2
+        ilp_solver_params: dict = field(default_factory=lambda:
+                                        {
+                                            "LogToConsole": 0,
+                                            "IntegralityFocus": 1,
+                                            "NodeFileStart": 0.5,
+                                        })  ## passed to the ILP solver directly
+        ilp_solver: str = "PULP_CBC_CMD"
+        protected_names: list = field(default_factory=list)
+        nb_total_sched: int = 100
+        nb_total_nodes: int = 20
+        nb_bdg_save: int = 6
+        nb_bdg_peak: int = 4
+        time_limit: int = 1*60
+        offload: bool = False ## Only to be used in top solver
+        add_offload_sched: bool = False ## Only use in top solver, to automatically add offload versions of computed schedules
+        activation_offload: bool = False
+        model_kwargs: dict = field(default_factory=dict) ## Passed to the Model class
+        accurate_mem: bool = True ## If True, include correction terms; ignored if offload=False
+        add_offload_sched:bool = False
 
-        @property
-        def time_limit(self):
-            if self.time_limit_ is None:
-                return default_time_limit[0]
-            else:
-                return self.time_limit_
-
-    def __init__(self, config=None, ilp_solver=None):
-        super().__init__(config)
-        self.ilp_solver = ilp_solver  # or solver_name[0]
-        self.solve_top = False
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.ilp_solver = self.config.ilp_solver
         try:
             solver = pulp.get_solver(self.ilp_solver, msg=0)
         except:
             avail_solver = pulp.listSolvers(onlyAvailable=True)[0]
-            print(f"Cannot get {ilp_solver}, will use {avail_solver}")
+            print(f"Cannot get {self.ilp_solver}, will use {avail_solver}")
             self.ilp_solver = avail_solver
         print(f"Using {self.ilp_solver} to solve ILP")
 
@@ -89,13 +69,7 @@ class HILP(Solver):
     #     return f"HILP solver"
 
     def can_solve(self, hg: HierarchicalGraph):
-        if self.config.solve_only_top_level and not self.solve_top:
-            return False
-        if self.solve_top:
-            limit = self.config.nb_total_nodes_top_level
-        else:
-            limit = self.config.nb_total_nodes
-        return len(hg.list_HCNs) // 2 <= limit
+        return len(hg.list_HCNs) // 2 <= self.config.nb_total_nodes
 
     def get_budget_list(self, hgraph: HierarchicalGraph):
         min_bdg = get_hgraph_budget_lb(hgraph)
@@ -209,7 +183,7 @@ class HILP(Solver):
                 if nb_sched >= len(list_sched):
                     # hcn.list_sched = list_sched
                     set_hcn_list_sched(hcn, list_sched)
-                    if self.solve_top and self.config.add_offload_sched:
+                    if self.config.add_offload_sched:
                         self.add_offload_sched_hcn(hcn)
                     continue
                 indices = np.array(
@@ -234,7 +208,7 @@ class HILP(Solver):
                     sel_sched.append(list_sched[argmax_diff])
                     indices[argmax_diff][1] = 0
                 hcn.list_sched = sel_sched
-                if self.solve_top and self.config.add_offload_sched:
+                if self.config.add_offload_sched:
                     self.add_offload_sched_hcn(hcn)
                 # hcn.list_sched = list_sched[:nb_sched]
             else:
@@ -246,13 +220,12 @@ class HILP(Solver):
         self,
         cluster: HierarchicalCluster,
         budgets=None,
-        accurate_mem=False,
         gc_collect=True,
     ):
-        print(f"solving {cluster.name}")
+        print(f"solving {cluster.name} with budgets {budgets}")
         list_op_sched = []
 
-        if self.solve_top and self.config.offload:
+        if self.config.offload:
             self.model_ilp = ModelPULPOffload
         else:
             self.model_ilp = ModelPULP
@@ -279,7 +252,6 @@ class HILP(Solver):
                     self.solve_hg(
                         hg,
                         *budget,
-                        accurate_mem=accurate_mem,
                     )
                 )
         if gc_collect:
@@ -291,7 +263,6 @@ class HILP(Solver):
         hg: HierarchicalGraph,
         peak_budget,
         save_budget=None,
-        accurate_mem=False,
         print_result=False,
     ):
         # print(accurate_mem)
@@ -309,18 +280,10 @@ class HILP(Solver):
         if not hasattr(save_budget, "__iter__"):
             save_budget = [save_budget]
         # start = time.time()
-        if self.solve_top:
-            solve_kwargs = self.config.top_solve_kwargs
-            self._group_parameters(hg, 
-            minor_size= self.config.top_solve_kwargs["optimize_metrics"]["minor_offload_size"])
-        else:
-            solve_kwargs = self.config.solve_kwargs
-        ilp_solver_params = self.config.ilp_solver_params
-        ilp_solver_params["TimeLimit"] = solve_kwargs["time_limit"]
-        # if accurate_mem:
-        #     ilp_solver_params["TimeLimit"] = self.config.time_limit_top
-        # else:
-        #     ilp_solver_params["TimeLimit"] = self.config.time_limit
+        if self.config.offload:
+            self._group_parameters(hg, minor_size=self.config.solve_kwargs["optimize_metrics"]["minor_offload_size"])
+        ilp_solver_params = dict(self.config.ilp_solver_params)
+        ilp_solver_params["TimeLimit"] = self.config.time_limit
 
         def solve_md(
             ilp_solver_params=ilp_solver_params,
@@ -337,7 +300,7 @@ class HILP(Solver):
                 ilp_solver_params=ilp_solver_params,
                 accurate_mem=accurate_mem,
                 protected_names=protected_names,
-                **solve_kwargs
+                **self.config.model_kwargs
             )
             md.build()
             # print(f"model building: {time.time()-start}")
@@ -392,7 +355,7 @@ class HILP(Solver):
         list_op_sched, md = solve_md(
             ilp_solver_params=ilp_solver_params,
             model_ilp=self.model_ilp,
-            accurate_mem=accurate_mem,
+            accurate_mem=self.config.accurate_mem and self.config.offload,
             protected_names=self.config.protected_names,
             ilp_solver=self.ilp_solver,
         )
