@@ -144,15 +144,15 @@ class Rockmate(torch.nn.Module):
                 for solver in self.bottom_solvers:
                     if isinstance(solver, HILP):
                         if solver.config.nb_total_nodes < partitioner.config.max_estimate_per_sub_graph:
-                            print(f"Warning, bottom solver HILP has nb_total_nodes f{solver.config.nb_total_nodes}, "
-                                  "smaller than partitioner max_estimate_per_sub_graph f{partitioner.config.max_estimate_per_sub_graph}."
+                            print(f"Warning, bottom solver HILP has nb_total_nodes {solver.config.nb_total_nodes}, "
+                                  f"smaller than partitioner max_estimate_per_sub_graph {partitioner.config.max_estimate_per_sub_graph}."
                                   " This may result in failure to find schedules")
                 for solver in self.top_solvers:
                     if isinstance(solver, HILP):
                         if solver.config.nb_total_nodes < partitioner.config.max_estimate_for_main_graph:
-                            print(f"Warning, top solver HILP has nb_total_nodes f{solver.config.nb_total_nodes}, "
+                            print(f"Warning, top solver HILP has nb_total_nodes {solver.config.nb_total_nodes}, "
                                   "smaller than partitioner max_estimate_for_main_graph "
-                                  "f{partitioner.config.max_estimate_for_main_graph}. This may result in failure to find schedules")
+                                  f"{partitioner.config.max_estimate_for_main_graph}. This may result in failure to find schedules")
 
     def preprocess(self, solver = None):
         if solver is None:
