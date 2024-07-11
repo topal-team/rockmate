@@ -25,7 +25,6 @@ def _default_config(func):
     for arg in sign.parameters.values():
         if arg.default is not arg.empty:
             config[arg.name] = getattr(sample, arg.name)
-    print("Default for", func, " are ", config)
     return config
 
 def default_config(name):
@@ -34,7 +33,7 @@ def default_config(name):
     elif name in available_partitioners:
         func = available_partitioners[name].Config
     else:
-        raise InvalidArgument(f"default_config: unknown solver or partitioner {name}")
+        raise ValueError(f"default_config: unknown solver or partitioner {name}")
     return _default_config(func)
 
 def _add_solver(config, name, position):
@@ -71,6 +70,7 @@ def generate_config(config_type):
         _add_bottom_solver(result, "hilp")
         _add_top_solver(result, "hilp")
         _add_partitioner(result, "bottom_to_top")
+        result.solver.top.hilp.nb_total_nodes = result.partitioner.bottom_to_top.max_estimate_for_main_graph
         result.partitioner.bottom_to_top.can_use_rotor = False
     elif config_type == "hiremate":
         for solver in available_solvers.keys():
@@ -81,18 +81,24 @@ def generate_config(config_type):
         for partitioner in available_partitioners.keys():
             _add_partitioner(result, partitioner)
     else:
-        raise InvalidArgument(f"Unknown config type {config_type}. Valid values are:"
-                              "rotor, rockmate, checkmate, hilp, hiremate")
+        raise ValueError(f"Unknown config type {config_type}. Valid values are:"
+                         "rotor, rockmate, checkmate, hilp, hiremate")
     return result
 
+_yaml_inited = False
 def save_config(config, filename):
+    global _yaml_inited
+    if not _yaml_inited:
+        from yaml.representer import Representer
+        yaml.add_representer(Bunch, Representer.represent_dict)
+        _yaml_inited = True
     with open(filename, "w") as f:
         yaml.dump(config, f)
 
 def load_config(filename):
     with open(filename, "r") as f:
-        result = yaml.load(f, loader=yaml.SafeLoader)
-    return result
+        result = yaml.load(f, yaml.SafeLoader)
+    return Bunch(result)
 
 def _make_solver(name: str, b: Bunch):
     return available_solvers[name](**b)
@@ -106,7 +112,6 @@ def from_config(model, model_inputs, budget=None, config_type="hiremate", config
     top_solvers = [ _make_solver(name, conf) for name, conf in config.solver.top.items() if conf is not None ]
     bottom_solvers = [ _make_solver(name, conf) for name, conf in config.solver.bottom.items() if conf is not None ]
     partitioners = [ _make_partitioner(name, conf) for name, conf in config.partitioner.items() if conf is not None ]
-    print(f"I have {len(partitioners)} partitioners")
     if not partitioners:
         partitioners = [ partitioned.Partitioner() ]
     return Rockmate(model, model_inputs, budget, top_solvers=top_solvers, bottom_solvers=bottom_solvers,
