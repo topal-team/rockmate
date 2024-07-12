@@ -960,7 +960,6 @@ class Compiler:
                         f"exp_avg_sq_{var_name}", self.storage, shape=var_name
                     )
                 )
-        prep_op.add_fct(Fct_manager_alloc("allocation", self.storage))
 
         if minor_param_nodes:
             minor_parameters = [pnode.param_name for pnode in minor_param_nodes]
@@ -985,6 +984,7 @@ class Compiler:
         self._activation_placehold(prep_op, cluster, output_nodes)
         if op_sched.with_parameters and self.storage.gd["optimize_metrics"]:
             self._optimizer_placehold(prep_op, op_list, minor_param_nodes)
+        prep_op.add_fct(Fct_manager_alloc("allocation", self.storage))
         op_sched.init_op_list = init_op_list + [prep_op] + self.post_op_list
 
     def _compute_fwd(self, op: ComputeOp):
