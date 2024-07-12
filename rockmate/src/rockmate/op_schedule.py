@@ -399,6 +399,7 @@ class OpSchedule:
         self.optim_states_multiplier = optim_states_multiplier
         self.interfaces = cluster.interfaces
         self.correct_overhead = correct_overhead
+        self.with_optimization = any(isinstance(op, OptimizeOp) for op in op_list[::-1])
 
         self.create_list_alloc(cluster)
         self.get_sched_info()  # get the schedule information for higher level solving

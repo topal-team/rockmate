@@ -513,8 +513,12 @@ def get_single_compute_op_list(
 
 
 def get_optimize_metrics(
-    _p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10, minor_offload_size=1024**2
+    _p, optim, cpu_optim=None, optim_kwargs={}, niter=10, minor_offload_size=1024**2
 ):
+    if optim is None:
+        return None
+    if cpu_optim is None:
+        cpu_optim = optim
     # timer = irotor.make_timer(torch.device("cpu"))
     timer = TimerCPU()
     a_c = torch.ones([10, 1024, 1024], device="cpu", pin_memory=True)
@@ -527,7 +531,7 @@ def get_optimize_metrics(
     p = torch.ones([10, 1024, 1024], dtype=_p.dtype).to("cuda")
     size = p.numel()
     p.grad = torch.ones_like(p)
-    optimizer = gpu_optim([p], **optim_kwargs)
+    optimizer = optim([p], **optim_kwargs)
     torch.cuda.reset_peak_memory_stats()
     mem = torch.cuda.memory_allocated()
     optimizer.step()
@@ -577,7 +581,7 @@ def get_optimize_metrics(
         "optimizer_states_size": round(opt_size // size / p.element_size()),
         "optimizer_overhead": round(opt_overhead // size / p.element_size()),
         "cpu_optim": cpu_optim,
-        "gpu_optim": gpu_optim,
+        "gpu_optim": optim,
         "cpu_optimize_speed": size * p.element_size() * niter / timer.elapsed(),
         "gpu_optimize_speed": gpu_optimize_speed,
         "bandwidth": bandwidth,

@@ -53,6 +53,7 @@ class HILP(Solver):
         model_kwargs: dict = field(default_factory=dict) ## Passed to the Model class
         accurate_mem: bool = True ## If True, include correction terms; ignored if offload=False
         add_offload_sched:bool = False
+        minor_offload_size:int = 10*1024**2
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -281,7 +282,7 @@ class HILP(Solver):
             save_budget = [save_budget]
         # start = time.time()
         if self.config.offload:
-            self._group_parameters(hg, minor_size=self.config.solve_kwargs["optimize_metrics"]["minor_offload_size"])
+            self._group_parameters(hg, minor_size=self.config.minor_offload_size)
         ilp_solver_params = dict(self.config.ilp_solver_params)
         ilp_solver_params["TimeLimit"] = self.config.time_limit
 
@@ -300,6 +301,8 @@ class HILP(Solver):
                 ilp_solver_params=ilp_solver_params,
                 accurate_mem=accurate_mem,
                 protected_names=protected_names,
+                activation_offload=self.config.activation_offload,
+                optimize_metrics=self.config.optimize_metrics,
                 **self.config.model_kwargs
             )
             md.build()

@@ -704,6 +704,8 @@ class ModelPULPOffload(ModelPULP):
         We assume that GPU optimization happens only right after
         the backward, which should be accessed from time_step_optimize_self.
         """
+        if not self.optimize_metrics:
+            return 0
         mem = 0
         for w in range(self.W):
             mem += self.parameter_gradient_size[w] * self.OptC[t, k, w]
@@ -715,6 +717,8 @@ class ModelPULPOffload(ModelPULP):
         the backward, but CPU optimization could happen anytime and
         represented by self.OptC.
         """
+        if not self.optimize_metrics:
+            return 0
         mem = 0
         if cpu:
             for w in self.hcn2param[k]:

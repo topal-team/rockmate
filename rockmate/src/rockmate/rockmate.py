@@ -84,8 +84,8 @@ class Rockmate(torch.nn.Module):
 
         self.optimize_metrics = get_optimize_metrics(
             list(original_mod.parameters())[0],
+            optim=gpu_optim,
             cpu_optim=cpu_optim,
-            gpu_optim=gpu_optim,
             optim_kwargs=optim_kwargs,
             minor_offload_size=minor_offload_size,
         )
@@ -204,7 +204,7 @@ class Rockmate(torch.nn.Module):
             if isinstance(solver, HILP):
                 # TODO: if no partitioning is allowed, update solver max nodes
                 hilp_solver = True
-                solver.config.model_kwargs["optimize_metrics"] = self.global_dict["optimize_metrics"]
+                solver.config.optimize_metrics = self.global_dict["optimize_metrics"]
         for solver in list_solvers:
             if isinstance(solver, HILP):
                 solver.config.protected_names.extend([f"{init_target_string} data", f"{init_target_string} grad"])
