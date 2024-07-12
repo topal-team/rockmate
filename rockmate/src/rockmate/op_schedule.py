@@ -85,16 +85,16 @@ class Parameter(Allocation):
     """
 
     def __init__(
-        self, pnode, is_grad=False, is_optim_states=False, optim_states_multiplier=2
+        self, pnode, is_grad=False, is_optim_states=False, optimizer_states_factor=2
     ):
         self.pnode = pnode
         self.is_grad = is_grad
         self.is_optim_states = is_optim_states
-        self.optim_states_multiplier = optim_states_multiplier
+        self.optimizer_states_factor = optimizer_states_factor
         if not self.is_optim_states:
             mem = pnode.mem
         else:
-            mem = pnode.mem * self.optim_states_multiplier
+            mem = pnode.mem * self.optimizer_states_factor
 
         super().__init__(
             target_name=pnode.param_name,
@@ -382,7 +382,7 @@ class OpSchedule:
         init_alive_status: dict = {},
         init_op_list: list = [],
         restore_op_list: list = [],
-        optim_states_multiplier=2,
+        optimizer_states_factor=2,
         correct_overhead=True,
     ):
         """
@@ -396,7 +396,7 @@ class OpSchedule:
         self.init_op_list = init_op_list  # Place to prepare items in storage
         self.restore_op_list = restore_op_list
         self.with_parameters = with_parameters
-        self.optim_states_multiplier = optim_states_multiplier
+        self.optimizer_states_factor = optimizer_states_factor
         self.interfaces = cluster.interfaces
         self.correct_overhead = correct_overhead
         self.with_optimization = any(isinstance(op, OptimizeOp) for op in op_list[::-1])
@@ -647,18 +647,18 @@ class OpSchedule:
                     if anode.info.requires_grad
                 ]
             )  # add parameter grad allocation
-            # if self.optim_states_multiplier:
-            self.list_alloc.extend(
-                [
-                    Parameter(
-                        anode,
-                        is_optim_states=True,
-                        optim_states_multiplier=self.optim_states_multiplier,
-                    )
-                    for anode in cluster.parameter_nodes
-                    if anode.info.requires_grad
-                ]
-            )  # add parameter grad allocation
+            if self.optimizer_states_factor:
+                self.list_alloc.extend(
+                    [
+                        Parameter(
+                            anode,
+                            is_optim_states=True,
+                            optimizer_states_factor=self.optimizer_states_factor,
+                        )
+                        for anode in cluster.parameter_nodes
+                        if anode.info.requires_grad
+                    ]
+                )  # add parameter grad allocation
         self.dict_alloc_param = {
             alloc.name: alloc
             for alloc in self.list_alloc

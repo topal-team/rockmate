@@ -98,7 +98,7 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
 
         init_ops = {op.target.name: op for op in init_op_list}
         for pnode in md.hgraph.cluster.parameter_nodes:
-            if pnode.mem < md.optimize_metrics["minor_offload_size"] or pnode.is_buffer:
+            if pnode.mem < md.minor_offload_size or pnode.is_buffer:
                 device = "cuda"
             else:
                 device = "cpu"
@@ -137,9 +137,9 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
         init_op_list=init_op_list,
         restore_op_list=restore_op_list,
         with_parameters=isinstance(md, ModelPULPOffload),
-        optim_states_multiplier=(
+        optimizer_states_factor=(
             md.optimize_metrics["optimizer_states_factor"]
-            if isinstance(md, ModelPULPOffload)
+            if md.optimize_metrics
             else None
         ),
     )
@@ -389,7 +389,7 @@ def group(md, w, tol=1):
     init_ops = []
     restore_ops = []
     init_alive = []
-    cpu_optimize_candidates = {p: 0 for p in parameters.keys()}
+    cpu_optimize_candidates = {p: 0 for p in parameters.keys()} if md.optimize_metrics else {}
 
     def apply_cpu_optimize(p):
         for t, k, op in ofl_ops:
@@ -547,9 +547,12 @@ def group(md, w, tol=1):
                 Alive[p] = 1
                 if (t > bwd_i and t < min(early_fwd + [md.T + 1])) or t < fwd_i:
                     # cpu optimize only if prefetch before fwd
-                    if parameters[p].info.requires_grad:
+                    if parameters[p].info.requires_grad and md.optimize_metrics:
                         # only trainable parameters will be optimize candidate
                         cpu_optimize_candidates[p] = 1
+
+    if not md.optimize_metrics:
+        return ofl_ops, prf_ops, del_ops, opt_ops, init_ops, restore_ops, init_alive
 
     candidates = {
         p: parameters[p].mem * a for p, a in cpu_optimize_candidates.items() if a > 0

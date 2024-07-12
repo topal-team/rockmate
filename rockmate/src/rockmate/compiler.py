@@ -983,7 +983,7 @@ class Compiler:
             self.compile_op[op.__class__.__name__](op)
         prep_op = Op("Preparation")
         self._activation_placehold(prep_op, cluster, output_nodes)
-        if op_sched.with_parameters:
+        if op_sched.with_parameters and self.storage.gd["optimize_metrics"]:
             self._optimizer_placehold(prep_op, op_list, minor_param_nodes)
         op_sched.init_op_list = init_op_list + [prep_op] + self.post_op_list
 

@@ -39,7 +39,6 @@ class ModelPULPOffload(ModelPULP):
         )
 
         self.with_grad = accurate_mem
-        self.with_optimizer_states = accurate_mem  # optimizer states will be offloaded
         self.gradient_accumulation = (
             0  # if 0, no gradient/optimizer states alive from previous iters
         )
@@ -379,7 +378,6 @@ class ModelPULPOffload(ModelPULP):
         self,
     ):
         # if with_grad, AliveG is a variable
-        # if with_optimizer_states, AliveO is a variable
         self.OflWProg = dict()
         self.OflGProg = dict()
         self.OptCProg = dict()
