@@ -22,6 +22,8 @@ class ModelPULPOffload(ModelPULP):
         optimize_metrics=None,
         activation_offload=False,
         dynamic_batch_size=False,
+        minor_offload_size=None,
+        bandwidth=None,
         ram_budget=None,
         cpu_optimize=True,
         **kwargs
@@ -52,6 +54,8 @@ class ModelPULPOffload(ModelPULP):
         self.dynamic_batch_size = dynamic_batch_size
         self.ram_budget = ram_budget or virtual_memory().available * 0.9/self.gcd
         self.cpu_optimize = cpu_optimize
+        self.minor_offload_size = minor_offload_size
+        self.bandwidth = bandwidth
 
     def build(self):
         # OVERWRITTING METHOD
@@ -69,25 +73,29 @@ class ModelPULPOffload(ModelPULP):
         self.add_offload_time_constraints()
 
     def config_offload(self):
-        optimize_metrics = self.optimize_metrics
-        self.optimizer_states_factor = optimize_metrics[
-            "optimizer_states_size"
-        ]  # *weight size
-        self.cpu_optimize_speed = (
-            optimize_metrics["cpu_optimize_speed"] / self.gcd
-        )  # B/ms
-        self.gpu_optimize_speed = (
-            optimize_metrics["gpu_optimize_speed"] / self.gcd
-        )  # B/ms
-        self.optimizer_overhead_factor = optimize_metrics[
-            "optimizer_overhead"
-        ]  # *weight size
-        self.minor_offload_size = optimize_metrics[
-            "minor_offload_size"
-        ]  # minor weight size
-        self.bandwidth = optimize_metrics["bandwidth"]  # bandwidth
-        self.bandwidthOfl = self.optimize_metrics["bandwidth"] / self.gcd  # byte/ms
-        self.bandwidthPrf = self.optimize_metrics["bandwidth"] / self.gcd  # byte/ms
+        if self.optimize_metrics:
+            optimize_metrics = self.optimize_metrics
+            self.optimizer_states_factor = optimize_metrics[
+                "optimizer_states_factor"
+            ]  # *weight size
+            self.cpu_optimize_speed = (
+                optimize_metrics["cpu_optimize_speed"] / self.gcd
+            )  # B/ms
+            self.gpu_optimize_speed = (
+                optimize_metrics["gpu_optimize_speed"] / self.gcd
+            )  # B/ms
+            self.optimizer_overhead_factor = optimize_metrics[
+                "optimizer_overhead"
+            ]  # *weight size
+        else:
+            self.optimizer_overhead_factor = 0
+            self.optimizer_states_factor = 0
+            self.cpu_optimize_speed = 0
+            self.gpu_optimize_speed = 0
+
+        # self.bandwidth = optimize_metrics["bandwidth"]  # bandwidth
+        self.bandwidthOfl = self.bandwidth / self.gcd  # byte/ms
+        self.bandwidthPrf = self.bandwidth / self.gcd  # byte/ms
         
         self.schedule_offload_time = []
         self.schedule_prefetch_time = []
@@ -201,8 +209,10 @@ class ModelPULPOffload(ModelPULP):
         self.OflG = RkLpVariable.dicts("OflG", param_idx)  # Offload gradient
         self.PrfW = RkLpVariable.dicts("PrfW", param_idx)  # Prefetch gradient
         self.PrfG = RkLpVariable.dicts("PrfG", param_idx)  # Prefetch gradient
-        self.OflO = RkLpVariable.dicts("OflO", param_idx)  # Offload optimizer states
-        self.PrfO = RkLpVariable.dicts("PrfO", param_idx)  # Prefetch optimizer states
+        self.OflO = RkLpVariable.dicts("OflO", param_idx, 
+                        upBound=1 if self.optimize_metrics else 0)  # Offload optimizer states
+        self.PrfO = RkLpVariable.dicts("PrfO", param_idx, 
+                        upBound=1 if self.optimize_metrics else 0)  # Prefetch optimizer states
 
         if self.cpu_optimize:
             self.OptC = RkLpVariable.dicts("OptC", param_idx)  # Optimize on cpu
@@ -322,7 +332,7 @@ class ModelPULPOffload(ModelPULP):
                 self.PrfG[k] = 0
 
         # if not self.with_optimizer_states:
-        if not self.optimize_metrics["optimizer_states_size"]:
+        if not self.optimizer_states_factor:
             for t, k, w in self.AliveO:
                 self.AliveO[(t, k, w)] = self.req_w - self.accumC_optimizer_states(w)
                 self.PrfO[(t, k, w)] = 0

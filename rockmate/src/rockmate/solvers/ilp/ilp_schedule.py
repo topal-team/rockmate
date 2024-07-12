@@ -138,7 +138,7 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
         restore_op_list=restore_op_list,
         with_parameters=isinstance(md, ModelPULPOffload),
         optim_states_multiplier=(
-            md.optimize_metrics["optimizer_states_size"]
+            md.optimize_metrics["optimizer_states_factor"]
             if isinstance(md, ModelPULPOffload)
             else None
         ),

@@ -20,9 +20,10 @@ from rkgb.core.partitioned import (
 )
 from rkgb.lowlevel.constants import init_target_string
 
+from .utils import get_optimize_metrics, measure_bandwidth
 from .op_schedule import *
 from .simulation import Simulator
-from .solvers.main import preprocess, solve_recursive, get_optimize_metrics, FastSolver, add_sched
+from .solvers.main import preprocess, solve_recursive, FastSolver, add_sched
 from .solvers import HILP, CheapSolver, RK_rotor
 from .compiler import Compiler, RK_Storage, make_gd, Fct_record_event
 import psutil
@@ -89,6 +90,8 @@ class Rockmate(torch.nn.Module):
             optim_kwargs=optim_kwargs,
             minor_offload_size=minor_offload_size,
         )
+        # TODO: only measure bandwidth if needed
+        self.bandwidth = measure_bandwidth()
 
         self.global_dict = make_gd(
             self.device,
@@ -205,6 +208,10 @@ class Rockmate(torch.nn.Module):
                 # TODO: if no partitioning is allowed, update solver max nodes
                 hilp_solver = True
                 solver.config.optimize_metrics = self.global_dict["optimize_metrics"]
+                if solver.config.offload:
+                    if self.bandwidth is None:
+                        self.bandwidth = measure_bandwidth()
+                    solver.config.bandwidth = self.bandwidth
         for solver in list_solvers:
             if isinstance(solver, HILP):
                 solver.config.protected_names.extend([f"{init_target_string} data", f"{init_target_string} grad"])
@@ -497,9 +504,10 @@ class Rockmate(torch.nn.Module):
 
     @property
     def minor_size(self):
-        return sum([pnode.mem for pnode in self.minor_param_nodes]) * (
-            self.global_dict["optimize_metrics"]["optimizer_states_size"] + 1
-        )
+        optimizer_states_factor = 0
+        if self.optimize_metrics:
+            optimizer_states_factor += self.optimize_metrics["optimizer_states_factor"]
+        return sum([pnode.mem for pnode in self.minor_param_nodes]) * (optimizer_states_factor+1)
 
     @property
     def op_list(self):

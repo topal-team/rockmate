@@ -303,6 +303,8 @@ class HILP(Solver):
                 protected_names=protected_names,
                 activation_offload=self.config.activation_offload,
                 optimize_metrics=self.config.optimize_metrics,
+                bandwidth=self.config.bandwidth,
+                minor_offload_size = self.config.minor_offload_size,
                 **self.config.model_kwargs
             )
             md.build()
