@@ -50,9 +50,8 @@ class HILP(Solver):
         offload: bool = False ## Only to be used in top solver
         add_offload_sched: bool = False ## Only use in top solver, to automatically add offload versions of computed schedules
         activation_offload: bool = False
-        model_kwargs: dict = field(default_factory=dict) ## Passed to the Model class
-        accurate_mem: bool = True ## If True, include correction terms; ignored if offload=False
-        add_offload_sched:bool = False
+        model_kwargs: dict = field(default_factory=dict) ## Passed to the ModelILP class
+        accurate_mem: bool = True ## If True, include correction terms
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -355,7 +354,7 @@ class HILP(Solver):
         list_op_sched, md = solve_md(
             ilp_solver_params=ilp_solver_params,
             model_ilp=self.model_ilp,
-            accurate_mem=self.config.accurate_mem and self.config.offload,
+            accurate_mem=self.config.accurate_mem,
             protected_names=self.config.protected_names,
             ilp_solver=self.ilp_solver,
         )

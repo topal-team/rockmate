@@ -197,34 +197,20 @@ class Rockmate(torch.nn.Module):
         budget = budget or self.budget
         budget -= self.minor_size
         list_solvers = list_solvers or self.top_solvers
-        rotor_solver = False
-        hilp_solver = False
-        checkmate_solver = False
+
+        # Set some options whoe values can only be known at runtime
         for solver in list_solvers:
             if isinstance(solver, HILP):
-                # TODO: if no partitioning is allowed, update solver max nodes
-                hilp_solver = True
                 solver.config.model_kwargs["optimize_metrics"] = self.global_dict["optimize_metrics"]
-        for solver in list_solvers:
-            if isinstance(solver, HILP):
                 solver.config.protected_names.extend([f"{init_target_string} data", f"{init_target_string} grad"])
                 if self.keep_outputs:
                     solver.config.protected_names.extend(self.output_names)
-                if rotor_solver: ##TODO: check in what case this is useful
-                    solver.config.nb_bdg_save = 10
-                    solver.config.nb_bdg_peak = 10
                 if self.dynamic_batch_dim is not None:
                     solver.config.model_kwargs["dynamic_batch_size"] = True
 
-        if (
-            any([
-                isinstance(solver, HILP)  or isinstance(solver, RK_rotor)
-                for solver in list_solvers
-            ])
-        ):
-            self.preprocess()
-            if recursive:
-                self.solver_recursive()
+        self.preprocess()
+        if self.bottom_solvers and recursive:
+            self.solver_recursive()
 
         list_solutions = []
         for solver in list_solvers:

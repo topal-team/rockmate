@@ -61,6 +61,8 @@ def generate_config(config_type):
     elif config_type == "rockmate":
         _add_bottom_solver(result, "hilp")
         _add_top_solver(result, "rotor")
+        result.solver.bottom.hilp.nb_bdg_save = 10
+        result.solver.bottom.hilp.nb_bdg_peak = 10
         _add_partitioner(result, "sequence")
     elif config_type == "checkmate":
         _add_top_solver(result, "hilp")
@@ -71,6 +73,8 @@ def generate_config(config_type):
         _add_top_solver(result, "hilp")
         _add_partitioner(result, "bottom_to_top")
         result.solver.top.hilp.nb_total_nodes = result.partitioner.bottom_to_top.max_estimate_for_main_graph
+        result.solver.top.hilp.time_limit *= 20
+        result.solver.bottom.hilp.accurate_mem = False
         result.partitioner.bottom_to_top.can_use_rotor = False
     elif config_type == "hiremate":
         for solver in available_solvers.keys():
@@ -78,6 +82,7 @@ def generate_config(config_type):
             _add_bottom_solver(result, solver)
         result.solver.top.hilp.nb_total_nodes = 100
         result.solver.top.hilp.time_limit *= 20
+        result.solver.bottom.hilp.accurate_mem = False
         for partitioner in available_partitioners.keys():
             _add_partitioner(result, partitioner)
     else:
