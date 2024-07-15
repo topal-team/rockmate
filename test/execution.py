@@ -63,8 +63,8 @@ def check_correctness(model, sample, budget=1e9, optim=torch.optim.Adam, dtype=N
     model_r = Rockmate(model, sample, budget, 
                         solve_sched=False,
                         cpu_optim=optim,
-                        gpu_optim=optim,
-                        ilp_solver = "PULP_CBC_CMD")
+                        gpu_optim=optim
+                        )
     # model_r.solve_sched(budget)
     model_r.fast_solve()
     model_r.get_compiled_fct()

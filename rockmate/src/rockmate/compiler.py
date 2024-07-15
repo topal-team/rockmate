@@ -71,7 +71,6 @@ def make_gd(
         "meta": {dtype: torch.ones(1, dtype=dtype, device=device, requires_grad=True) for dtype in float_dtype},
         # "cpu_optim": optimize_metrics["cpu_optim"],
         # "gpu_optim": optimize_metrics["gpu_optim"],
-        # "opt_kwargs": optimize_metrics["optim_kwargs"],
         "optimize_metrics": optimize_metrics,
         "main_stream": torch.cuda.current_stream(),
         # "prefetch_stream": torch.cuda.current_stream(),
@@ -941,7 +940,7 @@ class Compiler:
                         list_params=op.list_params,
                         optim=optim,
                         is_cpu=op.is_cpu,
-                        **self.storage.gd["optimize_metrics"]["opt_kwargs"],
+                        **self.storage.gd["optimize_metrics"]["optim_kwargs"],
                     )
                 )
             if (
@@ -969,7 +968,7 @@ class Compiler:
                     storage=self.storage,
                     list_params=minor_parameters,
                     optim=self.storage.gd["optimize_metrics"]["gpu_optim"],
-                    **self.storage.gd["optimize_metrics"]["opt_kwargs"],
+                    **self.storage.gd["optimize_metrics"]["optim_kwargs"],
                 )
             )
 

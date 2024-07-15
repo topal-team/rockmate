@@ -18,7 +18,7 @@ class ModelPULPOffload(ModelPULP):
         accurate_mem=False,
         protected_names=...,
         grouping=True,
-        grad_mode="free",
+        grad_mode="free", #['free', 'accumulate', 'zero_grad']
         optimize_metrics=None,
         activation_offload=False,
         dynamic_batch_size=False,
@@ -39,9 +39,6 @@ class ModelPULPOffload(ModelPULP):
         )
 
         self.with_grad = accurate_mem
-        self.gradient_accumulation = (
-            0  # if 0, no gradient/optimizer states alive from previous iters
-        )
         self.single_fwd = accurate_mem
         self.single_bwd = accurate_mem
         self.grouping = grouping
@@ -55,6 +52,14 @@ class ModelPULPOffload(ModelPULP):
         self.cpu_optimize = cpu_optimize
         self.minor_offload_size = minor_offload_size
         self.bandwidth = bandwidth
+        if not self.optimize_metrics:
+            raise UserWarning("Trying to solve ILP with offload but "\
+                              "optimization method is not provided."\
+                              "This is not implemented yet.")
+
+        if self.grad_mode != "free":
+            raise UserWarning("Parameter gradients are not freed during backward, "\
+                              "which is not implemented in ILP.")
 
     def build(self):
         # OVERWRITTING METHOD
@@ -213,7 +218,7 @@ class ModelPULPOffload(ModelPULP):
         self.PrfO = RkLpVariable.dicts("PrfO", param_idx, 
                         upBound=1 if self.optimize_metrics else 0)  # Prefetch optimizer states
 
-        if self.cpu_optimize:
+        if self.cpu_optimize and self.optimize_metrics:
             self.OptC = RkLpVariable.dicts("OptC", param_idx)  # Optimize on cpu
         else:
             self.OptC = RkLpVariable.dicts("OptC", param_idx, lowBound=0, upBound=0)
@@ -229,7 +234,9 @@ class ModelPULPOffload(ModelPULP):
 
     def accumC_grad(self, w):
         # if grad_accumulation, gradient stored on CPU from previous iterations
-        return self.sumOptC[w]
+        if self.grad_mode == "free":
+            return self.sumOptC[w]
+
 
     def accumC_optimizer_states(self, w):
         # if grad_accumulation, optimizer states stored on CPU from previous iterations
@@ -326,11 +333,10 @@ class ModelPULPOffload(ModelPULP):
                     if k not in self.krange(t) or (t > fwd_i and t < bwd_i):
                         self.OptC[t, k, w] = 0
 
-        if not self.gradient_accumulation:
+        if not self.grad_mode == "accumulate":
             for k in self.PrfG:
                 self.PrfG[k] = 0
 
-        # if not self.with_optimizer_states:
         if not self.optimizer_states_factor:
             for t, k, w in self.AliveO:
                 self.AliveO[(t, k, w)] = self.req_w - self.accumC_optimizer_states(w)
@@ -362,7 +368,9 @@ class ModelPULPOffload(ModelPULP):
                             self.param_grad_mem[t, k] += grad_size * self.req_w
         elif self.grad_mode in ["accumulate"]:
             for t, k, w in self.AliveG:
-                self.AliveG[(t, k, w)] = 1
+                bwd_indices = [x for x in self.param2hcn[w] if x > self.loss_idx]
+                if t in bwd_indices:
+                    self.AliveG[(t, k, w)] = 1
                 # if k == max(self.param2hcn[w]):
                 #     self.overhead[k] = [v+grad_size for v in self.overhead[k]]
                 # TODO: add offload gradient variables for gradient accumulation
@@ -491,15 +499,15 @@ class ModelPULPOffload(ModelPULP):
             bwd_i = max(self.param2hcn[w])
             self.md += self.PrfWProg[fwd_i, fwd_i, w] >= self.sumOptC[w]
             self.md += self.req_w - self.sumOptC[w] <= self.AliveO[bwd_i, bwd_i, w]
-            if self.gradient_accumulation:
+            if self.grad_mode == "accumulate":
                 self.md += self.OflGProg[bwd_i, bwd_i, w] == self.accumC_grad(w)
                 self.md += (
                     self.PrfGProg[bwd_i, bwd_i, w]
                     == self.accumC_grad(w) - self.sumOptC[w]
                 )
             t_, k_ = self.next_idx(bwd_i, bwd_i)
-            # self.md += self.AliveO[t_, k_, w] - self.AliveO[bwd_i, bwd_i, w] <= 1 - self.gradient_accumulation
-            # self.md += self.AliveG[t_, k_, w] - self.AliveG[bwd_i, bwd_i, w] <= 1# - self.gradient_accumulation
+            # self.md += self.AliveO[t_, k_, w] - self.AliveO[bwd_i, bwd_i, w] <= 1 - self.grad_mode == "accumulate"
+            # self.md += self.AliveG[t_, k_, w] - self.AliveG[bwd_i, bwd_i, w] <= 1# - self.grad_mode == "accumulate"
             for t in range(self.T):
                 for k in self.param2hcn[w]:
                     if k not in self.krange(t):
@@ -623,7 +631,7 @@ class ModelPULPOffload(ModelPULP):
         return 1 - self.parameter_gradient_size[w] / self.parameter_size[w]
 
     def fraction_instant_updated_param(self, w):
-        if self.gradient_accumulation:
+        if self.grad_mode == "accumulate":
             # TODO: not fully supported now
             return 0
         if self.grad_mode == "free":
@@ -631,7 +639,7 @@ class ModelPULPOffload(ModelPULP):
         return self.req_w - self.sumOptC[w]
 
     def fraction_remaining_gradients(self, w):
-        if self.gradient_accumulation:
+        if self.grad_mode == "accumulate":
             # TODO: not fully supported now
             return self.req_w
         if self.grad_mode == "free":

@@ -367,7 +367,7 @@ def schedule_step(md: ModelPULP, t, k):
                 op.wait_events.append((ofl_op.op_type, ofl_op.target.name))
     return op_list
 
-def group(md, w, tol=1):
+def group(md: ModelPULPOffload, w, tol=1):
     # Group the parameters of each block for the task
     fwd_i = min(md.param2hcn[w])
     bwd_i = max(md.param2hcn[w])
@@ -594,7 +594,7 @@ def group(md, w, tol=1):
         else:
             apply_gpu_optimize(p)
             gpu_optimze_param.append(pnode)
-    if md.with_optimizer_states and gpu_optimze_param:
+    if md.optimize_metrics and gpu_optimze_param:
         ofl_ops_os, prf_ops_os, del_ops_os, init_alive_os = group_optimizer_states(
             md, w, gpu_optimze_param
         )

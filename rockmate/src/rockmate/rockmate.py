@@ -497,7 +497,9 @@ class Rockmate(torch.nn.Module):
             #         remains.append(v.pnode.param_name)
             for k, p in self.original_mod.named_parameters():
                 if k not in remains and p.grad is not None:
-                    # p.grad = None if set_to_none else torch.zeros_like(p)
+                    # if set_to_none:
+                    #     p.grad = None
+                    # else:
                     p.grad.zero_()
         else:
             self.original_mod.zero_grad(set_to_none=set_to_none)
