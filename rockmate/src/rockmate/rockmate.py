@@ -96,6 +96,8 @@ class Rockmate(torch.nn.Module):
             self.dict_constants,
             optimize_metrics=self.optimize_metrics,
         )
+        
+        self.fix_solver_config()
 
         if solve_sched:
             self.solve_sched(recursive=solve_recursive)
@@ -154,6 +156,24 @@ class Rockmate(torch.nn.Module):
                                   "smaller than partitioner max_estimate_for_main_graph "
                                   f"{partitioner.config.max_estimate_for_main_graph}. This may result in failure to find schedules")
 
+    def fix_solver_config(self):
+        # Set some options whoe values can only be known at runtime
+        for solver in self.top_solvers:
+            if isinstance(solver, HILP):
+                solver.config.model_kwargs["optimize_metrics"] = self.global_dict["optimize_metrics"]
+                solver.config.protected_names.extend([f"{init_target_string} data", f"{init_target_string} grad"])
+                if self.keep_outputs:
+                    solver.config.protected_names.extend(self.output_names)
+                if self.dynamic_batch_dim is not None:
+                    solver.config.model_kwargs["dynamic_batch_size"] = True
+
+        for solver in self.bottom_solvers:
+            if isinstance(solver, HILP):
+                solver.config.protected_names.extend([f"{init_target_string} data", f"{init_target_string} grad"])
+                if self.keep_outputs:
+                    solver.config.protected_names.extend(self.output_names)
+
+
     def preprocess(self, solver = None):
         if solver is None:
             solver = FastSolver()
@@ -197,16 +217,6 @@ class Rockmate(torch.nn.Module):
         budget = budget or self.budget
         budget -= self.minor_size
         list_solvers = list_solvers or self.top_solvers
-
-        # Set some options whoe values can only be known at runtime
-        for solver in list_solvers:
-            if isinstance(solver, HILP):
-                solver.config.model_kwargs["optimize_metrics"] = self.global_dict["optimize_metrics"]
-                solver.config.protected_names.extend([f"{init_target_string} data", f"{init_target_string} grad"])
-                if self.keep_outputs:
-                    solver.config.protected_names.extend(self.output_names)
-                if self.dynamic_batch_dim is not None:
-                    solver.config.model_kwargs["dynamic_batch_size"] = True
 
         self.preprocess()
         if self.bottom_solvers and recursive:
