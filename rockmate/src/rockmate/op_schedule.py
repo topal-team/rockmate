@@ -765,7 +765,7 @@ class OpSchedule:
                             op.pos_info["input_names"].append(pnode.param_name)
                     if not op.pos_info["input_names"]:
                         op.disabled = True
-                        raise Warning(f"{op.name} is recomputed but no target inputs")
+                        warnings.warn(f"{op.name} is recomputed but no target inputs")
 
     def __repr__(self) -> str:
         return f"Op_sched takes {sum(self.time):.2f} ms with {self.peak_mem/1024**2} MiB peak mem"
