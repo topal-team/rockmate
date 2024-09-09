@@ -104,6 +104,7 @@ class PartitionedGraph(base.Graph):
             partitioned_cluster = None,
             parent_objet = None,
             is_main_graph = False,
+            list_of_part_indices : list[list[int]] = None,
             list_of_blocks_indices : list[tuple[int,int]] = None):
         # 1) Initialize simple attributes
         super().__init__(parent_objet)
@@ -120,6 +121,15 @@ class PartitionedGraph(base.Graph):
         self.graph_nb = graph_nb
         self.name = f"PartitionedGraph({graph_nb})"
 
+        if list_of_blocks_indices and list_of_part_indices:
+            raise Exception(
+                "A PartitionedGraph: only specify one of list_of_part_indices and list_of_blocks_indices"
+            )
+        if list_of_blocks_indices:
+            list_of_part_indices = [ list(range(start, end)) for (start, end) in list_of_blocks_indices ]
+            self.list_of_blocks_indices = list_of_blocks_indices # useful to remember how it was built
+
+
         self.cluster = partitioned_cluster
         # Real constructors based on a partitioner_cluster
         if partitioned_cluster is not None:
@@ -127,73 +137,80 @@ class PartitionedGraph(base.Graph):
             dict_info = partitioned_cluster.p_structure.dict_info
             # 2) FIRST CONSTRUCTOR:
             # - Based on a list of blocks:
-            if list_of_blocks_indices:
-                self.list_of_blocks_indices = list_of_blocks_indices # useful to remember how it was built
-                nb_blocks = len(list_of_blocks_indices)
+            if list_of_part_indices:
                 self.nodes = []
                 self._first_nodes = set()
                 self.output_nodes = set()
                 s_nodes = partitioned_cluster.s_nodes
                 list_blocks_s_nodes = []
                 dict_sn_to_pn = dict()
-                for block_i in range(nb_blocks):
-                    (start_i,end_i) = list_of_blocks_indices[block_i]
+                is_output_sn = { sn: False for sn in s_nodes }
+                for part_indices in list_of_part_indices:
+                    assert len(part_indices) > 0
                     # 'start' is included in the block; 'end' isn't
                     # 1) Create the PartitionedNode
-                    if start_i == end_i - 1:
-                        sn = s_nodes[start_i]
+                    if len(part_indices) <= 1:
+                        sn = s_nodes[part_indices[0]]
                         block_s_nodes = [sn]
                         block_pn = PartitionedNode(
                             main_graph=self,
                             main_target=sn.mt,
                             simplified_node=sn)
-                        block_pn.memory_occupied_by_all_outputs = dict_info[sn.mt].memsize
                     else:
-                        block_s_nodes = s_nodes[start_i:end_i]
+                        block_s_nodes = [ s_nodes[idx] for idx in part_indices ]
                         sub_cluster = PartitionedCluster(
                             block_s_nodes,
                             partitioned_cluster.p_structure)
                         block_pn = PartitionedNode(
                             main_graph=self,
                             sub_cluster=sub_cluster)
-                        block_pn.memory_occupied_by_all_outputs = dict_info[block_s_nodes[-1].mt].memsize
+                    block_pn.memory_occupied_by_all_outputs = 0
+                    # Will be computed when the next parts are constructed
                     
                     # 2) Store the PNode in self.nodes/output_nodes/_first_nodes 
                     self.nodes.append(block_pn)
                     for sn in block_s_nodes:
                         if sn.mt in partitioned_cluster.outputs_mt:
                             self.output_nodes.add(block_pn)
-                            break
+                            is_output_sn[sn] = True
+                            block_pn.memory_occupied_by_all_outputs += dict_info[sn.mt].memsize
+
                     for sn in block_s_nodes:
                         if sn.mt in partitioned_cluster.firsts_mt:
                             self._first_nodes.add(block_pn)
-                            break
 
-                    # 3) Edges with the previous block
+
+                    # 3) Edges with the previous parts
                     for sn in block_s_nodes:
                         dict_sn_to_pn[sn] = block_pn
                     list_blocks_s_nodes.append(set(block_s_nodes))
-                    if block_i > 0:
-                        for sn in block_s_nodes:
-                            # deps:
-                            for req_sn in sn.deps:
-                                if req_sn in s_nodes and req_sn not in block_s_nodes:
-                                    req_pn : PartitionedNode = dict_sn_to_pn[req_sn]
-                                    if req_pn not in block_pn.deps:
-                                        block_pn.deps.add(req_pn)
-                                        block_pn.deps_global.add(req_pn)
-                                        req_pn.users.add(block_pn)
-                                        req_pn.users_global.add(block_pn)
-                            # deps through artifacts:
-                            for req_sn in sn.deps_through_artifacts:
-                                if req_sn not in block_s_nodes:
-                                    req_pn : PartitionedNode = dict_sn_to_pn[req_sn]
-                                    if req_pn not in block_pn.deps_through_artifacts:
-                                        block_pn.deps_through_artifacts.add(req_pn)
-                                        block_pn.deps_through_artifacts_global.add(req_pn)
-                                        req_pn.users_through_artifacts.add(block_pn)
-                                        req_pn.users_through_artifacts_global.add(block_pn)
-                        # artifact edges are redundant with classic ones -> useless
+                    for sn in block_s_nodes:
+                        # deps:
+                        for req_sn in sn.deps:
+                            if req_sn in s_nodes and req_sn not in block_s_nodes:
+                                req_pn : PartitionedNode = dict_sn_to_pn[req_sn]
+                                if req_pn not in block_pn.deps:
+                                    block_pn.deps.add(req_pn)
+                                    block_pn.deps_global.add(req_pn)
+                                    req_pn.users.add(block_pn)
+                                    req_pn.users_global.add(block_pn)
+                                    if not is_output_sn[req_sn]:
+                                        is_output_sn[req_sn] = True
+                                        req_pn.memory_occupied_by_all_outputs += dict_info[req_sn.mt].memsize
+                        # deps through artifacts:
+                        for req_sn in sn.deps_through_artifacts:
+                            if req_sn not in block_s_nodes:
+                                req_pn : PartitionedNode = dict_sn_to_pn[req_sn]
+                                if req_pn not in block_pn.deps_through_artifacts:
+                                    block_pn.deps_through_artifacts.add(req_pn)
+                                    block_pn.deps_through_artifacts_global.add(req_pn)
+                                    req_pn.users_through_artifacts.add(block_pn)
+                                    req_pn.users_through_artifacts_global.add(block_pn)
+                                    if not is_output_sn[req_sn]:
+                                        is_output_sn[req_sn] = True
+                                        req_pn.memory_occupied_by_all_outputs += dict_info[req_sn.mt].memsize
+
+                    # artifact edges are redundant with classic ones -> useless
 
             # 2) SECOND CONSTRUCTOR:
             # - Default constructor translating partitioner_cluster.s_nodes
@@ -1693,6 +1710,191 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
                         new_blocks.append((start,cut_index))
                         new_blocks.append((cut_index,end))
         return new_blocks
-                
-                
+
+
+#########
+## DagP partitioner
+#########
+
+import tempfile
+import math
+import subprocess
+import os
+
+class CustomNode:
+    '''
+    Custom representation of graphs to manipulate METIS inputs/outputs easily
+    '''
+    def __init__(self, name, mem, idx):
+        '''
+        :param node: original node
+        :type node: fx.Node
+        :param time: time obtained by profiling this node
+        :type time: float
+        :param mem: memory size of this node's output
+        :type mem: float
+        :param idx: index of the node in the (topological sort of) the graph
+        :type idx: int
+        '''
+        self.name = name
+        self.idx = idx
+        self.mem = mem
+        self.children = []
+
+    def to_dot_line(self):
+        '''
+        Dot representation of node
+        https://graphviz.org/doc/info/lang.html
+
+        :return: representation of this node in dot format
+        :rtype: str
+        '''
+        dot = f'{self.idx} [weight={self.mem}];\n'
+        return dot
+
+    def to_dot_edges(self, indices=None):
+        '''
+        Dot representation of all edges (directed)
+
+        :return: representation of all outgoing edges for this node, in dot format
+        :rtype: str
+        '''
+        dot = ''
+        for v_idx, e_weight in self.children:
+            if indices is None or v_idx in indices:
+                dot += f'{self.idx}->{v_idx} [weight={e_weight}];\n'
+        return dot
+
+    def __repr__(self):
+        return repr(self.name)
+
+class CustomGraph:
+    '''
+    Graph of `base.Node`s, storing vertices in dictionaries indexed by name
+    List of edges are stored in the `CustomNode`s
+    '''
+    def __init__(self, cluster: PartitionedCluster, scale=1000):
+        self.nodes = {}
+        self.indices = {}
+        self.current_idx = 1
+        self.node_list = []
+        self.info = cluster.p_structure.dict_info
+
+        self.scale = scale
+        self.max_size = max(self._get_size(n) for n in cluster.s_nodes)
+
+        for n in cluster.s_nodes:
+            self.add_node(n)
+
+    def scale_size(self, size):
+        ##TODO decide if I want to take min_size into account as well
+        return int(self.scale * size / self.max_size)
+
+    def _get_size(self, s_node):
+        return self.info[s_node.mt].memsize
+    def get_size(self, s_node):
+        return self.scale_size(self._get_size(s_node))
+
+    def add_node(self, s_node):
+        '''
+        Nodes should be added in topological order
+        '''
+        node = CustomNode(s_node.mt, self.get_size(s_node), self.current_idx)
+        self.nodes[node.name] = node
+        self.indices[node.name] = self.current_idx
+        self.node_list.append(node)
+
+        for dep in s_node.deps:
+            weight = self.get_size(dep)
+            if dep.mt in self.nodes:
+                outgoing_edge = (self.current_idx, weight)
+                self.nodes[dep.mt].children.append(outgoing_edge)
+            ## If dep.mt is not in self.nodes, it means it comes from outside the current partition
+
+        self.current_idx += 1
+
+    def export_to_dot(self, file, indices=None):
+        file.write('digraph compgraph {\n') # don't forget the \n because dagP dot reader is sensitive ;)
+        for node in self.nodes.values():
+            if indices is None or node.idx in indices:
+                file.write(node.to_dot_line())
+        for node in self.nodes.values():
+            file.write(node.to_dot_edges(indices=indices))
+        file.write('}')
+
+def read_output(graph, nb_parts, filename):
+    '''
+    Reads the output of Graph Partitioning METIS and breaks a custom graph accordingly.
+
+    :param graph: custom representation of every node of a computational graph, by name
+    :type graph: Dict[str, Node]
+    :param file: name of the file where METIS wrote its output
+    :type file: str
+
+    :return: lists of nodes corresponding to each part of the partition obtained
+    :rtype: List[List[fx.Node]]
+    '''
+    mapping = []
+    parts = [ [] for _ in range(nb_parts) ]
+    n = 0
+
+    with open(filename, "r") as file:
+        lines = file.readlines()
+    lines = map(int, lines)
+
+    for line_number, part_number in enumerate(lines):
+        parts[part_number].append(line_number) ## Careful, result is numbered from O to n-1
+
+    return parts
+
+
+def partition(graph, nb_parts):
+    '''
+    graph should be a CustomSubGraph
+    '''
+    with tempfile.NamedTemporaryFile("w+", dir=".", suffix=".dot") as file:
+        graph.export_to_dot(file)
+        file.flush()
+        subprocess.run(["rMLGP", file.name, str(nb_parts), "--obj", "1", "--write_parts", "1", "--print", "0"],
+                       stdout = subprocess.DEVNULL)
+        os.remove(f'{file.name}.bin')
+        os.remove(f'{file.name}.nodemappings')
+        os.remove(f'{file.name}.partitioned.part_{nb_parts}.seed_0.dot')
+
+    output_name = f'{file.name}.partsfile.part_{nb_parts}.seed_0.txt'
+    result = read_output(graph, nb_parts, output_name)
+    os.remove(output_name)
+    return result
+
+class PartitionerDagp(Partitioner):
+    @dataclass
+    class Config:
+        max_estimate_for_main_graph: int = 30
+        max_estimate_per_sub_graph: int = 20
+
+    def __init__(self, **kwargs):
+        self.config = self.__class__.Config(**kwargs)
+
+    def __call__(self, cluster: PartitionedCluster):
+        cluster_size = len(cluster.s_nodes)
+        if cluster_size <= self.config.max_estimate_per_sub_graph:
+            return PartitionedGraph(cluster)
+
+        nb_subparts = min(math.ceil(cluster_size/self.config.max_estimate_per_sub_graph),
+                          self.config.max_estimate_per_sub_graph)
+
+        # Partition the current graph
+        cg = CustomGraph(cluster)
+        subpart_indices = partition(cg, nb_subparts)
+        # subpart_nodes = [  cg.node_list[i].s_node for i in part
+        #                    for part in subpart_indices ]
+        result = PartitionedGraph(cluster, list_of_part_indices=subpart_indices)
+
+        #Recursively partition subparts if needed
+        for block_pn in result.nodes:
+            if block_pn.sub_cluster is not None:
+                sub_cluster : PartitionedCluster = block_pn.sub_cluster
+                sub_cluster.partition(self)
+
+        return result
 
