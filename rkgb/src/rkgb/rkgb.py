@@ -130,7 +130,7 @@ class Result():
             self.build_anonymization()
             self.start_time()
             if partitioners is None:
-                partitioners = [partitioned.default_partitioner]
+                partitioners = [partitioned.Partitioner()]
             self.partitioned_structure = partitioned.PartitionedStructure(
                 self.simplified_graph,
                 partitioners,

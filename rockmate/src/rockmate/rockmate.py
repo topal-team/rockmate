@@ -147,15 +147,15 @@ class Rockmate(torch.nn.Module):
                 for solver in self.bottom_solvers:
                     if isinstance(solver, HILP):
                         if solver.config.nb_total_nodes < partitioner.config.max_estimate_per_sub_graph:
-                            print(f"Warning, bottom solver HILP has nb_total_nodes f{solver.config.nb_total_nodes}, "
-                                  "smaller than partitioner max_estimate_per_sub_graph f{partitioner.config.max_estimate_per_sub_graph}."
+                            print(f"Warning, bottom solver HILP has nb_total_nodes {solver.config.nb_total_nodes}, "
+                                  f"smaller than partitioner max_estimate_per_sub_graph {partitioner.config.max_estimate_per_sub_graph}."
                                   " This may result in failure to find schedules")
                 for solver in self.top_solvers:
                     if isinstance(solver, HILP):
                         if solver.config.nb_total_nodes < partitioner.config.max_estimate_for_main_graph:
-                            print(f"Warning, top solver HILP has nb_total_nodes f{solver.config.nb_total_nodes}, "
+                            print(f"Warning, top solver HILP has nb_total_nodes {solver.config.nb_total_nodes}, "
                                   "smaller than partitioner max_estimate_for_main_graph "
-                                  "f{partitioner.config.max_estimate_for_main_graph}. This may result in failure to find schedules")
+                                  f"{partitioner.config.max_estimate_for_main_graph}. This may result in failure to find schedules")
 
     def preprocess(self, solver = None):
         if solver is None:
@@ -200,9 +200,8 @@ class Rockmate(torch.nn.Module):
         budget = budget or self.budget
         budget -= self.minor_size
         list_solvers = list_solvers or self.top_solvers
-        rotor_solver = False
-        hilp_solver = False
-        checkmate_solver = False
+
+        # Set some options whoe values can only be known at runtime
         for solver in list_solvers:
             if isinstance(solver, HILP):
                 # TODO: if no partitioning is allowed, update solver max nodes
@@ -217,21 +216,12 @@ class Rockmate(torch.nn.Module):
                 solver.config.protected_names.extend([f"{init_target_string} data", f"{init_target_string} grad"])
                 if self.keep_outputs:
                     solver.config.protected_names.extend(self.output_names)
-                if rotor_solver: ##TODO: check in what case this is useful
-                    solver.config.nb_bdg_save = 10
-                    solver.config.nb_bdg_peak = 10
                 if self.dynamic_batch_dim is not None:
                     solver.config.model_kwargs["dynamic_batch_size"] = True
 
-        if (
-            any([
-                isinstance(solver, HILP)  or isinstance(solver, RK_rotor)
-                for solver in list_solvers
-            ])
-        ):
-            self.preprocess()
-            if recursive:
-                self.solver_recursive()
+        self.preprocess()
+        if self.bottom_solvers and recursive:
+            self.solver_recursive()
 
         list_solutions = []
         for solver in list_solvers:
