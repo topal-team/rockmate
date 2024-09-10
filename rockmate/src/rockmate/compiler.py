@@ -237,7 +237,9 @@ class Fct_del(RK_Fct):
         self.del_fcts[self.del_mode]()
 
     def del_data(self):
-        self.storage.get_val(self.target_name).data = torch.empty(0, dtype=self.storage.dtype)
+        self.storage.get_val(self.target_name).data = torch.empty(0, 
+                                                                  dtype=self.storage.dtype,
+                                                                  device=self.storage.gd["device"])
         # pass
 
     def del_grad(self):
@@ -246,17 +248,21 @@ class Fct_del(RK_Fct):
     def del_base(self):
         if self.storage.get_val(self.target_name)._base is None:
             return
-        self.storage.get_val(self.target_name)._base.data = torch.empty(0, dtype=self.storage.dtype)
+        self.storage.get_val(self.target_name)._base.data = torch.empty(0, 
+                                                                        dtype=self.storage.dtype,
+                                                                        device=self.storage.gd["device"])
 
     def del_var(self):
-        self.storage.ld[self.target_name] = torch.empty(0, dtype=self.storage.dtype)
+        self.storage.ld[self.target_name] = torch.empty(0, 
+                                                        dtype=self.storage.dtype,
+                                                        device=self.storage.gd["device"])
 
     def del_optim_states(self):
         for k, v in self.storage.get_val(
             f"Optimize_({self.target_name})"
         ).state.items():
-            v["exp_avg"].data = torch.empty(0, dtype=self.storage.dtype)
-            v["exp_avg_sq"].data = torch.empty(0, dtype=self.storage.dtype)
+            v["exp_avg"].data = torch.empty(0, dtype=self.storage.dtype, device=self.storage.gd["device"])
+            v["exp_avg_sq"].data = torch.empty(0, dtype=self.storage.dtype, device=self.storage.gd["device"])
 
 
 class Fct_gen_fake_data(RK_Fct):
@@ -293,7 +299,9 @@ class Fct_detach(RK_Fct):
         self.storage.add_val(
             self.target_name, self.storage.get_val(f"_{self.target_name}")
         )
-        self.storage.add_val(f"_{self.target_name}", torch.empty(0, dtype=self.storage.dtype))
+        self.storage.add_val(f"_{self.target_name}", torch.empty(0, 
+                                                                 dtype=self.storage.dtype, 
+                                                                 device=self.storage.gd["device"]))
 
     def __call__(self):
         self.storage.get_val(self.target_name).data = self.storage.ld[

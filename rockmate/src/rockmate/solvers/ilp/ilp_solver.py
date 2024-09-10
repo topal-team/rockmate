@@ -301,7 +301,7 @@ class HILP(Solver):
                 accurate_mem=accurate_mem,
                 protected_names=protected_names,
                 activation_offload=self.config.activation_offload,
-                optimize_metrics=self.config.optimize_metrics,
+                # optimize_metrics=self.config.optimize_metrics,
                 bandwidth=self.config.bandwidth,
                 minor_offload_size = self.config.minor_offload_size,
                 **self.config.model_kwargs

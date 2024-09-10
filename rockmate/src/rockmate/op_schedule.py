@@ -719,11 +719,15 @@ class OpSchedule:
                 if bwd_op_name not in self.occurrences:
                     continue
                 op.pos_info["next_bwd_idx"] = min(
-                    i for i in self.occurrences[bwd_op_name] if i > index
+                    [i for i in self.occurrences[bwd_op_name] if i > index],
+                    default=None
                 )
-                op.pos_info["last_before_bwd"] = not self.is_occurred(
-                    op.name, index + 1, op.pos_info["next_bwd_idx"]
-                )
+                if op.pos_info["next_bwd_idx"] is None:
+                    op.pos_info["last_before_bwd"] = False
+                else:
+                    op.pos_info["last_before_bwd"] = not self.is_occurred(
+                        op.name, index + 1, op.pos_info["next_bwd_idx"]
+                    )
 
                 # TODO: no_save_list should contain only the one got deleted before bwd
                 cnode = op.target
