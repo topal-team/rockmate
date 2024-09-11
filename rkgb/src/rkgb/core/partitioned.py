@@ -597,17 +597,17 @@ class PartitionedCluster():
             dict_ano_id_to_representee_cluster[ano_id] = self
     # =============================
 
-    def partition(self,partitioner : Partitioner):
+    def partition(self,partitioner : Partitioner, **kwargs):
         if self.self_or_strictly_equal_cluster is not self:
-            self.self_or_strictly_equal_cluster.partition(partitioner)
+            self.self_or_strictly_equal_cluster.partition(partitioner, **kwargs)
         elif self.representee_cluster is not self:
-            self.representee_cluster.partition(partitioner)
+            self.representee_cluster.partition(partitioner, **kwargs)
         elif partitioner in self.partitioners_already_used:
             pass
         elif self.size < self.p_structure.min_size_to_trigger_partitioning:
             pass
         else:
-            pg = partitioner(self)
+            pg = partitioner(self, **kwargs)
             if pg is not None: 
                 # we found something interesting 
                 # => some Partitioners returns None if failed, eg PartitionerSequence 
@@ -1772,8 +1772,10 @@ class CustomGraph:
     '''
     Graph of `base.Node`s, storing vertices in dictionaries indexed by name
     List of edges are stored in the `CustomNode`s
+    Unweighted by default: trying to balance the number of nodes in each part. If weighted, tries to balance
+      the memory sizes. In both cases, minimize the sizes of edges between parts.
     '''
-    def __init__(self, cluster: PartitionedCluster, scale=1000):
+    def __init__(self, cluster: PartitionedCluster, weighted=False, scale=1000):
         self.nodes = {}
         self.indices = {}
         self.current_idx = 1
@@ -1799,7 +1801,8 @@ class CustomGraph:
         '''
         Nodes should be added in topological order
         '''
-        node = CustomNode(s_node.mt, self.get_size(s_node), self.current_idx)
+        weight = self.get_size(s_node) if self.weighted else 1
+        node = CustomNode(s_node.mt, weight, self.current_idx)
         self.nodes[node.name] = node
         self.indices[node.name] = self.current_idx
         self.node_list.append(node)
@@ -1871,20 +1874,21 @@ class PartitionerDagp(Partitioner):
     class Config:
         max_estimate_for_main_graph: int = 30
         max_estimate_per_sub_graph: int = 20
+        weighted: bool = False
 
     def __init__(self, **kwargs):
         self.config = self.__class__.Config(**kwargs)
 
-    def __call__(self, cluster: PartitionedCluster):
+    def __call__(self, cluster: PartitionedCluster, top_level=True):
+        threshold = self.config.max_estimate_for_main_graph if top_level else self.config.max_estimate_per_sub_graph
         cluster_size = len(cluster.s_nodes)
-        if cluster_size <= self.config.max_estimate_per_sub_graph:
+        if cluster_size <= threshold:
             return PartitionedGraph(cluster)
 
-        nb_subparts = min(math.ceil(cluster_size/self.config.max_estimate_per_sub_graph),
-                          self.config.max_estimate_per_sub_graph)
+        nb_subparts = min(math.ceil(cluster_size/threshold), threshold)
 
         # Partition the current graph
-        cg = CustomGraph(cluster)
+        cg = CustomGraph(cluster, weighted=self.config.weighted)
         subpart_indices = partition(cg, nb_subparts)
         # subpart_nodes = [  cg.node_list[i].s_node for i in part
         #                    for part in subpart_indices ]
@@ -1894,7 +1898,7 @@ class PartitionerDagp(Partitioner):
         for block_pn in result.nodes:
             if block_pn.sub_cluster is not None:
                 sub_cluster : PartitionedCluster = block_pn.sub_cluster
-                sub_cluster.partition(self)
+                sub_cluster.partition(self, top_level=False)
 
         return result
 
