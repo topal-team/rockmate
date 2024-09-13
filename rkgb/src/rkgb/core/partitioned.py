@@ -605,7 +605,8 @@ class PartitionedCluster():
         elif partitioner in self.partitioners_already_used:
             pass
         elif self.size < self.p_structure.min_size_to_trigger_partitioning:
-            pass
+            self.partitionings.append(PartitionedGraph(self))
+            self.partitioners_already_used.append(partitioner)
         else:
             pg = partitioner(self, **kwargs)
             if pg is not None: 
@@ -646,14 +647,14 @@ class PartitionedCluster():
             render=True,
             dot=None):
         cluster = self.representee_cluster
+        partitionings = cluster.partitionings
+        if len(partitionings) == 0:
+            partitionings = [PartitionedGraph(self)]
         if not no_message:
-            if len(cluster.partitionings) == 0:
-                print("Sorry your cluster doesn't have any partitioning, "\
-                    "ie corresponding PartitionedGraph: use cluster.partition()")
             if cluster is not self:
                 print(f"Warning : render an equivalent cluster "\
                       f"{cluster.cluster_nb} (the representee)")
-        for i,pg in enumerate(cluster.partitionings):
+        for i,pg in enumerate(partitionings):
             if name is not None:
                 graph_name = f"{i}-th partitioning of {name}"
             else:
@@ -1780,6 +1781,7 @@ class CustomGraph:
         self.indices = {}
         self.current_idx = 1
         self.node_list = []
+        self.weighted = weighted
         self.info = cluster.p_structure.dict_info
 
         self.scale = scale
@@ -1848,6 +1850,8 @@ def read_output(graph, nb_parts, filename):
     for line_number, part_number in enumerate(lines):
         parts[part_number].append(line_number) ## Careful, result is numbered from O to n-1
 
+    # Remove empty parts
+    parts = [ p for p in parts if len(p) > 0 ]
     return parts
 
 
@@ -1855,18 +1859,34 @@ def partition(graph, nb_parts):
     '''
     graph should be a CustomSubGraph
     '''
-    with tempfile.NamedTemporaryFile("w+", dir=".", suffix=".dot") as file:
-        graph.export_to_dot(file)
-        file.flush()
-        subprocess.run(["rMLGP", file.name, str(nb_parts), "--obj", "1", "--write_parts", "1", "--print", "0"],
-                       stdout = subprocess.DEVNULL)
-        os.remove(f'{file.name}.bin')
-        os.remove(f'{file.name}.nodemappings')
-        os.remove(f'{file.name}.partitioned.part_{nb_parts}.seed_0.dot')
+    done = False
+    while not done:
+        with tempfile.NamedTemporaryFile("w+", dir=".", suffix=".dot") as file:
+            graph.export_to_dot(file)
+            file.flush()
+            subprocess.run(["rMLGP", file.name, str(nb_parts), "--obj", "0", "--write_parts", "1", "--print", "0"],
+                           stdout = subprocess.DEVNULL
+            )
+            try:
+                os.remove(f'{file.name}.bin')
+                os.remove(f'{file.name}.nodemappings')
+                os.remove(f'{file.name}.partitioned.part_{nb_parts}.seed_0.dot')
+            except FileNotFoundError:
+                pass
 
-    output_name = f'{file.name}.partsfile.part_{nb_parts}.seed_0.txt'
-    result = read_output(graph, nb_parts, output_name)
-    os.remove(output_name)
+        output_name = f'{file.name}.partsfile.part_{nb_parts}.seed_0.txt'
+        try:
+            result = read_output(graph, nb_parts, output_name)
+            done = True
+        except Exception as e:
+            print("Failed to get a result with", nb_parts, "parts, lowering nb_parts")
+            nb_parts -= 1
+            assert nb_parts >= 5
+        try:
+            os.remove(output_name)
+        except FileNotFoundError:
+            pass
+
     return result
 
 class PartitionerDagp(Partitioner):
@@ -1881,11 +1901,13 @@ class PartitionerDagp(Partitioner):
 
     def __call__(self, cluster: PartitionedCluster, top_level=True):
         threshold = self.config.max_estimate_for_main_graph if top_level else self.config.max_estimate_per_sub_graph
+        threshold_below = self.config.max_estimate_per_sub_graph
         cluster_size = len(cluster.s_nodes)
         if cluster_size <= threshold:
             return PartitionedGraph(cluster)
 
-        nb_subparts = min(math.ceil(cluster_size/threshold), threshold)
+        # nb_subparts = min(math.ceil(cluster_size/threshold_below), threshold)
+        nb_subparts = threshold
 
         # Partition the current graph
         cg = CustomGraph(cluster, weighted=self.config.weighted)
