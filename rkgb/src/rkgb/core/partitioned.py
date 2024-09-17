@@ -1855,7 +1855,7 @@ def read_output(graph, nb_parts, filename):
     return parts
 
 
-def partition(graph, nb_parts):
+def partition(graph, nb_parts, executable="rMLGP"):
     '''
     graph should be a CustomSubGraph
     '''
@@ -1864,9 +1864,14 @@ def partition(graph, nb_parts):
         with tempfile.NamedTemporaryFile("w+", dir=".", suffix=".dot") as file:
             graph.export_to_dot(file)
             file.flush()
-            subprocess.run(["rMLGP", file.name, str(nb_parts), "--obj", "0", "--write_parts", "1", "--print", "0"],
-                           stdout = subprocess.DEVNULL
-            )
+            try:
+                subprocess.run([executable, file.name, str(nb_parts), 
+                                "--obj", "0", "--write_parts", "1", "--print", "0"],
+                               stdout = subprocess.DEVNULL
+                           )
+            except FileNotFoundError as e:
+                print(f"Could not execute {executable}: {e}")
+                raise RuntimeError("rMLGP not found: " + str(e))
             try:
                 os.remove(f'{file.name}.bin')
                 os.remove(f'{file.name}.nodemappings')
@@ -1881,7 +1886,9 @@ def partition(graph, nb_parts):
         except Exception as e:
             print("Failed to get a result with", nb_parts, "parts, lowering nb_parts")
             nb_parts -= 1
-            assert nb_parts >= 5
+            if nb_parts < 5:
+                raise RuntimeError("rMLGP failed to obtain a result")
+
         try:
             os.remove(output_name)
         except FileNotFoundError:
@@ -1895,6 +1902,7 @@ class PartitionerDagp(Partitioner):
         max_estimate_for_main_graph: int = 30
         max_estimate_per_sub_graph: int = 20
         weighted: bool = True
+        executable: str = "rMLGP"
 
     def __init__(self, **kwargs):
         self.config = self.__class__.Config(**kwargs)
@@ -1911,9 +1919,12 @@ class PartitionerDagp(Partitioner):
 
         # Partition the current graph
         cg = CustomGraph(cluster, weighted=self.config.weighted)
-        subpart_indices = partition(cg, nb_subparts)
-        # subpart_nodes = [  cg.node_list[i].s_node for i in part
-        #                    for part in subpart_indices ]
+        try:
+            subpart_indices = partition(cg, nb_subparts, executable=self.config.executable)
+        except RuntimeError as e:
+            print("PartitionerDagp failure:", e)
+            return None
+
         result = PartitionedGraph(cluster, list_of_part_indices=subpart_indices)
 
         #Recursively partition subparts if needed
