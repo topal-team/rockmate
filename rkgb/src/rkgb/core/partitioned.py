@@ -1894,7 +1894,7 @@ class PartitionerDagp(Partitioner):
     class Config:
         max_estimate_for_main_graph: int = 30
         max_estimate_per_sub_graph: int = 20
-        weighted: bool = False
+        weighted: bool = True
 
     def __init__(self, **kwargs):
         self.config = self.__class__.Config(**kwargs)
