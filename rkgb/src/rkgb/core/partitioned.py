@@ -1422,8 +1422,8 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
         sub_partitioner: str = "bottom_to_top"
         split_patterns_in_two: bool = False
         recognize_simply_by_main_fct_not_whole_ano_material: bool = True
-        strict_max_number_of_top_level_nodes: int = 12
-        max_number_of_patterns: int = 8
+        strict_max_number_of_top_level_nodes: int = 50
+        max_number_of_patterns: int = 40
         min_number_of_patterns: int = 2
         min_percentage_covered_required: float = 0.75
         put_intermediates_with_preceding_block: bool = True
@@ -1591,7 +1591,7 @@ class PartitionerRecognizeRepetitivePattern(Partitioner):
                     if (
                         len(blocks_indices)
                         <= self.config.strict_max_number_of_top_level_nodes
-                    ):
+                     and len(patterns_indices) >= current_best_nb_patterns):
                         current_best_solution = patterns_indices
                         current_best_nb_patterns = len(current_best_solution)
         return current_best_solution
