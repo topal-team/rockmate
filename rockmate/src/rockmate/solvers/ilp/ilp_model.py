@@ -54,7 +54,7 @@ class ModelPULP:
         self.md = LpProblem(f"rockmateMILP", LpMinimize)
         self.use_correction_term = accurate_mem
 
-        self.config()
+        self.config_ilp()
 
     def build(self):
         # OVERWRITTING METHOD IN OFFLOAD
@@ -62,7 +62,7 @@ class ModelPULP:
         self.add_constraints()
         self.add_objective()
 
-    def config(self):
+    def config_ilp(self):
         self.hcn2sub_c = []
         self.list_list_sched = []
         self.sub_clusters = []

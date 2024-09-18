@@ -139,7 +139,7 @@ def schedule(md: ModelPULP, hgraph=None, check_valid=False):
         with_parameters=isinstance(md, ModelPULPOffload),
         optimizer_states_factor=(
             md.optimize_metrics["optimizer_states_factor"]
-            if md.optimize_metrics
+            if hasattr(md, "optimize_metrics")
             else None
         ),
     )

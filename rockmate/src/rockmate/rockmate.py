@@ -81,7 +81,6 @@ class Rockmate(torch.nn.Module):
 
         self.config_partitioner()
 
-        self.get_rkgb_result(model_inputs, model_kwargs, minor_offload_size)
 
         self.optimize_metrics = get_optimize_metrics(
             list(original_mod.parameters())[0],
@@ -90,6 +89,9 @@ class Rockmate(torch.nn.Module):
             optim_kwargs=optim_kwargs,
             minor_offload_size=minor_offload_size,
         )
+
+        self.get_rkgb_result(model_inputs, model_kwargs, minor_offload_size)
+
         # TODO: only measure bandwidth if needed
         self.bandwidth = measure_bandwidth()
 
@@ -163,6 +165,8 @@ class Rockmate(torch.nn.Module):
         # Set some options whoe values can only be known at runtime
         for solver in self.top_solvers:
             if isinstance(solver, HILP):
+                solver.config.model_kwargs = solver.config.model_kwargs.copy()
+                solver.config.protected_names = solver.config.protected_names.copy()
                 solver.config.model_kwargs["optimize_metrics"] = self.global_dict["optimize_metrics"]
                 solver.config.protected_names.extend([f"{init_target_string} data", f"{init_target_string} grad"])
                 if self.keep_outputs:
@@ -230,7 +234,7 @@ class Rockmate(torch.nn.Module):
                 if solver.config.offload:
                     if self.bandwidth is None:
                         self.bandwidth = measure_bandwidth()
-                    solver.config.bandwidth = self.bandwidth
+                    solver.config.model_kwargs["bandwidth"] = self.bandwidth
         for solver in list_solvers:
             if isinstance(solver, HILP):
                 solver.config.protected_names.extend([f"{init_target_string} data", f"{init_target_string} grad"])

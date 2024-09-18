@@ -301,8 +301,6 @@ class HILP(Solver):
                 accurate_mem=accurate_mem,
                 protected_names=protected_names,
                 activation_offload=self.config.activation_offload,
-                # optimize_metrics=self.config.optimize_metrics,
-                bandwidth=self.config.bandwidth,
                 minor_offload_size = self.config.minor_offload_size,
                 **self.config.model_kwargs
             )
@@ -363,7 +361,9 @@ class HILP(Solver):
             protected_names=self.config.protected_names,
             ilp_solver=self.ilp_solver,
         )
-        self.md = md
+        if md is not None:
+            self.md = md
+            self.solving_time = None if not md.feasible else md.solving_time
         return list_op_sched
 
     def get_activation_offload(self, op_sched):
