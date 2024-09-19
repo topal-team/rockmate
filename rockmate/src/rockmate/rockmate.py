@@ -534,13 +534,15 @@ class Rockmate(torch.nn.Module):
             if not "forward" in k and not "backward" in k and k not in ["training"]:
                 self.__dict__[k] = v
 
-    def save_to_local(self, path, id=datetime.now().strftime("%d_%m_%Y_%H_%M_%S")):
+    def save_to_local(self, path, id=None):
+        if not id:
+            id = datetime.now().strftime("%d_%m_%Y_%H_%M_%S")    ## rkMod.save_sched_to_local("dump")
         with open(f"{path}/{id}_rkgb_res.pkl", "wb") as f:
             pickle.dump(self.rkgb_res, f)
 
-    def save_sched_to_local(
-        self, path, id=datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
-    ):
+    def save_sched_to_local(self, path, id=None):
+        if not id:
+            id = datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
         with open(f"{path}/{id}_sched.pkl", "wb") as f:
             pickle.dump(self.op_sched, f)
 
