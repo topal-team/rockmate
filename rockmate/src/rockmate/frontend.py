@@ -18,6 +18,7 @@ available_partitioners = {
     "sequence": partitioned.PartitionerSequence,
     "bottom_to_top": partitioned.PartitionerBottomToTop,
     "repetitive": partitioned.PartitionerRecognizeRepetitivePattern,
+    "base": partitioned.Partitioner,
 }
 
 def _default_config(func):
@@ -96,7 +97,10 @@ def generate_config(config_type):
         result.solver.top.hilp.time_limit = 1200
         result.solver.bottom.cheap.add_offload = True
         _add_partitioner(result, "repetitive")
-    
+    elif config_type == "noremat":
+        _add_top_solver(result, "cheap")
+        result.solver.top.cheap.cheap_factor = 1e9
+        _add_partitioner(result, "base")
     else:
         raise ValueError(f"Unknown config type {config_type}. Valid values are:"
                          "rotor, rockmate, checkmate, hilp, hiremate")
