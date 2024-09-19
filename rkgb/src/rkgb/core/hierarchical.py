@@ -166,7 +166,10 @@ class HierarchicalGraph(base.Graph):
             and pn_to_proceed.main_target not in fb_graph.dict_bwd_cnodes):
                 pn_sub_cluster = None
             else:
-                pn_sub_cluster = HierarchicalCluster(fb_graph,p_node = pn_to_proceed)
+                if pn_to_proceed.sub_cluster is not None and pn_to_proceed.sub_cluster.h_cluster is not None:
+                    pn_sub_cluster = pn_to_proceed.sub_cluster.h_cluster
+                else:
+                    pn_sub_cluster = HierarchicalCluster(fb_graph,p_node = pn_to_proceed)
             
             # There are two cases:
             # If pn_to_proceed is a leaf node, then we simply generate corresponding
