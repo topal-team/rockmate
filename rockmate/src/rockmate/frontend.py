@@ -3,19 +3,21 @@ from . import solvers
 from rkgb import partitioned
 from configmypy import Bunch
 import yaml
+from copy import copy
 
 import inspect
 
 available_solvers = {
     "hilp": solvers.HILP,
     "rotor": solvers.RK_rotor,
+    "cheap": solvers.CheapSolver,
 ##    "twremat": solvers.twremat
 }
 
 available_partitioners = {
     "sequence": partitioned.PartitionerSequence,
     "bottom_to_top": partitioned.PartitionerBottomToTop,
-##     "repetitive": partitioned.PartitionerRecognizeRepetitivePattern,
+    "repetitive": partitioned.PartitionerRecognizeRepetitivePattern,
 }
 
 def _default_config(func):
@@ -85,6 +87,16 @@ def generate_config(config_type):
         result.solver.bottom.hilp.accurate_mem = False
         for partitioner in available_partitioners.keys():
             _add_partitioner(result, partitioner)
+    elif config_type == "offmate":
+        _add_top_solver(result, "hilp")
+        _add_bottom_solver(result, "cheap")
+        result.solver.top.hilp.offload = True
+        result.solver.top.hilp.nb_total_nodes = 100
+        result.solver.top.hilp.nb_total_sched = 500
+        result.solver.top.hilp.time_limit = 1200
+        result.solver.bottom.cheap.add_offload = True
+        _add_partitioner(result, "repetitive")
+    
     else:
         raise ValueError(f"Unknown config type {config_type}. Valid values are:"
                          "rotor, rockmate, checkmate, hilp, hiremate")
