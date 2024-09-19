@@ -34,10 +34,11 @@ class CheapSolver(Solver):
         def __init__(self):
             pass
 
-    def __init__(self, config=None, bandwidth=1e7, add_offload=True):
+    def __init__(self, config=None, bandwidth=1e7, add_offload=False, cheap_factor=2):
         super().__init__(config)
         self.bandwidth = bandwidth
         self.add_offload = add_offload
+        self.cheap_factor = cheap_factor
 
     def solve(self, cluster: HierarchicalCluster, budget=None):
         avg_time = np.mean(
@@ -50,7 +51,7 @@ class CheapSolver(Solver):
             if cnode.time is None:
                 return False
             # return cnode.time < avg_time
-            return cnode.time < sum(anode.mem for anode in cnode.users)/self.bandwidth/2
+            return cnode.time < sum(anode.mem for anode in cnode.users)/self.bandwidth/self.cheap_factor
 
         cnode_idx = {cnode.name: i for i, cnode in enumerate(cluster.list_cnodes)}
         loss_idx = len([cnode for cnode in cluster.list_cnodes if cnode.is_fwd]) - 1
@@ -69,7 +70,7 @@ class CheapSolver(Solver):
         anodes_del_idx = {i: [] for i, _ in enumerate(cluster.list_cnodes)}
         output_anodes = []
         for anode in cluster.list_anodes:
-            if "source" in anode.name:
+            if "source" in anode.name or anode in cluster.interfaces["output_data_anodes"]:
                 continue
             user_indices = []
             for cnode in anode.users_real:
