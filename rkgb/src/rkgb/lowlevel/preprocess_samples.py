@@ -49,9 +49,9 @@ class ExampleInputs():
             nb_given = len(inputs)
             nb_asked_pos = len(pos_params)
             nb_asked_tot = len(not_kw_params)
-            if nb_given != nb_asked_pos: raise Exception(
-                f"Incorrect number of values given for the original_mod inputs "\
-                f"({nb_given} instead of {nb_asked_pos}).")
+            if nb_given < nb_asked_pos or nb_given > nb_asked_tot:
+                raise Exception(f"Incorrect number of values given for the original_mod inputs "\
+                                f"({nb_given} given, should be between {nb_asked_pos} and {nb_asked_tot}).")
             dict_example_inputs = dict(zip(not_kw_params,inputs))
             self.args = tuple(inputs)
             self.dict.update(dict_example_inputs)
