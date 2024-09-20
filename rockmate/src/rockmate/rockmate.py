@@ -215,7 +215,7 @@ class Rockmate(torch.nn.Module):
         # if multiple solvers in list_solvers,
         # will choose the one with minimum time
         budget = budget or self.budget
-        budget -= self.minor_size
+        # budget -= self.minor_size
         list_solvers = list_solvers or self.top_solvers
 
         self.preprocess()
