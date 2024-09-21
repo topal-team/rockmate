@@ -404,6 +404,12 @@ class OpSchedule:
         self.create_list_alloc(cluster)
         self.get_sched_info()  # get the schedule information for higher level solving
 
+    def __getstate__(self):
+        # simulator should not be pickled
+        state = self.__dict__.copy()
+        state["simulator"] = None
+        return state
+
     def get_occurrences(self):
         self.occurrences = dict()
         for i, op in enumerate(self.op_list):
