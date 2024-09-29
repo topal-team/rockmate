@@ -564,7 +564,7 @@ class OpSchedule:
             if i == self.loss_idx:
                 continue
             correction_term = {
-                "save": self.save_mem[i],
+                "save": self.save_mem_with_interfaces[i], 
                 "overhead": self.overhead[i],
             }
             for anode_name, index in interfaces_status:
