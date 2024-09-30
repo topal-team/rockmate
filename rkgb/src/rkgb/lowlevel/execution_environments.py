@@ -88,7 +88,8 @@ class EnvironmentGenerator():
             our_global : dict,
             original_mod : torch.nn.Module,
             current_device : torch.device,
-            inspection_device : torch.device):
+            inspection_device : torch.device,
+            force_detach:bool =False):
         assert type(fn_to_proceed).__name__ == "ForwardNode"
         assert type(forward_graph).__name__ == "ForwardGraph"
         tmp_local = EnvironmentGenerator._init_tmp_local(current_device,inspection_device)
@@ -157,7 +158,8 @@ class EnvironmentGenerator():
             our_global : dict,
             original_mod : torch.nn.Module,
             current_device : torch.device,
-            inspection_device : torch.device):
+            inspection_device : torch.device,
+            force_detach=False):
         assert type(sn_to_proceed).__name__ == "SimplifiedNode"
         assert type(simplified_graph).__name__ == "SimplifiedGraph"
         tmp_local = EnvironmentGenerator._init_tmp_local(current_device,inspection_device)
@@ -165,14 +167,13 @@ class EnvironmentGenerator():
             simplified_graph.original_mod_input_targets
             + simplified_graph.input_targets)
         init_node = simplified_graph.init_node
-
         def generate_node(sn_to_generate, tmp_local, execution=False):
             # We are ready to generate sn:
             # - First we create the main_target value based on info
             # - Then we run the body_code to generate views / sizes
             if execution:
                 exec(ast_add_on.make_str_assign(sn_to_generate.main_code), our_global, tmp_local)
-                if "clone" in sn_to_generate.main_fct:
+                if force_detach or "clone" in sn_to_generate.main_fct:
                     main_value = tmp_local[sn_to_generate.main_target].detach().requires_grad_()
                     tmp_local[sn_to_generate.main_target] = main_value
                 body_code = ast_add_on.make_str_list_assign(
@@ -309,7 +310,8 @@ class EnvironmentGenerator():
             our_global : dict,
             original_mod : torch.nn.Module,
             current_device : torch.device,
-            inspection_device : torch.device):
+            inspection_device : torch.device,
+            force_detach: bool =False):
         if (type(node_to_proceed).__name__ == "SimplifiedNode"
         and type(graph).__name__ == "SimplifiedGraph"):
             method = EnvironmentGenerator.generate_local_env_with_simplified
@@ -317,6 +319,7 @@ class EnvironmentGenerator():
             method = EnvironmentGenerator.generate_local_env_with_forward
         return method(
                 node_to_proceed,graph,our_global,original_mod,
-                current_device,inspection_device
+                current_device,inspection_device,
+                force_detach
             )
     

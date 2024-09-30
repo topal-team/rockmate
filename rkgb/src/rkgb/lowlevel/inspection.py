@@ -137,7 +137,8 @@ class InspectorDefault(Inspector):
             self.our_global,
             self.original_mod,
             self.current_device,
-            self.inspection_device
+            self.inspection_device,
+            force_detach=True
         )
         # TO REPLACE by: Inspector.reset_tmp_local(...)
         self.func_run_fwd()
