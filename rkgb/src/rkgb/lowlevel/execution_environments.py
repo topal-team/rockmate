@@ -171,7 +171,13 @@ class EnvironmentGenerator():
             # - First we create the main_target value based on info
             # - Then we run the body_code to generate views / sizes
             if execution:
-                exec(sn_to_generate.get_code(), our_global, tmp_local)
+                exec(ast_add_on.make_str_assign(sn_to_generate.main_code), our_global, tmp_local)
+                if "clone" in sn_to_generate.main_fct:
+                    main_value = tmp_local[sn_to_generate.main_target].detach().requires_grad_()
+                    tmp_local[sn_to_generate.main_target] = main_value
+                body_code = ast_add_on.make_str_list_assign(
+                    sn_to_generate.body_code, force_special_kwargs=True)
+                exec(body_code, our_global, tmp_local)
                 return tmp_local
             main_value = sn_to_generate.info.generate_value(inspection_device)
             # Some operations are impossible over leaf tensors 
