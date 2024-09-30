@@ -364,6 +364,7 @@ class HILP(Solver):
         if md is not None:
             self.md = md
             self.solving_time = None if not md.feasible else md.solving_time
+            self.status = md.status
         return list_op_sched
 
     def get_activation_offload(self, op_sched):
