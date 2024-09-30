@@ -1,3 +1,20 @@
+
+# How to run
+
+Singularity image at Plafrim
+
+`/beegfs/ygusak/singularity_images/hiremate_twremat.sif` containing Gurobi and Twremat Haskell to run with HiRemate based on `hiremate_twremat.def`
+
+Run Singularity shell
+`sungularity shell --nv beegfs/ygusak/singularity_images/hiremate_twremat.sif`
+
+Inside the shell
+```
+cd ~/rockmate-private/rockmate && pip install -e . 
+cd ~/rockmate-private/rkgb && pip install -e .
+
+```
+
 # Example of how to use HRockmate
 
 ```python

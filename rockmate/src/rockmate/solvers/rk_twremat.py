@@ -1,4 +1,4 @@
-from hrockmate.rkgb.Htools import H_cluster
+from rkgb.Htools import H_cluster
 from .twremat_utils import *
 from .op_schedule import OpSchedule as New_OpSchedule
 from .op_schedule import Op
