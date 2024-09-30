@@ -15,6 +15,7 @@ export PATH="${PATH}:/root/.cabal/bin:/root/.local/bin:/opt/ghc/9.2.7/bin:/opt/t
 %post
 apt-get update && \
 apt-get install -y build-essential git curl wget libgmp-dev &&\
+apt-get install -y libjpeg-dev libpng-dev &&\
 apt-get clean
 
 cd /opt  && tar xvfz gurobi950.tar.gz
@@ -91,7 +92,7 @@ make install; \
 
 pip install graphviz mip gurobipy astunparse pandas numpy pydot 
 pip install wandb ruamel.yaml configmypy tensorly tensorly-torch torch-harmonics matplotlib opt-einsum h5py zarr neuraloperator
-pip install pulp==2.7.0 transformers
+pip install pulp==2.7.0 transformers torchvision
 
 export PATH="${PATH}:/root/.cabal/bin:/root/.local/bin:/opt/ghc/9.2.7/bin"
 

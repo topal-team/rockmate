@@ -1,4 +1,5 @@
-from rkgb.Htools import H_cluster
+# from rkgb.Htools import H_cluster
+from rkgb.core.hierarchical import HierarchicalCluster
 from .twremat_utils import *
 from .op_schedule import OpSchedule as New_OpSchedule
 from .op_schedule import Op

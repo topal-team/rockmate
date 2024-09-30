@@ -3,7 +3,7 @@ import numpy as np
 import torch
 
 import rkgb
-from .def_op import RunOp, DelOp, OpSchedule
+# from .def_op import RunOp, DelOp, OpSchedule
 
 from subprocess import Popen
 import os
@@ -95,14 +95,23 @@ def get_rockmate_graphs(model, sample, device="cuda"):
 
     # Get graphs with rk-GB
     try:
-        rkgb_res = rkgb.make_all_graphs(
-            _model, _sample, check_device_is_gpu=True
-        )
-        # rkgb.print_all_graphs(rkgb_res,name="fno1d",render_format="pdf")
-        # forward_graph = rkgb_res.S_graph
-        K_graph = rkgb_res.K_graph
+        rkgb_res = rkgb.rkgb.Result(model=_model,
+                               model_args=_sample,
+                               inspection_device=torch.device("cuda"))
+        H_cluster = rkgb_res.hierarchical_cluster
 
-        K_graph.fake_input_kdn_grad()
+        ### OLD RKGB START   
+
+        # rkgb_res = rkgb.make_all_graphs(
+        #    _model, _sample, check_device_is_gpu=True
+        # )
+        # # rkgb.print_all_graphs(rkgb_res,name="fno1d",render_format="pdf")
+        # # forward_graph = rkgb_res.S_graph
+        # K_graph = rkgb_res.K_graph
+
+        # K_graph.fake_input_kdn_grad() ## FOR ORIGINAL ROCKMATE COMPATIBILITY
+
+        ### OLD RKGB END
 
     except Exception as e:
         del _model
@@ -115,11 +124,11 @@ def get_rockmate_graphs(model, sample, device="cuda"):
     del _model
     del _sample
 
-    return K_graph
+    #return K_graph
+    return H_cluster
 
 
-def get_twremat_graph(
-    K_graph, contains_data_node=False, allow_loss_recomputation=False
+def get_twremat_graph(H_cluster, contains_data_node=False, allow_loss_recomputation=False
 ):
     """Builds fw-bckw graph, containing only computational nodes
 
@@ -153,53 +162,35 @@ def get_twremat_graph(
     """
 
     node_info = {}
-    # target = K_graph.list_kcn[-1].unique_id  # final computational node
     targets = []
-    for kcn in K_graph.list_kcn:
+    for cnode in H_cluster.list_cnodes:
         users_inside = [
-            dn
-            for dn in kcn.users
-            if (dn in K_graph.list_kdn and not dn in K_graph.interfaces["inputs_kdn_grad"])
+            dnode
+            for dnode in cnode.users
+            if (dnode in H_cluster.list_anodes and not dnode in H_cluster.interfaces['input_grad_anodes'])
         ]
         if len(users_inside) == 0:
-            targets.append(kcn.unique_id)
+            targets.append(cnode.unique_id)
 
-    # for cnode in K_graph.list_kcn:
-    #     mem_inputs = 0
-    #     mem_outputs = 0
-    #     cnode_deps = []
-
-    #     for dnode in cnode.deps_real:
-    #         mem_inputs += dnode.mem
-
-    #         for cn in dnode.deps:
-    #             cnode_deps.append(cn.unique_id)
-
-    for cnode in K_graph.list_kcn:
+    for cnode in H_cluster.list_cnodes:
         mem_inputs = 0
         mem_outputs = 0
         cnode_deps = [
-            cn.unique_id
-            for cn in cnode.deps_through_size_artifacts
-            if cn in K_graph.list_kcn
+            cn.unique_id 
+            for cn in cnode.deps_through_artifacts
+            if cn in H_cluster.list_cnodes
         ]
-
         for dnode in cnode.deps_real:
             mem_inputs += dnode.mem
 
-            for cn in K_graph.list_kcn:
+            for cn in H_cluster.list_cnodes:
                 if dnode in cn.users:
                     cnode_deps.append(cn.unique_id)
-
-        # for dnode in cnode.deps_fake:
-        #     mem_inputs += dnode.mem
-        #     for cn in dnode.deps:
-        #         cnode_deps.append(cn.unique_id)
 
         for dnode in cnode.deps_fake:
             mem_inputs += dnode.mem
 
-            for cn in K_graph.list_kcn:
+            for cn in H_cluster.list_cnodes:
                 if dnode in cn.users:
                     cnode_deps.append(cn.unique_id)
 
@@ -208,22 +199,24 @@ def get_twremat_graph(
             for dnode in cnode.users:
                 mem_outputs += dnode.mem
 
+
         node_info[cnode.unique_id] = {
             "type": "normal",
             "cpu": mem_inputs + mem_outputs,
             "mem": mem_outputs,
-            "overhead": cnode.overhead if cnode.overhead else 0,
+            "overhead": cnode.mem_overhead if cnode.mem_overhead else 0,
             "deps": cnode_deps,
         }
 
     if not allow_loss_recomputation:
         loss_node = [
-            [node for node in K_graph.list_kcn if "loss" in node.name][
+            [node for node in H_cluster.list_cnodes if "loss" in node.name][
                 0
             ].unique_id
         ]
     else:
         loss_node = []
+
     if not targets:
         raise ValueError("no targets")
     if len(node_info) < 1:
@@ -231,6 +224,89 @@ def get_twremat_graph(
     # if not loss_node:
     #     raise ValueError("no loss_node")
     return node_info, targets, loss_node
+
+    # ### OLD RKGB START
+
+    # # target = K_graph.list_kcn[-1].unique_id  # final computational node
+    # targets = []
+    # for kcn in K_graph.list_kcn:
+    #     users_inside = [
+    #         dn
+    #         for dn in kcn.users
+    #         if (dn in K_graph.list_kdn and not dn in K_graph.interfaces["inputs_kdn_grad"])
+    #     ]
+    #     if len(users_inside) == 0:
+    #         targets.append(kcn.unique_id)
+
+    # # for cnode in K_graph.list_kcn:
+    # #     mem_inputs = 0
+    # #     mem_outputs = 0
+    # #     cnode_deps = []
+
+    # #     for dnode in cnode.deps_real:
+    # #         mem_inputs += dnode.mem
+
+    # #         for cn in dnode.deps:
+    # #             cnode_deps.append(cn.unique_id)
+
+    # for cnode in K_graph.list_kcn:
+    #     mem_inputs = 0
+    #     mem_outputs = 0
+    #     cnode_deps = [
+    #         cn.unique_id
+    #         for cn in cnode.deps_through_size_artifacts
+    #         if cn in K_graph.list_kcn
+    #     ]
+
+    #     for dnode in cnode.deps_real:
+    #         mem_inputs += dnode.mem
+
+    #         for cn in K_graph.list_kcn:
+    #             if dnode in cn.users:
+    #                 cnode_deps.append(cn.unique_id)
+
+    #     # for dnode in cnode.deps_fake:
+    #     #     mem_inputs += dnode.mem
+    #     #     for cn in dnode.deps:
+    #     #         cnode_deps.append(cn.unique_id)
+
+        # for dnode in cnode.deps_fake:
+        #     mem_inputs += dnode.mem
+
+        #     for cn in K_graph.list_kcn:
+        #         if dnode in cn.users:
+        #             cnode_deps.append(cn.unique_id)
+
+        # # if (cnode.main_target != 'loss'):
+        # if not cnode.unique_id in targets:
+        #     for dnode in cnode.users:
+        #         mem_outputs += dnode.mem
+
+    #     node_info[cnode.unique_id] = {
+    #         "type": "normal",
+    #         "cpu": mem_inputs + mem_outputs,
+    #         "mem": mem_outputs,
+    #         "overhead": cnode.overhead if cnode.overhead else 0,
+    #         "deps": cnode_deps,
+    #     }
+
+    # if not allow_loss_recomputation:
+    #     loss_node = [
+    #         [node for node in K_graph.list_kcn if "loss" in node.name][
+    #             0
+    #         ].unique_id
+    #     ]
+    # else:
+    #     loss_node = []
+    # if not targets:
+    #     raise ValueError("no targets")
+    # if len(node_info) < 1:
+    #     raise ValueError("no node_info")
+    # # if not loss_node:
+    # #     raise ValueError("no loss_node")
+    # return node_info, targets, loss_node
+    
+    # ### OLD RKGB END
 
 
 def twremat_to_rockmate_schedule(K_graph, steps):
