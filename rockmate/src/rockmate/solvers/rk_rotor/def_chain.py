@@ -7,6 +7,7 @@
 from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
 from ..main import get_sched, translate
 from ...op_schedule import OpSchedule, DeleteOp, ComputeOp
+from . import def_sequence as rkseq
 
 import math
 from copy import deepcopy
@@ -194,6 +195,46 @@ class RK_Chain:
         self.fwd_tmp = [discretize_(x) for x in self.fwd_tmp]
         self.bwd_tmp = [discretize_(x) for x in self.bwd_tmp]
         self.ff_fwd_tmp = discretize_(self.ff_fwd_tmp)
+
+    def _get_norecomputation_sequence(self):
+        def cheapest_option(layer):
+            return min(range(self.nb_sol[layer]), key=lambda i: self.fw[layer][i] + self.bw[layer][i])
+
+        forward = []
+        backward = []
+        for i in range(self.ln):
+            option = cheapest_option(i)
+            forward.append(rkseq.SeqBlockFe(i, option, self.body[i].sols[option].fwd_op_list))
+            backward.append(rkseq.SeqBlockBwd(i, self.body[i].sols[option].bwd_op_list))
+        backward.reverse()
+        return rkseq.RK_Sequence(forward + [rkseq.SeqLoss()] + backward )
+
+    def _get_allrecomputation_sequence(self):
+        def smallest_option(layer):
+            return min(range(self.nb_sol[layer]), 
+                       key=lambda i: self.cbw[layer+1][i]+max(self.fwd_tmp[layer][i], self.bwd_tmp[layer][i]))
+
+        sequence = rkseq.RK_Sequence()
+
+        for j in reversed(range(self.ln + 1)):
+            sequence.insert(rkseq.SeqBlockFc(0, self.body[0].Fc_op_list))
+            for i in range(1, j):
+                sequence.insert(rkseq.SeqBlockFn(i, self.body[i].Fn_op_list))
+            if j == self.ln:
+                sequence.insert(rkseq.SeqLoss())
+            else:
+                option = smallest_option(j)
+                sequence.insert(rkseq.SeqBlockFe(j, option, self.body[j].sols[option].fwd_op_list))
+                sequence.insert(rkseq.SeqBlockBwd(j, self.body[j].sols[option].bwd_op_list))
+        return sequence
+
+    def get_min_memory(self):
+        seq = self._get_allrecomputation_sequence()
+        return self.simulate(seq, display=False) * self.mem_unit
+
+    def get_max_memory(self):
+        seq = self._get_norecomputation_sequence()
+        return self.simulate(seq, display=False) * self.mem_unit
 
     def simulate(self, sequence, display=True, stopAtLoss=False):
         return sequence.simulate(self, display, stopAtLoss)
