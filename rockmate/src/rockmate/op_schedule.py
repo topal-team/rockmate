@@ -546,11 +546,11 @@ class OpSchedule:
         interfaces_status = []
         for anode in self.interfaces["input_data_anodes"]:  # Input of Fwd
             interfaces_status.append((anode.name, self.loss_idx))  # After fwd
-            if self.list_anodes.index(anode) in self.dep_interfaces_data:
+            if anode in self.dep_interfaces_data:
                 interfaces_status.append((anode.name, len(self.op_list)))  # After Bwd
         for anode in self.interfaces["output_data_anodes"]:  # Output of Fwd
             interfaces_status.append((anode.name, 0))  # Before fwd?
-            if self.list_anodes.index(anode) in self.dep_interfaces_data:
+            if anode in self.dep_interfaces_data:
                 interfaces_status.append((anode.name, len(self.op_list)))  # After Bwd
             else:
                 interfaces_status.append((anode.name, -1))  # After Bwd
@@ -627,11 +627,13 @@ class OpSchedule:
                 i < self.loss_idx
                 and correction_term not in self.fwd_overhead_correction
             ):
+                correction_term["save"] -= self.save_mem_with_interfaces[self.loss_idx]
                 self.fwd_overhead_correction.append(correction_term)
             elif (
                 i > self.loss_idx
                 and correction_term not in self.bwd_overhead_correction
             ):
+                correction_term["save"] -= self.save_mem_with_interfaces[-1]
                 self.bwd_overhead_correction.append(correction_term)
 
     def create_list_alloc(self, cluster: HierarchicalCluster):
@@ -678,9 +680,15 @@ class OpSchedule:
         for alloc_name, is_alive in self.init_alive_status.items():
             alive_status[alloc_name] = is_alive
 
+        for anode in self.interfaces["input_data_anodes"]:
+            alive_status[anode.name] = True
+
         alive_list = []
-        for op in self.op_list:
+        for i, op in enumerate(self.op_list):
             if op.disabled:
+                if i == self.loss_idx:
+                    for anode in self.interfaces["output_grad_anodes"]:
+                        alive_status[anode.name] = True
                 alive_list.append(alive_status.copy())
                 continue
             if isinstance(op, DeleteOp):
