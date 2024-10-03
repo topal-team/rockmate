@@ -543,6 +543,16 @@ class OpSchedule:
         self.bwd_wait_time = 0
 
     def add_correction_term(self, alive_list):
+        """
+        Correction term works as follows:
+        each term corresponds to one step. "save" and "overhead" correspond
+        to the inside anodes (non interfaces considered). 
+        The other terms are the corrections for the higher level ILP:
+        when the mark is "always", the interface will always appear in the overhead
+        (still, they are recorded separately with the inside nodes);
+        otherwise, the overhead will be written with the higher level ILP variables.
+        """
+
         interfaces_status = []
         for anode in self.interfaces["input_data_anodes"]:  # Input of Fwd
             interfaces_status.append((anode.name, self.loss_idx))  # After fwd
@@ -564,7 +574,7 @@ class OpSchedule:
             if i == self.loss_idx:
                 continue
             correction_term = {
-                "save": self.save_mem_with_interfaces[i], 
+                "save": self.save_mem[i], 
                 "overhead": self.overhead[i],
             }
             for anode_name, index in interfaces_status:
@@ -574,7 +584,6 @@ class OpSchedule:
                     # If outside is alive, no need to correct;
                     # Otherwise, add anode to memory
                     if i > self.loss_idx and alive_status[anode_name] > 0:
-                        correction_term["save"] += anode.mem
                         correction_term[(self.list_anodes.index(anode), False)] = (
                             -anode.mem
                         )
@@ -627,13 +636,11 @@ class OpSchedule:
                 i < self.loss_idx
                 and correction_term not in self.fwd_overhead_correction
             ):
-                correction_term["save"] -= self.save_mem_with_interfaces[self.loss_idx]
                 self.fwd_overhead_correction.append(correction_term)
             elif (
                 i > self.loss_idx
                 and correction_term not in self.bwd_overhead_correction
             ):
-                correction_term["save"] -= self.save_mem_with_interfaces[-1]
                 self.bwd_overhead_correction.append(correction_term)
 
     def create_list_alloc(self, cluster: HierarchicalCluster):
