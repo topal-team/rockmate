@@ -61,7 +61,7 @@ class FastSolver(Solver):
         if re_cluster.list_schedules == []:
             # re_cluster.list_schedules += self.solve(re_cluster)
             re_cluster.list_schedules.append(list_sched[0])
-            if self.recompute_sched:
+            if self.recompute_sched and not re_cluster.is_bottom:
                 re_cluster.list_schedules.append(list_sched[1])
         autograd_sched = list_sched[1]
         hcn.ff_time = autograd_sched.fwd_time
