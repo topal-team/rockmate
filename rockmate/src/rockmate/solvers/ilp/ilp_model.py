@@ -598,6 +598,7 @@ class ModelPULP:
 
     def save_mem(self, t, k):
         # OVERWRITTING METHOD IN OFFLOAD
+        # it represents the saving memory AFTER deletion operations at step (t,k)
         return self.U[t, k]
 
     def overhead_mem(self, t, k):
@@ -773,6 +774,7 @@ class ModelPULP:
             # print(f"finished solving in {self.md.solutionTime}")
             # print(f"objective {self.md.objective.value()}")
             self.solve_time = self.md.solutionTime
+            print(f"Solved in {self.solve_time}s")
             self.active_steps = []
             for t in list(range(self.loss_idx + 1, self.T)) + list(
                 range(self.loss_idx + 1)
