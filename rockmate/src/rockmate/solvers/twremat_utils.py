@@ -154,7 +154,7 @@ def get_twremat_graph(H_cluster, contains_data_node=False, allow_loss_recomputat
             'type': 'normal',
             'cpu': mem_inputs + mem_outputs,
             'mem': mem_outputs,
-            'overhead': cnode.overhead,
+            'overhead': cnode.mem_overhead,
             'deps': cnode_deps
             }
         int

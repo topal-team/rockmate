@@ -20,7 +20,6 @@ cd ~/rockmate-private/rkgb && pip install -e .
 import rkgb, rockmate, torch
 from torchvision.models import resnet18
 from rockmate.solvers.twremat_utils import *
-from rockmate.solvers.twremat_utils import *
 
 model, sample = resnet18(), torch.randn(2, 3, 224, 224)
 budget = 1024**9
