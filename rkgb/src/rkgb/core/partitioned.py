@@ -972,6 +972,8 @@ def make_partitioner(description):
         return PartitionerBottomToTop(main_graph_as_any_other=True)
     elif description == "repetitive":
         return PartitionerRecognizeRepetitivePattern()
+    elif description == "base":
+        return Partitioner()
     else:
         print("[Warning] make_partitioner: unknown sub_partitioner", self.config.sub_partitioner,
               "possible values:", "bottom_to_top", "repetitive")
