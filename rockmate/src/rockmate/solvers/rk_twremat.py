@@ -1,7 +1,6 @@
 from rkgb.Htools import H_cluster
 from .twremat_utils import *
-from .op_schedule import OpSchedule as New_OpSchedule
-from .op_schedule import Op
+from .op_schedule import OpSchedule, ComputeOp, DeleteOp, Activation
 from .main import Solver, get_cluster_budget
 
 class TwRemat(Solver):
@@ -33,18 +32,8 @@ class TwRemat(Solver):
 
         return list_sched
 
-    ##TODO using old version OP Schedule in this method to solve completely with twremat
     def solve_full(self, rkgb_res, budget): 
-        
-        K_graph = rkgb_res.K_graph
-
-        node_info, target, loss = get_twremat_graph(K_graph, self.config.contains_data_node, self.config.allow_loss_recomputation)
-        steps = runtwremat(node_info, budget, target, loss)
-
-        op_schedule = twremat_to_rockmate_schedule(K_graph, steps)
-
-
-        return op_schedule
+        return self.solve_cluster(rkgb_res.hierarchical_cluster, budget)[1]
 
     def solve_cluster(self, cluster, budget):
 
@@ -56,6 +45,7 @@ class TwRemat(Solver):
 
         op_list = []
         op_name_list = []
+        loss_idx = None
 
         for i, step in enumerate(steps):
             step_type, cnode_id = step
@@ -64,10 +54,13 @@ class TwRemat(Solver):
             cnode = kcn_id_to_node[cnode_id]
 
             if step_type == 'compute':
-
-                runOp = Op(cnode, detach=True, disabled=("loss" in cnode.name))
+                if "loss" in cnode.name and loss_idx is None:#for multiple loss, we need the first one
+                    loss_idx = len(op_list)
+                runOp = ComputeOp(cnode, disabled=("loss" in cnode.name))
                 op_list.append(runOp)
                 op_name_list.append(runOp.name)
+
+                
 
                 # ### Input data to the cnode computation that won't be used by later computations should be deleted
 
@@ -94,10 +87,10 @@ class TwRemat(Solver):
                 ### Twremat instruction "free computaion" we interpret as deleting data outputs of cnode computation
                 for dnode in cnode.users:
                     idx = data_nodes.index(dnode)
-                    delOp = Op(data_nodes[idx])
+                    delOp = DeleteOp(Activation(data_nodes[idx]))
                     op_list.append(delOp)
                     op_name_list.append(delOp.name)
 
-        sched = New_OpSchedule(op_list, cluster = cluster)
+        sched = OpSchedule(op_list, cluster = cluster, loss_idx=loss_idx)
 
         return op_name_list, sched
