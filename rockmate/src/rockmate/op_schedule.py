@@ -403,6 +403,12 @@ class OpSchedule:
         self.create_list_alloc(cluster)
         self.get_sched_info()  # get the schedule information for higher level solving
 
+    def __getstate__(self):
+        # simulator should not be pickled
+        state = self.__dict__.copy()
+        state["simulator"] = None
+        return state
+
     def get_occurrences(self):
         self.occurrences = dict()
         for i, op in enumerate(self.op_list):
@@ -718,11 +724,15 @@ class OpSchedule:
                 if bwd_op_name not in self.occurrences:
                     continue
                 op.pos_info["next_bwd_idx"] = min(
-                    i for i in self.occurrences[bwd_op_name] if i > index
+                    [i for i in self.occurrences[bwd_op_name] if i > index],
+                    default=None
                 )
-                op.pos_info["last_before_bwd"] = not self.is_occurred(
-                    op.name, index + 1, op.pos_info["next_bwd_idx"]
-                )
+                if op.pos_info["next_bwd_idx"] is None:
+                    op.pos_info["last_before_bwd"] = False
+                else:
+                    op.pos_info["last_before_bwd"] = not self.is_occurred(
+                        op.name, index + 1, op.pos_info["next_bwd_idx"]
+                    )
 
                 # TODO: no_save_list should contain only the one got deleted before bwd
                 cnode = op.target
@@ -761,7 +771,7 @@ class OpSchedule:
                             op.pos_info["input_names"].append(pnode.param_name)
                     if not op.pos_info["input_names"]:
                         op.disabled = True
-                        raise Warning(f"{op.name} is recomputed but no target inputs")
+                        warnings.warn(f"{op.name} is recomputed but no target inputs")
 
     def __repr__(self) -> str:
         return f"Op_sched takes {sum(self.time):.2f} ms with {self.peak_mem/1024**2} MiB peak mem"

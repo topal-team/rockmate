@@ -47,11 +47,17 @@ class SimplifiedNodeAnonymizationMaterial():
                 all_real_cst.append(real_str)
         def search_through(a):
             if isinstance(a,ast.AST):
+                s = ast_add_on.ast_to_str(a)
                 if isinstance(a,ast.Name):
                     handle_str(a.id)
                 elif isinstance(a,ast.Attribute):
-                    s = ast_add_on.ast_to_str(a)
                     if 'self' in s:
+                        handle_str(s)
+                elif (isinstance(a, ast.Call) and 
+                      (
+                    s.startswith("self.get_parameter")
+                    or s.startswith("self.get_buffer")
+                    )):
                         handle_str(s)
                 else:
                     for s in a._fields:
@@ -60,6 +66,7 @@ class SimplifiedNodeAnonymizationMaterial():
             elif isinstance(a,str): handle_str(a)
             elif hasattr(a,"__iter__"):
                 for sub_a in a: search_through(sub_a)
+
 
         search_through(sn_to_proceed.get_code_ast())
         # TO IMPROVE : impose the order in which we explore required_parameter_nodes

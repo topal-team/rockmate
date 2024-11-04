@@ -5,23 +5,16 @@ from math import inf
 
 class FakeMod():
     def __init__(self):
-        self.__list__ = []
+        self.dict = {}
 
-    def __getitem__(self, i):
-        if i>=len(self.__list__):
-            self.__list__ += [FakeMod() for _ in range((i-len(self.__list__)+1))]
-        return self.__list__[i]
-    def __setitem__(self, i, value):
-        if i>=len(self.__list__):
-            self.__list__ += [FakeMod() for _ in range((i-len(self.__list__)+1))]
-        self.__list__[i] = value
+    def set_param(self, param_name, param_value):
+        self.dict[param_name] = param_value
 
-    def __setattr__(self, name: str, value):
-        self.__dict__[name] = value
-    def __getattr__(self, name):
-        if name not in self.__dict__:
-            self.__setattr__(name, FakeMod())
-        return self.__dict__[name]
+    def get_parameter(self, name):
+        return self.dict[name]
+    
+    def get_buffer(self, name):
+        return self.dict[name]
 
 
 class EnvironmentGenerator():
@@ -70,7 +63,7 @@ class EnvironmentGenerator():
                 param_value = torch.nn.Parameter(param_value,
                                                  requires_grad=param_node.get_value(original_mod).requires_grad)
             tmp_local["__value"] = param_value
-            exec(f"{param_node.param_str} = __value ; {param_node.get_code()}",
+            exec(f"self.set_param('{param_node.param_name}', __value) ; {param_node.get_code()}",
                 our_global, tmp_local)
         tmp_local["all_parameters_values"].append(param_value)
         tmp_local["all_parameters_strs"].append(param_node.param_str)

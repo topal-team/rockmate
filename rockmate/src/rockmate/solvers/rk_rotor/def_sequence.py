@@ -6,6 +6,7 @@
 # from .def_op import OpSchedule
 from ...op_schedule import Op
 from typing import List
+from copy import deepcopy
 
 ref_print_atoms = [True]
 
@@ -123,7 +124,7 @@ class RK_Sequence:
         raise Exception("Can't cut a Sequence which doesn't have SeqLoss")
 
     def get_op_list(self):
-        return [ op for rk_op in self.seq
+        return [ deepcopy(op) for rk_op in self.seq
                     for op in rk_op.op_list ]
 
     def simulate(self, chain, display=True, stopAtLoss=False):

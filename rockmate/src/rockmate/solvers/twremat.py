@@ -1,27 +1,22 @@
 # from rkgb.Htools import H_cluster
 from rkgb.core.hierarchical import HierarchicalCluster
 from .twremat_utils import *
-from .op_schedule import OpSchedule as New_OpSchedule
-from .op_schedule import Op
+from ..op_schedule import OpSchedule, ComputeOp, DeleteOp, Activation
 from .main import Solver, get_cluster_budget
+from dataclasses import dataclass
 
 
 class TwRemat(Solver):
+    @dataclass
     class Config:
-        def __init__(
-            self,
-            contains_data_node=False,
-            allow_loss_recomputation=False,
-            mem_unit=1024**2,
-        ):
-            self.mem_unit = mem_unit
-            self.contains_data_node = contains_data_node
-            self.allow_loss_recomputation = allow_loss_recomputation
+        mem_unit: int = 1024**2
+        contains_data_node: bool = False
+        allow_loss_recomputation: bool = False
 
-    def __init__(self, config=None):
-        super().__init__(config)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-    def _can_solve(self, cluster: H_cluster):
+    def _can_solve(self, cluster: HierarchicalCluster):
         return not cluster.is_bottom
 
     def solve(self, cluster, budgets=None):
@@ -35,7 +30,7 @@ class TwRemat(Solver):
             budgets = budgets
         list_sched = []
         for budget in budgets:
-            if isinstance(cluster, H_cluster):
+            if isinstance(cluster, HierarchicalCluster):
                 list_sched.append(self.solve_cluster(cluster, int(budget))[1])
 
         return list_sched
@@ -48,11 +43,12 @@ class TwRemat(Solver):
         )
         steps = runtwremat(node_info, budget, target, loss)
 
-        kcn_id_to_node = {cnode.unique_id: cnode for cnode in cluster.list_kcn}
-        data_nodes = cluster.list_kdn
+        kcn_id_to_node = {cnode.unique_id: cnode for cnode in cluster.list_cnodes}
+        data_nodes = cluster.list_anodes
 
         op_list = []
         op_name_list = []
+        loss_idx = None
 
         for i, step in enumerate(steps):
             step_type, cnode_id = step
@@ -61,7 +57,10 @@ class TwRemat(Solver):
             cnode = kcn_id_to_node[cnode_id]
 
             if step_type == "compute":
-                runOp = Op(cnode, detach=True, disabled=("loss" in cnode.name))
+                if "loss" in cnode.name and loss_idx is None: #for multiple loss nodes, we need the first one
+                    loss_idx = len(op_list)
+
+                runOp = ComputeOp(cnode, disabled=("loss" in cnode.name))
                 op_list.append(runOp)
                 op_name_list.append(runOp.name)
 
@@ -90,10 +89,10 @@ class TwRemat(Solver):
                 ### Twremat instruction "free computaion" we interpret as deleting data outputs of cnode computation
                 for dnode in cnode.users:
                     idx = data_nodes.index(dnode)
-                    delOp = Op(data_nodes[idx])
+                    delOp = DeleteOp(Activation(data_nodes[idx]))
                     op_list.append(delOp)
                     op_name_list.append(delOp.name)
 
-        sched = New_OpSchedule(op_list, cluster=cluster)
+        sched = OpSchedule(op_list, cluster=cluster, loss_idx=loss_idx)
         sched.solver = "TWRemat"
         return op_name_list, sched
