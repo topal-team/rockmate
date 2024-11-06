@@ -9,7 +9,7 @@ import inspect
 available_solvers = {
     "hilp": solvers.HILP,
     "rotor": solvers.RK_rotor,
-##    "twremat": solvers.twremat
+    "twremat": solvers.TwRemat
 }
 
 available_partitioners = {
