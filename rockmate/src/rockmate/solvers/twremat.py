@@ -1,6 +1,6 @@
 # from rkgb.Htools import H_cluster
 from rkgb.core.hierarchical import HierarchicalCluster
-from .twremat_utils import *
+from .twremat_utils import runtwremat, get_twremat_graph
 from ..op_schedule import OpSchedule, ComputeOp, DeleteOp, Activation
 from .main import Solver, get_cluster_budget
 from dataclasses import dataclass
@@ -12,6 +12,7 @@ class TwRemat(Solver):
         mem_unit: int = 1024**2
         contains_data_node: bool = False
         allow_loss_recomputation: bool = False
+        verbose: bool = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -41,7 +42,7 @@ class TwRemat(Solver):
             self.config.contains_data_node,
             self.config.allow_loss_recomputation,
         )
-        steps = runtwremat(node_info, budget, target, loss)
+        steps = runtwremat(node_info, budget, target, loss, verbose=self.config.verbose)
 
         kcn_id_to_node = {cnode.unique_id: cnode for cnode in cluster.list_cnodes}
         data_nodes = cluster.list_anodes

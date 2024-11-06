@@ -5,7 +5,7 @@ import torch
 import rkgb
 # from .def_op import RunOp, DelOp, OpSchedule
 
-from subprocess import Popen
+import subprocess
 import os
 import tempfile
 
@@ -25,7 +25,7 @@ def parse_memlimit(memlimit):
         return int(memlimit)
 
 
-def runtwremat(gr, memlimit, target, loss):
+def runtwremat(gr, memlimit, target, loss, verbose=False):
     if type(memlimit) is str:
         memlimit = parse_memlimit(memlimit)
 
@@ -62,9 +62,9 @@ def runtwremat(gr, memlimit, target, loss):
 
             print(f"node {n} deps {deps} {weight} {tstr} {loss_str}", file=fp)
 
-    print(" ".join([TWREMAT, fname, outname]))
-    proc = Popen(["twremat", fname, outname])
-    assert proc.wait() == 0
+    if verbose:
+        print(" ".join([TWREMAT, fname, outname]))
+    result = subprocess.run(["twremat", fname, outname], check=True, capture_output=not verbose)
 
     out = []
     with open(outname, "r") as fp:
