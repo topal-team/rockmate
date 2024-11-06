@@ -16,6 +16,7 @@ available_partitioners = {
     "sequence": partitioned.PartitionerSequence,
     "bottom_to_top": partitioned.PartitionerBottomToTop,
 ##     "repetitive": partitioned.PartitionerRecognizeRepetitivePattern,
+    "dagp": partitioned.PartitionerDagp,
 }
 
 def _default_config(func):
