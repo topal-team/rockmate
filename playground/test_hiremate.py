@@ -24,6 +24,7 @@ import sys
 # sys.path.append(f'{os.environ["WORK"]}/rockmate-private-jg/')
 sys.path.append(f'/home/ygusak/rockmate-private/')
 from models import get_iterator_over_all_examples
+from nvmodels import get_model_sample
 
 warnings.filterwarnings("ignore")
 
@@ -156,21 +157,27 @@ if __name__=="__main__":
              "UNet",
              "RegNet32", #RKGB problems at "F" building step (invalid decimal literal)
              "FNO1d", #TorchDynamo and RKGB problem has been fixed after setting FNO1d to nn.Module (as nn.Sequential had problem with forwarding correct argument name through the sequence of blocks)
-             #"FNO3d", #RKGB problems: during build_forward graph on code lines with 'slice'
+             "FNO3d", #RKGB problems: during build_forward graph on code lines with 'slice'
              "UFNO", #RKGB problems: during build_forward graph on code lines with 'slice'
              "UNO", #TorchDynnamo & RKGB problems: with padding
              "TFNO2d",
              ][::-1] # Fix MLP-mixer
     logging.info(f'Models to test: {examples}')
 
-    iterator_over_all_examples = get_iterator_over_all_examples(device, examples=examples)
+    nv_examples = [ "UNet2D", "Autoencoder2D", "DiT"]
+    logging.info(f'NV Models to test: {nv_examples}')
+
+
+    # iterator_over_all_examples = get_iterator_over_all_examples(device, examples=examples)
     #pdb.set_trace()
 
-    while True:
+    # while True:
+    for name in nv_examples:
         model, sample = None, [] # To do not accumulate memory
         logging.info(f'{"".join(["="]*60)}\n')
         try:
-            name, model, sample, get_param_fct = next(iterator_over_all_examples)
+            # name, model, sample, get_param_fct = next(iterator_over_all_examples)
+            model, sample = get_model_sample()
             logging.debug(f"Model {name} has been built \n")
             
 
