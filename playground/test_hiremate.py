@@ -140,7 +140,7 @@ def test_rkgb_graph_builder(*args, **kwargs):
 
 
 if __name__=="__main__":
-    test_remat = False
+    test_remat = True
 
     if torch.cuda.is_available():
         torch.cuda.init()
@@ -161,7 +161,7 @@ if __name__=="__main__":
              "UFNO", #RKGB problems: during build_forward graph on code lines with 'slice'
              "UNO", #TorchDynnamo & RKGB problems: with padding
              "TFNO2d",
-             ][::-1] # Fix MLP-mixer
+             ][::] # Fix MLP-mixer
     logging.info(f'Models to test: {examples}')
 
     nv_examples = [ "UNet2D", "Autoencoder2D", "DiT"]
@@ -220,7 +220,8 @@ if __name__=="__main__":
                 
                 if test_remat:
                     try:
-                        solver = HILP(ilp_solver="PULP_CBC_CMD")
+                        #solver = HILP(ilp_solver="PULP_CBC_CMD")
+                        solver = HILP(ilp_solver="GUROBI_CMD")
                         solver.config.offload = False
                         rematMod = Rockmate(
                                 model,
