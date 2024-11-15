@@ -1,3 +1,4 @@
+# The ILP algorithm is inspired from Checkmate: https://github.com/mllg/checkmate
 from typing import Dict, Any
 import time
 import numpy as np

@@ -1,5 +1,5 @@
 # ==========================
-# modified version of rotor algo
+# modified version of rotor algo: https://gitlab.inria.fr/hiepacs/rotor
 # contains RK_Sequence builder -> depends on RK_Chain
 # based on rotor/algorithms/persistent.py
 # ==========================
