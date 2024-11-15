@@ -174,6 +174,10 @@ class EnvironmentGenerator():
             if execution:
                 exec(ast_add_on.make_str_assign(sn_to_generate.main_code), our_global, tmp_local)
                 if force_detach or "clone" in sn_to_generate.main_fct:
+                    # We do not detach by default because it creates false dependecies
+                    # in most cases (tensors appear in .grad_fn but not really used),
+                    # but "clone" is special since it DOES require the input for backward.
+                    # Tested with Pytorch 2.3
                     main_value = tmp_local[sn_to_generate.main_target].detach().requires_grad_()
                     tmp_local[sn_to_generate.main_target] = main_value
                 body_code = ast_add_on.make_str_list_assign(
