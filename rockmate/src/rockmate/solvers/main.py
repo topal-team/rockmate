@@ -4,7 +4,6 @@ import numpy as np
 from copy import deepcopy, copy
 
 from rkgb.lowlevel.ast_add_on import ast_to_str
-from rkgb.lowlevel.measure import TimerCPU
 from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
 from rkgb.core.backward import ComputationNode
 from rkgb.lowlevel.constants import init_target_string
@@ -62,7 +61,7 @@ class FastSolver(Solver):
         if re_cluster.list_schedules == []:
             # re_cluster.list_schedules += self.solve(re_cluster)
             re_cluster.list_schedules.append(list_sched[0])
-            if self.recompute_sched:
+            if self.recompute_sched and not re_cluster.is_bottom:
                 re_cluster.list_schedules.append(list_sched[1])
         autograd_sched = list_sched[1]
         hcn.ff_time = autograd_sched.fwd_time
@@ -512,76 +511,3 @@ def get_single_compute_op_list(
     return op_list  # , loss_idx
 
 
-def get_optimize_metrics(
-    _p, cpu_optim, gpu_optim, optim_kwargs={}, niter=10, minor_offload_size=1024**2
-):
-    # timer = irotor.make_timer(torch.device("cpu"))
-    timer = TimerCPU()
-    a_c = torch.ones([10, 1024, 1024], device="cpu", pin_memory=True)
-    a_g = torch.ones([10, 1024, 1024], device="cuda")
-    b_c = torch.ones([10, 1024, 1024], device="cpu", pin_memory=True)
-    b_g = torch.ones([10, 1024, 1024], device="cuda")
-
-    p = deepcopy(_p).to("cuda")
-    # if not p.is_leaf:
-    p = torch.ones([10, 1024, 1024], dtype=_p.dtype).to("cuda")
-    size = p.numel()
-    p.grad = torch.ones_like(p)
-    optimizer = gpu_optim([p], **optim_kwargs)
-    torch.cuda.reset_peak_memory_stats()
-    mem = torch.cuda.memory_allocated()
-    optimizer.step()
-    timer.start()
-    for i in range(niter):
-        optimizer.step()
-    torch.cuda.synchronize()
-    timer.end()
-    mem_after = torch.cuda.memory_allocated()
-    gpu_optimize_speed = size * p.element_size() * niter / timer.elapsed()
-    opt_size = mem_after - mem
-    opt_overhead = torch.cuda.max_memory_allocated() - mem_after
-
-    p_c = torch.zeros_like(p, device="cpu")
-    p_c.grad = torch.ones_like(p_c)
-    optimizer = cpu_optim([p_c], **optim_kwargs)
-    optimizer.step()
-    p_stream = torch.cuda.Stream()
-    o_stream = torch.cuda.Stream()
-    timer.start()
-    for i in range(niter):
-        with torch.cuda.stream(p_stream):
-            a_c.copy_(a_g, non_blocking=True)
-        with torch.cuda.stream(o_stream):
-            b_g.copy_(b_c, non_blocking=True)
-    torch.cuda.synchronize()
-    timer.end()
-    bandwidth = niter * a_c.numel() * a_c.element_size() / timer.elapsed()
-    timer.start()
-    for i in range(niter):
-        with torch.cuda.stream(torch.cuda.Stream()):
-            a_c.copy_(a_g, non_blocking=True)
-            a_c.copy_(a_g, non_blocking=True)
-            a_c.copy_(a_g, non_blocking=True)
-            a_c.copy_(a_g, non_blocking=True)
-            a_c.copy_(a_g, non_blocking=True)
-        with torch.cuda.stream(torch.cuda.Stream()):
-            b_g.copy_(b_c, non_blocking=True)
-            b_g.copy_(b_c, non_blocking=True)
-            b_g.copy_(b_c, non_blocking=True)
-            b_g.copy_(b_c, non_blocking=True)
-            b_g.copy_(b_c, non_blocking=True)
-        optimizer.step()
-    torch.cuda.synchronize()
-    timer.end()
-    optimize_metrics = {
-        "optimizer_states_size": round(opt_size // size / p.element_size()),
-        "optimizer_overhead": round(opt_overhead // size / p.element_size()),
-        "cpu_optim": cpu_optim,
-        "gpu_optim": gpu_optim,
-        "cpu_optimize_speed": size * p.element_size() * niter / timer.elapsed(),
-        "gpu_optimize_speed": gpu_optimize_speed,
-        "bandwidth": bandwidth,
-        "minor_offload_size": minor_offload_size,
-        "optim_kwargs": optim_kwargs,
-    }
-    return optimize_metrics

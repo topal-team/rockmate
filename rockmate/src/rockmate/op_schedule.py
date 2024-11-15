@@ -85,16 +85,16 @@ class Parameter(Allocation):
     """
 
     def __init__(
-        self, pnode, is_grad=False, is_optim_states=False, optim_states_multiplier=2
+        self, pnode, is_grad=False, is_optim_states=False, optimizer_states_factor=2
     ):
         self.pnode = pnode
         self.is_grad = is_grad
         self.is_optim_states = is_optim_states
-        self.optim_states_multiplier = optim_states_multiplier
+        self.optimizer_states_factor = optimizer_states_factor
         if not self.is_optim_states:
             mem = pnode.mem
         else:
-            mem = pnode.mem * self.optim_states_multiplier
+            mem = pnode.mem * self.optimizer_states_factor
 
         super().__init__(
             target_name=pnode.param_name,
@@ -382,7 +382,7 @@ class OpSchedule:
         init_alive_status: dict = {},
         init_op_list: list = [],
         restore_op_list: list = [],
-        optim_states_multiplier=2,
+        optimizer_states_factor=2,
         correct_overhead=True,
     ):
         """
@@ -396,9 +396,10 @@ class OpSchedule:
         self.init_op_list = init_op_list  # Place to prepare items in storage
         self.restore_op_list = restore_op_list
         self.with_parameters = with_parameters
-        self.optim_states_multiplier = optim_states_multiplier
+        self.optimizer_states_factor = optimizer_states_factor
         self.interfaces = cluster.interfaces
         self.correct_overhead = correct_overhead
+        self.with_optimization = any(isinstance(op, OptimizeOp) for op in op_list[::-1])
 
         self.create_list_alloc(cluster)
         self.get_sched_info()  # get the schedule information for higher level solving
@@ -542,14 +543,24 @@ class OpSchedule:
         self.bwd_wait_time = 0
 
     def add_correction_term(self, alive_list):
+        """
+        Correction term works as follows:
+        each term corresponds to one step. "save" and "overhead" correspond
+        to the inside anodes (non interfaces considered). 
+        The other terms are the corrections for the higher level ILP:
+        when the mark is "always", the interface will always appear in the overhead
+        (still, they are recorded separately with the inside nodes);
+        otherwise, the overhead will be written with the higher level ILP variables.
+        """
+
         interfaces_status = []
         for anode in self.interfaces["input_data_anodes"]:  # Input of Fwd
             interfaces_status.append((anode.name, self.loss_idx))  # After fwd
-            if self.list_anodes.index(anode) in self.dep_interfaces_data:
+            if anode in self.dep_interfaces_data:
                 interfaces_status.append((anode.name, len(self.op_list)))  # After Bwd
         for anode in self.interfaces["output_data_anodes"]:  # Output of Fwd
             interfaces_status.append((anode.name, 0))  # Before fwd?
-            if self.list_anodes.index(anode) in self.dep_interfaces_data:
+            if anode in self.dep_interfaces_data:
                 interfaces_status.append((anode.name, len(self.op_list)))  # After Bwd
             else:
                 interfaces_status.append((anode.name, -1))  # After Bwd
@@ -563,7 +574,7 @@ class OpSchedule:
             if i == self.loss_idx:
                 continue
             correction_term = {
-                "save": self.save_mem[i],
+                "save": self.save_mem[i], 
                 "overhead": self.overhead[i],
             }
             for anode_name, index in interfaces_status:
@@ -573,7 +584,6 @@ class OpSchedule:
                     # If outside is alive, no need to correct;
                     # Otherwise, add anode to memory
                     if i > self.loss_idx and alive_status[anode_name] > 0:
-                        correction_term["save"] += anode.mem
                         correction_term[(self.list_anodes.index(anode), False)] = (
                             -anode.mem
                         )
@@ -652,18 +662,18 @@ class OpSchedule:
                     if anode.info.requires_grad
                 ]
             )  # add parameter grad allocation
-            # if self.optim_states_multiplier:
-            self.list_alloc.extend(
-                [
-                    Parameter(
-                        anode,
-                        is_optim_states=True,
-                        optim_states_multiplier=self.optim_states_multiplier,
-                    )
-                    for anode in cluster.parameter_nodes
-                    if anode.info.requires_grad
-                ]
-            )  # add parameter grad allocation
+            if self.optimizer_states_factor:
+                self.list_alloc.extend(
+                    [
+                        Parameter(
+                            anode,
+                            is_optim_states=True,
+                            optimizer_states_factor=self.optimizer_states_factor,
+                        )
+                        for anode in cluster.parameter_nodes
+                        if anode.info.requires_grad
+                    ]
+                )  # add parameter grad allocation
         self.dict_alloc_param = {
             alloc.name: alloc
             for alloc in self.list_alloc
@@ -677,9 +687,15 @@ class OpSchedule:
         for alloc_name, is_alive in self.init_alive_status.items():
             alive_status[alloc_name] = is_alive
 
+        for anode in self.interfaces["input_data_anodes"]:
+            alive_status[anode.name] = True
+
         alive_list = []
-        for op in self.op_list:
+        for i, op in enumerate(self.op_list):
             if op.disabled:
+                if i == self.loss_idx:
+                    for anode in self.interfaces["output_grad_anodes"]:
+                        alive_status[anode.name] = True
                 alive_list.append(alive_status.copy())
                 continue
             if isinstance(op, DeleteOp):

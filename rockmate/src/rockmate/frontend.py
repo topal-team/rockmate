@@ -3,19 +3,22 @@ from . import solvers
 from rkgb import partitioned
 from configmypy import Bunch
 import yaml
+from copy import copy
 
 import inspect
 
 available_solvers = {
     "hilp": solvers.HILP,
     "rotor": solvers.RK_rotor,
+    "cheap": solvers.CheapSolver,
     "twremat": solvers.TwRemat
 }
 
 available_partitioners = {
     "sequence": partitioned.PartitionerSequence,
     "bottom_to_top": partitioned.PartitionerBottomToTop,
-##     "repetitive": partitioned.PartitionerRecognizeRepetitivePattern,
+    "repetitive": partitioned.PartitionerRecognizeRepetitivePattern,
+    "base": partitioned.Partitioner,
     "dagp": partitioned.PartitionerDagp,
 }
 
@@ -86,6 +89,19 @@ def generate_config(config_type):
         result.solver.bottom.hilp.accurate_mem = False
         for partitioner in available_partitioners.keys():
             _add_partitioner(result, partitioner)
+    elif config_type == "offmate":
+        _add_top_solver(result, "hilp")
+        _add_bottom_solver(result, "cheap")
+        result.solver.top.hilp.offload = True
+        result.solver.top.hilp.nb_total_nodes = 100
+        result.solver.top.hilp.nb_total_sched = 500
+        result.solver.top.hilp.time_limit = 1200
+        result.solver.bottom.cheap.add_offload = True
+        _add_partitioner(result, "repetitive")
+    elif config_type == "noremat":
+        _add_top_solver(result, "cheap")
+        result.solver.top.cheap.cheap_factor = 1e9
+        _add_partitioner(result, "base")
     else:
         raise ValueError(f"Unknown config type {config_type}. Valid values are:"
                          "rotor, rockmate, checkmate, hilp, hiremate")
@@ -226,8 +242,64 @@ class Hiremate(Rockmate):
                          bottom_solvers=bottom_solvers,
                          partitioners=list_partitioners,
                          **kwargs)
+        
 # TODO: Careful, Offmate does not have the same assumptions about 1/
 # optimizer 2/ where the model is at the start 3/ do we handle
 # parameter gradients or leave them untouched in memory
 class Offmate(Rockmate):
-    pass
+    valid_algorithms = ["hilp"]
+
+    def __init__(self, model, model_inputs, nlayers=32, budget=None, algorithms=valid_algorithms, partitioner_params={}, **kwargs):
+        assert "list_solvers" not in kwargs
+        assert "partitioners" not in kwargs
+
+        assert all(alg in self.valid_algorithms for alg in algorithms), f"invalid algorithm list '{','.join(algorithms)}'"
+        # assert "can_use_rotor" not in partitioner_params
+        assert "main_graph_as_any_other" not in partitioner_params
+
+        # if not ('rotor' in algorithms): # hilp, twremat+hilp
+        #     list_partitioners = [
+        #         partitioned.PartitionerBottomToTop(
+        #             can_use_rotor=False,
+        #             **partitioner_params
+        #         )
+        #     ]
+
+        partitioners = [partitioned.PartitionerRecognizeRepetitivePattern(
+            strict_max_number_of_top_level_nodes=nlayers+4,
+            max_number_of_patterns=nlayers+2,
+            min_percentage_covered_required=0.75)]
+        # else: # twremat+hilp+rotor
+        #     list_partitioners = [
+        #         partitioned.PartitionerBottomToTop(
+        #             can_use_rotor=True,
+        #             **partitioner_params
+        #         ),
+        #         partitioned.PartitionerSequence(
+        #             partitioned.PartitionerBottomToTop(
+        #                 can_use_rotor=True,
+        #                 main_graph_as_any_other=True,
+        #                 **partitioner_params
+        #             )
+        #         )
+        #     ]
+        
+        solver = solvers.HILP(ilp_solver="PULP_CBC_CMD")
+        solver.config.offload = True
+        solver.config.solve_only_top_level = True
+        top_solvers = [solver]
+        bottom_solvers = [solvers.CheapSolver()]
+        # if "hilp" in algorithms:
+        #     top_solvers.append(solvers.HILP(time_limit=600, nb_total_nodes=100))
+        #     bottom_solvers.append(solvers.HILP(time_limit=60))
+        # if "rotor" in algorithms:
+        #     top_solvers.append(solvers.RK_rotor())
+        #     bottom_solvers.append(solvers.RK_rotor())
+
+        super().__init__(model, model_inputs, budget=budget,
+                         top_solvers=top_solvers,
+                         bottom_solvers=bottom_solvers,
+                         partitioners=partitioners,
+                        #  gpu_optim=torch.optim.Adam,
+                         minor_offload_size=10*1024**2,
+                         **kwargs)

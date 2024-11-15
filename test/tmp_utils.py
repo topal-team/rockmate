@@ -6,7 +6,10 @@ from rockmate.op_schedule import (SynchronizeOp,
                                           PrefetchOp,
                                           ComputeOp,
                                           DeleteOp,
-                                          OptimizeOp)
+                                          OptimizeOp,
+                                          Activation,
+                                          Parameter)
+from rockmate.solvers.ilp.ilp_offload import ModelPULPOffload
 # from rockmate.solvers.main import add_parameter_node
 from copy import deepcopy
 # from rkgb.utils import irotor
@@ -17,7 +20,7 @@ from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overloa
 # timer = irotor.make_timer(torch.device("cuda"))
 timer = TimerCUDA(torch.device("cuda"))
 
-from models.GPT import  GPT2
+# from models.GPT import  GPT2
 
 class LoraLinear(nn.Module):
     def __init__(self, linear, num_adapters=10, *args, **kwargs) -> None:
@@ -614,3 +617,124 @@ def alive_diff(rkmod, i):
 def save_mem_diff(rkmod, i):
     return rkmod.op_sched.save_mem[i] - rkmod.op_sched.save_mem[i-1]
     
+
+def get_saved_anode(md):
+    saved_anode = {}
+    t = md.loss_idx
+    for i in range(md.I):
+        if md.sol(md.AliveT[t, i]):
+            anode = md.hgraph.list_HANs[i].anode
+            saved_anode[anode.name] = anode
+    for k in range(md.T//2):
+        opt = -1
+        for o in range(md.nSched[k]):
+            if md.sol(md.Comp[k,k,o]):
+                opt = o
+                break
+        print(opt, md.list_list_sched[md.hcn2sub_c[k]][opt].mem)
+        if opt>=0:
+            op_sched = md.list_list_sched[md.hcn2sub_c[k]][opt]
+            for re_anode in op_sched.phantoms:
+                anode = md.sub_clusters[md.hcn2sub_c[k]].translate_representee_node(re_anode)
+                saved_anode[anode.name] = anode
+
+    return saved_anode
+
+def memory_analysis(rkmod):
+    md = rkmod.list_solvers[0].md
+    if isinstance(md, ModelPULPOffload):
+        print(f"Solution param mem at loss: {md.all_param_mem(md.loss_idx , md.loss_idx).value()*md.gcd}")
+        print(f"Solution act mem at loss: {md.activation_mem(md.loss_idx , md.loss_idx).value()*md.gcd}")
+    print(f"Solution mem at loss: {md.save_mem(md.loss_idx , md.loss_idx).value()*md.gcd}")
+    act_mem = 0
+    param_mem = 0
+    i = rkmod.op_sched.loss_idx
+    for k,v in rkmod.op_sched.alive_list[i].items():
+        if not v:continue
+        alloc = rkmod.op_sched.dict_alloc[k]
+        if isinstance(alloc, Activation): act_mem += alloc.mem
+        
+        if isinstance(alloc, Parameter): param_mem += alloc.mem
+    print(f"schedule act mem at loss {act_mem}")
+    print(f"schedule param mem at loss {param_mem}")
+    print(f"schedule all mem at loss {rkmod.op_sched.save_mem[rkmod.op_sched.loss_idx]+sum(anode.mem for anode in rkmod.op_sched.interfaces['output_data_anodes'])}")
+
+def visualize_steps(op_sched):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import seaborn
+    seaborn.set_theme()
+    N = len(op_sched.steps)
+    # categories = ['Category 1', 'Category 2', 'Category 3', 'Category 4']
+    categories = ['GPU compute', 'CPU optimize', 'Offload', 'Prefetch']
+    C = len(categories)
+    group_names = [f'Group {i}' for i in range(1, N+1)]
+    # Define colors for each category
+    category_colors = ['red', 'green', 'blue', 'purple']
+
+    # data = np.random.randint(5, 15, size=(N, len(categories)))
+    data = np.array([[step.comp_ops.time, 
+                    step.opt_ops.time,
+                    step.ofl_ops.time,
+                    step.prf_ops.time]
+                    for step in op_sched.steps])
+    # Create the horizontal stacked bar plot
+    # fig = plt.figure()
+    # ax  = fig.add_subplot(111,label="1")
+    fig, axs = plt.subplots(1,2, sharex=True,figsize=(12,5))
+
+    ax2 = plt.subplot(2,1,1)
+    ax = plt.subplot(2,1,2)
+    ax.grid(False)
+    # Initialize left positions for bars
+    left_positions = np.zeros(len(categories))
+
+    for i in range(N):
+        # Stacked bar plot for each group
+        for j, color in zip(range(len(categories)), category_colors):
+            ax.barh(categories[j], data[i, j], left=left_positions[j], color=color, edgecolor='white')
+            # left_positions[j] += data[i, j]
+        left_positions = [np.max(left_positions[j] + data[i]) for _ in range(C)]
+    print(left_positions[-1])
+    # Add labels and legend
+    ax.set_xlabel('Time (ms)')
+    # ax.set_ylabel('Operations')
+
+    # Create legend with category colors
+    legend_labels = [plt.Rectangle((0,0),1,1, color=color) for color in category_colors]
+    # ax.legend(legend_labels, categories, loc='upper right')
+
+    # ax2 = fig.add_subplot(111,label="2")
+    mem = []
+    time = [0]
+    idx = 0
+    for step in op_sched.steps:
+        time.append(step.time+time[-1])
+        mems = (op_sched.save_mem[idx:idx+len(step.op_list)]
+                +op_sched.overhead[idx:idx+len(step.op_list)]
+                # +op_sched.interface_mem[idx:idx+len(step.op_list)]
+                )
+        mem.append(max(mems)
+                /1024**3)
+        idx += len(step.op_list)
+    print(len(time))
+    ax2.plot(time[1:], mem)
+    ax2.set_xticks([])
+
+    ax2.set_xlim(0,sum([step.time for step in op_sched.steps]))
+    ax2.set_ylabel("Peak Memory (GiB)")
+    # # fig.addsu
+    fig.show()
+    # fig.tight_layout()
+    # fig.savefig("sched_viz.pdf", format="pdf", dpi=100)
+
+def step_time_analysis(rkmod):
+    for i, step in enumerate(rkmod.op_sched.steps):
+        if step.time*1.1 + 1 < rkmod.step_time[i]:
+            print(i, 
+                  rkmod.step_time[i]//1, 
+                  step.time//1, 
+                  step.comp_ops.time//1, 
+                  step.opt_ops.time//1, 
+                  step.prf_ops.time//1, 
+                  step.ofl_ops.time//1)

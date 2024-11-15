@@ -325,6 +325,8 @@ class RawGraph(base.Graph):
                 fct=dynamo_node.target.__name__,
                 raw_parser=parser)
             dict_dynamo_name_to_raw_node[dynamo_node.name] = raw_node
+            if "val" not in dynamo_node.meta:#expect to be assert operation
+                continue
             val = dynamo_node.meta["val"]
             self.dynamic_shapes[raw_node.target] = val.shape if hasattr(val, "shape") else None
             # Deps :

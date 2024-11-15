@@ -20,9 +20,10 @@ from rkgb.core.partitioned import (
 )
 from rkgb.lowlevel.constants import init_target_string
 
+from .utils import get_optimize_metrics, measure_bandwidth
 from .op_schedule import *
 from .simulation import Simulator
-from .solvers.main import preprocess, solve_recursive, get_optimize_metrics, FastSolver, add_sched
+from .solvers.main import preprocess, solve_recursive, FastSolver, add_sched
 from .solvers import HILP, CheapSolver, RK_rotor
 from .compiler import Compiler, RK_Storage, make_gd, Fct_record_event
 import psutil
@@ -80,15 +81,19 @@ class Rockmate(torch.nn.Module):
 
         self.config_partitioner()
 
-        self.get_rkgb_result(model_inputs, model_kwargs, minor_offload_size)
 
         self.optimize_metrics = get_optimize_metrics(
             list(original_mod.parameters())[0],
+            optim=gpu_optim,
             cpu_optim=cpu_optim,
-            gpu_optim=gpu_optim,
             optim_kwargs=optim_kwargs,
             minor_offload_size=minor_offload_size,
         )
+
+        self.get_rkgb_result(model_inputs, model_kwargs, minor_offload_size)
+
+        # TODO: only measure bandwidth if needed
+        self.bandwidth = measure_bandwidth()
 
         self.global_dict = make_gd(
             self.device,
@@ -160,6 +165,8 @@ class Rockmate(torch.nn.Module):
         # Set some options whoe values can only be known at runtime
         for solver in self.top_solvers:
             if isinstance(solver, HILP):
+                solver.config.model_kwargs = solver.config.model_kwargs.copy()
+                solver.config.protected_names = solver.config.protected_names.copy()
                 solver.config.model_kwargs["optimize_metrics"] = self.global_dict["optimize_metrics"]
                 solver.config.protected_names.extend([f"{init_target_string} data", f"{init_target_string} grad"])
                 if self.keep_outputs:
@@ -217,6 +224,24 @@ class Rockmate(torch.nn.Module):
         budget = budget or self.budget
         # budget -= self.minor_size
         list_solvers = list_solvers or self.top_solvers
+
+        # Set some options whoe values can only be known at runtime
+        for solver in list_solvers:
+            if isinstance(solver, HILP):
+                # TODO: if no partitioning is allowed, update solver max nodes
+                hilp_solver = True
+                solver.config.optimize_metrics = self.global_dict["optimize_metrics"]
+                if solver.config.offload:
+                    if self.bandwidth is None:
+                        self.bandwidth = measure_bandwidth()
+                    solver.config.model_kwargs["bandwidth"] = self.bandwidth
+        for solver in list_solvers:
+            if isinstance(solver, HILP):
+                solver.config.protected_names.extend([f"{init_target_string} data", f"{init_target_string} grad"])
+                if self.keep_outputs:
+                    solver.config.protected_names.extend(self.output_names)
+                if self.dynamic_batch_dim is not None:
+                    solver.config.model_kwargs["dynamic_batch_size"] = True
 
         self.preprocess()
         if self.bottom_solvers and recursive:
@@ -486,16 +511,19 @@ class Rockmate(torch.nn.Module):
             #         remains.append(v.pnode.param_name)
             for k, p in self.original_mod.named_parameters():
                 if k not in remains and p.grad is not None:
-                    # p.grad = None if set_to_none else torch.zeros_like(p)
+                    # if set_to_none:
+                    #     p.grad = None
+                    # else:
                     p.grad.zero_()
         else:
             self.original_mod.zero_grad(set_to_none=set_to_none)
 
     @property
     def minor_size(self):
-        return sum([pnode.mem for pnode in self.minor_param_nodes]) * (
-            self.global_dict["optimize_metrics"]["optimizer_states_size"] + 1
-        )
+        optimizer_states_factor = 0
+        if self.optimize_metrics:
+            optimizer_states_factor += self.optimize_metrics["optimizer_states_factor"]
+        return sum([pnode.mem for pnode in self.minor_param_nodes]) * (optimizer_states_factor+1)
 
     @property
     def op_list(self):

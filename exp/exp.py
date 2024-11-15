@@ -273,13 +273,6 @@ def exp_pt(nlayers=1,
     exp_stats["time"] = time/niters
     exp_stats["peak_mem"] = mem
     print(exp_stats)
-    # rkmod.compiler.storage.ld[rkmod.output.name.split(" ")[0]].data = torch.empty(0)
-    # rkmod.compiler.storage.ld["_"+rkmod.output.name.split(" ")[0]].data = torch.empty(0)
-    # if exp_id:
-    #     os.makedirs(os.path.dirname(f"exp_results/{exp_id}/"), exist_ok=True)
-    #     print("dump result")
-    #     with open(f"{exp_id}/res_{id}_pt.pkl", "wb") as f:
-    #         pickle.dump(exp_stats, f)
 
     if os.path.exists(exp_id):
         with open(exp_id, "rb") as f:
@@ -510,6 +503,58 @@ def dynamic_sample(sample, md):
         sample_new.append(s.repeat(batch_size, 1))
     return sample_new
 
+
+def exp_zero(nlayers=32, 
+               batch_size=4, 
+               exp_id=0, 
+               get_model=get7Bllama,
+               ds_config="ds_config_zero3.json"):
+    niters = 5
+    import deepspeed
+    with deepspeed.zero.Init(config_dict_or_path=ds_config):
+        model,sample = get_model(batch=batch_size, seq_len=512, nlayers=nlayers)
+
+    print(psutil.virtual_memory())
+    model, optimizer, _, lr_scheduler = deepspeed.initialize(
+        model=model,
+        model_parameters=model.parameters(),
+        config=ds_config,
+    )
+    model.gradient_checkpointing_enable()
+    
+
+    exp_stats = {}
+    exp_stats["nlayer"] = nlayers
+    exp_stats["input_size"] = [s.shape for s in sample]
+
+    exp_stats["model_size"] = sum(p.numel()*p.element_size() for p in model.parameters())
+    exp_stats["model_gradient_size"] = sum(p.numel()*p.element_size() for p in model.parameters()
+                                           if p.requires_grad)
+    # exp_stats["optimize_stats"] = rkmod.compiler.storage.gd["optimize_stats"]
+    exp_stats["gpu_type"] = torch.cuda.get_device_name()
+    exp_stats["zero_confnig"] = ds_config
+    torch.cuda.synchronize()
+    if psutil.virtual_memory().percent > 50:
+        exp_stats["exception"] = "OOM"
+    else:
+        print(psutil.virtual_memory().percent)
+        time, mem = exec_pt(model.to("cuda"), sample, niters=niters, optimizer=optimizer, zero_grad=False)
+        torch.cuda.synchronize()
+        print(time, mem)
+        exp_stats["time"] = time/niters
+        exp_stats["peak_mem"] = mem
+    print(exp_stats)
+
+    if os.path.exists(exp_id):
+        with open(exp_id, "rb") as f:
+            results = pickle.load(f)
+    else:
+        results = {}
+
+    results[nlayers] = exp_stats
+    with open(exp_id, "wb") as f:
+        pickle.dump(results, f)
+
 if __name__=="__main__":
     # exp_id = datetime.now().strftime('llama-7b')
     # exp_id = "llama-7b-ds"
@@ -550,6 +595,8 @@ if __name__=="__main__":
         "offmate_dynamic_batch":{"dynamic_batch_dim":0},
         "offmate_no_remat":{"remat":False},
         "rockmate":{"rotor":True},
+        "zero-3":{"ds_config":"ds_config_zero3.json"},
+        "zero-2":{"ds_config":"ds_config_zero2.json"}
     }
 
     args = parser.parse_args()
@@ -561,7 +608,7 @@ if __name__=="__main__":
     # id = args.id if args.id is not None else f"{nlayers}_{num_adapters}"
     rk = args.rk
     batch_size = args.batch_size
-    if args.method != "torch":
+    if "mate" in args.method:
         # print("exp on rockmate")
         dynamo_ram_trick()
         exp_rkmod(nlayers=nlayers, 
@@ -571,10 +618,15 @@ if __name__=="__main__":
                   get_model=models[args.model],
                   id_batch=args.id_batch,
                   **kwargs[args.method])
-    else:
+    elif args.method == "torch":
         exp_pt(nlayers=nlayers, 
                batch_size=batch_size, 
                exp_id=exp_id, 
                num_adapters=num_adapters, 
+               get_model=models[args.model])
+    elif "zero" in args.method:
+        exp_zero(nlayers=nlayers, 
+               batch_size=batch_size, 
+               exp_id=exp_id, 
                get_model=models[args.model])
     

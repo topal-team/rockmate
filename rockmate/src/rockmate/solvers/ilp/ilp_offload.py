@@ -18,10 +18,12 @@ class ModelPULPOffload(ModelPULP):
         accurate_mem=False,
         protected_names=...,
         grouping=True,
-        grad_mode="free",
+        grad_mode="free", #['free', 'accumulate', 'zero_grad']
         optimize_metrics=None,
         activation_offload=False,
         dynamic_batch_size=False,
+        minor_offload_size=None,
+        bandwidth=None,
         ram_budget=None,
         cpu_optimize=True,
         **kwargs
@@ -37,10 +39,6 @@ class ModelPULPOffload(ModelPULP):
         )
 
         self.with_grad = accurate_mem
-        self.with_optimizer_states = accurate_mem  # optimizer states will be offloaded
-        self.gradient_accumulation = (
-            0  # if 0, no gradient/optimizer states alive from previous iters
-        )
         self.single_fwd = accurate_mem
         self.single_bwd = accurate_mem
         self.grouping = grouping
@@ -48,10 +46,20 @@ class ModelPULPOffload(ModelPULP):
         self.activation_offload = activation_offload
         self.optimize_metrics = optimize_metrics
         self.use_correction_term = True
-        self.cpu_constant_cost = 50
+        self.cpu_constant_cost = 100
         self.dynamic_batch_size = dynamic_batch_size
         self.ram_budget = ram_budget or virtual_memory().available * 0.9/self.gcd
         self.cpu_optimize = cpu_optimize
+        self.minor_offload_size = minor_offload_size
+        self.bandwidth = bandwidth
+        if not self.optimize_metrics:
+            raise UserWarning("Trying to solve ILP with offload but "\
+                              "optimization method is not provided."\
+                              "This is not implemented yet.")
+
+        if self.grad_mode != "free":
+            raise UserWarning("Parameter gradients are not freed during backward, "\
+                              "which is not implemented in ILP.")
 
     def build(self):
         # OVERWRITTING METHOD
@@ -69,25 +77,29 @@ class ModelPULPOffload(ModelPULP):
         self.add_offload_time_constraints()
 
     def config_offload(self):
-        optimize_metrics = self.optimize_metrics
-        self.optimizer_states_factor = optimize_metrics[
-            "optimizer_states_size"
-        ]  # *weight size
-        self.cpu_optimize_speed = (
-            optimize_metrics["cpu_optimize_speed"] / self.gcd
-        )  # B/ms
-        self.gpu_optimize_speed = (
-            optimize_metrics["gpu_optimize_speed"] / self.gcd
-        )  # B/ms
-        self.optimizer_overhead_factor = optimize_metrics[
-            "optimizer_overhead"
-        ]  # *weight size
-        self.minor_offload_size = optimize_metrics[
-            "minor_offload_size"
-        ]  # minor weight size
-        self.bandwidth = optimize_metrics["bandwidth"]  # bandwidth
-        self.bandwidthOfl = self.optimize_metrics["bandwidth"] / self.gcd  # byte/ms
-        self.bandwidthPrf = self.optimize_metrics["bandwidth"] / self.gcd  # byte/ms
+        if self.optimize_metrics:
+            optimize_metrics = self.optimize_metrics
+            self.optimizer_states_factor = optimize_metrics[
+                "optimizer_states_factor"
+            ]  # *weight size
+            self.cpu_optimize_speed = (
+                optimize_metrics["cpu_optimize_speed"] / self.gcd
+            )  # B/ms
+            self.gpu_optimize_speed = (
+                optimize_metrics["gpu_optimize_speed"] / self.gcd
+            )  # B/ms
+            self.optimizer_overhead_factor = optimize_metrics[
+                "optimizer_overhead"
+            ]  # *weight size
+        else:
+            self.optimizer_overhead_factor = 0
+            self.optimizer_states_factor = 0
+            self.cpu_optimize_speed = 0
+            self.gpu_optimize_speed = 0
+
+        # self.bandwidth = optimize_metrics["bandwidth"]  # bandwidth
+        self.bandwidthOfl = self.bandwidth / self.gcd  # byte/ms
+        self.bandwidthPrf = self.bandwidth / self.gcd  # byte/ms
         
         self.schedule_offload_time = []
         self.schedule_prefetch_time = []
@@ -201,10 +213,12 @@ class ModelPULPOffload(ModelPULP):
         self.OflG = RkLpVariable.dicts("OflG", param_idx)  # Offload gradient
         self.PrfW = RkLpVariable.dicts("PrfW", param_idx)  # Prefetch gradient
         self.PrfG = RkLpVariable.dicts("PrfG", param_idx)  # Prefetch gradient
-        self.OflO = RkLpVariable.dicts("OflO", param_idx)  # Offload optimizer states
-        self.PrfO = RkLpVariable.dicts("PrfO", param_idx)  # Prefetch optimizer states
+        self.OflO = RkLpVariable.dicts("OflO", param_idx, 
+                        upBound=1 if self.optimize_metrics else 0)  # Offload optimizer states
+        self.PrfO = RkLpVariable.dicts("PrfO", param_idx, 
+                        upBound=1 if self.optimize_metrics else 0)  # Prefetch optimizer states
 
-        if self.cpu_optimize:
+        if self.cpu_optimize and self.optimize_metrics:
             self.OptC = RkLpVariable.dicts("OptC", param_idx)  # Optimize on cpu
         else:
             self.OptC = RkLpVariable.dicts("OptC", param_idx, lowBound=0, upBound=0)
@@ -220,7 +234,9 @@ class ModelPULPOffload(ModelPULP):
 
     def accumC_grad(self, w):
         # if grad_accumulation, gradient stored on CPU from previous iterations
-        return self.sumOptC[w]
+        if self.grad_mode == "free":
+            return self.sumOptC[w]
+
 
     def accumC_optimizer_states(self, w):
         # if grad_accumulation, optimizer states stored on CPU from previous iterations
@@ -317,12 +333,11 @@ class ModelPULPOffload(ModelPULP):
                     if k not in self.krange(t) or (t > fwd_i and t < bwd_i):
                         self.OptC[t, k, w] = 0
 
-        if not self.gradient_accumulation:
+        if not self.grad_mode == "accumulate":
             for k in self.PrfG:
                 self.PrfG[k] = 0
 
-        # if not self.with_optimizer_states:
-        if not self.optimize_metrics["optimizer_states_size"]:
+        if not self.optimizer_states_factor:
             for t, k, w in self.AliveO:
                 self.AliveO[(t, k, w)] = self.req_w - self.accumC_optimizer_states(w)
                 self.PrfO[(t, k, w)] = 0
@@ -353,7 +368,9 @@ class ModelPULPOffload(ModelPULP):
                             self.param_grad_mem[t, k] += grad_size * self.req_w
         elif self.grad_mode in ["accumulate"]:
             for t, k, w in self.AliveG:
-                self.AliveG[(t, k, w)] = 1
+                bwd_indices = [x for x in self.param2hcn[w] if x > self.loss_idx]
+                if t in bwd_indices:
+                    self.AliveG[(t, k, w)] = 1
                 # if k == max(self.param2hcn[w]):
                 #     self.overhead[k] = [v+grad_size for v in self.overhead[k]]
                 # TODO: add offload gradient variables for gradient accumulation
@@ -369,7 +386,6 @@ class ModelPULPOffload(ModelPULP):
         self,
     ):
         # if with_grad, AliveG is a variable
-        # if with_optimizer_states, AliveO is a variable
         self.OflWProg = dict()
         self.OflGProg = dict()
         self.OptCProg = dict()
@@ -483,15 +499,15 @@ class ModelPULPOffload(ModelPULP):
             bwd_i = max(self.param2hcn[w])
             self.md += self.PrfWProg[fwd_i, fwd_i, w] >= self.sumOptC[w]
             self.md += self.req_w - self.sumOptC[w] <= self.AliveO[bwd_i, bwd_i, w]
-            if self.gradient_accumulation:
+            if self.grad_mode == "accumulate":
                 self.md += self.OflGProg[bwd_i, bwd_i, w] == self.accumC_grad(w)
                 self.md += (
                     self.PrfGProg[bwd_i, bwd_i, w]
                     == self.accumC_grad(w) - self.sumOptC[w]
                 )
             t_, k_ = self.next_idx(bwd_i, bwd_i)
-            # self.md += self.AliveO[t_, k_, w] - self.AliveO[bwd_i, bwd_i, w] <= 1 - self.gradient_accumulation
-            # self.md += self.AliveG[t_, k_, w] - self.AliveG[bwd_i, bwd_i, w] <= 1# - self.gradient_accumulation
+            # self.md += self.AliveO[t_, k_, w] - self.AliveO[bwd_i, bwd_i, w] <= 1 - self.grad_mode == "accumulate"
+            # self.md += self.AliveG[t_, k_, w] - self.AliveG[bwd_i, bwd_i, w] <= 1# - self.grad_mode == "accumulate"
             for t in range(self.T):
                 for k in self.param2hcn[w]:
                     if k not in self.krange(t):
@@ -615,7 +631,7 @@ class ModelPULPOffload(ModelPULP):
         return 1 - self.parameter_gradient_size[w] / self.parameter_size[w]
 
     def fraction_instant_updated_param(self, w):
-        if self.gradient_accumulation:
+        if self.grad_mode == "accumulate":
             # TODO: not fully supported now
             return 0
         if self.grad_mode == "free":
@@ -623,7 +639,7 @@ class ModelPULPOffload(ModelPULP):
         return self.req_w - self.sumOptC[w]
 
     def fraction_remaining_gradients(self, w):
-        if self.gradient_accumulation:
+        if self.grad_mode == "accumulate":
             # TODO: not fully supported now
             return self.req_w
         if self.grad_mode == "free":
@@ -704,6 +720,8 @@ class ModelPULPOffload(ModelPULP):
         We assume that GPU optimization happens only right after
         the backward, which should be accessed from time_step_optimize_self.
         """
+        if not self.optimize_metrics:
+            return 0
         mem = 0
         for w in range(self.W):
             mem += self.parameter_gradient_size[w] * self.OptC[t, k, w]
@@ -715,6 +733,8 @@ class ModelPULPOffload(ModelPULP):
         the backward, but CPU optimization could happen anytime and
         represented by self.OptC.
         """
+        if not self.optimize_metrics:
+            return 0
         mem = 0
         if cpu:
             for w in self.hcn2param[k]:

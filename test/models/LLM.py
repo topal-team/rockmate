@@ -1,9 +1,3 @@
-"""
-This file comes from :
-https://amaarora.github.io/posts/2020-02-18-annotatedGPT2.html
-
-We do not use HuggingFace GPT because torch.jit fails to trace it
-"""
 import torch
 import math
 import copy
@@ -11,8 +5,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules import ModuleList
 from torch.nn.modules.normalization import LayerNorm
-from transformers.models.llama.modeling_llama import LlamaMLP, LlamaConfig
-from transformers.models.bloom.modeling_bloom import BloomMLP, BloomConfig
 from transformers import LlamaModel, LlamaConfig, LlamaForSequenceClassification
 
 def get7Bllama(batch, seq_len, nlayers=32, dtype=None, llama3=False, classification=False):
@@ -41,13 +33,13 @@ def get7Bllama(batch, seq_len, nlayers=32, dtype=None, llama3=False, classificat
         model = LlamaModel(configuration).to(dtype)
     return model, [sample]
 
-def get13Bllama(batch, seq_len, nlayers=40, dtype=None, llama3=False, classification=False):
+def get13Bllama(batch, seq_len, nlayers=40, dtype=None, classification=False):
     if dtype is None:
         dtype = torch.get_default_dtype()
     #https://huggingface.co/docs/transformers/main/model_doc/llama2#transformers.LlamaConfig
     sample = torch.randint(0, 600, [batch, seq_len])
     # Initializing a LLaMA llama-7b style configuration
-    vocab_size = 128256 if llama3 else 32000
+    vocab_size = 32000
     configuration = LlamaConfig(
                         vocab_size=vocab_size,
                         num_hidden_layers=nlayers, 
@@ -57,6 +49,8 @@ def get13Bllama(batch, seq_len, nlayers=40, dtype=None, llama3=False, classifica
                         output_hidden_states=False,
                         output_attentions=False,
                         )
+    configuration._attn_implementation="eager"
+    configuration._attn_implementation_internal="eager"
     # Initializing a model from the llama-7b style configuration
     if classification:
         model = LlamaForSequenceClassification(configuration).to(dtype)
