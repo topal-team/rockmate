@@ -121,7 +121,7 @@ def get_fst_param_nn_Transformer(model):
 # =========================================================
 
 def get_FNO1d(device,batchsize=4400,block_number=4,image_size=256):
-    from models.FNO1d import FNO1d
+    from .FNO1d import FNO1d
     model = FNO1d(16, 64 ,block_number=block_number)
     model.to(device)
     sample = [torch.rand((batchsize,image_size,1),device=device)]
