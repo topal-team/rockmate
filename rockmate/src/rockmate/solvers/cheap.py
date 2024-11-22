@@ -52,7 +52,7 @@ class CheapSolver(Solver):
             if cnode.time is None:
                 return False
             # return cnode.time < avg_time
-            return cnode.time < sum(anode.mem for anode in cnode.users)/self.bandwidth/self.cheap_factor
+            return cnode.time < sum(anode.mem for anode in cnode.users)/self.config.bandwidth/self.config.cheap_factor
 
         cnode_idx = {cnode.name: i for i, cnode in enumerate(cluster.list_cnodes)}
         loss_idx = len([cnode for cnode in cluster.list_cnodes if cnode.is_fwd]) - 1
@@ -130,7 +130,7 @@ class CheapSolver(Solver):
         op_sched = OpSchedule(
             fwd_op_list + bwd_op_list, loss_idx=len(fwd_op_list) - 1, cluster=cluster
         )
-        if self.add_offload:
+        if self.config.add_offload:
             op_sched = self.add_activation_offload(op_sched)
         return [op_sched]
 
@@ -162,7 +162,7 @@ class CheapSolver(Solver):
             )
             op_sched.op_list[i].record_event = True
             comp_op = op_sched.op_list[i]
-            offload_op = OffloadOp(Activation(anode), time=anode.mem / self.bandwidth)
+            offload_op = OffloadOp(Activation(anode), time=anode.mem / self.config.bandwidth)
             offload_op.wait_events.append([comp_op.op_type, comp_op.target.name])
             offload_op.record_event = True
             # fwd_op_list.append(offload_op)
@@ -183,7 +183,7 @@ class CheapSolver(Solver):
 
             # prefetch_op_list.append()
             alloc_op = AllocateOp(Activation(anode))
-            prefetch_op = PrefetchOp(Activation(anode), time=anode.mem / self.bandwidth)
+            prefetch_op = PrefetchOp(Activation(anode), time=anode.mem / self.config.bandwidth)
             prefetch_op.record_event = True
             prefetch_op.wait_events.append([offload_op.op_type, offload_op.target.name])
             # prefetch_op_list.append(prefetch_op)
