@@ -7,6 +7,19 @@ from dataclasses import dataclass
 
 
 class TwRemat(Solver):
+    '''This solver is a wrapper for the TwRemat treewidth-based rematerialization algorithm.
+
+    The TwRemat algorithm is implemented in https://github.com/lemonlabsuk/ai-scala-developer
+    and described in the paper
+
+    Ravi Kumar, Manish Purohit, Zoya Svitkina, Erik Vee, Joshua Wang. Efficient Rematerialization
+    for Deep Networks, NeurIPS
+    2019. https://papers.nips.cc/paper/9653-efficient-rematerialization-for-deep-networks.pdf
+
+    This class uses an external twremat executable that should be available in the PATH. A
+    singularity image containing all requirements is linked in the project README.
+    '''
+
     @dataclass
     class Config:
         mem_unit: int = 1024**2

@@ -25,9 +25,11 @@ import psutil
 
 class CheapSolver(Solver):
     """
-    Cheap solver solves a cluster with heuristic:
-    all the cheap operations are recomputed and
-    all the phantoms are offloaded during forward and prefetched during backward.
+    Cheap solver that solves a cluster with the following heuristic:
+    * all the cheap operations are recomputed and
+    * all the phantoms are offloaded during forward and prefetched during backward.
+
+    An operation is cheap if the ratio of computation time to offload time is below the cheap_factor
     """
 
     class Config:

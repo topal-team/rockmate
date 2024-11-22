@@ -1,23 +1,3 @@
-''' HOW TO RUN ROCKMATE WITH UPDATED rk_rotor.py
-from rockmate.solvers.main import add_sched
-
-# to get Fc/Fn schedules for clusters
-rkmod.preprocess()
-
-# to get Checkmate schedules for clusters
-for hcn in rkmod.rkgb_res.hierarchical_cluster.partitionings[0].list_HCNs:
-    print(hcn.sub_cluster)
-    if hcn.sub_cluster is None:continue
-    if not hcn.is_fwd: continue
-    solver = HILP(ilp_solver="PULP_CBC_CMD")
-    list_sched = solver(hcn.sub_cluster)
-    for sched in list_sched:
-        add_sched(hcn.sub_cluster, sched)
-
-# rkmod.get_compiled_fct()
-
-'''
-
 import time
 import warnings
 from rkgb.core.hierarchical import HierarchicalGraph, HierarchicalCluster
@@ -30,6 +10,17 @@ from .rotor_solver import seq_builder, solve_dp_functional
 from ...op_schedule import OpSchedule, ComputeOp
 
 class RK_rotor(Solver):
+    '''rk_rotor solver, adapted to the rockmate framework from the Rotor dynamic-programming based algorithm
+
+    The rotor algorithm is originally implemented in https://gitlab.inria.fr/hiepacs/rotor and described
+    in the paper:
+
+    Olivier Beaumont, Lionel Eyraud-Dubois, Julien Herrmann, Alexis Joly, Alena Shilova. Optimal
+    checkpointing for heterogeneous chains: how to train deep neural networks with limited memory. ACM
+    Transactions on Mathematical Software, In press. https://hal.science/hal-02352969v2
+
+    This version is modified to allow choosing between several rematerialization options for each layer.
+    '''
     @dataclass
     class Config:
         mem_unit: int = 1024**2

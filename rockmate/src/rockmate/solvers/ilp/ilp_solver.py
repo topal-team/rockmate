@@ -27,22 +27,36 @@ import psutil
 from dataclasses import dataclass, field
 
 
-## default_time_limit = [60 * 60]
-
-
 class HILP(Solver):
+    '''ILP-based rockmate solver. Generic implementation, can be used in rematerialization or offload mode
+
+    The original idea for the ILP formulation is from Checkmate: https://github.com/parasj/checkmate
+    described in
+
+    Paras Jain, Ajay Jain, Aniruddha Nrusimha, Amir Gholami, Pieter Abbeel, Kurt Keutzer, Ion Stoica,
+    Joseph E. Gonzalez. Checkmate: Breaking the Memory Wall with Optimal Tensor Rematerialization. MLSys
+    2020, https://arxiv.org/abs/1910.02653
+
+    This version is heavily modified from this original implementation, adding a hierarchical approach
+    and many features to support activation and parameter offloading.
+    '''
     @dataclass
     class Config:
+        '''Configuration options for HILP solver'''
         mem_unit: int = 1024**2
+        '''How memory values (in bytes) are quantized to obtain reasonable integers'''
         ilp_solver_params: dict = field(default_factory=lambda:
                                         {
                                             "LogToConsole": 0,
                                             "IntegralityFocus": 1,
                                             "NodeFileStart": 0.5,
-                                        })  ## passed to the ILP solver directly
+                                        })
+        '''Arguments passed to the ILP solver directly'''
         ilp_solver: str = "PULP_CBC_CMD"
+        '''Which solver to use in the PuLP library.'''
         protected_names: list = field(default_factory=list)
         nb_total_sched: int = 100
+        '''Total number of options to consider when solving one level of ILP.'''
         nb_total_nodes: int = 20
         nb_bdg_save: int = 6
         nb_bdg_peak: int = 4
