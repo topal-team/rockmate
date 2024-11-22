@@ -15,7 +15,6 @@ results/*
 *.out
 .vscode/
 *.log
-test/*
 test-old/*
 .env
 csolver*
