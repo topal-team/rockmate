@@ -21,7 +21,7 @@ from ..op_schedule import (
 )
 import time
 import psutil
-
+import dataclasses
 
 class CheapSolver(Solver):
     """
@@ -32,15 +32,14 @@ class CheapSolver(Solver):
     An operation is cheap if the ratio of computation time to offload time is below the cheap_factor
     """
 
+    @dataclasses.dataclass
     class Config:
-        def __init__(self):
-            pass
+        bandwidth: float = 1e7
+        add_offload: bool = False
+        cheap_factor: float = 2.0
 
-    def __init__(self, config=None, bandwidth=1e7, add_offload=False, cheap_factor=2):
-        super().__init__(config)
-        self.bandwidth = bandwidth
-        self.add_offload = add_offload
-        self.cheap_factor = cheap_factor
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     def solve(self, cluster: HierarchicalCluster, budget=None):
         avg_time = np.mean(
