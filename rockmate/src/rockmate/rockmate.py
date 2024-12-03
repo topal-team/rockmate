@@ -562,6 +562,11 @@ class Rockmate(torch.nn.Module):
                     ]
                 self.get_compiled_fct()
 
+    def load_sched_from_local(self, path, id):
+        with open(f"{path}/{id}_sched.pkl", "rb") as f_sched:
+            self.op_sched = pickle.load(f_sched)
+        self.get_compiled_fct()
+
 
 def define_autograd_Function(RkMod: Rockmate):
     class RK_autograd_Function(torch.autograd.Function):
