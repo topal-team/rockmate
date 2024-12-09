@@ -1,68 +1,136 @@
-# How to run with Singularity image
+# Rockmate
 
-Singularity image at Plafrim
+The `Rockmate` framework is designed for training a PyTorch neural network within a given GPU budget
+constraint using automatic re-materialization (activation checkpointing) technique.
 
-`/beegfs/ygusak/singularity_images/hiremate_twremat.sif` containing Gurobi and Twremat Haskell to run with HiRemate based on `hiremate_twremat.def`
+Given a PyTorch model, a sample input, and a GPU memory budget, `Rockmate` builds a new
+`torch.nn.Module`, which performs forward and backward pass keeping activations under the given
+budget.
 
-Run Singularity shell
-`sungularity shell --nv beegfs/ygusak/singularity_images/hiremate_twremat.sif`
+- The new model produces the same outputs and gradients as the original one.
+- Model training with a budget constraint, which is lower than the one required by PyTorch Autodiff,
+  is achieved by re-computing some of the activations instead of storing them for gradient
+  calculation.
+- Depending on the budget, `Rockmate` defines automatically which activations should be recomputed.
 
-Inside the shell
+<!-- Given a module, sample input, and a memory budget, `Rockmate` builds a new `torch.nn.Module`
+with equal forward and backward results while keeping the memory usage of activations under the
+given budget. -->
+
+<!-- For more details of our algorithm, see our paper at: https://openreview.net/pdf?id=wLAMOoL0KD
+-->
+
+Notes:
+
+- The model and sample should be on the same GPU device.
+- The `Rockmate` framework contains a variety of optimization algorithms, highly configurable, with
+  three main default behaviors:
+  - The original **Rockmate** algorithm designed for sequential-like neural networks, described in the
+    the [ICML 2023 paper (oral) "Rockmate: an Efficient, Fast, Automatic and Generic Tool for
+    Re-materialization in PyTorch"](https://openreview.net/pdf?id=wLAMOoL0KD). The code for the
+    paper is available standalone as the `v1` tag of this repository, but the algorithm is also part
+    of the complete repository, accessible vie the `PureRockmate` class.
+  - The hierarchical approach **HiRemate** can be applied to any kind of neural network, without the
+    sequential-like restriction of `Rockmate`. It is described in [ HiRemate: Hierarchical Approach
+    for Efficient Re-materialization of Large Neural Networks
+    ](https://inria.hal.science/hal-04403844), and accessible via the `Hiremate` class.
+  - The **OffMate** specialization also includes activation and weight offloading to further reduce
+    memory consumption. It is described in [OffMate: full fine-tuning of LLMs on a single GPU by
+    re-materialization and offloading](https://inria.hal.science/hal-04660745), and accessible via
+    the `Offmate` class.
+
+# Installation
+
+You can simply use pip:
+
 ```
-cd ~/rockmate-private/rockmate && pip install -e . 
-cd ~/rockmate-private/rkgb && pip install -e .
-
+pip install rockmate
 ```
 
-# TwRemat example
+Or clone the repository and install locally (we recommend using editable mode)
 ```
-import rkgb, rockmate, torch
-from torchvision.models import resnet18
-from rockmate.solvers.twremat_utils import *
-
-model, sample = resnet18(), torch.randn(2, 3, 224, 224)
-budget = 1024**9
-
-
-h_cluster = get_rockmate_graphs(model, sample)
-
-node_info, targets, loss_node = get_twremat_graph(h_cluster) 
-
-steps = runtwremat(node_info, budget, targets, loss_node)
-
+git clone https://github.com/topal-team/rockmate.git
+cd rockmate
+pip install -e ./rockmate -e ./rkgb
 ```
 
+# Examples
 
-
-# Example of how to use HRockmate
+## Rockmate
 
 ```python
 import torch
-import models
-import hrockmate
+from rockmate import PureRockmate, Hiremate
+from torchvision.models import resnet101
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda")
 
-model, sample = models.get_MLP(device)
+resnet = resnet101().cuda()
+optimizer = torch.optim.Adam(resnet.parameters())
+sample = torch.randn([100, 3, 128, 128]).cuda()
+m_budget = 2 * 1024**3 # 2GB
 
-rematMod = hrockmate.HRockmate(model,sample,budget=4.5e9)
+if use_hiremate:
+	rk_resnet = PureHiremate(resnet, sample, m_budget)
+else:
+	rk_resnet = PureRockmate(resnet, sample, m_budget)
 
-y = rematMod(*sample)
-loss = y.sum()
-loss.backward()
+for data, target in dataset:
+    y = rk_resnet(data) # use rk_resnet as resnet
+    loss = loss_function(y, target)
+    loss.backward()
+    optimizer.step() # parameters in resnet are updated
 ```
 
-# Example of how to use H-Partition and rkGB
-Note that H-Partition correspond to `Ptools.py` and `Htools.py` files.
-The have been included in rkGB.
+## Offmate
+
+The usage of `Offmate` is slightly different, because in this configuration the framework also
+handles the optimizer step. Furthermore, the framework does not assume that the model is on GPU at
+the start, which allows using models whose parameters do not fit in the GPU memory.
 
 ```python
-rkgb_res = hrockmate.rkgb.make_all_graphs(model,sample)
+import torch
+from rockmate import PureRockmate, Hiremate
+from torchvision.models import resnet101
+
+device = torch.device("cuda")
+
+resnet = resnet101()
+optimizer = torch.optim.Adam(resnet.parameters())
+sample = torch.randn([100, 3, 128, 128]).cuda()
+m_budget = 2 * 1024**3 # 2GB
+
+rk_resnet = Offmate(resnet, sample, m_budget)
+
+for data, target in dataset:
+    y = rk_resnet(data) # use rk_resnet as resnet
+    loss = loss_function(y, target)
+    loss.backward()
 ```
 
-Using graphviz, you can render the graphs:
+## Configurations
 
-```python
-rkgb.print(rkgb_res.P_structure,name="Top level graph of the partitioning")
-rkgb.print(rkgb_res.H_cluster,name="Top level forward backward graph")
+The `Rockmate` framework also provides a configuration mechanism, accessible with the following functions:
+
+* `generate_config(config_type)` generates a complete configuration, where `config_type` can be any
+  of `"rotor"`, `"rockmate"`, `"checkmate"`, `"hilp"`, `"hiremate"`, `"offmate"`, `"noremat"`.
+* This configuration can be modified, and also saved and loaded with `save_config()` and
+  `load_config()` functions.
+* Then, the `from_config(model, sample, budget, config)` function builds the appropriate `Rockmate()` module.
+
+# Citing
+If you used our research, we kindly ask you to cite the corresponding
+[paper](https://openreview.net/pdf?id=wLAMOoL0KD).
+
 ```
+@inproceedings{zhao2023rockmate,
+  title={Rockmate: an Efficient, Fast, Automatic and Generic Tool for Re-materialization in PyTorch},
+  author={Zhao, Xunyi and Le Hellard, Th{\'e}otime and Eyraud-Dubois, Lionel and Gusak, Julia and Beaumont, Olivier},
+  booktitle={International Conference on Machine Learning},
+  year={2023}
+}
+```
+
+# Further research and release
+
+Rockmate is in heavy development, with documentation and more features. Stay tuned for future updates coming soon.
