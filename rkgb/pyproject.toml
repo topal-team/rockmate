@@ -4,21 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rkgb"
-version = "1.0.1"
-requires-python = ">=3.8"
-license = {file = "LICENSE.txt"}
+version = "2.0.0"
+requires-python = ">=3.9"
+license = {file = "COPYING"}
 readme = "README.md"
-description = "Graph Builder tool of the Rockmate package"
+description = "Efficient and Automatic Rematerialization for Pytorch training"
 dependencies = [
-    "numpy",
-    "torch >= 1.8",
+    "torch >= 1.7",
     "astunparse >= 1.6.3",
+    "psutil >= 2.0.0",
 ]
 keywords = ["vizualisation", "pytorch"]
 authors = [
   {name = "Théotime Le Hellard"},
   {name = "Xunyi Zhao"},
   {name = "Julia Gusak"},
+  {name = "Li Zhe"},
   {name = "Olivier Beaumont"},
   {name = "Lionel Eyraud-Dubois"},
 ]
@@ -31,5 +32,4 @@ draw = ["pygraphviz"]
 
 [project.urls]
 Repository = "https://github.com/topal-team/rockmate.git"
-
 
