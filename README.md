@@ -31,7 +31,7 @@ Notes:
     paper is available standalone as the `v1` tag of this repository, but the algorithm is also part
     of the complete repository, accessible vie the `PureRockmate` class.
   - The hierarchical approach **HiRemate** can be applied to any kind of neural network, without the
-    sequential-like restriction of `Rockmate`. It is described in [ HiRemate: Hierarchical Approach
+    sequential-like restriction of `Rockmate`. It is described in [HiRemate: Hierarchical Approach
     for Efficient Re-materialization of Large Neural Networks
     ](https://inria.hal.science/hal-04403844), and accessible via the `Hiremate` class.
   - The **OffMate** specialization also includes activation and weight offloading to further reduce
