@@ -1,0 +1,189 @@
+2024-07-03 18:35:12,371 - INFO - Device: cuda
+2024-07-03 18:35:12,371 - INFO - Models to test: ['TFNO2d', 'UNO', 'UFNO', 'FNO1d', 'RegNet32', 'UNet', 'nn_Transformer', 'ResNet101', 'GPT']
+2024-07-03 18:35:12,371 - INFO - ============================================================
+
+2024-07-03 18:35:13,612 - DEBUG - Model UNO has been built 
+
+2024-07-03 18:35:13,612 - INFO - ---------- Test execution of TorchDynamo module for UNO model
+
+2024-07-03 18:35:26,981 - DEBUG - Dynamo graph builed with args=tuple(sample), kwargs=None  works
+2024-07-03 18:35:27,472 - DEBUG - Propagation through Dynamo module doesn't work: slice_scatter does not support automatic differentiation for outputs with complex dtype.
+2024-07-03 18:35:27,472 - DEBUG - Torch Dynamo module can't be trained!
+ 
+2024-07-03 18:35:27,472 - INFO - ---------- Test execution with forward from TorchDynamo signature for UNO model
+ 
+2024-07-03 18:35:37,139 - DEBUG - Model based on TorchDynamo signature can't be trained: name '_lifted_tensor_constant0' is not defined
+2024-07-03 18:35:37,139 - DEBUG - Model based on TorchDynamo signature can't be trained!
+ 
+2024-07-03 18:35:37,139 - INFO - ---------- Test RKGB for UNO model
+ 
+2024-07-03 18:35:47,352 - DEBUG - Graph builder problems! 
+ Sorry, we fail to execute the code we got from the tracer (dynamo):
+__83_slice_scatter = torch.ops.aten.slice_scatter.default(__76_slice_9, __78_copy, 4, 0, 4).
+2024-07-03 18:35:47,353 - INFO - ============================================================
+
+2024-07-03 18:35:48,444 - DEBUG - Model UFNO has been built 
+
+2024-07-03 18:35:48,444 - INFO - ---------- Test execution of TorchDynamo module for UFNO model
+ 
+2024-07-03 18:35:55,650 - DEBUG - Dynamo graph builed with args=tuple(sample), kwargs=None  works
+2024-07-03 18:35:55,817 - DEBUG - Propagation through Dynamo module doesn't work: slice_scatter does not support automatic differentiation for outputs with complex dtype.
+2024-07-03 18:35:55,817 - DEBUG - Torch Dynamo module can't be trained!
+ 
+2024-07-03 18:35:55,817 - INFO - ---------- Test execution with forward from TorchDynamo signature for UFNO model
+ 
+2024-07-03 18:36:03,782 - DEBUG - Model based on TorchDynamo signature can't be trained: 'str' object is not callable
+2024-07-03 18:36:03,782 - DEBUG - Model based on TorchDynamo signature can't be trained!
+ 
+2024-07-03 18:36:03,782 - INFO - ---------- Test RKGB for UFNO model
+ 
+2024-07-03 18:36:11,138 - DEBUG - Graph builder problems! 
+ Sorry, we fail to execute the code we got from the tracer (dynamo):
+__38_slice_scatter = torch.ops.aten.slice_scatter.default(__31_slice_9, __33_copy, 4, 0, 10).
+2024-07-03 18:36:11,139 - INFO - ============================================================
+
+2024-07-03 18:36:11,334 - DEBUG - Model FNO1d has been built 
+
+2024-07-03 18:36:11,335 - INFO - ---------- Test execution of TorchDynamo module for FNO1d model
+ 
+2024-07-03 18:36:12,642 - DEBUG - Dynamo graph builed with args=tuple(sample), kwargs=None  works
+2024-07-03 18:36:13,047 - DEBUG - Forward pass through Dynamo module works
+2024-07-03 18:36:13,334 - DEBUG - Backward pass through Dynamo module works
+2024-07-03 18:36:13,334 - DEBUG - TorchDynamo module can be trained
+
+2024-07-03 18:36:13,335 - INFO - ---------- Test execution with forward from TorchDynamo signature for FNO1d model
+ 
+2024-07-03 18:36:14,556 - DEBUG - Model based on TorchDynamo signature can't be trained: name '_lifted_tensor_constant0' is not defined
+2024-07-03 18:36:14,556 - DEBUG - Model based on TorchDynamo signature can't be trained!
+ 
+2024-07-03 18:36:14,556 - INFO - ---------- Test RKGB for FNO1d model
+ 
+2024-07-03 18:36:17,100 - DEBUG - == RKGB graph for FNO1d has been built == 
+
+2024-07-03 18:36:17,100 - INFO - ============================================================
+
+2024-07-03 18:36:18,663 - DEBUG - Model RegNet32 has been built 
+
+2024-07-03 18:36:18,664 - INFO - ---------- Test execution of TorchDynamo module for RegNet32 model
+ 
+2024-07-03 18:36:26,088 - DEBUG - Dynamo graph builed with args=tuple(sample), kwargs=None  works
+[W Conv_v8.cpp:919] Warning: Plan failed with a cudnnException: CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR: cudnnFinalize Descriptor Failed cudnn_status: CUDNN_STATUS_NOT_SUPPORTED (function try_configs)
+[W Conv_v8.cpp:919] Warning: Plan failed with a cudnnException: CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR: cudnnFinalize Descriptor Failed cudnn_status: CUDNN_STATUS_NOT_SUPPORTED (function try_configs)
+[W Conv_v8.cpp:919] Warning: Plan failed with a cudnnException: CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR: cudnnFinalize Descriptor Failed cudnn_status: CUDNN_STATUS_NOT_SUPPORTED (function try_configs)
+2024-07-03 18:36:26,676 - DEBUG - Forward pass through Dynamo module works
+2024-07-03 18:36:26,697 - DEBUG - Propagation through Dynamo module doesn't work: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.FloatTensor [2520]] is at version 1; expected version 0 instead. Hint: the backtrace further above shows the operation that failed to compute its gradient. The variable in question was changed in there or anywhere later. Good luck!
+2024-07-03 18:36:26,697 - DEBUG - Torch Dynamo module can't be trained!
+ 
+2024-07-03 18:36:26,698 - INFO - ---------- Test execution with forward from TorchDynamo signature for RegNet32 model
+ 
+2024-07-03 18:36:34,062 - DEBUG - Forward with code works
+2024-07-03 18:36:34,400 - DEBUG - Backward after forward with code works
+2024-07-03 18:36:34,401 - DEBUG - Model based on TorchDynamo signature can be trained
+
+2024-07-03 18:36:34,401 - INFO - ---------- Test RKGB for RegNet32 model
+ 
+2024-07-03 18:36:42,021 - DEBUG - Graph builder problems! 
+ invalid decimal literal (<string>, line 1)
+2024-07-03 18:36:42,022 - INFO - ============================================================
+
+2024-07-03 18:36:42,261 - DEBUG - Model UNet has been built 
+
+2024-07-03 18:36:42,261 - INFO - ---------- Test execution of TorchDynamo module for UNet model
+ 
+2024-07-03 18:36:44,182 - DEBUG - Dynamo graph builed with args=tuple(sample), kwargs=None  works
+2024-07-03 18:36:44,395 - DEBUG - Forward pass through Dynamo module works
+2024-07-03 18:36:44,418 - DEBUG - Propagation through Dynamo module doesn't work: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.FloatTensor [32]] is at version 1; expected version 0 instead. Hint: the backtrace further above shows the operation that failed to compute its gradient. The variable in question was changed in there or anywhere later. Good luck!
+2024-07-03 18:36:44,418 - DEBUG - Torch Dynamo module can't be trained!
+ 
+2024-07-03 18:36:44,419 - INFO - ---------- Test execution with forward from TorchDynamo signature for UNet model
+ 
+2024-07-03 18:36:46,365 - DEBUG - Forward with code works
+2024-07-03 18:36:46,603 - DEBUG - Backward after forward with code works
+2024-07-03 18:36:46,603 - DEBUG - Model based on TorchDynamo signature can be trained
+
+2024-07-03 18:36:46,603 - INFO - ---------- Test RKGB for UNet model
+ 
+2024-07-03 18:36:51,112 - DEBUG - == RKGB graph for UNet has been built == 
+
+2024-07-03 18:36:51,112 - INFO - ============================================================
+
+2024-07-03 18:36:51,580 - DEBUG - Model nn_Transformer has been built 
+
+2024-07-03 18:36:51,580 - INFO - ---------- Test execution of TorchDynamo module for nn_Transformer model
+ 
+2024-07-03 18:36:59,643 - DEBUG - Dynamo graph builed with args=tuple(sample), kwargs=None  works
+2024-07-03 18:37:00,317 - DEBUG - Forward pass through Dynamo module works
+2024-07-03 18:37:00,349 - DEBUG - Propagation through Dynamo module doesn't work: LSE is not correctly aligned
+2024-07-03 18:37:00,349 - DEBUG - Torch Dynamo module can't be trained!
+ 
+2024-07-03 18:37:00,350 - INFO - ---------- Test execution with forward from TorchDynamo signature for nn_Transformer model
+ 
+2024-07-03 18:37:08,626 - DEBUG - Forward with code works
+2024-07-03 18:37:08,646 - DEBUG - Model based on TorchDynamo signature can't be trained: LSE is not correctly aligned
+2024-07-03 18:37:08,646 - DEBUG - Model based on TorchDynamo signature can't be trained!
+ 
+2024-07-03 18:37:08,647 - INFO - ---------- Test RKGB for nn_Transformer model
+ 
+2024-07-03 18:37:19,368 - DEBUG - Graph builder problems! 
+ LSE is not correctly aligned
+2024-07-03 18:37:19,368 - INFO - ============================================================
+
+2024-07-03 18:37:20,010 - DEBUG - Model ResNet101 has been built 
+
+2024-07-03 18:37:20,010 - INFO - ---------- Test execution of TorchDynamo module for ResNet101 model
+ 
+2024-07-03 18:37:30,169 - DEBUG - Dynamo graph builed with args=tuple(sample), kwargs=None  works
+2024-07-03 18:37:30,848 - DEBUG - Forward pass through Dynamo module works
+2024-07-03 18:37:30,854 - DEBUG - Propagation through Dynamo module doesn't work: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.FloatTensor [2048]] is at version 1; expected version 0 instead. Hint: the backtrace further above shows the operation that failed to compute its gradient. The variable in question was changed in there or anywhere later. Good luck!
+2024-07-03 18:37:30,854 - DEBUG - Torch Dynamo module can't be trained!
+ 
+2024-07-03 18:37:30,855 - INFO - ---------- Test execution with forward from TorchDynamo signature for ResNet101 model
+ 
+2024-07-03 18:37:41,151 - DEBUG - Forward with code works
+2024-07-03 18:37:41,375 - DEBUG - Backward after forward with code works
+2024-07-03 18:37:41,377 - DEBUG - Model based on TorchDynamo signature can be trained
+
+2024-07-03 18:37:41,377 - INFO - ---------- Test RKGB for ResNet101 model
+ 
+2024-07-03 18:38:03,259 - DEBUG - == RKGB graph for ResNet101 has been built == 
+
+2024-07-03 18:38:03,259 - INFO - ============================================================
+
+2024-07-03 18:38:04,334 - DEBUG - Model GPT has been built 
+
+2024-07-03 18:38:04,334 - INFO - ---------- Test execution of TorchDynamo module for GPT model
+ 
+2024-07-03 18:38:05,568 - DEBUG - Dynamo graph builed with args=tuple(sample), kwargs=None  works
+2024-07-03 18:38:06,011 - DEBUG - Forward pass through Dynamo module works
+2024-07-03 18:38:06,085 - DEBUG - Backward pass through Dynamo module works
+2024-07-03 18:38:06,086 - DEBUG - TorchDynamo module can be trained
+
+2024-07-03 18:38:06,086 - INFO - ---------- Test execution with forward from TorchDynamo signature for GPT model
+ 
+2024-07-03 18:38:07,283 - DEBUG - Model based on TorchDynamo signature can't be trained: 'str' object is not callable
+2024-07-03 18:38:07,283 - DEBUG - Model based on TorchDynamo signature can't be trained!
+ 
+2024-07-03 18:38:07,283 - INFO - ---------- Test RKGB for GPT model
+ 
+2024-07-03 18:38:10,578 - DEBUG - == RKGB graph for GPT has been built == 
+
+2024-07-03 18:38:10,578 - INFO - ============================================================
+
+2024-07-03 18:38:10,578 - DEBUG - 
+2024-07-03 18:38:10,578 - DEBUG - === End ===
+Successfully loaded UNO
+Example inputs : dict_keys(['x'])
+Successfully loaded UFNO
+Example inputs : dict_keys(['x'])
+Successfully loaded FNO1d
+Example inputs : dict_keys(['x'])
+Successfully loaded RegNet32
+Example inputs : dict_keys(['x'])
+Successfully loaded UNet
+Example inputs : dict_keys(['x'])
+Successfully loaded nn_Transformer
+Example inputs : dict_keys(['src', 'tgt'])
+Successfully loaded ResNet101
+Example inputs : dict_keys(['x'])
+Successfully loaded GPT
+Example inputs : dict_keys(['src'])

@@ -13,3 +13,11 @@ results/*
 *.sh
 *.egg-info*
 *.out
+.vscode/
+*.log
+test-old/*
+.env
+csolver*
+*.pdf
+*.json
+*.zip

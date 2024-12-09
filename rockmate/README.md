@@ -1,30 +1,16 @@
 # Rockmate
 
-Warning: Currently, Rockmate relies on Gurobi to solve the Integer Linear Programming model. 
+The `Rockmate` framework is designed for training a PyTorch neural network within a given GPU budget
+constraint using automatic re-materialization (activation checkpointing) technique.
 
-Given a module and a sample (*i.e.* example input for it) and a memory budget, 
-`Rockmate` builds a new `torch.nn.Module` with equal forward and backward results while 
-keeping the memory peak under the given budget.
+Given a PyTorch model, a sample input, and a GPU memory budget, `Rockmate` builds a new
+`torch.nn.Module`, which performs forward and backward pass keeping activations under the given
+budget.
 
-Backward pass updates original model parameters.
+- The new model produces the same outputs and gradients as the original one.
+- Model training with a budget constraint, which is lower than the one required by PyTorch Autodiff,
+  is achieved by re-computing some of the activations instead of storing them for gradient
+  calculation.
+- Depending on the budget, `Rockmate` defines automatically which activations should be recomputed.
 
-The model and sample should be on the GPU device.
-
-### Complete example
-
-```python
-import torch
-from rockmate import Rockmate
-from torchvision.models import resnet101
-
-device = torch.device("cuda")
-model = resnet101().to(device)
-x = torch.randn([100, 3, 128, 128]).to(device)
-m_budget = 2 * 1024**3
-
-rkMod = Rockmate(model, x, m_budget)
-
-loss = rkMod(x).mean()
-loss.backward()
-rkMod.backward()
-```
+More information on [our repository](https://github.com/topal-team/rockmate).
