@@ -8,7 +8,9 @@ __all__ = ["solvers",
            "frontend",
            "generate_config",
            "from_config",
-           "default_config"
+           "default_config",
+           "save_config",
+           "load_config"
            ]
 
 from .rockmate import Rockmate
