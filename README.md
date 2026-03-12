@@ -31,9 +31,9 @@ Notes:
     paper is available standalone as the `v1` tag of this repository, but the algorithm is also part
     of the complete repository, accessible vie the `PureRockmate` class.
   - The hierarchical approach **HiRemate** can be applied to any kind of neural network, without the
-    sequential-like restriction of `Rockmate`. It is described in [HiRemate: Hierarchical Approach
-    for Efficient Re-materialization of Large Neural Networks
-    ](https://inria.hal.science/hal-04403844), and accessible via the `Hiremate` class.
+    sequential-like restriction of `Rockmate`. It is described in [ICML 2025 paper "HiRemate: Hierarchical Approach
+    for Efficient Re-materialization of Large Neural Networks"
+    ](https://openreview.net/forum?id=rnx11J4hsg), and accessible via the `Hiremate` class.
   - The **OffMate** specialization also includes activation and weight offloading to further reduce
     memory consumption. It is described in [OffMate: full fine-tuning of LLMs on a single GPU by
     re-materialization and offloading](https://inria.hal.science/hal-04660745), and accessible via
@@ -119,8 +119,8 @@ The `Rockmate` framework also provides a configuration mechanism, accessible wit
 * Then, the `from_config(model, sample, budget, config)` function builds the appropriate `Rockmate()` module.
 
 # Citing
-If you used our research, we kindly ask you to cite the corresponding
-[paper](https://openreview.net/pdf?id=wLAMOoL0KD).
+If you used our research, we kindly ask you to cite the corresponding papers
+[[1](https://openreview.net/pdf?id=wLAMOoL0KD), [2](https://openreview.net/forum?id=rnx11J4hsg)].
 
 ```
 @inproceedings{zhao2023rockmate,
@@ -128,6 +128,13 @@ If you used our research, we kindly ask you to cite the corresponding
   author={Zhao, Xunyi and Le Hellard, Th{\'e}otime and Eyraud-Dubois, Lionel and Gusak, Julia and Beaumont, Olivier},
   booktitle={International Conference on Machine Learning},
   year={2023}
+}
+
+@inproceedings{gusak2025hiremate,
+  title={HiRemate: Hierarchical Approach for Efficient Re-materialization of Neural Networks},
+  author={Gusak, Julia and Zhao, Xunyi and Le Hellard, Th{\'e}otime and Li, Zhe and Eyraud-Dubois, Lionel and Beaumont, Olivier},
+  booktitle={Forty-second International Conference on Machine Learning},
+  year={2025}
 }
 ```
 
